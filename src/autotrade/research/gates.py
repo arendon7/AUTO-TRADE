@@ -5,6 +5,79 @@ from math import isfinite
 from statistics import median
 
 from .backtest import BacktestResult
+from .market import MarketDataset
+
+
+@dataclass(frozen=True, slots=True)
+class SampleAdequacyPolicy:
+    min_bars: int
+    min_fills: int
+    min_unique_days: int
+    max_rejected_signal_fraction: float
+    max_gap_count: int = 0
+
+    def __post_init__(self) -> None:
+        if self.min_bars <= 0:
+            raise ValueError("min_bars must be > 0")
+        if self.min_fills < 0:
+            raise ValueError("min_fills must be >= 0")
+        if self.min_unique_days <= 0:
+            raise ValueError("min_unique_days must be > 0")
+        if not 0 <= self.max_rejected_signal_fraction <= 1:
+            raise ValueError("max_rejected_signal_fraction must be between 0 and 1")
+        if self.max_gap_count < 0:
+            raise ValueError("max_gap_count must be >= 0")
+
+
+@dataclass(frozen=True, slots=True)
+class SampleAdequacyDecision:
+    passed: bool
+    reason_codes: tuple[str, ...]
+    bars: int
+    fills: int
+    unique_days: int
+    rejected_signal_fraction: float
+    gap_count: int
+
+
+def evaluate_sample_adequacy(
+    *,
+    result: BacktestResult,
+    dataset: MarketDataset,
+    policy: SampleAdequacyPolicy,
+) -> SampleAdequacyDecision:
+    if result.dataset_hash != dataset.dataset_hash:
+        raise ValueError("backtest result does not match dataset")
+
+    bars = len(dataset.bars)
+    fills = result.metrics.fills
+    unique_days = len({bar.started_at.date() for bar in dataset.bars})
+    rejected = result.metrics.rejected_signals
+    attempted = fills + rejected
+    rejected_fraction = rejected / attempted if attempted else 0.0
+    gap_count = len(dataset.gap_indexes())
+
+    reasons: list[str] = []
+    if bars < policy.min_bars:
+        reasons.append("INSUFFICIENT_BARS")
+    if fills < policy.min_fills:
+        reasons.append("INSUFFICIENT_FILLS")
+    if unique_days < policy.min_unique_days:
+        reasons.append("INSUFFICIENT_UNIQUE_DAYS")
+    if rejected_fraction > policy.max_rejected_signal_fraction:
+        reasons.append("HIGH_REJECTED_SIGNAL_FRACTION")
+    if gap_count > policy.max_gap_count:
+        reasons.append("TOO_MANY_GAPS")
+
+    return SampleAdequacyDecision(
+        passed=not reasons,
+        reason_codes=tuple(reasons),
+        bars=bars,
+        fills=fills,
+        unique_days=unique_days,
+        rejected_signal_fraction=rejected_fraction,
+        gap_count=gap_count,
+    )
 
 
 @dataclass(frozen=True, slots=True)
