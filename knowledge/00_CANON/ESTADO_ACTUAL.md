@@ -1,29 +1,32 @@
 # ESTADO ACTUAL
 
 Fecha: 2026-08-10
-Fase: Foundation v0.2
+Fase: Foundation v0.3
 
 ## Hecho
 - Architecture Baseline 1.0 y memoria Graphify + Obsidian incorporadas en `main`.
-- Contratos de dominio mínimos implementados: market snapshot, order intent, risk decision, order, fill y portfolio snapshot.
-- Event Ledger append-only en memoria para Foundation/paper.
-- Capital Safety Kernel ejecutable y fail-closed.
-- Límites: orden, posición, estrategia, portfolio, net exposure, leverage, pérdida diaria, drawdown y órdenes abiertas.
-- Validación de market data stale/futuro/inválido y sanity band de precios.
-- Reconciliation mismatch y broker state desconocido bloquean riesgo.
-- Kill switch implementado; permite únicamente reducción estricta de riesgo sin flip de posición.
-- RiskDecision ligado por fingerprint al intent + market snapshot y con TTL.
-- OMS con idempotencia, reserva de key antes de I/O y estado `UNKNOWN` ante respuesta ambigua/inválida del broker.
-- Paper Broker determinista implementado.
-- Pipeline único `OrderIntent -> Safety Kernel -> OMS -> Paper Broker -> Ledger`.
-- 52 pruebas PASS con 93.28% de cobertura total de branches/statements combinada reportada por CI.
+- Contratos de dominio, Capital Safety Kernel, OMS y Paper Broker base implementados desde Foundation v0.2.
+- Backend SQLite/WAL implementado para estado durable local de Foundation/paper.
+- Event Ledger durable con unicidad y cadena hash verificable.
+- OMS durable con idempotencia cross-process y estado `SUBMITTING` persistido antes de broker I/O.
+- Portfolio State Store versionado con optimistic concurrency y aplicación idempotente de fills.
+- Reservas atómicas de riesgo: versión de portfolio + generación de reservas evitan aprobar simultáneamente contra capacidad stale.
+- Kill switch persistente y versionado; sobrevive restart.
+- `RiskDecision` ligado a `safety_state_version`; una aprobación vieja se invalida si cambia el estado de seguridad antes del submit.
+- `DurablePaperBroker` idempotente y recuperable implementado como simulador de seguridad de ejecución.
+- Reconciliation Engine ejecutable: órdenes ambiguas, posiciones, órdenes abiertas y reservas se cotejan con estado broker-side.
+- Arranque fail-closed: reconciliation/broker state se degradan antes de reconciliar y solo vuelven a estado confiable si existe concordancia.
+- Crash después de broker commit puede recuperarse sin duplicar orden ni exposición.
+- Reservas huérfanas se detectan como inconsistencia y bloquean nuevo riesgo.
+- 70 pruebas PASS con 86.38% de cobertura combinada reportada por CI.
 - Knowledge Contract PASS.
 
 ## Limitaciones conocidas
-- La exclusión evaluate+submit es intra-proceso; todavía no existe reserva transaccional cross-process.
-- Portfolio/reconciliation todavía no son persistentes ni versionados de forma durable.
-- Event Ledger actual es in-memory; falta backend durable.
-- Paper Broker no es un modelo realista de fills para backtesting.
+- SQLite es el backend durable de referencia para Foundation/paper local; no está promovido como datastore final de una topología live distribuida.
+- `DurablePaperBroker` no es un modelo realista de fills para backtesting.
+- Un broker real deberá aportar client IDs idempotentes, account/order inspection, cancelación, timeouts y reconciliación equivalentes.
+- Sigue existiendo riesgo operativo inherente a una orden ya en vuelo durante una activación de kill switch; antes de live se requieren execution fences/cancelación broker-side y certificación adicional.
+- Falta lifecycle completo de partial fills/cancel/replace y recuperación de esos estados.
 - No existe ingesta real de market data ni broker real.
 - No existen todavía backtester, research pipeline ni estrategias certificadas.
 - Los límites monetarios productivos todavía no están definidos; solo existen fixtures TEST-USD de pruebas.
@@ -34,4 +37,4 @@ Fase: Foundation v0.2
 No existe autorización técnica ni humana para operar dinero real.
 
 ## Próximo hito
-Foundation v0.3: persistencia durable + portfolio state versionado + reconciliation engine + reservas atómicas de riesgo/idempotencia cross-process + recovery/chaos tests.
+Research v0.4: market-data contract + backtester event-driven + fees/spread/slippage/latency + strategy interface + experiment registry + holdout protegido + walk-forward/robustness gates. En paralelo se mantendrá una lista explícita de hardening pendiente antes de cualquier broker real.
