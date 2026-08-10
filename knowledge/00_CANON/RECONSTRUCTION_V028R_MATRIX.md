@@ -17,13 +17,13 @@ Objetivo: reconstruir todas las capacidades históricamente verificadas sin deud
 | R0 | durable OMS + idempotency + UNKNOWN/reconciliation base | v0.10 lineage | PASS/PARTIAL | complete lifecycle to be rechecked in R2 |
 | R0 | persistent kill switch + stale safety decision invalidation | reconstructed strengthening | PASS | restart + race tests |
 | R0 | atomic risk reservations cross-process | reconstructed strengthening | PASS | concurrency tests |
-| R1 | canonical market data + hashes/provenance | v0.3–v0.5 lineage | PARTIAL | PR #4 implementation audit + merge/rework |
-| R1 | strategy contract / safe DSL | v0.3 | PARTIAL | deterministic signals, safe parser/config, hash, no broker authority |
+| R1 | canonical market data + hashes/provenance | v0.3–v0.5 lineage | PARTIAL | audit/complete PR #4 |
+| R1 | strategy contract / safe DSL | v0.3 | PARTIAL | deterministic signals, safe declarative config, canonical hash, no broker authority |
 | R1 | BAR_CLOSE -> NEXT_BAR / no look-ahead | v0.3 | PARTIAL | adversarial leakage tests |
-| R1 | explicit fees/spread/slippage/latency | v0.5 lineage | PARTIAL | zero-cost requires explicit opt-in; cost stress |
-| R1 | TRAIN/VALIDATION/protected HOLDOUT | v0.3+ | PARTIAL | no tuning access + one-way final validation governance |
+| R1 | explicit fees/spread/slippage/latency | v0.5 lineage | PARTIAL | zero-cost explicit opt-in; documented latency/delay semantics; cost stress |
+| R1 | TRAIN/VALIDATION/protected HOLDOUT | v0.3+ | PARTIAL | no tuning access + final-validation governance |
 | R1 | walk-forward robustness | v0.5 | PARTIAL | chronological rolling/expanding folds |
-| R1 | moving-block bootstrap | v0.5 | TODO | block bootstrap + reproducible seeds/tests |
+| R1 | moving-block bootstrap | v0.5 | TODO | reproducible block bootstrap + seed/tests |
 | R1 | sample adequacy + immutable validation registry | v0.5 | PARTIAL | explicit gates + immutable evidence |
 | R2 | fat-finger and price sanity bands | v0.10 | PARTIAL | boundary + stale/invalid price tests |
 | R2 | portfolio/strategy/order/position exposure + leverage | v0.10 | PARTIAL | complete risk-policy matrix |
@@ -53,17 +53,29 @@ Objetivo: reconstruir todas las capacidades históricamente verificadas sin deud
 | R6 | PAPER trade_updates protection evidence | v0.28 | TODO | event evidence when policy requires |
 | R6 | unsupported products fail closed | v0.28 | TODO | crypto bracket unsupported unless separately certified |
 
+## R1 audit finding — PR #4
+Confirmed useful implementation already exists for:
+- canonical bars/instrument metadata + dataset hashes;
+- future-bar execution with `execution_delay_bars >= 1`;
+- fees, half-spread, slippage, leverage and volume participation;
+- temporal split + protected holdout permit;
+- rolling/expanding walk-forward folds;
+- SQLite experiment registry with reproducibility conflict detection;
+- configurable robustness gate.
+
+Confirmed gaps before R1 can be `PASS`:
+- no declarative safe Strategy DSL yet; only Python `ResearchStrategy` protocol;
+- moving-block bootstrap absent;
+- sample-adequacy/validation-completeness gates incomplete;
+- latency is represented only indirectly as bar delay rather than a separately documented/modelled assumption;
+- R1 validation evidence layer needs completion;
+- PR #4 canon/docs must be synchronized with current v0.28R plan.
+
 ## Debt policy
-A track cannot be marked PASS with:
-- known P0/P1 defects;
-- skipped negative tests;
-- reduced coverage gate;
-- untracked capability mismatch;
-- TODO hidden in code comments without a canonical debt item;
-- temporary bypasses to reach broker/network paths.
+A track cannot be marked PASS with known P0/P1 defects, skipped negative tests, reduced coverage, untracked capability mismatches, hidden critical TODOs or temporary broker/network bypasses.
 
 ## Immediate target
-**R1** is the active reconstruction track. PR #4 is not merged blindly: its research engine must be audited against every R1 row, then completed before promotion.
+**R1** is active. PR #4 is being completed rather than merged blindly.
 
 ## Final release condition
 `v0.28R` exists only when every row above is `PASS`, CI is green on the release SHA, source-of-truth/handoff are synchronized and LIVE remains blocked unless a separate future promotion explicitly changes that state.
