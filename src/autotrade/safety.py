@@ -17,6 +17,7 @@ from .domain import (
     market_fingerprint,
 )
 from .ledger import EventLedger, LedgerEvent
+from .state import InMemorySafetyStateStore, SafetyStateStore
 
 
 class InvalidSafetyConfiguration(ValueError):
@@ -72,11 +73,15 @@ class SafetyLimits:
 
 
 class CapitalSafetyKernel:
-    def __init__(self, limits: SafetyLimits, ledger: EventLedger) -> None:
+    def __init__(
+        self,
+        limits: SafetyLimits,
+        ledger: EventLedger,
+        state_store: SafetyStateStore | None = None,
+    ) -> None:
         self._limits = limits
         self._ledger = ledger
-        self._kill_switch_active = False
-        self._kill_switch_reason = ""
+        self._state_store = state_store or InMemorySafetyStateStore()
         self._lock = RLock()
 
     @property
@@ -85,21 +90,23 @@ class CapitalSafetyKernel:
 
     @property
     def kill_switch_active(self) -> bool:
-        with self._lock:
-            return self._kill_switch_active
+        return self._state_store.get().kill_switch_active
+
+    @property
+    def state_store(self) -> SafetyStateStore:
+        return self._state_store
 
     def activate_kill_switch(self, *, reason: str, now: datetime) -> None:
         if not reason.strip():
             raise ValueError("kill switch reason is required")
         with self._lock:
-            self._kill_switch_active = True
-            self._kill_switch_reason = reason
+            state = self._state_store.activate(reason=reason, now=now)
             self._ledger.append(
                 LedgerEvent(
                     event_id=f"kill:{uuid4()}",
                     event_type="KILL_SWITCH_ACTIVATED",
                     occurred_at=now,
-                    payload={"reason": reason},
+                    payload={"reason": reason, "safety_state_version": str(state.version)},
                 )
             )
 
@@ -107,14 +114,16 @@ class CapitalSafetyKernel:
         if not confirmed_by.strip():
             raise ValueError("confirmed_by is required")
         with self._lock:
-            self._kill_switch_active = False
-            self._kill_switch_reason = ""
+            state = self._state_store.reset(now=now)
             self._ledger.append(
                 LedgerEvent(
                     event_id=f"kill-reset:{uuid4()}",
                     event_type="KILL_SWITCH_RESET",
                     occurred_at=now,
-                    payload={"confirmed_by": confirmed_by},
+                    payload={
+                        "confirmed_by": confirmed_by,
+                        "safety_state_version": str(state.version),
+                    },
                 )
             )
 
@@ -139,6 +148,7 @@ class CapitalSafetyKernel:
     ) -> RiskDecision:
         fp = intent_fingerprint(intent)
         market_fp = market_fingerprint(market)
+        control_state = self._state_store.get()
 
         def reject(code: str, detail: str, *, risk_reducing: bool = False) -> RiskDecision:
             return self._record_decision(
@@ -151,6 +161,7 @@ class CapitalSafetyKernel:
                 reason_detail=detail,
                 approved_notional=None,
                 risk_reducing=risk_reducing,
+                safety_state_version=control_state.version,
             )
 
         if not _aware(now) or not _aware(intent.created_at) or not _aware(market.observed_at):
@@ -234,8 +245,8 @@ class CapitalSafetyKernel:
         projected_gross = portfolio.gross_exposure - abs(current_position) + abs(projected_position)
         projected_net = portfolio.net_exposure + signed_order_notional
 
-        if self._kill_switch_active and not risk_reducing:
-            return reject("KILL_SWITCH_ACTIVE", self._kill_switch_reason, risk_reducing=risk_reducing)
+        if control_state.kill_switch_active and not risk_reducing:
+            return reject("KILL_SWITCH_ACTIVE", control_state.kill_switch_reason, risk_reducing=risk_reducing)
         if portfolio.daily_pnl <= -self._limits.max_daily_loss and not risk_reducing:
             return reject("MAX_DAILY_LOSS", str(portfolio.daily_pnl), risk_reducing=risk_reducing)
         if portfolio.drawdown >= self._limits.max_drawdown and not risk_reducing:
@@ -262,6 +273,7 @@ class CapitalSafetyKernel:
             reason_detail="all hard limits passed",
             approved_notional=order_notional,
             risk_reducing=risk_reducing,
+            safety_state_version=control_state.version,
         )
 
     def _record_decision(
@@ -276,6 +288,7 @@ class CapitalSafetyKernel:
         reason_detail: str,
         approved_notional: Decimal | None,
         risk_reducing: bool,
+        safety_state_version: int,
     ) -> RiskDecision:
         decision_id = str(uuid4())
         decision = RiskDecision(
@@ -291,6 +304,7 @@ class CapitalSafetyKernel:
             market_fingerprint=market_fp,
             approved_notional=approved_notional,
             risk_reducing=risk_reducing,
+            safety_state_version=safety_state_version,
         )
         self._ledger.append(
             LedgerEvent(
@@ -304,6 +318,7 @@ class CapitalSafetyKernel:
                     "reason_code": reason_code,
                     "risk_reducing": str(risk_reducing).lower(),
                     "limits_version": self._limits.limits_version,
+                    "safety_state_version": str(safety_state_version),
                 },
             )
         )
