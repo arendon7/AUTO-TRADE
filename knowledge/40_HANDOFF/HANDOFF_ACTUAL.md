@@ -1,52 +1,59 @@
 # HANDOFF ACTUAL
 
 Fecha: 2026-08-10
-Branch: `recovery/legacy-v0.28-canon`
-Base main: `721dd64a7a87a276c7f85ca34467b8a62f09d563`
+Fase: v0.28R Reconstruction
+Track activo: R1 — Market Data + Strategy DSL + Research Engine
 
-## Cambio de dirección crítico
-La reconstrucción inicial asumía que el proyecto histórico había quedado cerca de Foundation. Esa suposición fue corregida al recuperar certificaciones reales que demuestran releases hasta **AUTO TRADING IA v0.28.0**.
+## Cambio de dirección aprobado
+El source histórico v0.28 se considera irrecuperable para el plan de trabajo. En vez de seguir esperando, el proyecto reconstruirá una implementación equivalente **v0.28R** sin deuda técnica oculta.
 
-Por eso:
-- Foundation v0.3 actual permanece como fallback ejecutable;
-- PR #4 Research v0.4 fue convertido a DRAFT/FALLBACK;
-- no se seguirá reconstruyendo hacia arriba sin intentar primero recuperar el source v0.28.
+ADR-0006 define el programa y `RECONSTRUCTION_V028R_MATRIX.md` define cada capacidad que debe volver a quedar PASS.
 
-## Evidencia histórica recuperada
-v0.28 certificó:
-- 302/302 PASS;
-- 207 JSON Schemas;
-- SIMULATION;
-- Event Ledger válido;
-- clean ZIP extraction + compile + health PASS;
-- external PAPER Canary/Evidence;
-- broker-side equity bracket protection sandbox + nested legs + PAPER trade_updates;
-- LIVE authority NONE.
+## Base actual
+R0 Foundation durable ya existe en `main`:
+- SQLite/WAL state;
+- durable hash-chained ledger;
+- OMS/idempotency;
+- portfolio versioning + atomic risk reservations;
+- persistent kill switch;
+- DurablePaperBroker;
+- startup reconciliation/crash recovery;
+- coverage gate >=85%.
 
-Los reportes previos prueban además research completo, HOLDOUT protegido, Trial Ledger/PBO/DSR, capital safety/OMS/reconciliation, real data intake, portfolio robustness, health/drift, defensive bridge y forward/shadow evidence.
+## PR #4
+Research v0.4 reconstruida contiene una base fuerte y ya certificada en su head anterior:
+- canonical bars/instrument metadata/dataset hashes;
+- event-driven backtester;
+- minimum future-bar execution;
+- explicit fees/spread/slippage/leverage/volume participation;
+- temporal splits + protected HOLDOUT permits;
+- SQLite Experiment Registry;
+- walk-forward + robustness gates;
+- adversarial tests;
+- 122 tests PASS / 89.40% coverage.
 
-## Búsqueda del source realizada
-Sin source package encontrado en:
-- File Library (sí existen reportes);
-- Google Drive;
-- SharePoint/OneDrive;
-- GitHub actual.
+PR #4 pasa de fallback a **candidato R1**. No se fusiona todavía: primero se completa contra toda la matriz R1.
 
-No se inventará el árbol v0.28 desde reportes.
+## Faltantes R1 explícitos
+- safe Strategy DSL/config validation + canonical hash;
+- stronger proof that strategy layer has no broker/network/risk authority;
+- moving-block bootstrap;
+- sample adequacy / validation-completeness gates;
+- explicit latency semantics in cost/execution assumptions if not already equivalent;
+- final audit of HOLDOUT isolation and experiment immutability;
+- sync with current source-of-truth/canon;
+- threat/failure-path review.
 
-## Memoria/proceso corregidos
-Se añadieron:
-- `knowledge/00_CANON/SOURCE_OF_TRUTH.md`;
-- `knowledge/00_CANON/LEGACY_V028_RECOVERY.md`;
-- `knowledge/50_RUNBOOKS/RECOVER_LEGACY_V028.md`;
-- ADR-0005;
-- `AGENTS.md` actualizado con jerarquía de verdad y regla de no-regresión.
+## Después de R1
+R2: Capital Safety + OMS maturity, incluyendo full partial-fill/cancel/replace lifecycle y machine-readable contract registry.
+Luego R3→R6 hasta external PAPER + verified broker-side protection.
 
-## Próximo paso exacto
-Recuperar/importar source v0.28 cuando aparezca y recertificarlo antes de seguir con nueva funcionalidad. Si definitivamente no aparece, crear ADR para reconstrucción equivalente desde la arquitectura histórica, preservando todos los invariants verificables.
+## Debt rule
+No se cierra ningún track con P0/P1 conocido. P2+ solo puede quedar si está explícito, justificado y no degrada un invariant histórico.
 
-## Startup para la próxima sesión
-`AGENTS.md -> SOURCE_OF_TRUTH -> CONTEXTO_RAPIDO -> ESTADO_ACTUAL -> TAREA_ACTIVA -> LEGACY_V028_RECOVERY -> HANDOFF_ACTUAL -> Graphify si existe -> trabajo`.
+## Memoria
+Startup recomendado:
+`AGENTS.md -> SOURCE_OF_TRUTH -> CONTEXTO_RAPIDO -> ESTADO_ACTUAL -> TAREA_ACTIVA -> RECONSTRUCTION_V028R_MATRIX -> latest ADR -> HANDOFF_ACTUAL -> Graphify if fresh -> impacted source`.
 
 ## Capital
 **LIVE TRADING: BLOQUEADO.**
