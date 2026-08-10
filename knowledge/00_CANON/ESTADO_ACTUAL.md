@@ -1,63 +1,77 @@
 # ESTADO ACTUAL
 
 Fecha: 2026-08-10
-Fase: Legacy Recovery / Canon Reconciliation
+Fase: v0.28R Reconstruction — R1 active
 
-## Verdad actual del repositorio
-`main` está en `721dd64...` y contiene la reconstrucción Foundation v0.3 certificada en este repo:
+## Base ejecutable actual
+`main` contiene Foundation v0.3 reconstruida y certificada:
 - SQLite/WAL durable state;
 - hash-chained Event Ledger;
 - OMS/idempotency cross-process;
 - versioned portfolio + atomic risk reservations;
 - persistent kill switch;
 - DurablePaperBroker;
-- startup reconciliation y crash recovery;
-- 70 tests PASS y 86.38% coverage en la certificación v0.3.
+- startup reconciliation + crash recovery;
+- coverage gate 85%.
 
-PR #4 contiene una reconstrucción Research v0.4 con 122 tests PASS y 89.40% coverage, pero fue convertida a **DRAFT/FALLBACK** y no debe fusionarse todavía.
+Esta base constituye **R0** de la nueva reconstrucción.
 
-## Descubrimiento histórico crítico
-Se recuperaron artefactos de certificación que demuestran que la conversación/proyecto anterior ya había avanzado hasta **AUTO TRADING IA v0.28.0**.
+## Decisión sobre el source histórico
+El source ZIP/tree v0.28 no pudo recuperarse y el usuario confirma que no dispone de una copia recuperable. Ya no se mantiene el proyecto bloqueado esperando ese paquete.
 
-Última certificación histórica verificada:
-- track `Broker-Side Protection Sandbox`;
-- runtime `SIMULATION`;
-- 302/302 tests PASS;
-- 207 JSON Schemas;
-- Event Ledger válido;
-- clean ZIP extraction + compile + health PASS;
-- External PAPER canary/evidence y broker-side bracket protection sandbox;
-- LIVE capital authority `NONE`.
+Se adopta ADR-0006: reconstrucción equivalente **v0.28R**, capability-by-capability, usando la evidencia histórica como especificación de invariantes y no como código.
 
-Los reportes intermedios verifican además Market Data Foundation, Strategy DSL, Fast/Canonical Backtest, Validation, Trial Ledger, PBO/DSR, Final HOLDOUT, Capital Safety, OMS/reconciliation, Local Paper, external PAPER gateway, real-data intake, Research Control Center, Portfolio Research/Robustness, Health/Drift, Defensive Health Bridge, Shadow/Forward Evidence y Portfolio Shadow.
+## Evidencia histórica conservada
+`LEGACY_RELEASE_MATRIX.md` conserva tracks verificables hasta v0.28, incluyendo:
+- research/validation/HOLDOUT;
+- Trial Ledger, PBO/DSR y Tournament;
+- Capital Safety/OMS/reconciliation;
+- real market-data intake;
+- portfolio robustness;
+- health/drift + Defensive Health Bridge;
+- closed-kline stream;
+- synchronized shadow/forward evidence;
+- external PAPER Canary/Evidence;
+- broker-side equity bracket protection.
 
-## Estado del source histórico
-El package/ZIP v0.28 **todavía no está recuperado**.
+Última referencia histórica: v0.28 con 302 tests PASS / 207 schemas, runtime SIMULATION y LIVE authority NONE. Esos números no son cuotas; los invariantes son el objetivo.
 
-Búsqueda realizada sin coincidencia del source:
-- File Library: conserva reportes/certificaciones, no el ZIP;
-- Google Drive: sin package coincidente;
-- SharePoint/OneDrive: sin package coincidente;
-- GitHub `arendon7/AUTO-TRADE`: repo reciente, no contiene el árbol histórico.
+## Matriz de reconstrucción
+`RECONSTRUCTION_V028R_MATRIX.md` es ahora el backlog canónico de equivalencia.
 
-Por integridad no se reconstruirá el v0.28 inventando source desde los reportes.
+Tracks:
+- R0 Foundation durable: base actual.
+- R1 Market Data + Strategy DSL + Research Engine: **ACTIVE**.
+- R2 Capital Safety + OMS maturity.
+- R3 Real market data + research governance.
+- R4 Portfolio robustness + health.
+- R5 Streaming + shadow/forward evidence.
+- R6 External PAPER + broker-side protection.
 
-## Arquitectura de memoria ya implantada
-- `SOURCE_OF_TRUTH.md`: precedencia canónica y regla de no-regresión.
-- `LEGACY_V028_RECOVERY.md`: mapa histórico verificado.
-- `AGENTS.md`: startup obligatorio desde el canon.
-- `knowledge/`: vault Obsidian humano/canónico.
-- `graphify-out/`: grafo estructural regenerable cuando se disponga de runtime Graphify.
-- `RECOVER_LEGACY_V028.md`: procedimiento de importación y recertificación del source.
-- Git + CI/tests: historial y evidencia de comportamiento.
+`v0.28R` solo se declara cuando R0–R6 estén PASS sin P0/P1 conocidos.
+
+## PR #4
+PR #4 contiene una base Research v0.4 útil: market contracts, event-driven backtester, explicit costs, temporal splits, protected holdout, experiment registry, walk-forward y robustness gates. Su último head certificado reportó 122 tests PASS y 89.40% coverage.
+
+Deja de ser un fallback congelado. Pasa a ser **candidato R1**, pero no se fusiona hasta completar las filas R1 faltantes, especialmente safe Strategy DSL, moving-block bootstrap, sample adequacy/validation completeness y sincronización del canon actual.
+
+## Graphify + Obsidian
+La integración fue corregida:
+- Graphify semantic/deep build se ejecuta dentro de un coding assistant soportado;
+- `graphify-out/SOURCE_SHA` controla frescura;
+- este ChatGPT no afirma haber generado un grafo inexistente;
+- Obsidian `knowledge/` + Git/CI mantienen continuidad y evidencia.
+
+## Deuda conocida actual
+No se oculta como deuda cerrada:
+- lifecycle completo partial fill/cancel/replace se cerrará en R2;
+- source histórico exacto seguirá perdido, pero ya no es dependencia del plan;
+- Graphify graph todavía debe ser generado en runtime/asistente compatible;
+- R1 aún está PARTIAL hasta completar y certificar PR #4.
 
 ## Estado de capital
 **LIVE TRADING: BLOQUEADO.**
-La existencia histórica de external PAPER y broker-side protection no concede autoridad LIVE.
+La reconstrucción v0.28R no constituye una promoción LIVE.
 
 ## Próximo hito
-1. Recuperar/importar el source package v0.28 si aparece.
-2. Recertificarlo contra su evidencia histórica (302 tests / 207 schemas o explicar drift).
-3. Ejecutar Graphify deep sobre el árbol recuperado.
-4. Reconciliar únicamente después las mejoras útiles de Foundation v0.3 / PR #4.
-5. Si el source resulta definitivamente irrecuperable, abrir ADR específico para reconstrucción equivalente v0.28 desde evidencia, sin downlevel silencioso.
+Completar R1 sin deuda P0/P1 y certificarlo sobre `main` antes de iniciar R2.
