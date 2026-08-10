@@ -35,7 +35,7 @@ if not errors:
         ("OrderIntent", safety, "OrderIntent safety contract missing"),
         ("Idempotency", safety, "idempotency contract missing"),
         ("FAIL CLOSED", safety, "fail-closed contract missing"),
-        ("tests negativos", task, "negative safety tests missing from active task"),
+        ("negativ", task, "negative safety tests missing from active task"),
     ]
 
     for needle, haystack, message in checks:
