@@ -2,58 +2,61 @@
 
 Fecha: 2026-08-10
 Fase: v0.28R Reconstruction
-Track activo: R1 — Market Data + Strategy DSL + Research Engine
+Track activo: **R2 — Capital Safety + OMS maturity**
+Branch: `reconstruction/r2-capital-oms`
 
-## Cambio de dirección aprobado
-El source histórico v0.28 se considera irrecuperable para el plan de trabajo. En vez de seguir esperando, el proyecto reconstruirá una implementación equivalente **v0.28R** sin deuda técnica oculta.
+## R1 closure
+R1 was merged as `ed1c0689299b625e8092bad99814d93a4fb77438`.
 
-ADR-0006 define el programa y `RECONSTRUCTION_V028R_MATRIX.md` define cada capacidad que debe volver a quedar PASS.
-
-## Base actual
-R0 Foundation durable ya existe en `main`:
-- SQLite/WAL state;
-- durable hash-chained ledger;
-- OMS/idempotency;
-- portfolio versioning + atomic risk reservations;
-- persistent kill switch;
-- DurablePaperBroker;
-- startup reconciliation/crash recovery;
-- coverage gate >=85%.
-
-## PR #4
-Research v0.4 reconstruida contiene una base fuerte y ya certificada en su head anterior:
-- canonical bars/instrument metadata/dataset hashes;
-- event-driven backtester;
-- minimum future-bar execution;
-- explicit fees/spread/slippage/leverage/volume participation;
-- temporal splits + protected HOLDOUT permits;
-- SQLite Experiment Registry;
-- walk-forward + robustness gates;
-- adversarial tests;
-- 122 tests PASS / 89.40% coverage.
-
-PR #4 pasa de fallback a **candidato R1**. No se fusiona todavía: primero se completa contra toda la matriz R1.
-
-## Faltantes R1 explícitos
-- safe Strategy DSL/config validation + canonical hash;
-- stronger proof that strategy layer has no broker/network/risk authority;
+Certified capabilities:
+- canonical market data + provenance hashes;
+- structural anti-look-ahead;
+- explicit research costs/capacity + bar-delay latency assumption;
+- safe declarative Strategy DSL + canonical hash;
+- protected HOLDOUT + one-use final-validation permit;
+- chronological walk-forward robustness;
 - moving-block bootstrap;
-- sample adequacy / validation-completeness gates;
-- explicit latency semantics in cost/execution assumptions if not already equivalent;
-- final audit of HOLDOUT isolation and experiment immutability;
-- sync with current source-of-truth/canon;
-- threat/failure-path review.
+- sample adequacy;
+- immutable Experiment and Validation registries;
+- documented R1 failure paths.
 
-## Después de R1
-R2: Capital Safety + OMS maturity, incluyendo full partial-fill/cancel/replace lifecycle y machine-readable contract registry.
-Luego R3→R6 hasta external PAPER + verified broker-side protection.
+Evidence:
+- 161 tests PASS / 90.34% total coverage before merge;
+- Core Safety + Knowledge Contract PASS on merge SHA.
 
-## Debt rule
-No se cierra ningún track con P0/P1 conocido. P2+ solo puede quedar si está explícito, justificado y no degrada un invariant histórico.
+R1 has no known P0/P1 debt. Its explicit single-symbol/bar-based limitations are scope boundaries, not hidden claims.
 
-## Memoria
-Startup recomendado:
-`AGENTS.md -> SOURCE_OF_TRUTH -> CONTEXTO_RAPIDO -> ESTADO_ACTUAL -> TAREA_ACTIVA -> RECONSTRUCTION_V028R_MATRIX -> latest ADR -> HANDOFF_ACTUAL -> Graphify if fresh -> impacted source`.
+## Debt registry
+`knowledge/00_CANON/DEBT_REGISTER.md` is mandatory from this point forward.
+
+R2 currently owns:
+- `TD-R2-001` full partial-fill/cancel/replace lifecycle;
+- `TD-R2-002` versioned machine-readable contracts;
+- `TD-R2-003` complete risk-policy matrix;
+- `TD-R2-004` durable daily-loss/drawdown/circuit state;
+- `TD-R2-005` control-plane coverage hotspots.
+
+P0/P1 cannot be waived to close R2.
+
+## R2 next exact work
+1. inspect `domain.py`, `safety.py`, `oms.py`, `state.py`, `persistence.py`, `reconciliation.py`, `engine.py` and broker interfaces;
+2. write an R2 lifecycle/risk-state design before broad mutation;
+3. implement partial-fill/cancel/replace transitions + persistence;
+4. make reconciliation recover ambiguous lifecycle states;
+5. complete durable circuit/loss/drawdown semantics;
+6. add schema/contract registry + compatibility CI;
+7. extend adversarial/chaos tests;
+8. close debt IDs with evidence, then certify/merge.
+
+## Guardrails
+- no broker real or external market-data network in R2;
+- no blind retry after ambiguous broker I/O;
+- stricter defensive state wins under concurrency/restart;
+- no safety threshold is weakened to make tests/strategies pass;
+- LIVE remains blocked.
+
+## Startup sequence
+`AGENTS.md -> SOURCE_OF_TRUTH -> ESTADO_ACTUAL -> TAREA_ACTIVA -> RECONSTRUCTION_V028R_MATRIX -> DEBT_REGISTER -> latest ADR -> HANDOFF_ACTUAL -> Graphify if fresh -> impacted source`.
 
 ## Capital
 **LIVE TRADING: BLOQUEADO.**
