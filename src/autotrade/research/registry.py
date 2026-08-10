@@ -4,7 +4,7 @@ from dataclasses import asdict, dataclass
 from datetime import datetime
 from hashlib import sha256
 import json
-from math import isfinite
+from math import inf, isfinite
 from pathlib import Path
 import sqlite3
 from typing import Mapping
