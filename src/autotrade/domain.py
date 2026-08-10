@@ -75,6 +75,7 @@ class RiskDecision:
     market_fingerprint: str
     approved_notional: Decimal | None = None
     risk_reducing: bool = False
+    safety_state_version: int = 0
 
 
 @dataclass(frozen=True, slots=True)
