@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 from datetime import datetime
+from decimal import Decimal
 from enum import StrEnum
 from threading import RLock
 from typing import Protocol
@@ -325,29 +326,30 @@ def apply_fill_to_portfolio(snapshot: PortfolioSnapshot, order: OrderRecord) -> 
     if order.filled_quantity <= 0 or order.average_fill_price is None:
         return snapshot
 
+    zero = Decimal("0")
     signed_fill = order.intent.side.sign * order.filled_quantity * order.average_fill_price
     positions = dict(snapshot.signed_position_notional_by_symbol)
-    positions[order.intent.symbol] = positions.get(order.intent.symbol, 0) + signed_fill
-    positions = {symbol: value for symbol, value in positions.items() if value != 0}
+    positions[order.intent.symbol] = positions.get(order.intent.symbol, zero) + signed_fill
+    positions = {symbol: value for symbol, value in positions.items() if value != zero}
 
     strategy_positions = {
         strategy: dict(values)
         for strategy, values in snapshot.strategy_signed_position_notional_by_symbol.items()
     }
     own = strategy_positions.setdefault(order.intent.strategy_id, {})
-    own[order.intent.symbol] = own.get(order.intent.symbol, 0) + signed_fill
-    own = {symbol: value for symbol, value in own.items() if value != 0}
+    own[order.intent.symbol] = own.get(order.intent.symbol, zero) + signed_fill
+    own = {symbol: value for symbol, value in own.items() if value != zero}
     if own:
         strategy_positions[order.intent.strategy_id] = own
     else:
         strategy_positions.pop(order.intent.strategy_id, None)
 
     strategy_gross = {
-        strategy: sum((abs(value) for value in values.values()), start=0)
+        strategy: sum((abs(value) for value in values.values()), start=zero)
         for strategy, values in strategy_positions.items()
     }
-    gross = sum((abs(value) for value in positions.values()), start=0)
-    net = sum(positions.values(), start=0)
+    gross = sum((abs(value) for value in positions.values()), start=zero)
+    net = sum(positions.values(), start=zero)
 
     return replace(
         snapshot,
