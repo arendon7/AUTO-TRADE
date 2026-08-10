@@ -1,40 +1,63 @@
 # ESTADO ACTUAL
 
 Fecha: 2026-08-10
-Fase: Foundation v0.3
+Fase: Legacy Recovery / Canon Reconciliation
 
-## Hecho
-- Architecture Baseline 1.0 y memoria Graphify + Obsidian incorporadas en `main`.
-- Contratos de dominio, Capital Safety Kernel, OMS y Paper Broker base implementados desde Foundation v0.2.
-- Backend SQLite/WAL implementado para estado durable local de Foundation/paper.
-- Event Ledger durable con unicidad y cadena hash verificable.
-- OMS durable con idempotencia cross-process y estado `SUBMITTING` persistido antes de broker I/O.
-- Portfolio State Store versionado con optimistic concurrency y aplicación idempotente de fills.
-- Reservas atómicas de riesgo: versión de portfolio + generación de reservas evitan aprobar simultáneamente contra capacidad stale.
-- Kill switch persistente y versionado; sobrevive restart.
-- `RiskDecision` ligado a `safety_state_version`; una aprobación vieja se invalida si cambia el estado de seguridad antes del submit.
-- `DurablePaperBroker` idempotente y recuperable implementado como simulador de seguridad de ejecución.
-- Reconciliation Engine ejecutable: órdenes ambiguas, posiciones, órdenes abiertas y reservas se cotejan con estado broker-side.
-- Arranque fail-closed: reconciliation/broker state se degradan antes de reconciliar y solo vuelven a estado confiable si existe concordancia.
-- Crash después de broker commit puede recuperarse sin duplicar orden ni exposición.
-- Reservas huérfanas se detectan como inconsistencia y bloquean nuevo riesgo.
-- 70 pruebas PASS con 86.38% de cobertura combinada reportada por CI.
-- Knowledge Contract PASS.
+## Verdad actual del repositorio
+`main` está en `721dd64...` y contiene la reconstrucción Foundation v0.3 certificada en este repo:
+- SQLite/WAL durable state;
+- hash-chained Event Ledger;
+- OMS/idempotency cross-process;
+- versioned portfolio + atomic risk reservations;
+- persistent kill switch;
+- DurablePaperBroker;
+- startup reconciliation y crash recovery;
+- 70 tests PASS y 86.38% coverage en la certificación v0.3.
 
-## Limitaciones conocidas
-- SQLite es el backend durable de referencia para Foundation/paper local; no está promovido como datastore final de una topología live distribuida.
-- `DurablePaperBroker` no es un modelo realista de fills para backtesting.
-- Un broker real deberá aportar client IDs idempotentes, account/order inspection, cancelación, timeouts y reconciliación equivalentes.
-- Sigue existiendo riesgo operativo inherente a una orden ya en vuelo durante una activación de kill switch; antes de live se requieren execution fences/cancelación broker-side y certificación adicional.
-- Falta lifecycle completo de partial fills/cancel/replace y recuperación de esos estados.
-- No existe ingesta real de market data ni broker real.
-- No existen todavía backtester, research pipeline ni estrategias certificadas.
-- Los límites monetarios productivos todavía no están definidos; solo existen fixtures TEST-USD de pruebas.
-- Graphify está integrado mediante runbook/scripts, pero `graphify-out/` aún debe generarse en un runtime con Graphify disponible.
+PR #4 contiene una reconstrucción Research v0.4 con 122 tests PASS y 89.40% coverage, pero fue convertida a **DRAFT/FALLBACK** y no debe fusionarse todavía.
+
+## Descubrimiento histórico crítico
+Se recuperaron artefactos de certificación que demuestran que la conversación/proyecto anterior ya había avanzado hasta **AUTO TRADING IA v0.28.0**.
+
+Última certificación histórica verificada:
+- track `Broker-Side Protection Sandbox`;
+- runtime `SIMULATION`;
+- 302/302 tests PASS;
+- 207 JSON Schemas;
+- Event Ledger válido;
+- clean ZIP extraction + compile + health PASS;
+- External PAPER canary/evidence y broker-side bracket protection sandbox;
+- LIVE capital authority `NONE`.
+
+Los reportes intermedios verifican además Market Data Foundation, Strategy DSL, Fast/Canonical Backtest, Validation, Trial Ledger, PBO/DSR, Final HOLDOUT, Capital Safety, OMS/reconciliation, Local Paper, external PAPER gateway, real-data intake, Research Control Center, Portfolio Research/Robustness, Health/Drift, Defensive Health Bridge, Shadow/Forward Evidence y Portfolio Shadow.
+
+## Estado del source histórico
+El package/ZIP v0.28 **todavía no está recuperado**.
+
+Búsqueda realizada sin coincidencia del source:
+- File Library: conserva reportes/certificaciones, no el ZIP;
+- Google Drive: sin package coincidente;
+- SharePoint/OneDrive: sin package coincidente;
+- GitHub `arendon7/AUTO-TRADE`: repo reciente, no contiene el árbol histórico.
+
+Por integridad no se reconstruirá el v0.28 inventando source desde los reportes.
+
+## Arquitectura de memoria ya implantada
+- `SOURCE_OF_TRUTH.md`: precedencia canónica y regla de no-regresión.
+- `LEGACY_V028_RECOVERY.md`: mapa histórico verificado.
+- `AGENTS.md`: startup obligatorio desde el canon.
+- `knowledge/`: vault Obsidian humano/canónico.
+- `graphify-out/`: grafo estructural regenerable cuando se disponga de runtime Graphify.
+- `RECOVER_LEGACY_V028.md`: procedimiento de importación y recertificación del source.
+- Git + CI/tests: historial y evidencia de comportamiento.
 
 ## Estado de capital
 **LIVE TRADING: BLOQUEADO.**
-No existe autorización técnica ni humana para operar dinero real.
+La existencia histórica de external PAPER y broker-side protection no concede autoridad LIVE.
 
 ## Próximo hito
-Research v0.4: market-data contract + backtester event-driven + fees/spread/slippage/latency + strategy interface + experiment registry + holdout protegido + walk-forward/robustness gates. En paralelo se mantendrá una lista explícita de hardening pendiente antes de cualquier broker real.
+1. Recuperar/importar el source package v0.28 si aparece.
+2. Recertificarlo contra su evidencia histórica (302 tests / 207 schemas o explicar drift).
+3. Ejecutar Graphify deep sobre el árbol recuperado.
+4. Reconciliar únicamente después las mejoras útiles de Foundation v0.3 / PR #4.
+5. Si el source resulta definitivamente irrecuperable, abrir ADR específico para reconstrucción equivalente v0.28 desde evidencia, sin downlevel silencioso.
