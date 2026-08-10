@@ -30,6 +30,7 @@ class RiskDecisionStatus(StrEnum):
 
 class OrderStatus(StrEnum):
     VALIDATED = "VALIDATED"
+    SUBMITTING = "SUBMITTING"
     SUBMITTED = "SUBMITTED"
     PARTIALLY_FILLED = "PARTIALLY_FILLED"
     FILLED = "FILLED"
