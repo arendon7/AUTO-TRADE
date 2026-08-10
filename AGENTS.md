@@ -10,13 +10,24 @@ Build a profitable, testable and capital-safe algorithmic trading system. Optimi
 
 No AI-generated output is itself an executable trading authorization.
 
+## Source-of-truth rule
+Before planning or coding, read `knowledge/00_CANON/SOURCE_OF_TRUTH.md`.
+
+Historical v0.28 evidence proves a more mature implementation existed than the currently imported GitHub tree. Until that source is recovered and recertified:
+- current `main` is an executable fallback, not proof that later historical modules never existed;
+- PR #4 is a fallback reconstruction and must not be merged as the canonical evolution path;
+- do not recreate a historically certified capability merely because it is absent from current `main`;
+- never invent historical source details from validation reports.
+
 ## Mandatory startup sequence
-1. Read `knowledge/00_CANON/CONTEXTO_RAPIDO.md`.
-2. Read `knowledge/00_CANON/ESTADO_ACTUAL.md`.
-3. Read `knowledge/00_CANON/TAREA_ACTIVA.md`.
-4. Read latest relevant ADR and handoff.
-5. If `graphify-out/graph.json` exists, query Graphify before broad source reads.
-6. Inspect only impacted files and their graph neighbors.
+1. Read `knowledge/00_CANON/SOURCE_OF_TRUTH.md`.
+2. Read `knowledge/00_CANON/CONTEXTO_RAPIDO.md`.
+3. Read `knowledge/00_CANON/ESTADO_ACTUAL.md`.
+4. Read `knowledge/00_CANON/TAREA_ACTIVA.md`.
+5. Read `knowledge/00_CANON/LEGACY_V028_RECOVERY.md` while source recovery is active.
+6. Read latest relevant ADR and `knowledge/40_HANDOFF/HANDOFF_ACTUAL.md`.
+7. If `graphify-out/graph.json` exists and matches the working tree, query Graphify before broad source reads.
+8. Inspect only impacted files and their graph neighbors.
 
 ## Mandatory close sequence
 1. Run relevant tests and safety contracts.
@@ -24,7 +35,8 @@ No AI-generated output is itself an executable trading authorization.
 3. Update `ESTADO_ACTUAL.md` and `TAREA_ACTIVA.md`.
 4. Add/modify ADR if a durable architectural decision changed.
 5. Update `HANDOFF_ACTUAL.md`.
-6. Regenerate Graphify incrementally.
+6. Regenerate Graphify incrementally/deep when the runtime is available.
+7. Verify source-of-truth precedence did not regress.
 
 ## Non-negotiable capital controls
 - Fail closed on missing/invalid market data, stale prices, broker ambiguity, reconciliation mismatch or risk-engine error.
@@ -32,18 +44,21 @@ No AI-generated output is itself an executable trading authorization.
 - Reject duplicate/idempotency-conflicting orders.
 - Reject prices/quantities outside instrument precision and configured sanity bands.
 - No naked order path bypassing OMS and Capital Safety Kernel.
-- Emergency kill switch must cancel eligible open orders and block new risk.
+- Emergency controls must block new risk and handle eligible open-order protection/cancellation according to the certified broker contract.
 - Promotion to live requires explicit human approval and passing gates.
+- Automatic processes may reduce/block risk; they may not autonomously increase risk or clear a defensive restriction.
 
 ## Research integrity
 - No look-ahead leakage.
 - Protected holdout is not used for iterative tuning.
 - Include fees, spread, slippage, latency assumptions and realistic fills.
+- Account for every preregistered trial when applying multiple-testing controls.
 - Prefer portfolio of independent/reasonably diversified edges over one fragile strategy.
-- Track out-of-sample behavior, turnover, capacity, drawdown and regime sensitivity.
+- Track out-of-sample behavior, turnover, capacity, drawdown, regime sensitivity and forward evidence.
 
 ## Change discipline
 - Small reversible changes.
 - Every trading-sensitive change needs tests.
 - Never alter risk thresholds merely to make a strategy pass.
-- Memory/docs can describe limits but executable configuration/code is authoritative.
+- Never downgrade a historically verified safety invariant without explicit ADR and stronger evidence.
+- Memory/docs can describe limits but executable configuration/code is authoritative once the corresponding source tree is recovered.
