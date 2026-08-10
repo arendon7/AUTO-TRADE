@@ -1,64 +1,82 @@
 # AGENTS.md — AUTO-TRADE
 
 ## Mission
-Build a profitable, testable and capital-safe algorithmic trading system. Optimize for sustainable net returns subject to hard risk constraints; never optimize raw return by weakening safety.
+Build a profitable, testable and capital-safe algorithmic trading system. Optimize sustainable net returns subject to hard risk constraints; never optimize raw return by weakening safety.
 
 ## Authority model
 - ChatGPT/AI: research, coding, analysis, strategy hypotheses, diagnostics, documentation.
-- Deterministic components: validation, sizing limits, permissions, execution gates, reconciliation, kill switches.
+- Deterministic components: validation, sizing limits, permissions, execution gates, reconciliation, kill switches/circuits.
 - Human operator: promotion between research -> backtest -> paper -> limited live -> scaled live.
 
 No AI-generated output is itself an executable trading authorization.
 
 ## Source-of-truth rule
-Before planning or coding, read `knowledge/00_CANON/SOURCE_OF_TRUTH.md`.
+The historical v0.28 source is considered unavailable. The active program is **v0.28R capability reconstruction** under ADR-0006.
 
-Historical v0.28 evidence proves a more mature implementation existed than the currently imported GitHub tree. Until that source is recovered and recertified:
-- current `main` is an executable fallback, not proof that later historical modules never existed;
-- PR #4 is a fallback reconstruction and must not be merged as the canonical evolution path;
-- do not recreate a historically certified capability merely because it is absent from current `main`;
-- never invent historical source details from validation reports.
+Precedence:
+1. executable code/config/tests/contracts in current `main`;
+2. `RECONSTRUCTION_V028R_MATRIX.md` + current ADRs;
+3. `DEBT_REGISTER.md` for unresolved technical debt;
+4. historical v0.1–v0.28 reports as invariant evidence only;
+5. fresh Graphify artifacts when `SOURCE_SHA` matches;
+6. Obsidian/Markdown canon and handoff;
+7. conversational memory last.
+
+Never invent missing historical source/APIs from reports. Rebuild capabilities with current tests/evidence instead.
 
 ## Mandatory startup sequence
 1. Read `knowledge/00_CANON/SOURCE_OF_TRUTH.md`.
-2. Read `knowledge/00_CANON/CONTEXTO_RAPIDO.md`.
-3. Read `knowledge/00_CANON/ESTADO_ACTUAL.md`.
-4. Read `knowledge/00_CANON/TAREA_ACTIVA.md`.
-5. Read `knowledge/00_CANON/LEGACY_V028_RECOVERY.md` while source recovery is active.
+2. Read `knowledge/00_CANON/ESTADO_ACTUAL.md`.
+3. Read `knowledge/00_CANON/TAREA_ACTIVA.md`.
+4. Read `knowledge/00_CANON/RECONSTRUCTION_V028R_MATRIX.md`.
+5. Read `knowledge/00_CANON/DEBT_REGISTER.md`.
 6. Read latest relevant ADR and `knowledge/40_HANDOFF/HANDOFF_ACTUAL.md`.
-7. If `graphify-out/graph.json` exists and matches the working tree, query Graphify before broad source reads.
-8. Inspect only impacted files and their graph neighbors.
+7. If `graphify-out/graph.json` exists and `SOURCE_SHA` matches the relevant tree, query Graphify before broad source reads.
+8. Inspect only impacted files and graph/source neighbors.
 
 ## Mandatory close sequence
-1. Run relevant tests and safety contracts.
-2. Record evidence and unresolved risks.
-3. Update `ESTADO_ACTUAL.md` and `TAREA_ACTIVA.md`.
-4. Add/modify ADR if a durable architectural decision changed.
-5. Update `HANDOFF_ACTUAL.md`.
-6. Regenerate Graphify incrementally/deep when the runtime is available.
-7. Verify source-of-truth precedence did not regress.
+1. Run relevant positive/negative tests and safety contracts.
+2. Record evidence, scope boundaries and unresolved risks.
+3. Update `DEBT_REGISTER.md`: close fixed debt, add newly discovered debt, never hide severity.
+4. Update matrix status only from verified evidence.
+5. Update `ESTADO_ACTUAL.md` and `TAREA_ACTIVA.md`.
+6. Add/modify ADR when durable architecture changes.
+7. Update `HANDOFF_ACTUAL.md`.
+8. Regenerate/stamp Graphify when a compatible runtime is available.
+9. Recertify the merge SHA for a track close.
+
+## Debt discipline
+- A track cannot be `PASS` with a known P0/P1 assigned to that track.
+- Do not downgrade severity to satisfy a milestone.
+- Planned future-track capabilities are not hidden debt, but cannot be claimed complete early.
+- Coverage gaps in capital-sensitive failure branches must be treated as evidence debt, not masked by a high global percentage.
+- No TODO/FIXME may bypass OMS, Safety Kernel, reconciliation, HOLDOUT or broker/network restrictions.
 
 ## Non-negotiable capital controls
-- Fail closed on missing/invalid market data, stale prices, broker ambiguity, reconciliation mismatch or risk-engine error.
-- Enforce max order notional, max position, max strategy exposure, max portfolio exposure, max leverage, max daily loss and max drawdown.
-- Reject duplicate/idempotency-conflicting orders.
+- Fail closed on missing/invalid/stale market data, broker ambiguity, reconciliation mismatch, stale portfolio/safety state or risk-engine error.
+- Enforce max order notional, max position, max strategy exposure, max portfolio exposure, max leverage, max daily loss and max drawdown/circuit policy.
+- Reject duplicate/idempotency-conflicting orders and duplicate fills.
 - Reject prices/quantities outside instrument precision and configured sanity bands.
 - No naked order path bypassing OMS and Capital Safety Kernel.
-- Emergency controls must block new risk and handle eligible open-order protection/cancellation according to the certified broker contract.
-- Promotion to live requires explicit human approval and passing gates.
-- Automatic processes may reduce/block risk; they may not autonomously increase risk or clear a defensive restriction.
+- Ambiguous broker I/O is potential risk until reconciled; never blind-retry.
+- Emergency/defensive controls may reduce or block risk; automatic processes may not autonomously increase risk or clear a stricter restriction.
+- Promotion to PAPER/LIVE requires the relevant future track and explicit approval; v0.28R reconstruction itself is not promotion.
 
 ## Research integrity
 - No look-ahead leakage.
-- Protected holdout is not used for iterative tuning.
-- Include fees, spread, slippage, latency assumptions and realistic fills.
+- Protected HOLDOUT is not used for iterative tuning.
+- Include fees, spread, slippage and explicit latency assumptions.
 - Account for every preregistered trial when applying multiple-testing controls.
-- Prefer portfolio of independent/reasonably diversified edges over one fragile strategy.
-- Track out-of-sample behavior, turnover, capacity, drawdown, regime sensitivity and forward evidence.
+- Prefer diversified independent/reasonably independent edges over one fragile strategy.
+- Track OOS behavior, turnover, capacity, drawdown, regime sensitivity and forward evidence.
+- A Strategy DSL stop is not broker-side protection.
 
 ## Change discipline
-- Small reversible changes.
-- Every trading-sensitive change needs tests.
-- Never alter risk thresholds merely to make a strategy pass.
-- Never downgrade a historically verified safety invariant without explicit ADR and stronger evidence.
-- Memory/docs can describe limits but executable configuration/code is authoritative once the corresponding source tree is recovered.
+- Small reversible changes with explicit state migrations when needed.
+- Every trading-sensitive change needs failure-path tests.
+- Never alter risk thresholds merely to make a strategy/test pass.
+- Never downgrade a historically verified invariant without explicit ADR and stronger evidence.
+- Runtime code/config is authoritative for current behavior; docs must not overclaim it.
+
+## Capital status
+**LIVE TRADING: BLOQUEADO.**
