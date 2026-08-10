@@ -17,7 +17,7 @@ from .domain import (
     market_fingerprint,
 )
 from .ledger import EventLedger, LedgerEvent
-from .state import InMemoryOrderStore, OrderStore
+from .state import InMemoryOrderStore, OrderStore, SafetyStateStore
 
 
 class OrderRejectedByControlPlane(RuntimeError):
@@ -39,10 +39,12 @@ class OrderManagementSystem:
         broker: ExecutionBroker,
         ledger: EventLedger,
         order_store: OrderStore | None = None,
+        safety_state_store: SafetyStateStore | None = None,
     ) -> None:
         self._broker = broker
         self._ledger = ledger
         self._orders = order_store or InMemoryOrderStore()
+        self._safety_state_store = safety_state_store
 
     def submit(
         self,
@@ -158,8 +160,8 @@ class OrderManagementSystem:
     def all_orders(self) -> tuple[OrderRecord, ...]:
         return self._orders.all_orders()
 
-    @staticmethod
     def _validate_control_plane(
+        self,
         *,
         intent: OrderIntent,
         decision: RiskDecision,
@@ -177,6 +179,10 @@ class OrderManagementSystem:
             raise OrderRejectedByControlPlane("market changed after risk approval")
         if now > decision.valid_until:
             raise OrderRejectedByControlPlane("risk decision expired")
+        if self._safety_state_store is not None:
+            current = self._safety_state_store.get()
+            if current.version != decision.safety_state_version:
+                raise OrderRejectedByControlPlane("safety state changed after risk approval")
 
     @staticmethod
     def _finalize_execution(
