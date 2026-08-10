@@ -68,12 +68,19 @@ R1 usa contiguous-block resampling con block size, iterations y seed explícitos
 
 Estos son límites explícitos de scope, no deuda oculta ni claims de realismo inexistente.
 
-## Current evidence
-R1 head tras DSL/bootstrap/adequacy/validation additions:
-- 133 tests PASS;
-- 88.62% total coverage;
+## Failure-path review
+`knowledge/20_ARQUITECTURA/R1_RESEARCH_FAILURE_PATHS.md` documenta leakage, corrupted data, optimistic fills, HOLDOUT misuse, mutable evidence, unsafe configuration y límites de amenaza. No hay P0/P1 R1 conocido al cierre del head certificado.
+
+## Certification evidence
+Head funcional R1 antes de merge:
+- **161 tests PASS**;
+- **90.34% total coverage** con gate mínimo 85% intacto;
+- research coverage: bootstrap 100%, DSL 96%, gates 96%, market 100%, validation 94%, splits 95%, strategy 100%, backtest 95%;
 - compile PASS;
-- Knowledge Contract PASS.
+- Knowledge Contract PASS;
+- Core Safety Tests PASS.
+
+El conteo histórico v0.28 no se usa como cuota; estas pruebas cubren los invariants R1 reconstruidos.
 
 ## Capital
 Research no autoriza ejecución.
