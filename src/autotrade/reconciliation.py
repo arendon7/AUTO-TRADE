@@ -104,6 +104,7 @@ class ReconciliationEngine:
             recovered.append(final.order_id)
 
         orders = self._oms.all_orders()
+        orders_by_key = {order.intent.idempotency_key: order for order in orders}
         local_open_ids = {
             order.order_id
             for order in orders
@@ -127,6 +128,37 @@ class ReconciliationEngine:
                     ",".join(external_at_broker),
                 )
             )
+
+        for reservation in self._reservations.active_view().reservations:
+            order = orders_by_key.get(reservation.idempotency_key)
+            if order is None:
+                issues.append(
+                    ReconciliationIssue(
+                        "ORPHAN_RISK_RESERVATION",
+                        reservation.idempotency_key,
+                    )
+                )
+                continue
+            if reservation.status is ReservationStatus.OPEN and order.status not in {
+                OrderStatus.SUBMITTED,
+                OrderStatus.PARTIALLY_FILLED,
+            }:
+                issues.append(
+                    ReconciliationIssue(
+                        "RESERVATION_ORDER_STATE_MISMATCH",
+                        f"{reservation.idempotency_key}:{reservation.status.value}/{order.status.value}",
+                    )
+                )
+            if reservation.status is ReservationStatus.UNKNOWN and order.status not in {
+                OrderStatus.SUBMITTING,
+                OrderStatus.UNKNOWN,
+            }:
+                issues.append(
+                    ReconciliationIssue(
+                        "RESERVATION_ORDER_STATE_MISMATCH",
+                        f"{reservation.idempotency_key}:{reservation.status.value}/{order.status.value}",
+                    )
+                )
 
         local_positions = _normalized_positions(
             self._portfolio_store.get().snapshot.signed_position_notional_by_symbol
