@@ -9,6 +9,28 @@ verify_outputs() {
   test -f graphify-out/graph.html || { echo "ERROR: graphify-out/graph.html missing" >&2; return 1; }
 }
 
+print_assistant_command() {
+  local args=""
+  case "$1" in
+    update) args=" --update" ;;
+    deep) args=" --mode deep" ;;
+    full) args="" ;;
+    *) echo "ERROR: unsupported semantic mode: $1" >&2; return 2 ;;
+  esac
+
+  cat >&2 <<EOF
+Graphify's current build/update semantic pass runs inside a supported coding assistant.
+This shell helper will not pretend to run it.
+
+Use one of:
+  Codex:  \$graphify .${args}
+  Other supported assistants: /graphify .${args}
+
+After graphify-out/ is written, run:
+  bash scripts/refresh_graphify.sh stamp
+EOF
+}
+
 case "$MODE" in
   stamp)
     verify_outputs
@@ -38,21 +60,7 @@ case "$MODE" in
     exec graphify watch .
     ;;
   update|deep|full)
-    cat >&2 <<EOF
-Graphify's current build/update pass runs inside a supported coding assistant.
-This shell helper will not pretend to run it.
-
-Use:
-  Codex:  \$graphify .${MODE/update/ --update}
-  Other supported assistants: /graphify .${MODE/update/ --update}
-
-For a deep rebuild use:
-  Codex:  \$graphify . --mode deep
-  Others: /graphify . --mode deep
-
-After the assistant writes graphify-out/, run:
-  bash scripts/refresh_graphify.sh stamp
-EOF
+    print_assistant_command "$MODE"
     exit 3
     ;;
   help|*)
@@ -62,9 +70,9 @@ Usage: bash scripts/refresh_graphify.sh <stamp|verify|watch|update|deep|full>
   stamp   verify graph files exist and store current git HEAD in graphify-out/SOURCE_SHA
   verify  fail if graph files are missing or stamped for another HEAD
   watch   run Graphify's local AST watcher
-  update/deep/full
-          print the correct assistant command; these semantic passes cannot be
-          truthfully launched by this shell helper alone
+  update  print the correct assistant command for an incremental semantic pass
+  deep    print the correct assistant command for a deep semantic rebuild
+  full    print the correct assistant command for a normal full build
 EOF
     ;;
 esac
