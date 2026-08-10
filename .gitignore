@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Secrets / local config
+.env
+.env.*
+!.env.example
+secrets/
+
+# OS/editor
+.DS_Store
+.vscode/
+.idea/
+
+# Obsidian local UI state (keep shared vault config)
+knowledge/.obsidian/workspace.json
+knowledge/.obsidian/workspace-mobile.json
+knowledge/.obsidian/cache/
+
+# Graphify local runtime pointer/cache; keep graph artifacts versioned
+graphify-out/.graphify_python
