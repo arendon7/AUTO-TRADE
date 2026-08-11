@@ -1,46 +1,47 @@
 # TAREA ACTIVA — AUTO-TRADE
 
 ## Objetivo inmediato
-**Reparar la integración post-merge de R4, recertificar el SHA exacto de `main` y solo entonces abrir R5.**
+**Integrar R5 certificado en `main`, recertificar el SHA exacto resultante y sólo entonces abrir R6.**
 
-PR #11 fue fusionado por squash en `main` como `aa6d80dc1682967edef367f726a620e41c0af118`. Knowledge Contract quedó verde, pero Core Safety falló por dos artefactos de cierre: un test permanente exigía incorrectamente `480` en vez de `479`, y quedó el workflow temporal `r4-final-readiness-one-shot.yml` dentro del árbol fusionado.
-
-Esto NO invalida las capacidades funcionales R4 ya certificadas, pero sí invalida la recertificación post-merge hasta reparar ambos defectos.
+R5 ya tiene branch certification sobre `0d4f75d083a055b83646bb861f08731aecace560`. No añadir nuevas features R5 ni iniciar external PAPER desde la rama pre-merge.
 
 ## Secuencia obligatoria
-1. corregir el contrato permanente R4 a la evidencia real `479 tests / 86.45%`;
-2. eliminar el workflow temporal R4 del árbol;
-3. mantener explícita la evidencia del fallo de integración;
-4. ejecutar Core Safety + Knowledge Contract en la rama hotfix;
-5. fusionar el hotfix únicamente contra su head verde esperado;
-6. verificar ambos gates sobre el SHA exacto resultante en `main`;
-7. solo si `main` queda verde, crear rama R5 desde ese SHA;
-8. antes de programar R5, registrar explícitamente sus deudas/capacidades.
+1. exigir Core Safety + Knowledge Contract verdes en el head final de PR #13;
+2. sacar PR #13 de DRAFT sólo con head exacto certificado;
+3. merge por squash usando `expected_head_sha`;
+4. verificar Core Safety + Knowledge Contract sobre el SHA exacto resultante en `main`;
+5. sólo si `main` queda verde, crear rama R6 desde ese SHA;
+6. registrar explícitamente deuda R6 antes de programar cualquier gateway PAPER.
 
-## R5 — alcance siguiente, todavía bloqueado
-- closed-kline read-only stream, disabled by default y fixed host;
-- duplicate idempotency + gap fail-closed; no silent imputation;
-- unexpected socket termination -> DEGRADED; no reconnect que esconda gaps;
-- synchronized portfolio shadow con pesos/timestamps congelados;
-- forward evidence post-activation sin HOLDOUT;
-- ninguna autoridad external PAPER/LIVE.
+## R6 — alcance siguiente, todavía no iniciado
+- external Alpaca PAPER gateway, disabled by default;
+- exact PAPER host allowlist; LIVE host forbidden;
+- bounded external PAPER canary con prerequisites y notional cap más estricto;
+- qualification evidence de terminality/fills/slippage/reconciliation;
+- broker-side equity bracket protection con parent + exactamente 2 legs validadas;
+- PAPER `trade_updates` protection evidence cuando la policy lo requiera;
+- unsupported products fail closed; crypto bracket no soportado salvo certificación separada.
 
-## Negative tests obligatorios para R5
-- duplicated closed kline no duplica estado/evidencia;
-- gap o out-of-order stream falla cerrado y no imputa;
-- stale/malformed/future kline rechazada;
-- unexpected socket termination deja estado DEGRADED;
-- reconnect no puede ocultar un gap existente;
-- shadow con weight/timestamp mismatch falla cerrado;
-- forward evidence no toca FINAL_HOLDOUT;
-- cualquier path de stream/shadow sigue sin importar OMS/broker execution authority.
+## Negative tests obligatorios para R6
+- gateway disabled by default => cero red y cero order submission;
+- LIVE host, arbitrary host, credentials/proxy no autorizado o path no permitido => reject antes de I/O;
+- falta de preregistration, Instrument Master, Health/Safety approval, reconciliation o PAPER qualification => canary bloqueado;
+- canary notional exactamente en frontera permitido y un quantum por encima rechazado; nunca auto-upsize a venue minimum;
+- stale/missing/conflicting market/portfolio/broker state => fail closed, no nueva exposición;
+- ambiguous submit/timeout => UNKNOWN + reconciliation; nunca retry ciego que duplique orden;
+- partial fill/cancel/replace/restart preservan idempotencia y reservas;
+- bracket equity debe tener parent + exactamente stop-loss y take-profit coherentes; leg faltante/extra/crossed/invalid => reject;
+- asset/producto sin bracket certificado => fail closed; crypto bracket permanece unsupported;
+- `trade_updates` faltante/stale/conflictivo cuando policy lo exige => protección no certificada;
+- ninguna ruta R6 acepta host LIVE ni puede promover LIVE authority;
+- AI/research output jamás es autorización de orden; Safety + OMS siguen siendo gates deterministas.
 
 ## Restricciones
-- `TD-OPS-001` Graphify P3 permanece visible; no fabricar `graphify-out`.
-- No reducir coverage gate ni borrar negative tests para cerrar R5.
-- No declarar rentabilidad por resultados de infraestructura/reproducibilidad.
-- No crear rama R5 desde `aa6d80d...` mientras Core Safety permanezca rojo.
+- Coverage gate >=85% intacto.
+- No relajar negative tests para cerrar R6.
+- `TD-OPS-001` permanece visible; no fabricar Graphify.
+- No declarar rentabilidad por PAPER qualification.
 
 ## Capital
 **LIVE TRADING: BLOQUEADO.**
-External PAPER queda fuera de R5 y pertenece al track R6.
+R6, si se certifica, será PAPER-only; cualquier futuro LIVE requerirá promoción separada y explícita fuera de v0.28R.

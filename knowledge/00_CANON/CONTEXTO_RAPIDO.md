@@ -1,6 +1,6 @@
 # CONTEXTO RÁPIDO — AUTO-TRADE
 
-Estado actual: **v0.28R R0–R4 certified; R4 merged, post-merge recertification repair active**.
+Estado actual: **v0.28R R0–R5 certified; R5 PR #13 pending integration**.
 
 ## Leer primero
 1. `knowledge/00_CANON/SOURCE_OF_TRUTH.md`
@@ -9,23 +9,19 @@ Estado actual: **v0.28R R0–R4 certified; R4 merged, post-merge recertification
 4. `knowledge/00_CANON/RECONSTRUCTION_V028R_MATRIX.md`
 5. `knowledge/00_CANON/debt_register.json`
 6. `knowledge/40_HANDOFF/HANDOFF_ACTUAL.md`
-7. `knowledge/60_EVIDENCE/R4_CERTIFICATION.json`
-8. `knowledge/60_EVIDENCE/R4_POST_MERGE_INTEGRATION_AUDIT.json`
+7. `knowledge/60_EVIDENCE/R5_CERTIFICATION.json`
+8. `knowledge/60_EVIDENCE/R5_LIVE_CLOSED_KLINE_STREAM_EVIDENCE.json`
 
-## Certificación R4
-Branch basis `350efd43ac133c95a1997b4a821a2e0bab4afaf2`: **479 tests PASS / 86.45% coverage**; 10 contracts; authority/debt/knowledge gates PASS. R4 blocking debt open: 0.
-
-## Integración
-PR #11 fue squash-merged a `main` como `aa6d80dc1682967edef367f726a620e41c0af118`.
-Ese SHA NO está post-merge certificado: Knowledge Contract PASS, Core Safety FAIL por un assert documental `480` vs `479` y un one-shot R4 que quedó en el árbol.
+## R5 certification
+Basis `0d4f75d083a055b83646bb861f08731aecace560` from post-R4-green `main` `c294aa69f35b64559e3aea58a1c0661e66599db8`: **606 tests PASS / 86.49% coverage**; 10 contracts; Research Authority, R5 Authority, Debt Register and Knowledge Contract PASS. R5 blocking debt open: 0.
 
 ## Regla operativa inmediata
-Reparar esos dos artefactos mediante `hotfix/r4-post-merge-recertification`, fusionar sólo con CI verde y recertificar el SHA exacto de `main`. Solo entonces crear R5.
+No empezar R6 desde la rama R5. Primero PR #13 -> merge -> CI verde sobre SHA exacto de `main`; después crear R6 y registrar su deuda.
 
 ## Próximo track
-R5 = read-only closed-kline streaming + gap/idempotency semantics + synchronized shadow + forward evidence without HOLDOUT.
+R6 = external Alpaca PAPER gateway + bounded canary + PAPER evidence qualification + broker-side protection. PAPER only; LIVE remains forbidden.
 
 ## Authority
-AI/research/Portfolio Manager no tienen autoridad de ejecución. Safety + OMS continúan siendo fronteras obligatorias. External PAPER/LIVE no está habilitado.
+AI/research/Portfolio Manager/stream/shadow/forward no tienen autoridad de ejecución. Safety + OMS continúan siendo fronteras deterministas obligatorias.
 
 **LIVE TRADING: BLOQUEADO.**
