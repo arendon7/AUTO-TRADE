@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "track": "R4",
+  "debt_id": "TD-R4-012",
+  "status": "CERTIFIED_SLICE_NOT_TRACK_CERTIFICATION",
+  "certification_basis_head": "32584b277febb5680038c9c6e06379f99e648cdb",
+  "ci": {
+    "core_safety_run_id": 31459705434,
+    "knowledge_contract_run_id": 31459705450,
+    "tests_passed": 472,
+    "coverage_percent": 86.42,
+    "contract_registry": "PASS",
+    "contract_count": 10,
+    "contract_registry_sha256": "ddb94afa8916be37d0d956e6c32f775ea41c0fb79f4ea26d2d65dfa286c62785",
+    "research_advisory_authority_boundary": "PASS",
+    "debt_register_contract": "PASS",
+    "knowledge_contract": "PASS"
+  },
+  "implementation": [
+    "src/autotrade/research/health.py",
+    "src/autotrade/health_bridge.py"
+  ],
+  "tests": [
+    "tests/test_r4_recovery_ack_idempotency.py",
+    "tests/test_r4_health_drift.py",
+    "tests/test_r4_health_binding_integrity.py",
+    "tests/test_r4_health_bridge.py",
+    "tests/test_r4_health_bridge_integration.py"
+  ],
+  "certified_invariants": [
+    "Health and Defensive Health Bridge recovery APIs require an explicit canonical recovery_id.",
+    "The first recovery request durably binds recovery_id to entity identity, evidence and confirming actor.",
+    "A retry with the same recovery_id and the same request binding is a no-op even when retried later.",
+    "The same recovery_id reused with different evidence or actor fails closed as a conflict.",
+    "A duplicate Health recovery cannot relax QUARANTINED to DEGRADED and then HEALTHY; a second relaxation requires a distinct explicit recovery_id.",
+    "A recovery acknowledgement recorded while Health is already HEALTHY cannot later be replayed after a future degradation to create an implicit recovery.",
+    "A duplicate Defensive Bridge recovery cannot relax NO_NEW_RISK to REDUCED and then NORMAL; a second relaxation requires a distinct explicit recovery_id.",
+    "A duplicate Defensive Bridge retry does not increment bridge_version, does not increment safety_state.version and does not create a second recovery ledger event.",
+    "A retry of an already accepted bridge recovery remains a no-op if it arrives after the underlying evidence becomes stale; a new recovery_id on stale evidence is rejected.",
+    "All recovery state changes remain transactional under SQLite BEGIN IMMEDIATE semantics."
+  ],
+  "explicit_non_claims": [
+    "This is not R4 track certification.",
+    "This is not profitability evidence.",
+    "Recovery acknowledgement does not grant broker, PAPER or LIVE authority."
+  ],
+  "capital_authority": "NONE",
+  "live_trading": "BLOCKED"
+}

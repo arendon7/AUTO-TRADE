@@ -1,0 +1,51 @@
+{
+  "schema_version": 1,
+  "track": "R4",
+  "debt_id": "TD-R4-006",
+  "status": "CERTIFIED_SLICE_NOT_TRACK_CERTIFICATION",
+  "certification_basis_head": "2caf1d8b3f1748660a00b7018cd2c2b9cb2bd453",
+  "debt_closure_head": "1338765d484683271e144e1125039272a09afd29",
+  "ci": {
+    "core_safety_run_id": 31457978757,
+    "knowledge_contract_run_id": 31457978749,
+    "tests_passed": 431,
+    "coverage_percent": 86.53,
+    "contract_registry": "PASS",
+    "contract_count": 10,
+    "research_authority_boundary": "PASS",
+    "debt_register_contract": "PASS",
+    "knowledge_contract": "PASS"
+  },
+  "implementation": [
+    "src/autotrade/health_bridge.py",
+    "src/autotrade/safety.py",
+    "src/autotrade/oms.py",
+    "src/autotrade/bootstrap.py"
+  ],
+  "tests": [
+    "tests/test_r4_health_bridge.py",
+    "tests/test_r4_health_bridge_integration.py",
+    "tests/test_r4_health_drift.py",
+    "tests/test_r4_health_binding_integrity.py"
+  ],
+  "certified_invariants": [
+    "The bridge reads authoritative durable HealthControlState; callers cannot supply a self-authorizing health object.",
+    "Automatic health synchronization is monotone and can only maintain or tighten risk: HEALTHY maps to NORMAL, DEGRADED to REDUCED, QUARANTINED/RETIRED to NO_NEW_RISK.",
+    "Stricter-state-wins applies across strategy and optional portfolio controls; missing/stale/future required control state fails closed.",
+    "Bridge state is durable, baseline/policy bound, replay-idempotent and protected by raw-row SHA-256 commitment plus semantic validation.",
+    "Every distinct bridge state change atomically increments safety_state.version, invalidating already-approved RiskDecision objects before OMS submission.",
+    "OMS independently rechecks the bridge at submit time, closing the temporal gap where a health control can become stale without a state-version mutation.",
+    "Automatic controls never increase risk budgets or exposure. True risk-reducing exits remain available under REDUCED/NO_NEW_RISK when the Capital Safety Kernel independently classifies them as reducing.",
+    "Recovery is never automatic: it requires explicit acknowledgement, fresh authoritative health evidence under the same baseline/policy binding, and relaxes at most one bridge level per acknowledgement.",
+    "Safety/OMS integration is explicit opt-in at bootstrap; default historical paper-core behavior remains bridge-disabled.",
+    "No bridge operation submits broker orders or bypasses Capital Safety Kernel/OMS."
+  ],
+  "explicit_non_claims": [
+    "This is not R4 track certification.",
+    "This is not profitability evidence.",
+    "This does not grant external PAPER or LIVE authority.",
+    "TD-R4-007 deterministic Portfolio Manager/sizing remains open."
+  ],
+  "capital_authority": "NONE",
+  "live_trading": "BLOCKED"
+}

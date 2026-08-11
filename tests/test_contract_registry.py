@@ -45,8 +45,10 @@ def test_default_registry_loads_with_stable_ids_and_fingerprint():
     second = ContractRegistry.load_default()
     ids = [spec.contract_id for spec in first.all_contracts()]
     assert ids == sorted(ids)
-    assert len(ids) == 9
-    assert len(set(ids)) == 9
+    assert len(ids) == 10
+    assert len(set(ids)) == 10
+    assert "AuthoritativeInstrumentRules@1" in ids
+    assert first.registry_version == 2
     assert first.registry_fingerprint() == second.registry_fingerprint()
     assert len(first.registry_fingerprint()) == 64
     assert all(len(spec.fingerprint) == 64 for spec in first.all_contracts())

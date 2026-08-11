@@ -1,7 +1,7 @@
 # v0.28R CAPABILITY EQUIVALENCE MATRIX
 
-Fecha: 2026-08-10
-Estado: ACTIVE — **R0–R3 certified; R4 next**
+Fecha: 2026-08-11
+Estado: ACTIVE — **R0–R4 certified; R5 next**
 Objetivo: reconstruir todas las capacidades históricamente verificadas sin deuda oculta y sin declarar equivalencia por número de versión.
 
 ## Status legend
@@ -39,14 +39,14 @@ Objetivo: reconstruir todas las capacidades históricamente verificadas sin deud
 | R3 | Research Control Center read-only | v0.16 | PASS | immutable evidence projection + CI authority separation |
 | R3 | FINAL_HOLDOUT authority separation | reconstructed strengthening | PASS | one-use consumed permit bound one-to-one to final trial + research authority gate |
 | R3 | bounded real-data reproducibility evidence | reconstructed strengthening | PASS | 2 independent 10-bar fetches + identical hashes + artifact roundtrip |
-| R4 | authoritative instrument master | reconstructed safety prerequisite | TODO | versioned venue rules/provenance; unknown/stale/conflicting metadata fail closed (`TD-R4-001`) |
-| R4 | versioned Portfolio State / reconciliation infrastructure | v0.18 lineage | PARTIAL | durable/versioned base exists from R0/R2; R4 portfolio-governance invariants still need certification |
-| R4 | correlation-aware portfolio research | v0.18 | TODO | diversification/concentration constraints using authorized research evidence |
-| R4 | allocation perturbation + leave-one-out | v0.18 | TODO | deterministic robustness reports tied to immutable inputs |
-| R4 | TRAIN-calibrated regimes | v0.18 | TODO | no HOLDOUT-derived thresholds; unknown regime conservative |
-| R4 | Strategy/Portfolio Health & Drift | v0.19 | TODO | immutable baselines/reports + explicit state transitions |
-| R4 | Defensive Health Bridge | v0.20 | TODO | automatic actions reduce/block only + explicit human/policy recovery |
-| R4 | deterministic Portfolio Manager / sizing + cross-strategy budgets | reconstructed strengthening | TODO | bounded advisory/control-plane output; no OMS bypass or capital authority |
+| R4 | authoritative instrument master | reconstructed safety prerequisite | PASS | versioned venue rules/provenance; unknown/stale/conflicting metadata fail closed (`TD-R4-001`) |
+| R4 | versioned Portfolio State / reconciliation infrastructure | v0.18 lineage | PASS | shared semantic snapshot validation + durable portfolio hash commitment + atomic fill/projection integrity certified (`TD-R4-008`,`TD-R4-009`,`TD-R4-010`) |
+| R4 | correlation-aware portfolio research | v0.18 | PASS | common-panel dependence + anti-forgery clusters + exact strategy/cluster/portfolio budgets (`TD-R4-002`) |
+| R4 | allocation perturbation + leave-one-out | v0.18 | PASS | deterministic exact-sum Decimal normalization + complete recomputable perturbation/leave-one-out gate (`TD-R4-003`,`TD-R4-011`) |
+| R4 | TRAIN-calibrated regimes | v0.18 | PASS | TRAIN/DEVELOPMENT-only calibration + frozen HOLDOUT evaluation + UNKNOWN on stale/missing evidence (`TD-R4-004`) |
+| R4 | Strategy/Portfolio Health & Drift | v0.19 | PASS | baseline/policy-bound durable health + retry-safe recovery + tamper-evident ACK-chain anchored in Health state (`TD-R4-005`,`TD-R4-012`,`TD-R4-014`) |
+| R4 | Defensive Health Bridge | v0.20 | PASS | reduce/block-only bridge + retry-safe recovery + authoritative unsynced-worsening overlay + Safety/OMS rechecks (`TD-R4-006`,`TD-R4-012`,`TD-R4-013`) |
+| R4 | deterministic Portfolio Manager / sizing + cross-strategy budgets | reconstructed strengthening | PASS | advisory-only sizing + base/Health/venue budget+robustness recomputation + authoritative metadata + CI authority gate (`TD-R4-007`) |
 | R5 | closed-kline read-only stream | v0.22 | TODO | disabled default + fixed host + stream state |
 | R5 | duplicate idempotency + gap fail-closed | v0.22 | TODO | no silent imputation |
 | R5 | socket termination -> DEGRADED | v0.22 | TODO | no reconnect that hides gaps |
@@ -79,17 +79,22 @@ Bounded real-data campaign hashes:
 
 This campaign is reproducibility/intake evidence, **not profitability proof**.
 
-## Active target — R4
-R4 closes portfolio/regime/health governance before R5 shadow/forward monitoring:
-1. authoritative instrument master;
-2. audit/reuse existing versioned portfolio state and certify R4 invariants;
-3. correlation-aware diversification/concentration research;
-4. allocation perturbation + leave-one-out;
-5. TRAIN-only regime calibration;
-6. Strategy/Portfolio Health & Drift;
-7. reduce/block-only Defensive Health Bridge;
-8. deterministic sizing + cross-strategy budgets;
-9. keep PAPER/LIVE fail-closed.
+### R4
+Branch certification basis: `350efd43ac133c95a1997b4a821a2e0bab4afaf2`.
+Final branch evidence before canonical closure: **479 tests PASS / 86.45% coverage**, Contract Registry 10 PASS, Research/Advisory Authority PASS, Debt Register PASS, Knowledge Contract PASS.
+Certification artifact: `knowledge/60_EVIDENCE/R4_CERTIFICATION.json`.
+
+R4 adds no external PAPER/LIVE authority; Portfolio Manager remains advisory-only and the Defensive Health Bridge can only maintain/reduce/block risk.
+
+## Active target — R5
+R5 reconstruye read-only streaming/shadow/forward evidence sin habilitar capital externo:
+1. closed-kline read-only stream, disabled by default y host fijo;
+2. duplicate idempotency + gap fail-closed, sin silent imputation;
+3. unexpected socket termination -> DEGRADED, sin reconnect que oculte gaps;
+4. synchronized portfolio shadow con pesos/timestamps congelados;
+5. forward evidence post-activation separado de HOLDOUT;
+6. registrar deuda R5 antes de implementar cualquier gap descubierto;
+7. mantener external PAPER/LIVE bloqueado.
 
 ## Debt policy
 A track cannot be PASS with known P0/P1/P2 defects assigned to that track, skipped negative tests, reduced coverage, untracked mismatches, hidden critical TODOs or temporary broker/network bypasses. `knowledge/00_CANON/debt_register.json` is the machine-readable authority; this matrix is the capability view.

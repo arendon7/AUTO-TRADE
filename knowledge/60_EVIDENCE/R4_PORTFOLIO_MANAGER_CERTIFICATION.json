@@ -1,0 +1,51 @@
+{
+  "schema_version": 1,
+  "track": "R4",
+  "debt_id": "TD-R4-007",
+  "status": "CERTIFIED_SLICE_NOT_TRACK_CERTIFICATION",
+  "certification_basis_head": "b68b77dd3603a8b84b81e8bc31a00fa79784b6e6",
+  "ci": {
+    "core_safety_run_id": 31458869481,
+    "knowledge_contract_run_id": 31458869501,
+    "tests_passed": 457,
+    "coverage_percent": 86.38,
+    "contract_registry": "PASS",
+    "contract_count": 10,
+    "contract_registry_sha256": "ddb94afa8916be37d0d956e6c32f775ea41c0fb79f4ea26d2d65dfa286c62785",
+    "research_advisory_authority_boundary": "PASS",
+    "debt_register_contract": "PASS",
+    "knowledge_contract": "PASS"
+  },
+  "implementation": [
+    "src/autotrade/portfolio_manager.py",
+    "scripts/check_research_authority.py"
+  ],
+  "tests": [
+    "tests/test_r4_portfolio_manager.py",
+    "tests/test_r4_portfolio_manager_binding.py",
+    "tests/test_r4_portfolio_manager_authority_gate.py",
+    "tests/test_r4_allocation_exact_normalization.py"
+  ],
+  "certified_invariants": [
+    "Portfolio Manager output is advisory capacity only: it does not create OrderIntent, import OMS/broker/engine execution modules, choose side/order type or submit/cancel/replace orders.",
+    "A permanent CI authority gate rejects future OMS/broker/engine imports, execution-capable domain symbols and execution-like calls in portfolio_manager.py; tests prove the gate catches representative violations.",
+    "The complete strategy candidate universe must exactly match the dependence universe and each strategy@version key is bound to its own Health entity identity.",
+    "Base diversification budgets and base allocation robustness are recomputed from source evidence and fingerprint-bound into the sizing decision.",
+    "Health controls can only shrink allocation; post-Health budgets, diversification and robustness are recomputed before venue sizing.",
+    "Quotes must be finite, tick-aligned, non-future and fresh under explicit policy.",
+    "Authoritative Instrument Master rules must be tradable, fresh and identity-matched; unknown/stale/halted metadata fails closed.",
+    "Quantity is always rounded down to the authoritative quantity_step and capped downward by venue maximums.",
+    "Venue minimums never cause upsizing; below-minimum candidates are zeroed, after which diversification and robustness are recomputed and can fail the whole sizing decision.",
+    "Final actual notionals/weights are revalidated against strategy/cluster/portfolio budgets and allocation robustness after Health and venue rounding/caps.",
+    "The decision fingerprint binds base budget, base robustness, Health-adjusted budget/robustness, final budget/robustness, candidate/rules evidence and final allocation capacity.",
+    "Any future execution path remains required to pass the Capital Safety Kernel and OMS independently; Portfolio Manager has no capital authority."
+  ],
+  "explicit_non_claims": [
+    "This is not R4 track certification.",
+    "This is not profitability evidence.",
+    "A sizing decision is not an order approval or broker instruction.",
+    "This does not grant external PAPER or LIVE authority."
+  ],
+  "capital_authority": "NONE",
+  "live_trading": "BLOCKED"
+}

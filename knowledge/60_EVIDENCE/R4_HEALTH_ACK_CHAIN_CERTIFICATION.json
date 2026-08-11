@@ -1,0 +1,48 @@
+{
+  "schema_version": 1,
+  "track": "R4",
+  "debt_id": "TD-R4-014",
+  "status": "CERTIFIED_SLICE_NOT_TRACK_CERTIFICATION",
+  "certification_basis_head": "5297610d2ed460755c24c13663516c0a05d261e3",
+  "ci": {
+    "core_safety_run_id": 31460515734,
+    "knowledge_contract_run_id": 31460515720,
+    "tests_passed": 479,
+    "coverage_percent": 86.45,
+    "contract_registry": "PASS",
+    "contract_count": 10,
+    "contract_registry_sha256": "ddb94afa8916be37d0d956e6c32f775ea41c0fb79f4ea26d2d65dfa286c62785",
+    "research_advisory_authority_boundary": "PASS",
+    "debt_register_contract": "PASS",
+    "knowledge_contract": "PASS"
+  },
+  "implementation": [
+    "src/autotrade/research/health.py"
+  ],
+  "tests": [
+    "tests/test_r4_health_ack_chain_integrity.py",
+    "tests/test_r4_recovery_ack_idempotency.py",
+    "tests/test_r4_health_drift.py",
+    "tests/test_r4_health_binding_integrity.py",
+    "tests/test_r4_health_bridge.py",
+    "tests/test_r4_health_bridge_integration.py",
+    "tests/test_r4_authoritative_health_overlay.py"
+  ],
+  "certified_invariants": [
+    "The complete Health recovery-acknowledgement history is represented by an append-only per-entity chain with canonical ack_seq, previous_ack_hash and ack_hash.",
+    "The current recovery_ack_head is part of the hash-protected HealthControlState fingerprint, anchoring the ACK chain to authoritative durable state.",
+    "Health state reads, automatic assessments and recovery acknowledgements verify the complete ACK chain before proceeding.",
+    "ACK row deletion, payload mutation, sequence gap/reordering, previous-hash mismatch and state-head mismatch fail closed.",
+    "A recovery acknowledgement that leaves severity HEALTHY still versions durable evidence and advances the ACK-chain head, preventing a no-op ACK from disappearing without trace.",
+    "Existing pre-chain Health state with durable rows and legacy recovery acknowledgements is not silently migrated; explicit migration/rebaseline is required.",
+    "The ACK-chain hardening preserves retry-safe recovery_id semantics and does not grant execution authority."
+  ],
+  "explicit_non_claims": [
+    "This is not R4 track certification.",
+    "This is not profitability evidence.",
+    "Hash-chain tamper evidence is not a cryptographic secret or authorization credential.",
+    "This does not grant external PAPER or LIVE authority."
+  ],
+  "capital_authority": "NONE",
+  "live_trading": "BLOCKED"
+}

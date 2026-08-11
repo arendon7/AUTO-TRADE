@@ -4,13 +4,14 @@ from typing import Any
 
 from .brokers.base import BrokerExecution
 from .domain import Fill, OrderIntent, OrderRecord, RiskDecision
+from .instrument_master import AuthoritativeInstrumentRules
 from .ledger import LedgerEvent
 from .risk_state import RiskTelemetryState
 from .state import RiskReservation, SafetyControlState
 
 
 def contract_payload(value: Any) -> tuple[str, dict[str, object]]:
-    """Return the canonical R2 contract id and JSON-safe payload for a domain object.
+    """Return the canonical machine-readable contract id and JSON-safe payload.
 
     This is deliberately explicit rather than reflective: adding a new field to a
     capital-sensitive object requires a conscious contract/serializer change.
@@ -72,6 +73,8 @@ def contract_payload(value: Any) -> tuple[str, dict[str, object]]:
             "version": value.version,
             "updated_at": value.updated_at.isoformat(),
         }
+    if isinstance(value, AuthoritativeInstrumentRules):
+        return "AuthoritativeInstrumentRules@1", value.to_payload()
     if isinstance(value, LedgerEvent):
         return "LedgerEvent@1", {
             "event_id": value.event_id,

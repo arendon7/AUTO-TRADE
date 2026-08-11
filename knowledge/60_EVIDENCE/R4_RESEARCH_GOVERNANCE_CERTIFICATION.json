@@ -1,0 +1,93 @@
+{
+  "schema_version": 1,
+  "track": "R4",
+  "status": "CERTIFIED_SLICE_NOT_TRACK_CERTIFICATION",
+  "certified_debt_ids": [
+    "TD-R4-002",
+    "TD-R4-003",
+    "TD-R4-004",
+    "TD-R4-005"
+  ],
+  "certification_basis_head": "76e1eec851f433f9e5c4c49f786ae79c7a846ee0",
+  "ci": {
+    "core_safety_run_id": 31456933168,
+    "knowledge_contract_run_id": 31456933192,
+    "tests_passed": 412,
+    "coverage_percent": 86.79,
+    "contract_registry": "PASS",
+    "research_authority_boundary": "PASS",
+    "debt_register_contract": "PASS",
+    "knowledge_contract": "PASS"
+  },
+  "dependence_and_budgets": {
+    "code": "src/autotrade/research/portfolio_dependence.py",
+    "tests": [
+      "tests/test_r4_portfolio_dependence.py",
+      "tests/test_r4_dependence_integrity.py",
+      "tests/test_r4_dependence_universe_integrity.py"
+    ],
+    "invariants": [
+      "TRAIN/DEVELOPMENT calibration only; FINAL_HOLDOUT is not representable as a calibration phase",
+      "all pair correlations use one common aligned timestamp intersection",
+      "insufficient common observations and zero-variance series fail closed",
+      "clusters are deterministically recomputed from the aligned panel and threshold",
+      "forged pairs, clusters, spec fingerprints or aligned returns are rejected",
+      "strategy, correlated-cluster and total allocation budgets use exact-boundary fail-closed validation",
+      "this module validates proposed research allocations and has no OMS/broker authority"
+    ]
+  },
+  "allocation_robustness": {
+    "code": "src/autotrade/research/allocation_robustness.py",
+    "tests": [
+      "tests/test_r4_allocation_robustness.py"
+    ],
+    "invariants": [
+      "complete deterministic leave-one-strategy-out scenario set",
+      "complete deterministic bounded donor-to-receiver perturbation scenario set",
+      "robustness is recomputed from source dependence evidence, budget policy, weights, spec and robustness policy",
+      "serialized evidence is not self-authorizing",
+      "non-positive baseline mean, degenerate volatility and budget violations fail closed",
+      "fragile point allocations fail explicit robustness thresholds"
+    ]
+  },
+  "regime_governance": {
+    "code": "src/autotrade/research/regimes.py",
+    "tests": [
+      "tests/test_r4_regime_governance.py"
+    ],
+    "invariants": [
+      "RegimeCalibrationSeries can represent TRAIN/DEVELOPMENT only",
+      "FINAL_HOLDOUT can evaluate a frozen model but cannot calibrate it",
+      "causal feature availability is required",
+      "missing, future or stale features classify UNKNOWN rather than optimistically",
+      "append-only contiguous model versions",
+      "the prior durable model row is fully reconstructed and verified before appending the next version",
+      "stored row identity, payload fingerprint, JSON and decimal corruption fail closed"
+    ]
+  },
+  "health_and_drift": {
+    "code": "src/autotrade/research/health.py",
+    "tests": [
+      "tests/test_r4_health_drift.py",
+      "tests/test_r4_health_binding_integrity.py"
+    ],
+    "invariants": [
+      "health baselines are calibrated from authorized TRAIN/DEVELOPMENT evidence",
+      "STRATEGY and PORTFOLIO identities are separate durable namespaces",
+      "each durable state is permanently bound to its baseline fingerprint and policy fingerprint",
+      "automatic assessments can maintain or worsen severity but cannot improve it",
+      "distinct evidence versions state while replay of any previously applied assessment is idempotent",
+      "state rows are hash-verified on read",
+      "recovery requires explicit acknowledgement plus freshly recomputed HEALTHY evidence under the same baseline and policy",
+      "RETIRED does not automatically recover"
+    ]
+  },
+  "explicit_non_claims": [
+    "This is not R4 track certification.",
+    "This is not profitability evidence.",
+    "This does not grant PAPER or LIVE execution authority.",
+    "TD-R4-006 Defensive Health Bridge and TD-R4-007 deterministic Portfolio Manager/sizing remain open."
+  ],
+  "capital_authority": "NONE",
+  "live_trading": "BLOCKED"
+}

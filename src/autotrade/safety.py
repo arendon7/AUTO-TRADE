@@ -16,7 +16,9 @@ from .domain import (
     intent_fingerprint,
     market_fingerprint,
 )
+from .health_bridge import HealthBridgeControlProvider, HealthBridgeError
 from .ledger import EventLedger, LedgerEvent
+from .portfolio_integrity import portfolio_snapshot_error
 from .state import InMemorySafetyStateStore, SafetyStateStore
 
 
@@ -78,10 +80,21 @@ class CapitalSafetyKernel:
         limits: SafetyLimits,
         ledger: EventLedger,
         state_store: SafetyStateStore | None = None,
+        health_bridge: HealthBridgeControlProvider | None = None,
+        portfolio_health_entity_id: str = "",
     ) -> None:
+        if portfolio_health_entity_id and (
+            portfolio_health_entity_id != portfolio_health_entity_id.strip()
+            or not portfolio_health_entity_id
+        ):
+            raise ValueError("portfolio_health_entity_id must be canonical text")
+        if health_bridge is None and portfolio_health_entity_id:
+            raise ValueError("portfolio_health_entity_id requires health_bridge")
         self._limits = limits
         self._ledger = ledger
         self._state_store = state_store or InMemorySafetyStateStore()
+        self._health_bridge = health_bridge
+        self._portfolio_health_entity_id = portfolio_health_entity_id
         self._lock = RLock()
 
     @property
@@ -289,6 +302,52 @@ class CapitalSafetyKernel:
         projected_gross = portfolio.gross_exposure - abs(current_position) + abs(projected_position)
         projected_net = portfolio.net_exposure + signed_order_notional
 
+        if self._health_bridge is not None:
+            try:
+                health_control = self._health_bridge.effective_control(
+                    strategy_id=intent.strategy_id,
+                    portfolio_entity_id=self._portfolio_health_entity_id,
+                    now=now,
+                )
+            except HealthBridgeError as exc:
+                return reject(
+                    "HEALTH_CONTROL_UNAVAILABLE",
+                    str(exc),
+                    risk_reducing=risk_reducing,
+                )
+            if health_control.blocks_new_risk and not risk_reducing:
+                return reject(
+                    "HEALTH_NO_NEW_RISK",
+                    health_control.reason,
+                    risk_reducing=risk_reducing,
+                )
+            if not risk_reducing:
+                health_order_limit = self._limits.max_order_notional * health_control.order_multiplier
+                if order_notional > health_order_limit:
+                    return reject(
+                        "HEALTH_MAX_ORDER_NOTIONAL",
+                        f"{order_notional}>{health_order_limit}:{health_control.reason}",
+                        risk_reducing=False,
+                    )
+                health_strategy_limit = (
+                    self._limits.max_strategy_gross_exposure * health_control.strategy_multiplier
+                )
+                if projected_strategy_gross > health_strategy_limit:
+                    return reject(
+                        "HEALTH_MAX_STRATEGY_GROSS",
+                        f"{projected_strategy_gross}>{health_strategy_limit}:{health_control.reason}",
+                        risk_reducing=False,
+                    )
+                health_portfolio_limit = (
+                    self._limits.max_portfolio_gross_exposure * health_control.portfolio_multiplier
+                )
+                if projected_gross > health_portfolio_limit:
+                    return reject(
+                        "HEALTH_MAX_PORTFOLIO_GROSS",
+                        f"{projected_gross}>{health_portfolio_limit}:{health_control.reason}",
+                        risk_reducing=False,
+                    )
+
         if control_state.kill_switch_active and not risk_reducing:
             return reject("KILL_SWITCH_ACTIVE", control_state.kill_switch_reason, risk_reducing=risk_reducing)
         if control_state.circuit_active and not risk_reducing:
@@ -394,70 +453,6 @@ def _strictly_reduces_without_flip(current: Decimal, projected: Decimal) -> bool
 
 
 def _validate_portfolio(portfolio: PortfolioSnapshot) -> str | None:
-    numeric = {
-        "equity": portfolio.equity,
-        "gross_exposure": portfolio.gross_exposure,
-        "net_exposure": portfolio.net_exposure,
-        "daily_pnl": portfolio.daily_pnl,
-        "drawdown": portfolio.drawdown,
-    }
-    for name, value in numeric.items():
-        if not _finite(value):
-            return f"{name} is not finite"
-    if portfolio.equity <= 0:
-        return "equity must be > 0"
-    if portfolio.gross_exposure < 0:
-        return "gross_exposure cannot be negative"
-    if portfolio.drawdown < 0:
-        return "drawdown cannot be negative"
-    if portfolio.open_orders < 0:
-        return "open_orders cannot be negative"
-
-    zero = Decimal("0")
-    aggregate_positions = dict(portfolio.signed_position_notional_by_symbol)
-    for symbol, value in aggregate_positions.items():
-        if not symbol.strip():
-            return "position symbol is empty"
-        if not _finite(value):
-            return f"position {symbol} is not finite"
-    calculated_gross = sum((abs(value) for value in aggregate_positions.values()), start=zero)
-    calculated_net = sum(aggregate_positions.values(), start=zero)
-    if calculated_gross != portfolio.gross_exposure:
-        return (
-            "gross_exposure does not match position map: "
-            f"declared={portfolio.gross_exposure},calculated={calculated_gross}"
-        )
-    if calculated_net != portfolio.net_exposure:
-        return (
-            "net_exposure does not match position map: "
-            f"declared={portfolio.net_exposure},calculated={calculated_net}"
-        )
-
-    strategy_positions = portfolio.strategy_signed_position_notional_by_symbol
-    for strategy, values in strategy_positions.items():
-        if not strategy.strip():
-            return "strategy id is empty"
-        calculated = zero
-        for symbol, value in values.items():
-            if not symbol.strip():
-                return f"strategy {strategy} contains empty symbol"
-            if not _finite(value):
-                return f"strategy {strategy}/{symbol} position is not finite"
-            calculated += abs(value)
-        declared = portfolio.strategy_gross_exposure.get(strategy)
-        if declared is None:
-            return f"strategy {strategy} is missing gross exposure"
-        if not _finite(declared) or declared < 0:
-            return f"strategy {strategy} gross exposure is invalid"
-        if declared != calculated:
-            return (
-                f"strategy {strategy} gross exposure mismatch: "
-                f"declared={declared},calculated={calculated}"
-            )
-
-    for strategy, declared in portfolio.strategy_gross_exposure.items():
-        if not _finite(declared) or declared < 0:
-            return f"strategy {strategy} gross exposure is invalid"
-        if strategy not in strategy_positions and declared != 0:
-            return f"strategy {strategy} gross exposure has no position map"
-    return None
+    # Backward-compatible private wrapper. Semantic trust is centralized
+    # in portfolio_integrity so persistence and Safety cannot disagree.
+    return portfolio_snapshot_error(portfolio)

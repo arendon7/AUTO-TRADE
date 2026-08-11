@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "track": "R4",
+  "debt_id": "TD-R4-011",
+  "status": "CERTIFIED_SLICE_NOT_TRACK_CERTIFICATION",
+  "certification_basis_head": "b68b77dd3603a8b84b81e8bc31a00fa79784b6e6",
+  "ci": {
+    "core_safety_run_id": 31458869481,
+    "knowledge_contract_run_id": 31458869501,
+    "tests_passed": 457,
+    "coverage_percent": 86.38,
+    "contract_registry": "PASS",
+    "contract_count": 10,
+    "contract_registry_sha256": "ddb94afa8916be37d0d956e6c32f775ea41c0fb79f4ea26d2d65dfa286c62785",
+    "research_advisory_authority_boundary": "PASS",
+    "debt_register_contract": "PASS",
+    "knowledge_contract": "PASS"
+  },
+  "implementation": [
+    "src/autotrade/research/allocation_robustness.py"
+  ],
+  "tests": [
+    "tests/test_r4_allocation_exact_normalization.py",
+    "tests/test_r4_allocation_robustness.py",
+    "tests/test_r4_portfolio_manager.py"
+  ],
+  "certified_invariants": [
+    "Decimal normalization preserves the exact contract sum(weights)==1 instead of weakening the invariant with a tolerance.",
+    "All but the final canonical component are normalized deterministically; the final canonical component is the exact remainder to Decimal(1).",
+    "The same exact-sum normalization applies to baseline weights, leave-one-out scenarios and bounded perturbation scenarios.",
+    "Repeating-decimal ratios such as 0.30/0.90 are regression-tested across the baseline and complete scenario universe.",
+    "Normalization remains deterministic regardless of mapping insertion order.",
+    "The repair does not increase portfolio weights, relax diversification budgets or grant execution authority."
+  ],
+  "explicit_non_claims": [
+    "This is not R4 track certification.",
+    "This is not profitability evidence.",
+    "This does not grant PAPER or LIVE execution authority."
+  ],
+  "capital_authority": "NONE",
+  "live_trading": "BLOCKED"
+}

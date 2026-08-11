@@ -1,34 +1,28 @@
 # CONTEXTO RÁPIDO — AUTO-TRADE
 
-## Objetivo
-Construir un sistema de auto-trading algorítmico basado en agentes que busque **rentabilidad neta sostenible** sin entregar a una IA control ilimitado del dinero.
+Estado actual: **v0.28R R0–R4 certified; R4 PR #11 ready and pending integration**.
 
-## Arquitectura acordada
-- Market Data Agent
-- Strategy Agent
-- Risk Agent
-- Execution Agent
-- Portfolio Agent
-- Monitoring/Alert Agent
-- Research/Backtest Agent
-- Orchestrator/Supervisor Agent
-- Capital Safety Kernel determinista
-- OMS (Order Management System)
-- Reconciliation Engine
-- Event Ledger auditable
+## Leer primero
+1. `knowledge/00_CANON/SOURCE_OF_TRUTH.md`
+2. `knowledge/00_CANON/ESTADO_ACTUAL.md`
+3. `knowledge/00_CANON/TAREA_ACTIVA.md`
+4. `knowledge/00_CANON/RECONSTRUCTION_V028R_MATRIX.md`
+5. `knowledge/00_CANON/debt_register.json`
+6. `knowledge/40_HANDOFF/HANDOFF_ACTUAL.md`
+7. `knowledge/60_EVIDENCE/R4_CERTIFICATION.json`
 
-El orquestador coordina, pero no puede omitir controles del kernel, OMS o reconciliación.
+## Certificación R4
+Basis `350efd43ac133c95a1997b4a821a2e0bab4afaf2`: **479 tests PASS / 86.45% coverage**; 10 contracts; authority/debt/knowledge gates PASS. R4 blocking debt open: 0.
 
-## Baseline 1.0 recuperado
-- ChatGPT se usa para investigación/desarrollo; no como autoridad final de ejecución.
-- Quant y safety críticos deben ser deterministas y testeables.
-- Holdout protegido contra sobreajuste.
-- Diseñar un portfolio de edges, no depender de una sola estrategia.
-- Chaos/failure testing para fallos de red, broker, precios, duplicados y estados parciales.
-- Ejecución fail-closed.
+La cifra previa 480 / 86.58% fue una inconsistencia documental; los logs del run citado confirman 479 / 86.45%.
 
-## Restricción principal
-Nunca permitir una operación grande o errónea por fallo de IA, software, datos, broker o configuración. Deben existir límites redundantes y kill switches.
+## Regla operativa inmediata
+No empezar R5 desde la rama R4. Primero PR #11 -> merge -> CI verde sobre SHA exacto de `main`; después crear rama R5 desde ese SHA.
 
-## Memoria
-`knowledge/` es un vault de Obsidian. `graphify-out/` será el grafo regenerable de Graphify. El código y configuración versionada siguen siendo la verdad operativa.
+## Próximo track
+R5 = read-only closed-kline streaming + gap/idempotency semantics + synchronized shadow + forward evidence without HOLDOUT.
+
+## Authority
+AI/research/Portfolio Manager no tienen autoridad de ejecución. Safety + OMS continúan siendo fronteras obligatorias. External PAPER/LIVE no está habilitado.
+
+**LIVE TRADING: BLOQUEADO.**

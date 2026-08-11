@@ -1,0 +1,114 @@
+{
+  "schema_version": 1,
+  "track": "R4",
+  "status": "CERTIFIED_BRANCH_PENDING_PR_INTEGRATION",
+  "base_main": "c585a84b5197076b210723bb70980b828e4e3026",
+  "certification_basis_head": "350efd43ac133c95a1997b4a821a2e0bab4afaf2",
+  "ci": {
+    "core_safety_run_id": 31460825121,
+    "knowledge_contract_run_id": 31460825110,
+    "tests_passed": 479,
+    "coverage_percent": 86.45,
+    "coverage_minimum_percent": 85.0,
+    "contract_registry": "PASS",
+    "contract_count": 10,
+    "contract_registry_sha256": "ddb94afa8916be37d0d956e6c32f775ea41c0fb79f4ea26d2d65dfa286c62785",
+    "research_advisory_authority_boundary": "PASS",
+    "debt_register_contract": "PASS",
+    "knowledge_contract": "PASS"
+  },
+  "closed_r4_debt_ids": [
+    "TD-R4-001",
+    "TD-R4-002",
+    "TD-R4-003",
+    "TD-R4-004",
+    "TD-R4-005",
+    "TD-R4-006",
+    "TD-R4-007",
+    "TD-R4-008",
+    "TD-R4-009",
+    "TD-R4-010",
+    "TD-R4-011",
+    "TD-R4-012",
+    "TD-R4-013",
+    "TD-R4-014"
+  ],
+  "open_r4_blocking_debt_ids": [],
+  "open_nonblocking_ops_debt_ids": [
+    "TD-OPS-001"
+  ],
+  "capabilities": {
+    "authoritative_instrument_master": {
+      "status": "PASS",
+      "evidence": "knowledge/60_EVIDENCE/R4_INSTRUMENT_MASTER_CERTIFICATION.json"
+    },
+    "versioned_portfolio_state_and_reconciliation": {
+      "status": "PASS",
+      "evidence": "knowledge/60_EVIDENCE/R4_PORTFOLIO_STATE_AUDIT.json"
+    },
+    "correlation_aware_portfolio_research": {
+      "status": "PASS",
+      "evidence": "knowledge/60_EVIDENCE/R4_RESEARCH_GOVERNANCE_CERTIFICATION.json"
+    },
+    "allocation_perturbation_and_leave_one_out": {
+      "status": "PASS",
+      "evidence": [
+        "knowledge/60_EVIDENCE/R4_RESEARCH_GOVERNANCE_CERTIFICATION.json",
+        "knowledge/60_EVIDENCE/R4_EXACT_NORMALIZATION_CERTIFICATION.json"
+      ]
+    },
+    "train_calibrated_regimes": {
+      "status": "PASS",
+      "evidence": "knowledge/60_EVIDENCE/R4_RESEARCH_GOVERNANCE_CERTIFICATION.json"
+    },
+    "strategy_portfolio_health_and_drift": {
+      "status": "PASS",
+      "evidence": [
+        "knowledge/60_EVIDENCE/R4_RESEARCH_GOVERNANCE_CERTIFICATION.json",
+        "knowledge/60_EVIDENCE/R4_RECOVERY_IDEMPOTENCY_CERTIFICATION.json",
+        "knowledge/60_EVIDENCE/R4_HEALTH_ACK_CHAIN_CERTIFICATION.json"
+      ]
+    },
+    "defensive_health_bridge": {
+      "status": "PASS",
+      "evidence": [
+        "knowledge/60_EVIDENCE/R4_DEFENSIVE_HEALTH_BRIDGE_CERTIFICATION.json",
+        "knowledge/60_EVIDENCE/R4_RECOVERY_IDEMPOTENCY_CERTIFICATION.json",
+        "knowledge/60_EVIDENCE/R4_AUTHORITATIVE_HEALTH_OVERLAY_CERTIFICATION.json"
+      ]
+    },
+    "deterministic_portfolio_manager_sizing": {
+      "status": "PASS",
+      "evidence": "knowledge/60_EVIDENCE/R4_PORTFOLIO_MANAGER_CERTIFICATION.json"
+    }
+  },
+  "cross_boundary_invariants": [
+    "Instrument Master rules are authoritative, versioned, provenance-bound and fail closed when unknown, stale, conflicting or non-tradable.",
+    "Portfolio State/fill persistence is hash-verified and semantically validated on read/replay.",
+    "Correlation, cluster and allocation evidence use deterministic source-bound research inputs and cannot self-authorize execution.",
+    "Allocation robustness recomputes complete leave-one-out and perturbation evidence and preserves exact Decimal sum(weights)==1 without tolerance weakening.",
+    "Regime calibration structurally excludes FINAL_HOLDOUT; missing/stale regime evidence is conservative.",
+    "Health automatic transitions only maintain or worsen risk; recovery is explicit, retry-safe, baseline/policy-bound and ACK-chain tamper-evident.",
+    "Defensive Health Bridge automatically maintains or reduces capacity only, overlays current authoritative Health on every control read and invalidates stale approvals through Safety/OMS controls.",
+    "Portfolio Manager is advisory-only, recomputes budgets/robustness after Health and venue constraints, rounds/caps downward and never upsizes to venue minimums.",
+    "Permanent CI authority checks prohibit research/Portfolio Manager execution creep into OMS, broker, engine or execution-capable domain symbols.",
+    "No R4 capability grants external PAPER or LIVE order authority."
+  ],
+  "final_scan": {
+    "r4_open_p0_p1_p2": 0,
+    "all_required_r4_matrix_rows": "PASS",
+    "temporary_r4_workflows_present": false,
+    "temporary_r4_helpers_present": false,
+    "new_external_broker_execution_authority_detected": false,
+    "pr_11_was_draft_during_certification": true
+  },
+  "explicit_non_claims": [
+    "R4 certification is not profitability evidence.",
+    "R4 certification is not external PAPER qualification.",
+    "R4 certification is not LIVE trading approval.",
+    "The historical v0.28 source package remains unrecovered; this is evidence-backed v0.28R reconstruction certification."
+  ],
+  "capital_authority": "NONE",
+  "external_paper_authority": "NONE_ADDED_BY_R4",
+  "live_trading": "BLOCKED"
+}

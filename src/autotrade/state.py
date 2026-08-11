@@ -8,6 +8,11 @@ from threading import RLock
 from typing import Protocol
 
 from .domain import Fill, OrderRecord, PortfolioSnapshot
+from .portfolio_integrity import (
+    PortfolioIntegrityError,
+    clone_portfolio_snapshot,
+    validate_portfolio_snapshot,
+)
 
 
 class OrderStore(Protocol):
@@ -171,18 +176,30 @@ class InMemoryPortfolioStore:
         self._orders_with_fill_events: set[str] = set()
         self._lock = RLock()
 
+    def _require_current_locked(self) -> VersionedPortfolioSnapshot:
+        if self._current is None:
+            raise PortfolioNotInitialized("portfolio state is not initialized")
+        validate_portfolio_snapshot(self._current.snapshot)
+        return self._current
+
+    def _view_locked(self, current: VersionedPortfolioSnapshot) -> VersionedPortfolioSnapshot:
+        return VersionedPortfolioSnapshot(
+            version=current.version,
+            snapshot=clone_portfolio_snapshot(current.snapshot),
+        )
+
     def initialize(self, snapshot: PortfolioSnapshot, *, now: datetime) -> VersionedPortfolioSnapshot:
         del now
+        candidate = clone_portfolio_snapshot(snapshot)
         with self._lock:
             if self._current is None:
-                self._current = VersionedPortfolioSnapshot(version=1, snapshot=snapshot)
-            return self._current
+                self._current = VersionedPortfolioSnapshot(version=1, snapshot=candidate)
+            current = self._require_current_locked()
+            return self._view_locked(current)
 
     def get(self) -> VersionedPortfolioSnapshot:
         with self._lock:
-            if self._current is None:
-                raise PortfolioNotInitialized("portfolio state is not initialized")
-            return self._current
+            return self._view_locked(self._require_current_locked())
 
     def compare_and_set(
         self,
@@ -192,12 +209,16 @@ class InMemoryPortfolioStore:
         now: datetime,
     ) -> VersionedPortfolioSnapshot | None:
         del now
+        candidate = clone_portfolio_snapshot(snapshot)
         with self._lock:
-            current = self.get()
+            current = self._require_current_locked()
             if current.version != expected_version:
                 return None
-            self._current = VersionedPortfolioSnapshot(version=current.version + 1, snapshot=snapshot)
-            return self._current
+            self._current = VersionedPortfolioSnapshot(
+                version=current.version + 1,
+                snapshot=candidate,
+            )
+            return self._view_locked(self._current)
 
     def set_reconciliation_status(
         self,
@@ -207,20 +228,26 @@ class InMemoryPortfolioStore:
         now: datetime,
     ) -> VersionedPortfolioSnapshot:
         del now
+        if not isinstance(reconciliation_ok, bool) or not isinstance(broker_state_known, bool):
+            raise PortfolioIntegrityError("reconciliation status flags must be boolean")
         with self._lock:
-            current = self.get()
+            current = self._require_current_locked()
             if (
                 current.snapshot.reconciliation_ok == reconciliation_ok
                 and current.snapshot.broker_state_known == broker_state_known
             ):
-                return current
+                return self._view_locked(current)
             updated = replace(
                 current.snapshot,
                 reconciliation_ok=reconciliation_ok,
                 broker_state_known=broker_state_known,
             )
-            self._current = VersionedPortfolioSnapshot(version=current.version + 1, snapshot=updated)
-            return self._current
+            detached = clone_portfolio_snapshot(updated)
+            self._current = VersionedPortfolioSnapshot(
+                version=current.version + 1,
+                snapshot=detached,
+            )
+            return self._view_locked(self._current)
 
     def apply_order_result(self, order: OrderRecord, *, now: datetime) -> VersionedPortfolioSnapshot:
         """Foundation compatibility path.
@@ -230,17 +257,21 @@ class InMemoryPortfolioStore:
         """
         del now
         with self._lock:
-            current = self.get()
+            current = self._require_current_locked()
             if (
                 order.order_id in self._applied_order_ids
                 or order.order_id in self._orders_with_fill_events
                 or order.filled_quantity <= 0
             ):
-                return current
+                return self._view_locked(current)
             updated = apply_fill_to_portfolio(current.snapshot, order)
+            detached = clone_portfolio_snapshot(updated)
+            self._current = VersionedPortfolioSnapshot(
+                version=current.version + 1,
+                snapshot=detached,
+            )
             self._applied_order_ids.add(order.order_id)
-            self._current = VersionedPortfolioSnapshot(version=current.version + 1, snapshot=updated)
-            return self._current
+            return self._view_locked(self._current)
 
     def apply_fills(
         self,
@@ -251,36 +282,52 @@ class InMemoryPortfolioStore:
     ) -> VersionedPortfolioSnapshot:
         del now
         with self._lock:
-            current = self.get()
+            current = self._require_current_locked()
             if order.order_id in self._applied_order_ids:
-                return current
-            snapshot = current.snapshot
+                return self._view_locked(current)
+
+            snapshot = clone_portfolio_snapshot(current.snapshot)
+            pending_identities: dict[str, tuple[str, str, str, str, str, str]] = {}
             changed = False
-            batch_seen: set[str] = set()
             for fill in sorted(fills, key=lambda value: (value.occurred_at, value.fill_id)):
                 _validate_fill_for_order(fill=fill, order=order)
                 identity = _fill_identity(fill)
+
                 existing_identity = self._applied_fill_identities.get(fill.fill_id)
                 if existing_identity is not None:
                     if existing_identity != identity:
                         raise ValueError("conflicting applied fill identity")
                     continue
-                if fill.fill_id in batch_seen:
+
+                pending_identity = pending_identities.get(fill.fill_id)
+                if pending_identity is not None:
+                    if pending_identity != identity:
+                        raise ValueError("conflicting fill identity within batch")
                     continue
-                batch_seen.add(fill.fill_id)
+
+                pending_identities[fill.fill_id] = identity
                 incremental = replace(
                     order,
                     filled_quantity=fill.quantity,
                     average_fill_price=fill.price,
                 )
                 snapshot = apply_fill_to_portfolio(snapshot, incremental)
-                self._applied_fill_identities[fill.fill_id] = identity
-                self._orders_with_fill_events.add(order.order_id)
                 changed = True
+
             if not changed:
-                return current
-            self._current = VersionedPortfolioSnapshot(version=current.version + 1, snapshot=snapshot)
-            return self._current
+                return self._view_locked(current)
+
+            # Validate the entire projected batch before publishing *any*
+            # bookkeeping identity. A late invalid/corrupt fill cannot leave a
+            # partially committed in-memory idempotency state.
+            detached = clone_portfolio_snapshot(snapshot)
+            self._current = VersionedPortfolioSnapshot(
+                version=current.version + 1,
+                snapshot=detached,
+            )
+            self._applied_fill_identities.update(pending_identities)
+            self._orders_with_fill_events.add(order.order_id)
+            return self._view_locked(self._current)
 
 
 class ReservationStatus(StrEnum):

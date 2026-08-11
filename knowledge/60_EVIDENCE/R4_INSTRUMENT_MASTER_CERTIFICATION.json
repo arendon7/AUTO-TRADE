@@ -1,0 +1,40 @@
+{
+  "track": "R4",
+  "slice": "TD-R4-001",
+  "capability": "Authoritative Instrument Master",
+  "certification_state": "SLICE_CERTIFIED",
+  "certification_basis_commit": "3e12d6bc06b354b831c984fd6b1b61afcc6e13f2",
+  "ci": {
+    "tests_passed": 302,
+    "coverage_percent": 87.78,
+    "coverage_gate_percent": 85.0,
+    "instrument_master_coverage_percent": 91.0,
+    "contract_registry": "PASS",
+    "contract_count": 10,
+    "contract_registry_sha256": "ddb94afa8916be37d0d956e6c32f775ea41c0fb79f4ea26d2d65dfa286c62785",
+    "research_authority_boundary": "PASS",
+    "debt_register_contract": "PASS",
+    "knowledge_contract": "PASS"
+  },
+  "certified_invariants": [
+    "authoritative execution-sensitive metadata is structurally separate from research InstrumentMetadata",
+    "append-only contiguous per-instrument versions with idempotent identical replay and conflict rejection",
+    "canonical identity/source strings reject surrounding-whitespace aliases",
+    "price tick, quantity step, aligned min/max quantity and min/max notional are finite and fail closed",
+    "explicit TRADING/HALTED/DISABLED/UNKNOWN status",
+    "source/version/as-of/source-payload SHA-256 provenance",
+    "deterministic payload fingerprint with pre-parse validation",
+    "every durable read cross-checks embedded payload fingerprint against separately persisted fingerprint column",
+    "payload, stored fingerprint and JSON corruption block reads and subsequent version publication",
+    "future, stale and expired metadata fail closed",
+    "research-only metadata cannot be implicitly published as authoritative venue rules",
+    "AuthoritativeInstrumentRules@1 is machine-readable and CI-required"
+  ],
+  "explicit_non_claims": [
+    "No live venue/exchange metadata fetch is implemented by this slice.",
+    "No PAPER or LIVE broker order authority is added.",
+    "A research serialization price_tick/quantity_step value is not venue-rule evidence.",
+    "R4 as a whole is not certified by this slice."
+  ],
+  "capital_state": "LIVE_TRADING_BLOCKED"
+}
