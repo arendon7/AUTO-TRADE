@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "track": "R4",
+  "audit": "POST_MERGE_INTEGRATION",
+  "merge_sha": "aa6d80dc1682967edef367f726a620e41c0af118",
+  "status": "REPAIR_IN_PROGRESS",
+  "runs": {
+    "knowledge_contract": {
+      "run_id": 31461659067,
+      "conclusion": "success"
+    },
+    "core_safety": {
+      "run_id": 31461659063,
+      "conclusion": "failure",
+      "observed_tests": {
+        "passed": 481,
+        "failed": 2
+      },
+      "coverage_percent": 86.45
+    }
+  },
+  "integration_defects": [
+    {
+      "id": "R4-PM-001",
+      "type": "CERTIFICATION_CONTRACT_MISMATCH",
+      "file": "tests/test_r4_certification_contract.py",
+      "observed": "certificate contains 479 tests_passed",
+      "incorrect_expectation": "480 tests_passed",
+      "remediation": "bind permanent test to verified 479 / 86.45 branch evidence"
+    },
+    {
+      "id": "R4-PM-002",
+      "type": "TEMPORARY_WORKFLOW_LEAK",
+      "file": ".github/workflows/r4-final-readiness-one-shot.yml",
+      "observed": "temporary R4 readiness workflow present in merged main tree",
+      "remediation": "remove one-shot from the repository tree before post-merge recertification"
+    }
+  ],
+  "functional_regression_detected": false,
+  "r4_blocking_debt_reopened": false,
+  "remediation_branch": "hotfix/r4-post-merge-recertification",
+  "r5_gate": "BLOCKED_UNTIL_EXACT_MAIN_SHA_GREEN",
+  "capital_authority": "NONE",
+  "live_trading": "BLOCKED"
+}

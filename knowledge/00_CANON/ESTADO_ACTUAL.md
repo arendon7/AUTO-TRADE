@@ -1,7 +1,7 @@
 # ESTADO ACTUAL — AUTO-TRADE
 
 Fecha: 2026-08-11
-Estado canónico: **v0.28R reconstruction — R0–R4 CERTIFIED; PR #11 integration pending**
+Estado canónico: **v0.28R reconstruction — R0–R4 CERTIFIED; R4 integrated but post-merge recertification temporarily FAILED**
 
 ## Fuente de verdad
 El proyecto histórico v0.28 alcanzó mayor madurez que la reconstrucción inicial, pero su source package no fue recuperado. La ruta activa es la reconstrucción equivalente v0.28R regida por `SOURCE_OF_TRUTH.md`, `RECONSTRUCTION_V028R_MATRIX.md` y `debt_register.json`.
@@ -11,9 +11,19 @@ El proyecto histórico v0.28 alcanzó mayor madurez que la reconstrucción inici
 - R1: Market Data + Strategy DSL + Research Integrity — PASS.
 - R2: Capital Safety + OMS maturity — PASS.
 - R3: bounded real-data/research governance — PASS e integrado en `main` `c585a84b5197076b210723bb70980b828e4e3026`.
-- R4: portfolio/regimes/health governance — **PASS en branch**, certificado sobre `350efd43ac133c95a1997b4a821a2e0bab4afaf2` con **479 tests PASS / 86.45% coverage** y todos los gates verdes.
+- R4: portfolio/regimes/health governance — PASS en branch, certificado sobre `350efd43ac133c95a1997b4a821a2e0bab4afaf2` con **479 tests PASS / 86.45% coverage**.
 
-## R4 certificado
+## Integración R4
+PR #11 fue fusionado por squash en `main` como `aa6d80dc1682967edef367f726a620e41c0af118`.
+
+Post-merge:
+- Knowledge Contract run `31461659067`: PASS.
+- Core Safety run `31461659063`: FAIL.
+- Fallos: contrato permanente R4 esperaba erróneamente `480` frente a evidencia real `479`, y el árbol fusionado conservó `.github/workflows/r4-final-readiness-one-shot.yml`.
+
+Estos son defectos de integración/certificación, no regresiones funcionales de Portfolio/Regime/Health. R5 permanece bloqueado hasta que el hotfix quede fusionado y el SHA exacto de `main` recertifique verde.
+
+## R4 certificado funcionalmente
 Incluye:
 - Instrument Master autoritativo/versionado;
 - Portfolio State/fill durability audit;
@@ -27,25 +37,13 @@ Incluye:
 - deterministic advisory-only Portfolio Manager/sizing con post-Health/post-venue revalidation;
 - permanent Research/Advisory Authority CI boundary.
 
-## Evidencia verificada
-- Core Safety run `31460825121`: PASS — 479 tests / 86.45% coverage;
-- Knowledge Contract run `31460825110`: PASS;
-- Contract Registry: 10 PASS, SHA-256 `ddb94afa8916be37d0d956e6c32f775ea41c0fb79f4ea26d2d65dfa286c62785`;
-- Debt Register: 33 items, 1 open, 0 bloqueantes para tracks certificados;
-- R4 certification artifact: `knowledge/60_EVIDENCE/R4_CERTIFICATION.json`.
-
-## Estado de integración
-- PR #11 permanece pendiente de merge hasta que el head canónico de cierre vuelva a pasar Core Safety + Knowledge Contract.
-- Después del merge, el SHA exacto de `main` debe recertificarse antes de crear R5.
-- No iniciar R5 desde la rama pre-merge.
-
 ## Deuda
 - R4 P0/P1/P2 OPEN: **0**.
 - `TD-OPS-001` Graphify P3/OPS: OPEN, no bloqueante.
 
 ## Próximo track
 **R5 — read-only streaming + synchronized shadow + forward evidence.**
-No ejecutar implementación R5 hasta completar integración/post-merge de R4.
+No iniciar R5 hasta completar hotfix + recertificación post-merge verde del SHA exacto de `main`.
 
 ## Capital
 **LIVE TRADING: BLOQUEADO.**
