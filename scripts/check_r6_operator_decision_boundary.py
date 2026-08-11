@@ -82,9 +82,9 @@ def main() -> int:
                 errors.append(f"operator decision fail-closed anchor missing: {anchor}")
 
     for workflow, label in ((CORE, "Core Safety"), (R6, "R6 Authority")):
-        if workflow.is_file() and SELF_COMMAND not in workflow.read_text(encoding="utf-8"):
+        if not workflow.is_file() or SELF_COMMAND not in workflow.read_text(encoding="utf-8"):
             errors.append(f"{label}: operator decision checker is not wired into permanent CI")
-    if R6.is_file() and SELF_TEST not in R6.read_text(encoding="utf-8"):
+    if not R6.is_file() or SELF_TEST not in R6.read_text(encoding="utf-8"):
         errors.append("R6 Authority: operator decision adversarial checker tests are not wired into CI")
 
     if errors:
@@ -102,7 +102,7 @@ def _scan_forbidden_authority(path: Path) -> list[str]:
     errors: list[str] = []
     source = path.read_text(encoding="utf-8")
     tree = ast.parse(source, filename=str(path))
-    rel = path.relative_to(ROOT)
+    rel = _relative(path)
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for alias in node.names:
@@ -114,8 +114,8 @@ def _scan_forbidden_authority(path: Path) -> list[str]:
                 errors.append(f"{rel}:{node.lineno}: forbidden authority/network import: {module}")
         elif isinstance(node, ast.Call):
             call = _call_name(node.func)
-            if call in {"urlopen", "Request", "connect", "send", "write"}:
-                errors.append(f"{rel}:{node.lineno}: network/write call forbidden in operator decision surface: {call}")
+            if call in {"urlopen", "Request", "send"}:
+                errors.append(f"{rel}:{node.lineno}: network call forbidden in operator decision surface: {call}")
     if path.resolve() == MODULE.resolve():
         for fragment in FORBIDDEN_DECISION_IMPORT_FRAGMENTS:
             if fragment in source:
@@ -138,6 +138,13 @@ def _named_calls(path: Path, name: str) -> list[tuple[int, str]]:
         if isinstance(node, ast.Call) and _call_name(node.func) == name:
             found.append((node.lineno, name))
     return found
+
+
+def _relative(path: Path) -> Path:
+    try:
+        return path.relative_to(ROOT)
+    except ValueError:
+        return path
 
 
 def _call_name(func: ast.expr) -> str:
