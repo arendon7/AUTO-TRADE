@@ -160,6 +160,13 @@ class OrderManagementSystem:
             raise KeyError(order_id)
         if order.status.terminal:
             self._validate_terminal_replay(order=order, execution=execution)
+            self._record_execution(
+                final=order,
+                all_fills=execution.fills,
+                now=now,
+                recovered=recovered,
+                changed=False,
+            )
             return order
         if not order.status.broker_open:
             raise BrokerStateConflict(f"order {order_id} is not broker-open: {order.status.value}")
@@ -221,6 +228,62 @@ class OrderManagementSystem:
                 )
             )
             raise BrokerCancellationAmbiguous(order.order_id) from exc
+
+    def mark_replace_pending(
+        self,
+        *,
+        order_id: str,
+        replacement_intent_id: str,
+        now: datetime,
+    ) -> OrderRecord:
+        if not replacement_intent_id.strip():
+            raise ValueError("replacement_intent_id is required")
+        order = self._orders.get_by_order_id(order_id)
+        if order is None:
+            raise KeyError(order_id)
+        if order.status not in {
+            OrderStatus.SUBMITTED,
+            OrderStatus.PARTIALLY_FILLED,
+            OrderStatus.REPLACE_PENDING,
+        }:
+            raise BrokerStateConflict(
+                f"order {order_id} cannot enter replace from {order.status.value}"
+            )
+        self._append_idempotent(
+            LedgerEvent(
+                event_id=f"replace-requested:{order.order_id}",
+                event_type="ORDER_REPLACE_REQUESTED",
+                occurred_at=now,
+                payload={
+                    "order_id": order.order_id,
+                    "replacement_intent_id": replacement_intent_id,
+                },
+            )
+        )
+        if order.status is OrderStatus.REPLACE_PENDING:
+            return order
+        pending = replace(order, status=OrderStatus.REPLACE_PENDING)
+        self._orders.update(pending)
+        return pending
+
+    def replacement_request_matches(
+        self, *, order_id: str, replacement_intent_id: str
+    ) -> bool:
+        event_id = f"replace-requested:{order_id}"
+        for event in self._ledger.all_events():
+            if event.event_id != event_id:
+                continue
+            if event.event_type != "ORDER_REPLACE_REQUESTED":
+                raise BrokerStateConflict(
+                    f"replace event identity has wrong type: {event.event_type}"
+                )
+            existing = event.payload.get("replacement_intent_id", "")
+            if existing != replacement_intent_id:
+                raise BrokerStateConflict(
+                    f"replacement intent conflict for order {order_id}"
+                )
+            return True
+        return False
 
     def fills_for_order(self, order_id: str) -> tuple[Fill, ...]:
         return self._fills.fills_for_order(order_id)
@@ -345,8 +408,6 @@ class OrderManagementSystem:
                     },
                 )
             )
-        if not changed:
-            return
         snapshot_key = json.dumps(
             {
                 "status": final.status.value,

@@ -254,14 +254,16 @@ class DurableTradingPipeline:
         market: MarketSnapshot,
         now: datetime,
     ) -> ReplacePipelineResult:
-        """Authoritative cancel followed by a completely fresh guarded submit."""
+        """Authoritative cancel followed by a completely fresh guarded submit.
+
+        The replace request is durably evidenced before cancellation. Retries
+        after a crash are safe: REPLACE_PENDING resumes cancellation; CANCELLED
+        resumes the fresh replacement submit only when the durable marker binds
+        the same replacement intent.
+        """
         original = self._oms.get_by_order_id(order_id)
         if original is None:
             raise KeyError(order_id)
-        if original.status.terminal:
-            raise ReplacementAborted(
-                f"original order already terminal: {original.status.value}"
-            )
         if replacement_intent.idempotency_key == original.intent.idempotency_key:
             raise ReplacementAborted("replacement requires a new idempotency key")
         if replacement_intent.intent_id == original.intent.intent_id:
@@ -275,23 +277,54 @@ class DurableTradingPipeline:
                 "replacement must preserve symbol, side and strategy identity"
             )
 
+        if original.status.terminal:
+            if (
+                original.status is OrderStatus.CANCELLED
+                and self._oms.replacement_request_matches(
+                    order_id=order_id,
+                    replacement_intent_id=replacement_intent.intent_id,
+                )
+            ):
+                new_result = self.process_intent(
+                    intent=replacement_intent,
+                    market=market,
+                    now=now,
+                )
+                return ReplacePipelineResult(
+                    original_order=original,
+                    replacement=new_result,
+                    aborted_reason=(
+                        new_result.decision.reason_code
+                        if new_result.order is None and new_result.decision is not None
+                        else ""
+                    ),
+                )
+            raise ReplacementAborted(
+                f"original order already terminal: {original.status.value}"
+            )
+
+        self._oms.mark_replace_pending(
+            order_id=order_id,
+            replacement_intent_id=replacement_intent.intent_id,
+            now=now,
+        )
         cancelled = self.cancel_order(order_id=order_id, now=now)
         if cancelled.status is not OrderStatus.CANCELLED:
             raise ReplacementAborted(
                 f"replacement aborted because original resolved as {cancelled.status.value}"
             )
 
-        replacement = self.process_intent(
+        new_result = self.process_intent(
             intent=replacement_intent,
             market=market,
             now=now,
         )
         return ReplacePipelineResult(
             original_order=cancelled,
-            replacement=replacement,
+            replacement=new_result,
             aborted_reason=(
-                replacement.decision.reason_code
-                if replacement.order is None and replacement.decision is not None
+                new_result.decision.reason_code
+                if new_result.order is None and new_result.decision is not None
                 else ""
             ),
         )

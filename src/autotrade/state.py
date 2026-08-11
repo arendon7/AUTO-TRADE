@@ -167,7 +167,7 @@ class InMemoryPortfolioStore:
     def __init__(self) -> None:
         self._current: VersionedPortfolioSnapshot | None = None
         self._applied_order_ids: set[str] = set()
-        self._applied_fill_ids: set[str] = set()
+        self._applied_fill_identities: dict[str, tuple[str, str, str, str, str, str]] = {}
         self._orders_with_fill_events: set[str] = set()
         self._lock = RLock()
 
@@ -259,7 +259,13 @@ class InMemoryPortfolioStore:
             batch_seen: set[str] = set()
             for fill in sorted(fills, key=lambda value: (value.occurred_at, value.fill_id)):
                 _validate_fill_for_order(fill=fill, order=order)
-                if fill.fill_id in batch_seen or fill.fill_id in self._applied_fill_ids:
+                identity = _fill_identity(fill)
+                existing_identity = self._applied_fill_identities.get(fill.fill_id)
+                if existing_identity is not None:
+                    if existing_identity != identity:
+                        raise ValueError("conflicting applied fill identity")
+                    continue
+                if fill.fill_id in batch_seen:
                     continue
                 batch_seen.add(fill.fill_id)
                 incremental = replace(
@@ -268,7 +274,7 @@ class InMemoryPortfolioStore:
                     average_fill_price=fill.price,
                 )
                 snapshot = apply_fill_to_portfolio(snapshot, incremental)
-                self._applied_fill_ids.add(fill.fill_id)
+                self._applied_fill_identities[fill.fill_id] = identity
                 self._orders_with_fill_events.add(order.order_id)
                 changed = True
             if not changed:
@@ -383,6 +389,17 @@ class InMemoryReservationStore:
     def get(self, idempotency_key: str) -> RiskReservation | None:
         with self._lock:
             return self._by_key.get(idempotency_key)
+
+
+def _fill_identity(fill: Fill) -> tuple[str, str, str, str, str, str]:
+    return (
+        fill.order_id,
+        fill.symbol,
+        fill.side.value,
+        str(fill.quantity),
+        str(fill.price),
+        fill.occurred_at.isoformat(),
+    )
 
 
 def _validate_fill_for_order(*, fill: Fill, order: OrderRecord) -> None:

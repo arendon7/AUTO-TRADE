@@ -137,12 +137,19 @@ class SQLiteFillAwarePortfolioStore(SQLitePortfolioStore):
                 CREATE TABLE IF NOT EXISTS portfolio_applied_fills (
                     fill_id TEXT PRIMARY KEY,
                     order_id TEXT NOT NULL,
+                    fill_hash TEXT,
                     applied_at TEXT NOT NULL
                 );
                 CREATE INDEX IF NOT EXISTS idx_portfolio_applied_fills_order_id
                 ON portfolio_applied_fills(order_id);
                 """
             )
+            columns = {
+                row["name"]
+                for row in conn.execute("PRAGMA table_info(portfolio_applied_fills)").fetchall()
+            }
+            if "fill_hash" not in columns:
+                conn.execute("ALTER TABLE portfolio_applied_fills ADD COLUMN fill_hash TEXT")
         finally:
             conn.close()
 
@@ -184,19 +191,22 @@ class SQLiteFillAwarePortfolioStore(SQLitePortfolioStore):
                 if fill.fill_id in seen_batch:
                     continue
                 seen_batch.add(fill.fill_id)
+                fingerprint = fill_fingerprint(fill)
                 already = conn.execute(
-                    "SELECT 1 FROM portfolio_applied_fills WHERE fill_id = ?",
+                    "SELECT fill_hash FROM portfolio_applied_fills WHERE fill_id = ?",
                     (fill.fill_id,),
                 ).fetchone()
                 if already is not None:
+                    if already["fill_hash"] != fingerprint:
+                        raise FillIntegrityConflict(fill.fill_id)
                     continue
                 snapshot = apply_single_fill_to_portfolio(snapshot=snapshot, order=order, fill=fill)
                 conn.execute(
                     """
-                    INSERT INTO portfolio_applied_fills(fill_id, order_id, applied_at)
-                    VALUES (?, ?, ?)
+                    INSERT INTO portfolio_applied_fills(fill_id, order_id, fill_hash, applied_at)
+                    VALUES (?, ?, ?, ?)
                     """,
-                    (fill.fill_id, order.order_id, now.isoformat()),
+                    (fill.fill_id, order.order_id, fingerprint, now.isoformat()),
                 )
                 changed = True
 

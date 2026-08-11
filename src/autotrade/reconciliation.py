@@ -57,7 +57,11 @@ class ReconciliationEngine:
                 ok=False,
                 broker_state_known=False,
                 recovered_order_ids=(),
-                issues=(ReconciliationIssue("BROKER_STATE_UNKNOWN", "broker account state unavailable"),),
+                issues=(
+                    ReconciliationIssue(
+                        "BROKER_STATE_UNKNOWN", "broker account state unavailable"
+                    ),
+                ),
             )
             self._record(result=result, now=now)
             return result
@@ -65,23 +69,21 @@ class ReconciliationEngine:
         issues: list[ReconciliationIssue] = []
         recovered: list[str] = []
 
-        # R2 recovery rule: every order that has reached the broker is eligible
-        # for projection repair, including already-terminal local orders. This
-        # closes the crash window where OMS/fill evidence committed but the
-        # process died before portfolio projection/reservation release.
+        # Any order that may have reached the broker can require projection
+        # repair, including a local terminal order. This closes the crash window
+        # where OMS/fill evidence committed before portfolio/reservation state.
         for order in self._oms.all_orders():
             if order.status is OrderStatus.VALIDATED:
                 continue
             execution = self._broker.get_execution(order.order_id)
             if execution is None:
-                code = (
-                    "UNRESOLVED_BROKER_OPEN_ORDER"
-                    if order.status.broker_open
-                    else "TERMINAL_ORDER_MISSING_AT_BROKER"
-                )
                 issues.append(
                     ReconciliationIssue(
-                        code,
+                        (
+                            "UNRESOLVED_BROKER_OPEN_ORDER"
+                            if order.status.broker_open
+                            else "TERMINAL_ORDER_MISSING_AT_BROKER"
+                        ),
                         f"order {order.order_id} has no authoritative broker execution snapshot",
                     )
                 )
@@ -94,18 +96,18 @@ class ReconciliationEngine:
                     recovered=True,
                 )
                 fills = self._oms.fills_for_order(final.order_id)
-                if fills:
-                    self._portfolio_store.apply_fills(final, fills, now=now)
+                before_portfolio_version = self._portfolio_store.get().version
+                projected = self._portfolio_store.apply_fills(final, fills, now=now)
+                projection_changed = projected.version != before_portfolio_version
+
                 reservation_status = _reservation_status_for_order(final)
+                before_reservation = self._reservations.get(final.intent.idempotency_key)
                 try:
-                    before = self._reservations.get(final.intent.idempotency_key)
                     self._reservations.set_status(
                         idempotency_key=final.intent.idempotency_key,
                         status=reservation_status,
                         now=now,
                     )
-                    if before is not None and before.status is not reservation_status:
-                        recovered.append(final.order_id)
                 except KeyError:
                     issues.append(
                         ReconciliationIssue(
@@ -113,9 +115,11 @@ class ReconciliationEngine:
                             f"order {final.order_id} has no durable risk reservation",
                         )
                     )
-                # A state transition, fill replay or projection repair is a
-                # meaningful recovery. Deduplication occurs at result build.
-                if final != order or fills:
+                reservation_changed = (
+                    before_reservation is not None
+                    and before_reservation.status is not reservation_status
+                )
+                if final != order or projection_changed or reservation_changed:
                     recovered.append(final.order_id)
             except (BrokerStateConflict, FillIntegrityConflict, ValueError) as exc:
                 issues.append(
@@ -151,7 +155,9 @@ class ReconciliationEngine:
             order = orders_by_key.get(reservation.idempotency_key)
             if order is None:
                 issues.append(
-                    ReconciliationIssue("ORPHAN_RISK_RESERVATION", reservation.idempotency_key)
+                    ReconciliationIssue(
+                        "ORPHAN_RISK_RESERVATION", reservation.idempotency_key
+                    )
                 )
                 continue
             if reservation.status is ReservationStatus.OPEN and order.status not in {
@@ -203,7 +209,9 @@ class ReconciliationEngine:
         ]
         if unresolved:
             issues.append(
-                ReconciliationIssue("AMBIGUOUS_ORDER_REMAINS", ",".join(sorted(unresolved)))
+                ReconciliationIssue(
+                    "AMBIGUOUS_ORDER_REMAINS", ",".join(sorted(unresolved))
+                )
             )
 
         ok = not issues
@@ -252,4 +260,8 @@ def _reservation_status_for_order(order: OrderRecord) -> ReservationStatus:
 
 def _normalized_positions(values) -> dict[str, Decimal]:
     zero = Decimal("0")
-    return {symbol: Decimal(value) for symbol, value in values.items() if Decimal(value) != zero}
+    return {
+        symbol: Decimal(value)
+        for symbol, value in values.items()
+        if Decimal(value) != zero
+    }
