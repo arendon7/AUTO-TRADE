@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "track": "R6",
+  "debt_id": "TD-R6-012",
+  "purpose": "One-shot implementation trigger for crash-safe same-attempt resume before UNKNOWN.",
+  "external_paper_order_sent": false,
+  "live_trading": "BLOCKED"
+}
