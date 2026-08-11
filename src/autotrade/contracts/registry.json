@@ -1,5 +1,5 @@
 {
-  "registry_version": 1,
+  "registry_version": 2,
   "contracts": [
     {
       "name": "OrderIntent",
@@ -138,6 +138,32 @@
         "event_type": {"type": "string", "non_empty": true},
         "occurred_at": {"type": "timestamp"},
         "payload": {"type": "object"}
+      }
+    },
+    {
+      "name": "AuthoritativeInstrumentRules",
+      "version": 1,
+      "compatibility": "strict",
+      "allow_extra_fields": false,
+      "fields": {
+        "venue": {"type": "string", "non_empty": true},
+        "symbol": {"type": "string", "non_empty": true},
+        "base_currency": {"type": "string", "non_empty": true},
+        "quote_currency": {"type": "string", "non_empty": true},
+        "version": {"type": "integer"},
+        "price_tick": {"type": "decimal"},
+        "quantity_step": {"type": "decimal"},
+        "min_quantity": {"type": "nullable_decimal"},
+        "max_quantity": {"type": "nullable_decimal"},
+        "min_notional": {"type": "nullable_decimal"},
+        "max_notional": {"type": "nullable_decimal"},
+        "trading_status": {"type": "string", "enum": ["TRADING", "HALTED", "DISABLED", "UNKNOWN"]},
+        "source": {"type": "string", "non_empty": true},
+        "source_version": {"type": "string", "non_empty": true},
+        "source_payload_sha256": {"type": "string", "non_empty": true},
+        "observed_at": {"type": "timestamp"},
+        "valid_until": {"type": "nullable_timestamp"},
+        "fingerprint": {"type": "string", "non_empty": true}
       }
     }
   ]
