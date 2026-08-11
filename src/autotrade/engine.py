@@ -23,6 +23,7 @@ from .oms import (
     OrderManagementSystem,
     OrderRejectedByControlPlane,
 )
+from .risk_state import RiskTelemetryStore
 from .safety import CapitalSafetyKernel
 from .state import (
     PortfolioStore,
@@ -101,6 +102,7 @@ class DurableTradingPipeline:
         oms: OrderManagementSystem,
         portfolio_store: PortfolioStore,
         reservation_store: ReservationStore,
+        risk_telemetry_store: RiskTelemetryStore | None = None,
         max_reservation_retries: int = 5,
     ) -> None:
         if max_reservation_retries <= 0:
@@ -111,6 +113,7 @@ class DurableTradingPipeline:
         self._oms = oms
         self._portfolio_store = portfolio_store
         self._reservations = reservation_store
+        self._risk_telemetry = risk_telemetry_store
         self._max_reservation_retries = max_reservation_retries
 
     def process_intent(
@@ -141,6 +144,7 @@ class DurableTradingPipeline:
                 reservation_view.reservations,
                 reservation_view.generation,
             )
+            effective = self._with_risk_telemetry(effective)
             decision = self._safety.evaluate(
                 intent=intent,
                 market=market,
@@ -250,13 +254,7 @@ class DurableTradingPipeline:
         market: MarketSnapshot,
         now: datetime,
     ) -> ReplacePipelineResult:
-        """Safely replace by authoritative cancel followed by a fresh guarded submit.
-
-        There is deliberately no broker-native in-place mutation in R2. The
-        original reservation remains authoritative until cancellation is known.
-        Only after local/broker evidence says CANCELLED is a fresh replacement
-        evaluated against the then-current portfolio and reservation state.
-        """
+        """Authoritative cancel followed by a completely fresh guarded submit."""
         original = self._oms.get_by_order_id(order_id)
         if original is None:
             raise KeyError(order_id)
@@ -279,8 +277,6 @@ class DurableTradingPipeline:
 
         cancelled = self.cancel_order(order_id=order_id, now=now)
         if cancelled.status is not OrderStatus.CANCELLED:
-            # FILLED/EXPIRED/REJECTED may win a race with cancellation. Creating
-            # a new order automatically in that case could double exposure.
             raise ReplacementAborted(
                 f"replacement aborted because original resolved as {cancelled.status.value}"
             )
@@ -298,6 +294,17 @@ class DurableTradingPipeline:
                 if replacement.order is None and replacement.decision is not None
                 else ""
             ),
+        )
+
+    def _with_risk_telemetry(self, portfolio: PortfolioSnapshot) -> PortfolioSnapshot:
+        if self._risk_telemetry is None:
+            return portfolio
+        telemetry = self._risk_telemetry.get()
+        return replace(
+            portfolio,
+            equity=telemetry.current_equity,
+            daily_pnl=telemetry.daily_pnl,
+            drawdown=telemetry.drawdown,
         )
 
     def _apply_known_fills(self, *, order: OrderRecord, now: datetime) -> None:
