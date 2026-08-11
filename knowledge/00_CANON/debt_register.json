@@ -1,0 +1,221 @@
+{
+  "certified_tracks": [
+    "R0",
+    "R1",
+    "R2"
+  ],
+  "items": [
+    {
+      "area": "OMS lifecycle",
+      "evidence": [
+        "tests/test_r2_fill_lifecycle.py",
+        "tests/test_r2_partial_cancel.py",
+        "tests/test_r2_replace.py",
+        "tests/test_r2_replace_evidence.py",
+        "knowledge/20_ARQUITECTURA/R2_FAILURE_PATH_REVIEW.md"
+      ],
+      "id": "TD-R2-001",
+      "resolution": "Partial-fill, cancel, replace, ambiguity and restart lifecycle certified with cancel-first fresh-risk replace semantics.",
+      "severity": "P1",
+      "status": "CLOSED",
+      "track": "R2"
+    },
+    {
+      "area": "Contracts",
+      "evidence": [
+        "src/autotrade/contracts/registry.json",
+        "tests/test_contract_registry.py",
+        "tests/test_contract_payloads.py",
+        "scripts/check_contract_registry.py"
+      ],
+      "id": "TD-R2-002",
+      "resolution": "Strict versioned machine-readable registry, explicit runtime serializers, compatibility policy and CI gate.",
+      "severity": "P1",
+      "status": "CLOSED",
+      "track": "R2"
+    },
+    {
+      "area": "Risk policy",
+      "evidence": [
+        "tests/test_r2_risk_matrix.py",
+        "tests/test_r2_reservation_risk_matrix.py"
+      ],
+      "id": "TD-R2-003",
+      "resolution": "Exact-boundary/+epsilon capital-limit matrix and reservation-aware exposure tests certified.",
+      "severity": "P1",
+      "status": "CLOSED",
+      "track": "R2"
+    },
+    {
+      "area": "Daily risk state",
+      "evidence": [
+        "src/autotrade/risk_state.py",
+        "tests/test_r2_risk_telemetry.py"
+      ],
+      "id": "TD-R2-004",
+      "resolution": "Durable UTC-session loss/drawdown telemetry atomically activates persistent circuit state; recovery requires explicit acknowledgement.",
+      "severity": "P1",
+      "status": "CLOSED",
+      "track": "R2"
+    },
+    {
+      "area": "Control-plane coverage",
+      "evidence": [
+        "knowledge/60_EVIDENCE/R2_CERTIFICATION.json",
+        "knowledge/20_ARQUITECTURA/R2_FAILURE_PATH_REVIEW.md"
+      ],
+      "id": "TD-R2-005",
+      "resolution": "Critical R2 failure paths have targeted adversarial tests; total branch coverage certified at 91.27% with an enforced 85% minimum.",
+      "severity": "P2",
+      "status": "CLOSED",
+      "track": "R2"
+    },
+    {
+      "area": "Crash recovery",
+      "evidence": [
+        "tests/test_r2_crash_projection_recovery.py",
+        "src/autotrade/reconciliation.py"
+      ],
+      "id": "TD-R2-006",
+      "resolution": "Startup reconciliation repairs terminal OMS/fill commit that crashed before portfolio projection/reservation release, exactly once.",
+      "severity": "P1",
+      "status": "CLOSED",
+      "track": "R2"
+    },
+    {
+      "area": "Portfolio snapshot integrity",
+      "evidence": [
+        "tests/test_r2_portfolio_snapshot_integrity.py",
+        "tests/test_r2_risk_matrix.py",
+        "src/autotrade/safety.py"
+      ],
+      "id": "TD-R2-007",
+      "resolution": "Safety input validates finite values plus exact gross/net and per-strategy gross consistency against position maps.",
+      "severity": "P1",
+      "status": "CLOSED",
+      "track": "R2"
+    },
+    {
+      "area": "Fill projection integrity",
+      "evidence": [
+        "tests/test_r2_projection_integrity.py",
+        "src/autotrade/execution_state.py",
+        "src/autotrade/state.py"
+      ],
+      "id": "TD-R2-008",
+      "resolution": "Both durable and in-memory portfolio projection bind fill_id to immutable fill content; conflicting reuse fails closed.",
+      "severity": "P2",
+      "status": "CLOSED",
+      "track": "R2"
+    },
+    {
+      "area": "Replace evidence",
+      "evidence": [
+        "tests/test_r2_replace_evidence.py",
+        "tests/test_r2_idempotent_events.py",
+        "src/autotrade/oms.py",
+        "src/autotrade/engine.py"
+      ],
+      "id": "TD-R2-009",
+      "resolution": "ORDER_REPLACE_REQUESTED/REPLACE_PENDING is durable and retry-safe across crash between cancel and replacement submission.",
+      "severity": "P2",
+      "status": "CLOSED",
+      "track": "R2"
+    },
+    {
+      "area": "GitHub Actions runtime",
+      "evidence": [
+        ".github/workflows/core-tests.yml",
+        ".github/workflows/knowledge-contract.yml"
+      ],
+      "id": "TD-CI-001",
+      "resolution": "Core/knowledge workflows moved to Node-24-generation official actions (checkout@v5, setup-python@v6).",
+      "severity": "P3",
+      "status": "CLOSED",
+      "track": "OPS"
+    },
+    {
+      "area": "Graphify",
+      "evidence": [
+        "knowledge/50_RUNBOOKS/GRAPHIFY_OBSIDIAN.md"
+      ],
+      "id": "TD-OPS-001",
+      "next_action": "Generate a real semantic/deep graph from a supported coding assistant when that runtime is available; never fake graphify-out artifacts.",
+      "resolution": "",
+      "severity": "P3",
+      "status": "OPEN",
+      "track": "OPS"
+    },
+    {
+      "area": "External market-data boundary",
+      "evidence": [],
+      "id": "TD-R3-001",
+      "next_action": "Implement deny-by-default public market-data provider with GET-only transport, exact HTTPS host allowlist, bounded timeouts/requests and rejection of trading/private endpoints before network I/O.",
+      "resolution": "",
+      "severity": "P1",
+      "status": "OPEN",
+      "track": "R3"
+    },
+    {
+      "area": "Canonical external-data intake",
+      "evidence": [],
+      "id": "TD-R3-002",
+      "next_action": "Validate Binance kline payloads into canonical MarketDataset with exact time coverage, ordering, duplicates, gaps, symbol/timeframe binding, provenance and response/dataset checksums; incomplete or ambiguous input must fail closed.",
+      "resolution": "",
+      "severity": "P1",
+      "status": "OPEN",
+      "track": "R3"
+    },
+    {
+      "area": "Trial Ledger / preregistration",
+      "evidence": [],
+      "id": "TD-R3-003",
+      "next_action": "Add durable immutable preregistration and trial-result accounting so no evaluated trial can enter promotion evidence unless registered before execution and every registered trial receives terminal accounting.",
+      "resolution": "",
+      "severity": "P1",
+      "status": "OPEN",
+      "track": "R3"
+    },
+    {
+      "area": "HOLDOUT governance / authority separation",
+      "evidence": [],
+      "id": "TD-R3-004",
+      "next_action": "Bind trial phases to train/development/final-holdout governance, require one-use final-validation authorization for HOLDOUT and prove research/reporting code cannot create executable OrderIntent authorization.",
+      "resolution": "",
+      "severity": "P1",
+      "status": "OPEN",
+      "track": "R3"
+    },
+    {
+      "area": "Multiple-testing governance",
+      "evidence": [],
+      "id": "TD-R3-005",
+      "next_action": "Implement complete trial-universe accounting plus deterministic multiple-testing evidence; compute PBO/Deflated Sharpe only when explicit statistical preconditions are met and fail closed when trials/evidence are omitted.",
+      "resolution": "",
+      "severity": "P1",
+      "status": "OPEN",
+      "track": "R3"
+    },
+    {
+      "area": "Bounded real-data campaign",
+      "evidence": [],
+      "id": "TD-R3-006",
+      "next_action": "Run a small opt-in read-only real-data campaign with frozen manifest/checksums and reproducible outputs to validate the intake/research pipeline without treating the result as profitability proof.",
+      "resolution": "",
+      "severity": "P2",
+      "status": "OPEN",
+      "track": "R3"
+    },
+    {
+      "area": "Research Control Center",
+      "evidence": [],
+      "id": "TD-R3-007",
+      "next_action": "Add a read-only research reporting/control-center surface over immutable registries with no OMS/broker dependency or capital authority.",
+      "resolution": "",
+      "severity": "P2",
+      "status": "OPEN",
+      "track": "R3"
+    }
+  ],
+  "registry_version": 1
+}
