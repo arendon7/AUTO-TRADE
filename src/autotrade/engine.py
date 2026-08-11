@@ -72,12 +72,27 @@ class DurablePipelineResult:
     recovery_required: bool = False
 
 
+@dataclass(frozen=True, slots=True)
+class ReplacePipelineResult:
+    original_order: OrderRecord
+    replacement: DurablePipelineResult | None
+    aborted_reason: str = ""
+
+    @property
+    def replaced(self) -> bool:
+        return self.replacement is not None and self.replacement.order is not None
+
+
 class ConcurrentRiskStateChanged(RuntimeError):
     pass
 
 
+class ReplacementAborted(RuntimeError):
+    pass
+
+
 class DurableTradingPipeline:
-    """Cross-process guarded path with durable risk reservations and fill accounting."""
+    """Cross-process guarded path with durable reservations and fill accounting."""
 
     def __init__(
         self,
@@ -226,6 +241,64 @@ class DurableTradingPipeline:
                 now=now,
             )
         return final
+
+    def replace_order(
+        self,
+        *,
+        order_id: str,
+        replacement_intent: OrderIntent,
+        market: MarketSnapshot,
+        now: datetime,
+    ) -> ReplacePipelineResult:
+        """Safely replace by authoritative cancel followed by a fresh guarded submit.
+
+        There is deliberately no broker-native in-place mutation in R2. The
+        original reservation remains authoritative until cancellation is known.
+        Only after local/broker evidence says CANCELLED is a fresh replacement
+        evaluated against the then-current portfolio and reservation state.
+        """
+        original = self._oms.get_by_order_id(order_id)
+        if original is None:
+            raise KeyError(order_id)
+        if original.status.terminal:
+            raise ReplacementAborted(
+                f"original order already terminal: {original.status.value}"
+            )
+        if replacement_intent.idempotency_key == original.intent.idempotency_key:
+            raise ReplacementAborted("replacement requires a new idempotency key")
+        if replacement_intent.intent_id == original.intent.intent_id:
+            raise ReplacementAborted("replacement requires a new intent_id")
+        if (
+            replacement_intent.symbol != original.intent.symbol
+            or replacement_intent.side is not original.intent.side
+            or replacement_intent.strategy_id != original.intent.strategy_id
+        ):
+            raise ReplacementAborted(
+                "replacement must preserve symbol, side and strategy identity"
+            )
+
+        cancelled = self.cancel_order(order_id=order_id, now=now)
+        if cancelled.status is not OrderStatus.CANCELLED:
+            # FILLED/EXPIRED/REJECTED may win a race with cancellation. Creating
+            # a new order automatically in that case could double exposure.
+            raise ReplacementAborted(
+                f"replacement aborted because original resolved as {cancelled.status.value}"
+            )
+
+        replacement = self.process_intent(
+            intent=replacement_intent,
+            market=market,
+            now=now,
+        )
+        return ReplacePipelineResult(
+            original_order=cancelled,
+            replacement=replacement,
+            aborted_reason=(
+                replacement.decision.reason_code
+                if replacement.order is None and replacement.decision is not None
+                else ""
+            ),
+        )
 
     def _apply_known_fills(self, *, order: OrderRecord, now: datetime) -> None:
         fills = self._oms.fills_for_order(order.order_id)
