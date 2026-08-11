@@ -98,7 +98,7 @@ def test_decision_self_hash_and_ttl_are_fail_closed(tmp_path) -> None:
         replace(state.decision, decision_hash="f" * 64)
     with pytest.raises(ValueError, match="<=2 minutes"):
         registry.record_operator_approval(
-            context=replace(context, attempt_id="attempt-long-ttl", preparation_hash="0" * 64),
+            context=context,
             operator_id="operator:arendon7",
             issued_at=NOW,
             expires_at=NOW + timedelta(minutes=3),
