@@ -1,0 +1,70 @@
+name: R2 Gated Certification
+
+on:
+  push:
+    branches: ["reconstruction/r2-capital-oms"]
+    paths: [".r2cert/TRIGGER"]
+
+permissions:
+  contents: write
+
+jobs:
+  certify-r2:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout exact branch
+        uses: actions/checkout@v4
+        with:
+          ref: reconstruction/r2-capital-oms
+          fetch-depth: 0
+
+      - name: Capture tested source SHA
+        run: echo "R2_SOURCE_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+
+      - name: Verify transient patch machinery is absent
+        run: |
+          test ! -e .r2patch
+          test ! -e .r2final
+          test ! -e .r2final2
+          test ! -e .r2micro
+          test ! -e .github/workflows/r2-one-shot-patch.yml
+          test ! -e .github/workflows/r2-finalize-patch.yml
+          test ! -e .github/workflows/r2-finalize2-patch.yml
+          test ! -e .github/workflows/r2-micro-patch.yml
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install
+        run: python -m pip install -e '.[dev]'
+
+      - name: Compile
+        run: python -m compileall -q src tests scripts .r2cert
+
+      - name: Full tests and coverage
+        run: |
+          pytest --junitxml=/tmp/r2-junit.xml --cov=autotrade --cov-report=term-missing --cov-report=json:/tmp/r2-coverage.json
+
+      - name: Machine-readable contract registry
+        run: python scripts/check_contract_registry.py | tee /tmp/r2-contract.txt
+
+      - name: Canonical knowledge contract
+        run: python scripts/check_knowledge_contract.py
+
+      - name: Write certification evidence
+        env:
+          R2_COVERAGE_JSON: /tmp/r2-coverage.json
+          R2_JUNIT_XML: /tmp/r2-junit.xml
+          R2_CONTRACT_OUTPUT: /tmp/r2-contract.txt
+        run: python .r2cert/write_evidence2.py
+
+      - name: Commit evidence and self-clean
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "test(r2): record gated certification evidence"
+          git push origin HEAD:reconstruction/r2-capital-oms
