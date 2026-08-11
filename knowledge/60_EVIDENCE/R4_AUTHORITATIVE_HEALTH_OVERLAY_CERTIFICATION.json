@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "track": "R4",
+  "debt_id": "TD-R4-013",
+  "status": "CERTIFIED_SLICE_NOT_TRACK_CERTIFICATION",
+  "certification_basis_head": "32584b277febb5680038c9c6e06379f99e648cdb",
+  "ci": {
+    "core_safety_run_id": 31459705434,
+    "knowledge_contract_run_id": 31459705450,
+    "tests_passed": 472,
+    "coverage_percent": 86.42,
+    "contract_registry": "PASS",
+    "contract_count": 10,
+    "contract_registry_sha256": "ddb94afa8916be37d0d956e6c32f775ea41c0fb79f4ea26d2d65dfa286c62785",
+    "research_advisory_authority_boundary": "PASS",
+    "debt_register_contract": "PASS",
+    "knowledge_contract": "PASS"
+  },
+  "implementation": [
+    "src/autotrade/health_bridge.py",
+    "src/autotrade/safety.py",
+    "src/autotrade/oms.py"
+  ],
+  "tests": [
+    "tests/test_r4_authoritative_health_overlay.py",
+    "tests/test_r4_health_bridge.py",
+    "tests/test_r4_health_bridge_integration.py",
+    "tests/test_r4_recovery_ack_idempotency.py"
+  ],
+  "certified_invariants": [
+    "Every effective Health control read compares the durable bridge projection with the current authoritative HealthControlState.",
+    "Authoritative Health read failures and missing, stale or future required Health evidence fail closed.",
+    "Authoritative baseline/policy binding mismatches, backward versions and same-version identity conflicts fail closed.",
+    "A newer, more restrictive authoritative Health state tightens effective control immediately even before durable bridge synchronization.",
+    "A newer, less restrictive authoritative Health state never relaxes risk during a read; the bridge remains the stricter authority until explicit recovery/synchronization permits relaxation.",
+    "The read overlay is defensive only and does not silently rewrite durable bridge state.",
+    "Effective evidence fingerprints bind both the bridge projection and the current authoritative Health evidence.",
+    "Capital Safety Kernel inherits the overlay and rejects unsynchronized worsening without waiting for a safety-state version bump.",
+    "OMS submit-time recheck inherits the overlay and blocks unsynchronized worsening before broker submission even when the previously approved safety-state version is unchanged.",
+    "The overlay only maintains or reduces risk and never grants order/broker authority."
+  ],
+  "explicit_non_claims": [
+    "This is not R4 track certification.",
+    "This is not profitability evidence.",
+    "This does not grant external PAPER or LIVE authority."
+  ],
+  "capital_authority": "NONE",
+  "live_trading": "BLOCKED"
+}
