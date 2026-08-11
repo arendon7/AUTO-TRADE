@@ -1,0 +1,123 @@
+name: R6 Close TD-R6-013
+
+on:
+  push:
+    branches: ["reconstruction/r6-external-paper-protection"]
+    paths:
+      - ".github/workflows/r6-close-td013.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  close-td-r6-013:
+    if: github.ref == 'refs/heads/reconstruction/r6-external-paper-protection'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout exact branch
+        uses: actions/checkout@v5
+        with:
+          ref: reconstruction/r6-external-paper-protection
+          fetch-depth: 0
+
+      - name: Close structural debt from certified evidence
+        run: |
+          python - <<'PY'
+          from __future__ import annotations
+          import json
+          from pathlib import Path
+
+          debt_path = Path("knowledge/00_CANON/debt_register.json")
+          evidence_path = Path("knowledge/60_EVIDENCE/R6_TD_R6_013_OPERATIONAL_LIFECYCLE_CERTIFICATION.json")
+          md_path = Path("knowledge/00_CANON/DEBT_REGISTER.md")
+          workflow_path = Path(".github/workflows/r6-close-td013.yml")
+
+          if not evidence_path.is_file():
+              raise SystemExit("TD-R6-013 certification evidence is missing")
+          evidence = json.loads(evidence_path.read_text(encoding="utf-8"))
+          if evidence.get("debt_id") != "TD-R6-013":
+              raise SystemExit("TD-R6-013 evidence identity mismatch")
+          if evidence.get("preclosure_head_sha") != "aa3cc3c7eb5cad26ea9427c0d448f827ddffb6f5":
+              raise SystemExit("TD-R6-013 evidence is not bound to certified preclosure head")
+          certification = evidence.get("certification", {})
+          required = (
+              certification.get("core_safety", {}).get("conclusion"),
+              certification.get("r6_paper_authority", {}).get("conclusion"),
+              certification.get("knowledge_contract", {}).get("conclusion"),
+          )
+          if required != ("success", "success", "success"):
+              raise SystemExit("TD-R6-013 preclosure certification is incomplete")
+          if evidence.get("scope", {}).get("real_external_paper_post_performed") is not False:
+              raise SystemExit("structural closure must not claim or require a PAPER POST")
+          if evidence.get("properties_proven", {}).get("live_trading") != "BLOCKED":
+              raise SystemExit("LIVE must remain blocked")
+
+          document = json.loads(debt_path.read_text(encoding="utf-8"))
+          matches = [item for item in document["items"] if item.get("id") == "TD-R6-013"]
+          if len(matches) != 1:
+              raise SystemExit("TD-R6-013 must exist exactly once")
+          item = matches[0]
+          if item.get("status") not in {"OPEN", "CLOSED"}:
+              raise SystemExit("TD-R6-013 has invalid prior status")
+
+          item["evidence"] = [
+              "knowledge/60_EVIDENCE/R6_TD_R6_013_OPERATIONAL_LIFECYCLE_CERTIFICATION.json",
+              "src/autotrade/brokers/alpaca_paper_operational.py",
+              "src/autotrade/brokers/alpaca_paper_operational_prepare.py",
+              "src/autotrade/brokers/alpaca_paper_core_provenance.py",
+              "src/autotrade/brokers/alpaca_paper_operational_execute.py",
+              "src/autotrade/brokers/alpaca_paper_operational_evidence.py",
+              "scripts/r6_external_paper_preflight.py",
+              "scripts/r6_issue_operator_decision.py",
+              "scripts/r6_execute_paper_canary.py",
+              "scripts/check_r6_operational_lifecycle_boundary.py",
+              "scripts/check_r6_core_provenance_boundary.py",
+              "scripts/check_r6_preparation_core_binding.py",
+              "scripts/check_r6_operational_execution_boundary.py",
+              "tests/test_r6_operational_prepare.py",
+              "tests/test_r6_operator_decision_cli.py",
+              "tests/test_r6_operational_execute.py",
+              "tests/test_r6_operational_execute_validation.py",
+              "tests/test_r6_execute_paper_canary_cli.py",
+              "tests/test_r6_operational_evidence.py",
+              ".github/workflows/core-tests.yml",
+              ".github/workflows/r6-authority.yml"
+          ]
+          item["next_action"] = ""
+          item["resolution"] = (
+              "Certified durable authority-separated R6 operational lifecycle: sanitized GET-only PAPER preflight; "
+              "same-workspace offline preparation with read-only core provenance; separate interactive human decision; "
+              "separate triple-gated single-shot execution runtime with exact same-attempt crash resume and UNKNOWN no-repost semantics; "
+              "and separate GET/receive-only reconciliation, trade_updates and qualification evidence capture. Permanent Core/R6 CI forbids "
+              "preparation/evidence authority widening, credential persistence, AI/research execution authority and LIVE access. Certified preclosure "
+              "head aa3cc3c7eb5cad26ea9427c0d448f827ddffb6f5: Core 31547368270, R6 Authority 31547368240, Knowledge 31547368285 PASS; "
+              "1191 tests / 85.04916607812245% coverage. No real PAPER POST was required or performed for this structural closure."
+          )
+          item["status"] = "CLOSED"
+          debt_path.write_text(json.dumps(document, indent=2, sort_keys=False) + "\n", encoding="utf-8")
+
+          md = md_path.read_text(encoding="utf-8")
+          old = "| `TD-R6-013` | P1 | operational external PAPER lifecycle harness | OPEN — durable read-only preparation + separate human execution + separate evidence capture; preparation cannot import/call POST authority |"
+          new = "| `TD-R6-013` | P1 | operational external PAPER lifecycle harness | **CLOSED** — certified sanitized preflight + same-core preparation/provenance + separate human decision + triple-gated restart-safe single-shot execution + separate evidence capture; no real POST required for structural closure |"
+          if old not in md and new not in md:
+              raise SystemExit("TD-R6-013 Markdown row drifted unexpectedly")
+          md = md.replace(old, new)
+          md = md.replace("R6 P0/P1/P2 OPEN: **7**.", "R6 P0/P1/P2 OPEN: **6**.")
+          md_path.write_text(md, encoding="utf-8")
+
+          workflow_path.unlink()
+          PY
+
+      - name: Validate canonical debt register
+        run: |
+          python scripts/check_debt_register.py
+          python scripts/check_knowledge_contract.py
+
+      - name: Commit closure and self-delete workflow
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add knowledge/00_CANON/debt_register.json knowledge/00_CANON/DEBT_REGISTER.md .github/workflows/r6-close-td013.yml
+          git diff --cached --check
+          git commit -m "evidence(r6): close TD-R6-013 operational lifecycle"
+          git push origin HEAD:reconstruction/r6-external-paper-protection
