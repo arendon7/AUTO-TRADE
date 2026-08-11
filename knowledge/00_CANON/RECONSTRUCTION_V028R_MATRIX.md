@@ -1,6 +1,6 @@
 # v0.28R CAPABILITY EQUIVALENCE MATRIX
 
-Fecha: 2026-08-10
+Fecha: 2026-08-11
 Estado: ACTIVE — **R0–R4 certified; R5 next**
 Objetivo: reconstruir todas las capacidades históricamente verificadas sin deuda oculta y sin declarar equivalencia por número de versión.
 
@@ -40,7 +40,7 @@ Objetivo: reconstruir todas las capacidades históricamente verificadas sin deud
 | R3 | FINAL_HOLDOUT authority separation | reconstructed strengthening | PASS | one-use consumed permit bound one-to-one to final trial + research authority gate |
 | R3 | bounded real-data reproducibility evidence | reconstructed strengthening | PASS | 2 independent 10-bar fetches + identical hashes + artifact roundtrip |
 | R4 | authoritative instrument master | reconstructed safety prerequisite | PASS | versioned venue rules/provenance; unknown/stale/conflicting metadata fail closed (`TD-R4-001`) |
-| R4 | versioned Portfolio State / reconciliation infrastructure | v0.18 lineage | PASS | durable/versioned base exists from R0/R2; R4 portfolio-governance invariants still need certification |
+| R4 | versioned Portfolio State / reconciliation infrastructure | v0.18 lineage | PASS | shared semantic snapshot validation + durable portfolio hash commitment + atomic fill/projection integrity certified (`TD-R4-008`,`TD-R4-009`,`TD-R4-010`) |
 | R4 | correlation-aware portfolio research | v0.18 | PASS | common-panel dependence + anti-forgery clusters + exact strategy/cluster/portfolio budgets (`TD-R4-002`) |
 | R4 | allocation perturbation + leave-one-out | v0.18 | PASS | deterministic exact-sum Decimal normalization + complete recomputable perturbation/leave-one-out gate (`TD-R4-003`,`TD-R4-011`) |
 | R4 | TRAIN-calibrated regimes | v0.18 | PASS | TRAIN/DEVELOPMENT-only calibration + frozen HOLDOUT evaluation + UNKNOWN on stale/missing evidence (`TD-R4-004`) |
@@ -81,7 +81,7 @@ This campaign is reproducibility/intake evidence, **not profitability proof**.
 
 ### R4
 Branch certification basis: `350efd43ac133c95a1997b4a821a2e0bab4afaf2`.
-Final branch evidence before canonical closure: **480 tests PASS / 86.58% coverage**, Contract Registry 10 PASS, Research/Advisory Authority PASS, Debt Register PASS, Knowledge Contract PASS.
+Final branch evidence before canonical closure: **479 tests PASS / 86.45% coverage**, Contract Registry 10 PASS, Research/Advisory Authority PASS, Debt Register PASS, Knowledge Contract PASS.
 Certification artifact: `knowledge/60_EVIDENCE/R4_CERTIFICATION.json`.
 
 R4 adds no external PAPER/LIVE authority; Portfolio Manager remains advisory-only and the Defensive Health Bridge can only maintain/reduce/block risk.
