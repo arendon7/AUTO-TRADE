@@ -17,11 +17,11 @@ class BrokerIdempotencyConflict(RuntimeError):
 
 
 class DurablePaperBroker:
-    """Deterministic paper broker with durable, idempotent broker-side state.
+    """Deterministic durable paper execution-safety simulator.
 
-    It intentionally models only immediate MARKET fills and marketable LIMIT
-    fills. Non-marketable LIMIT orders remain open. This is an execution-safety
-    simulator, not a realistic backtest fill engine.
+    MARKET and marketable LIMIT orders fill immediately. Non-marketable LIMIT
+    orders remain open and may be cancelled. BrokerExecution snapshots are
+    cumulative. This is not a realistic research fill model.
     """
 
     def __init__(self, runtime: SQLiteRuntime) -> None:
@@ -40,10 +40,17 @@ class DurablePaperBroker:
                     side TEXT NOT NULL,
                     status TEXT NOT NULL,
                     execution_json TEXT NOT NULL,
-                    submitted_at TEXT NOT NULL
+                    submitted_at TEXT NOT NULL,
+                    updated_at TEXT
                 );
                 """
             )
+            columns = {
+                row["name"]
+                for row in conn.execute("PRAGMA table_info(paper_broker_orders)").fetchall()
+            }
+            if "updated_at" not in columns:
+                conn.execute("ALTER TABLE paper_broker_orders ADD COLUMN updated_at TEXT")
         finally:
             conn.close()
 
@@ -85,8 +92,9 @@ class DurablePaperBroker:
             conn.execute(
                 """
                 INSERT INTO paper_broker_orders(
-                    order_id, idempotency_key, symbol, side, status, execution_json, submitted_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                    order_id, idempotency_key, symbol, side, status,
+                    execution_json, submitted_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     order.order_id,
@@ -96,10 +104,50 @@ class DurablePaperBroker:
                     execution.status.value,
                     _execution_to_json(execution),
                     now.isoformat(),
+                    now.isoformat(),
                 ),
             )
             conn.execute("COMMIT")
             return execution
+        except Exception:
+            if conn.in_transaction:
+                conn.execute("ROLLBACK")
+            raise
+        finally:
+            conn.close()
+
+    def cancel(self, *, order_id: str, now: datetime) -> BrokerExecution:
+        conn = self._runtime.connect()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                "SELECT status, execution_json FROM paper_broker_orders WHERE order_id = ?",
+                (order_id,),
+            ).fetchone()
+            if row is None:
+                conn.execute("ROLLBACK")
+                raise KeyError(order_id)
+            current = _execution_from_json(row["execution_json"])
+            status = OrderStatus(row["status"])
+            if status.terminal:
+                conn.execute("COMMIT")
+                return current
+            cancelled = BrokerExecution(status=OrderStatus.CANCELLED, fills=current.fills)
+            conn.execute(
+                """
+                UPDATE paper_broker_orders
+                SET status = ?, execution_json = ?, updated_at = ?
+                WHERE order_id = ?
+                """,
+                (
+                    cancelled.status.value,
+                    _execution_to_json(cancelled),
+                    now.isoformat(),
+                    order_id,
+                ),
+            )
+            conn.execute("COMMIT")
+            return cancelled
         except Exception:
             if conn.in_transaction:
                 conn.execute("ROLLBACK")
@@ -133,7 +181,12 @@ class DurablePaperBroker:
         for row in rows:
             status = OrderStatus(row["status"])
             execution = _execution_from_json(row["execution_json"])
-            if status in {OrderStatus.SUBMITTED, OrderStatus.PARTIALLY_FILLED}:
+            if status in {
+                OrderStatus.SUBMITTED,
+                OrderStatus.PARTIALLY_FILLED,
+                OrderStatus.CANCEL_PENDING,
+                OrderStatus.REPLACE_PENDING,
+            }:
                 open_order_ids.add(row["order_id"])
             for fill in execution.fills:
                 signed = fill.side.sign * fill.quantity * fill.price
