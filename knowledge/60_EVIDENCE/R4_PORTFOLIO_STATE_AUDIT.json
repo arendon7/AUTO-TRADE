@@ -1,0 +1,46 @@
+{
+  "track": "R4",
+  "slice": ["TD-R4-008", "TD-R4-009", "TD-R4-010"],
+  "capability": "Versioned Portfolio State / reconciliation infrastructure audit",
+  "certification_state": "SLICE_CERTIFIED",
+  "certification_basis_commit": "a531a8f285cdab887856cb60d91bc5b7317ac58e",
+  "ci": {
+    "compile": "PASS",
+    "test_suite": "PASS",
+    "coverage_gate_percent": 85.0,
+    "coverage_gate": "PASS",
+    "contract_registry": "PASS",
+    "research_authority_boundary": "PASS",
+    "debt_register_contract": "PASS",
+    "knowledge_contract": "PASS"
+  },
+  "reused_certified_infrastructure": [
+    "R0/R2 versioned Portfolio State",
+    "R0/R2 SQLite/WAL durability",
+    "R0/R2 atomic risk reservations",
+    "R0/R2 reconciliation and crash recovery",
+    "R2 fill-level idempotency and projection semantics"
+  ],
+  "r4_hardening_certified": [
+    "one semantic PortfolioSnapshot validator is shared by persistence and Capital Safety Kernel",
+    "aggregate gross/net exposure must exactly match the aggregate position map",
+    "strategy gross maps must exactly match strategy position maps",
+    "aggregate positions must exactly equal the sum of strategy positions",
+    "durable portfolio_state carries an independent SHA-256 commitment over exact persisted snapshot bytes",
+    "durable reads validate hash before semantic use and semantically validate even when an attacker recomputes the storage hash",
+    "valid legacy portfolio rows are semantically validated before hash backfill; invalid legacy rows fail migration",
+    "risk reservation acquisition validates the current portfolio commitment before binding to its version",
+    "durable fills verify payload hash and independent identity columns on every read/replay",
+    "in-memory snapshots are detached at store boundaries so nested mutable maps cannot change exposure without a version increment",
+    "in-memory CAS/initialization/reconciliation writes reject semantically invalid snapshots or non-boolean state flags",
+    "in-memory fill batches validate and project fully before publishing any snapshot or fill identity bookkeeping",
+    "a late invalid fill or conflicting duplicate inside one batch leaves both exposure and idempotency bookkeeping unchanged",
+    "identical no-op reconciliation updates are idempotent and do not create artificial version increments"
+  ],
+  "explicit_non_claims": [
+    "This audit does not certify correlation-aware portfolio research, allocation robustness, regimes, health/drift or sizing.",
+    "In-memory and durable stores share semantic trust invariants but do not claim identical durability mechanisms.",
+    "No external PAPER or LIVE order authority is added."
+  ],
+  "capital_state": "LIVE_TRADING_BLOCKED"
+}
