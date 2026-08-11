@@ -33,6 +33,21 @@ _SUPPORTED_LEG_STATUSES = frozenset(
         "replaced",
     }
 )
+_BRACKET_PAYLOAD_KEYS = frozenset(
+    {
+        "client_order_id",
+        "extended_hours",
+        "limit_price",
+        "order_class",
+        "qty",
+        "side",
+        "stop_loss",
+        "symbol",
+        "take_profit",
+        "time_in_force",
+        "type",
+    }
+)
 
 
 class PaperBracketError(RuntimeError):
@@ -78,10 +93,65 @@ class PaperEquityVenueRules:
 class AlpacaEquityBracketRequest:
     order_id: str
     client_order_id: str
+    asset_class: str
     instrument_master_fingerprint: str
     canonical_payload: Mapping[str, object]
     payload_json: str
     payload_hash: str
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.order_id, str) or not _ID_RE.fullmatch(self.order_id):
+            raise ValueError("order_id must be canonical identifier")
+        if not isinstance(self.client_order_id, str) or not _ID_RE.fullmatch(self.client_order_id):
+            raise ValueError("client_order_id must be canonical identifier")
+        if self.asset_class != "us_equity":
+            raise ValueError("R6 bracket request supports us_equity only")
+        if not _HASH_RE.fullmatch(self.instrument_master_fingerprint):
+            raise ValueError("instrument_master_fingerprint must be lowercase SHA-256")
+        if not isinstance(self.canonical_payload, Mapping):
+            raise ValueError("canonical_payload must be a mapping")
+        payload = dict(self.canonical_payload)
+        if frozenset(payload) != _BRACKET_PAYLOAD_KEYS:
+            raise ValueError("bracket request payload surface is not exact")
+        if payload.get("client_order_id") != self.client_order_id:
+            raise ValueError("bracket request client_order_id mismatch")
+        if payload.get("order_class") != "bracket":
+            raise ValueError("bracket request order_class must be bracket")
+        if payload.get("side") != "buy":
+            raise ValueError("R6 bracket request is BUY-only")
+        if payload.get("type") != "limit":
+            raise ValueError("R6 bracket request parent type must be limit")
+        if payload.get("time_in_force") != "day":
+            raise ValueError("R6 bracket request time_in_force must be day")
+        if payload.get("extended_hours") is not False:
+            raise ValueError("R6 bracket request extended_hours must be false")
+        symbol = payload.get("symbol")
+        if not isinstance(symbol, str) or not _SYMBOL_RE.fullmatch(symbol):
+            raise ValueError("bracket request symbol must be canonical")
+        qty = _canonical_positive_decimal(payload.get("qty"), "qty")
+        limit_price = _canonical_positive_decimal(payload.get("limit_price"), "limit_price")
+        take_profit = payload.get("take_profit")
+        if not isinstance(take_profit, Mapping) or frozenset(take_profit) != {"limit_price"}:
+            raise ValueError("bracket request take_profit surface is not exact")
+        take_profit_price = _canonical_positive_decimal(
+            take_profit.get("limit_price"), "take_profit.limit_price"
+        )
+        stop_loss = payload.get("stop_loss")
+        if not isinstance(stop_loss, Mapping) or frozenset(stop_loss) != {"stop_price"}:
+            raise ValueError("bracket request stop_loss surface is not exact")
+        stop_loss_price = _canonical_positive_decimal(
+            stop_loss.get("stop_price"), "stop_loss.stop_price"
+        )
+        if not take_profit_price > limit_price > stop_loss_price:
+            raise ValueError("bracket request protection geometry is invalid")
+        if qty <= 0:
+            raise ValueError("bracket request quantity must be positive")
+        canonical_json = _canonical_json(payload)
+        if self.payload_json != canonical_json:
+            raise ValueError("payload_json is not canonical payload serialization")
+        calculated_hash = sha256(canonical_json.encode("utf-8")).hexdigest()
+        if self.payload_hash != calculated_hash:
+            raise ValueError("payload_hash does not match canonical payload")
 
 
 @dataclass(frozen=True, slots=True)
@@ -164,6 +234,7 @@ class AlpacaEquityBracketBuilder:
         return AlpacaEquityBracketRequest(
             order_id=order.order_id,
             client_order_id=client_order_id,
+            asset_class=venue_rules.asset_class,
             instrument_master_fingerprint=venue_rules.instrument_master_fingerprint,
             canonical_payload=payload,
             payload_json=payload_json,
@@ -182,6 +253,8 @@ class AlpacaNestedBracketResponseValidator:
         expected: AlpacaEquityBracketRequest,
     ) -> AlpacaNestedBracketAttestation:
         _validate_request_id(request_id)
+        if expected.asset_class != "us_equity":
+            raise PaperBracketResponseIntegrityError("expected bracket asset class must be us_equity")
         payload = _strict_json_object(response_body)
         parent_id = _required_id(payload, "id")
         client_order_id = _required_str(payload, "client_order_id")
@@ -334,6 +407,20 @@ def _validate_request_id(value: str) -> None:
         raise PaperBracketResponseIntegrityError("X-Request-ID is missing or too long")
     if any(ord(char) < 33 or ord(char) == 127 for char in value):
         raise PaperBracketResponseIntegrityError("X-Request-ID contains invalid characters")
+
+
+def _canonical_positive_decimal(value: object, label: str) -> Decimal:
+    if not isinstance(value, str):
+        raise ValueError(f"{label} must be canonical decimal string")
+    try:
+        parsed = Decimal(value)
+    except Exception as exc:
+        raise ValueError(f"{label} is invalid decimal") from exc
+    if not _finite_positive(parsed):
+        raise ValueError(f"{label} must be finite and positive")
+    if _decimal_text(parsed) != value:
+        raise ValueError(f"{label} must use canonical decimal text")
+    return parsed
 
 
 def _decimal_text(value: Decimal) -> str:
