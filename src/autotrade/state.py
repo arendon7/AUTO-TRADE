@@ -62,6 +62,8 @@ class InMemoryOrderStore:
 class SafetyControlState:
     kill_switch_active: bool = False
     kill_switch_reason: str = ""
+    circuit_active: bool = False
+    circuit_reason: str = ""
     version: int = 0
     updated_at: datetime | None = None
 
@@ -70,6 +72,8 @@ class SafetyStateStore(Protocol):
     def get(self) -> SafetyControlState: ...
     def activate(self, *, reason: str, now: datetime) -> SafetyControlState: ...
     def reset(self, *, now: datetime) -> SafetyControlState: ...
+    def activate_circuit(self, *, reason: str, now: datetime) -> SafetyControlState: ...
+    def acknowledge_circuit(self, *, reason: str, now: datetime) -> SafetyControlState: ...
 
 
 class InMemorySafetyStateStore:
@@ -83,7 +87,8 @@ class InMemorySafetyStateStore:
 
     def activate(self, *, reason: str, now: datetime) -> SafetyControlState:
         with self._lock:
-            self._state = SafetyControlState(
+            self._state = replace(
+                self._state,
                 kill_switch_active=True,
                 kill_switch_reason=reason,
                 version=self._state.version + 1,
@@ -93,9 +98,40 @@ class InMemorySafetyStateStore:
 
     def reset(self, *, now: datetime) -> SafetyControlState:
         with self._lock:
-            self._state = SafetyControlState(
+            self._state = replace(
+                self._state,
                 kill_switch_active=False,
                 kill_switch_reason="",
+                version=self._state.version + 1,
+                updated_at=now,
+            )
+            return self._state
+
+    def activate_circuit(self, *, reason: str, now: datetime) -> SafetyControlState:
+        if not reason.strip():
+            raise ValueError("circuit reason is required")
+        with self._lock:
+            if self._state.circuit_active:
+                return self._state
+            self._state = replace(
+                self._state,
+                circuit_active=True,
+                circuit_reason=reason,
+                version=self._state.version + 1,
+                updated_at=now,
+            )
+            return self._state
+
+    def acknowledge_circuit(self, *, reason: str, now: datetime) -> SafetyControlState:
+        if not reason.strip():
+            raise ValueError("circuit acknowledgement reason is required")
+        with self._lock:
+            if not self._state.circuit_active:
+                return self._state
+            self._state = replace(
+                self._state,
+                circuit_active=False,
+                circuit_reason="",
                 version=self._state.version + 1,
                 updated_at=now,
             )
