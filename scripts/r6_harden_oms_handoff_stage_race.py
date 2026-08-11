@@ -64,6 +64,12 @@ def main() -> int:
         "            return SafetyControlState(version=0, updated_at=NOW)\n",
         "writer PRE_IO race fixture",
     )
+    writer_test = replace_once(
+        writer_test,
+        "    assert flipping.calls == 2\n",
+        "    assert flipping.calls == 4\n",
+        "writer PRE_IO read-count assertion",
+    )
     WRITER_TEST.write_text(writer_test, encoding="utf-8")
     print("TD-R6-010 stage Safety race hardened and PRE_IO fixture realigned")
     return 0
