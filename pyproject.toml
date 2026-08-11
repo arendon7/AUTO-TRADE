@@ -7,7 +7,9 @@ name = "auto-trade-core"
 version = "0.4.0.dev0"
 description = "Capital-safe algorithmic trading core"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+  "websockets==16.1.1",
+]
 
 [project.optional-dependencies]
 dev = [
