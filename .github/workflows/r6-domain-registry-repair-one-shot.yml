@@ -1,0 +1,99 @@
+name: R6 Canonical Domain Registry Repair
+
+on:
+  push:
+    branches:
+      - reconstruction/r6-external-paper-protection
+    paths:
+      - .github/workflows/r6-domain-registry-repair-one-shot.yml
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: reconstruction/r6-external-paper-protection
+          fetch-depth: 0
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Apply exact R6 repair
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          replacements = {
+              'tests/test_r6_paper_canary_permit.py': [
+                  ('        stop_price=None,\n', ''),
+                  ('        broker_order_id=None,\n        updated_at=NOW - timedelta(seconds=1),\n', '        created_at=NOW - timedelta(seconds=1),\n'),
+              ],
+              'tests/test_r6_paper_reconciliation.py': [
+                  ('        stop_price=None,\n', ''),
+                  ('        broker_order_id=None,\n        updated_at=NOW - timedelta(seconds=1),\n', '        created_at=NOW - timedelta(seconds=1),\n'),
+              ],
+              'tests/test_r6_paper_writer.py': [
+                  ('        stop_price=None,\n', ''),
+                  ('        broker_order_id=None,\n        updated_at=NOW - timedelta(seconds=1),\n', '        created_at=NOW - timedelta(seconds=1),\n'),
+              ],
+              'tests/test_r6_paper_submission_ambiguity.py': [
+                  ('        stop_price=None,\n', ''),
+                  ('        broker_order_id=None,\n        updated_at=T0,\n', '        created_at=T0,\n'),
+                  ('OrderStatus.CREATED', 'OrderStatus.SUBMITTED'),
+              ],
+          }
+          for raw_path, pairs in replacements.items():
+              path = Path(raw_path)
+              text = path.read_text(encoding='utf-8')
+              for old, new in pairs:
+                  if old not in text:
+                      raise SystemExit(f'missing expected fixture pattern in {raw_path}: {old!r}')
+                  text = text.replace(old, new)
+              path.write_text(text, encoding='utf-8')
+
+          path = Path('src/autotrade/brokers/alpaca_paper_submission.py')
+          text = path.read_text(encoding='utf-8')
+          old = '''            if by_order is not None or by_client is not None:\n                if by_order is None or by_client is None:\n                    raise PaperSubmissionIntegrityError("submission binding indexes disagree")\n                existing = _binding_from_row(by_order)\n                if str(by_client["order_id"]) != existing.order_id:\n                    raise PaperSubmissionConflict(\n                        "client_order_id is already bound to another local order"\n                    )\n                if existing.fingerprint != binding.fingerprint:\n                    raise PaperSubmissionConflict(\n                        "order/client_order_id is already bound to different immutable data"\n                    )\n                _, state, _ = self._verify_locked(conn, binding.order_id)\n                conn.execute("COMMIT")\n                return state\n'''
+          new = '''            if by_order is None and by_client is not None:\n                raise PaperSubmissionConflict(\n                    "client_order_id is already bound to another local order"\n                )\n            if by_order is not None:\n                existing = _binding_from_row(by_order)\n                if existing.client_order_id != binding.client_order_id:\n                    raise PaperSubmissionConflict(\n                        "local order is already bound to a different client_order_id"\n                    )\n                if by_client is None or str(by_client["order_id"]) != existing.order_id:\n                    raise PaperSubmissionIntegrityError("submission binding indexes disagree")\n                if existing.fingerprint != binding.fingerprint:\n                    raise PaperSubmissionConflict(\n                        "order/client_order_id is already bound to different immutable data"\n                    )\n                _, state, _ = self._verify_locked(conn, binding.order_id)\n                conn.execute("COMMIT")\n                return state\n'''
+          if old not in text:
+              raise SystemExit('prepare classification block not found')
+          text = text.replace(old, new, 1)
+
+          old = '''            if state.status is not PaperSubmissionStatus.PREPARED:\n                raise PaperSubmissionBlocked(\n                    f"external PAPER submit blocked from {state.status.value}; reconcile first"\n                )\n\n            event = _make_event(\n'''
+          new = '''            if now.astimezone(timezone.utc) < state.updated_at.astimezone(timezone.utc):\n                raise PaperSubmissionIntegrityError(\n                    "submission event time cannot move backwards"\n                )\n            if state.status is not PaperSubmissionStatus.PREPARED:\n                raise PaperSubmissionBlocked(\n                    f"external PAPER submit blocked from {state.status.value}; reconcile first"\n                )\n\n            event = _make_event(\n'''
+          if old not in text:
+              raise SystemExit('submit transition block not found')
+          text = text.replace(old, new, 1)
+          path.write_text(text, encoding='utf-8')
+
+          for path in Path('tests').glob('test_r6_*.py'):
+              t = path.read_text(encoding='utf-8')
+              if 'stop_price=None,' in t or 'OrderStatus.CREATED' in t:
+                  raise SystemExit(f'stale canonical-domain fixture remains in {path}')
+          PY
+      - name: Commit repair before certification
+        run: |
+          git config user.name arendon7
+          git config user.email 102555888+arendon7@users.noreply.github.com
+          git add src/autotrade/brokers/alpaca_paper_submission.py tests/test_r6_paper_*.py
+          git commit -m "fix(r6): realign PAPER tests and submission registry"
+          git push origin HEAD:reconstruction/r6-external-paper-protection
+      - name: Certify repaired tree
+        run: |
+          python -m pip install -e '.[dev]'
+          python -m compileall -q src tests scripts
+          pytest --cov=autotrade --cov-report=term-missing
+          python scripts/check_contract_registry.py
+          python scripts/check_research_authority.py
+          python scripts/check_r5_authority.py
+          python scripts/check_r6_authority.py
+          python scripts/check_debt_register.py
+          python scripts/check_knowledge_contract.py
+      - name: Self-clean on success
+        run: |
+          git rm .github/workflows/r6-domain-registry-repair-one-shot.yml
+          git commit -m "chore(r6): remove domain registry repair one-shot"
+          git push origin HEAD:reconstruction/r6-external-paper-protection
