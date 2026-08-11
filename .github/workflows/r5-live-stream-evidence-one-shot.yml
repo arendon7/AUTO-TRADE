@@ -1,0 +1,192 @@
+name: R5 Live Closed-Kline Evidence
+
+on:
+  push:
+    branches:
+      - reconstruction/r5-stream-shadow-forward
+    paths:
+      - .github/workflows/r5-live-stream-evidence-one-shot.yml
+
+permissions:
+  contents: write
+
+jobs:
+  evidence:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: reconstruction/r5-stream-shadow-forward
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Install exact R5 runtime
+        run: python -m pip install -e '.[dev]'
+
+      - name: Collect one bounded live market-data-only closed kline
+        env:
+          R5_LIVE_EVIDENCE_PATH: knowledge/60_EVIDENCE/R5_LIVE_CLOSED_KLINE_STREAM_EVIDENCE.json
+        run: |
+          python - <<'PY'
+          from __future__ import annotations
+
+          from datetime import datetime, timezone
+          from decimal import Decimal
+          import json
+          import os
+          from pathlib import Path
+          from urllib.parse import urlsplit
+
+          from autotrade.research.market import InstrumentMetadata
+          from autotrade.research.streaming import ClosedKlineSubscription, StreamState
+          from autotrade.research.stream_transport import (
+              WebsocketsTransportLimits,
+              build_binance_closed_kline_stream,
+          )
+
+          instrument = InstrumentMetadata(
+              symbol="BTCUSDT",
+              venue="BINANCE_SPOT",
+              quote_currency="USDT",
+              price_tick=Decimal("0.01"),
+              quantity_step=Decimal("0.00001"),
+          )
+          subscription = ClosedKlineSubscription(
+              instrument=instrument,
+              interval="1s",
+              enabled=True,
+              timeout_seconds=5.0,
+              max_event_lag_seconds=10.0,
+              future_tolerance_seconds=2.0,
+          )
+          limits = WebsocketsTransportLimits(
+              max_message_bytes=65536,
+              max_queue_frames=1,
+              ping_interval_seconds=20.0,
+              ping_timeout_seconds=10.0,
+              close_timeout_seconds=5.0,
+          )
+          parsed = urlsplit(subscription.url)
+          assert parsed.scheme == "wss"
+          assert parsed.hostname == "data-stream.binance.vision"
+          assert parsed.path == "/ws/btcusdt@kline_1s"
+          assert parsed.query == ""
+          assert parsed.fragment == ""
+
+          stream = build_binance_closed_kline_stream(subscription, limits=limits)
+          assert stream.state == StreamState.READY
+
+          attempts = 0
+          ignored_open = 0
+          accepted = None
+          opened_at = datetime.now(timezone.utc)
+          try:
+              stream.open()
+              assert stream.state == StreamState.ACTIVE
+              # A 1s kline updates every second. Twelve bounded receives provide
+              # ample room for at least one authoritative close without an
+              # unbounded wait or reconnect loop.
+              for _ in range(12):
+                  attempts += 1
+                  received_at = datetime.now(timezone.utc)
+                  observation = stream.poll_once(received_at=received_at)
+                  if observation.ignored_open_kline:
+                      ignored_open += 1
+                      continue
+                  if observation.accepted:
+                      accepted = (observation, received_at)
+                      break
+              if accepted is None:
+                  raise RuntimeError("no authoritative closed 1s kline observed within bounded attempt budget")
+          finally:
+              stream.close()
+
+          observation, received_at = accepted
+          assert observation.bar is not None
+          assert observation.bar_fingerprint is not None
+          assert stream.state == StreamState.CLOSED
+
+          evidence = {
+              "schema_version": 1,
+              "track": "R5",
+              "control": "bounded live closed-kline market-data stream",
+              "status": "PASS",
+              "github": {
+                  "source_head": os.environ.get("GITHUB_SHA"),
+                  "run_id": int(os.environ["GITHUB_RUN_ID"]),
+                  "run_attempt": int(os.environ["GITHUB_RUN_ATTEMPT"]),
+              },
+              "endpoint": {
+                  "scheme": parsed.scheme,
+                  "host": parsed.hostname,
+                  "path": parsed.path,
+                  "market_data_only": True,
+                  "application_send_surface": "NONE",
+                  "proxy": "DISABLED",
+                  "compression": "DISABLED",
+              },
+              "subscription": {
+                  "venue": instrument.venue,
+                  "symbol": instrument.symbol,
+                  "interval": subscription.interval,
+                  "enabled_explicitly": subscription.enabled,
+                  "timeout_seconds": subscription.timeout_seconds,
+                  "max_event_lag_seconds": subscription.max_event_lag_seconds,
+                  "future_tolerance_seconds": subscription.future_tolerance_seconds,
+              },
+              "limits": {
+                  "max_attempts": 12,
+                  "max_message_bytes": limits.max_message_bytes,
+                  "max_queue_frames": limits.max_queue_frames,
+                  "ping_interval_seconds": limits.ping_interval_seconds,
+                  "ping_timeout_seconds": limits.ping_timeout_seconds,
+                  "close_timeout_seconds": limits.close_timeout_seconds,
+              },
+              "observation": {
+                  "attempts": attempts,
+                  "open_frames_ignored": ignored_open,
+                  "stream_state_after_close": stream.state.value,
+                  "bar_started_at": observation.bar.started_at.isoformat(),
+                  "bar_ended_at": observation.bar.ended_at.isoformat(),
+                  "received_at": received_at.isoformat(),
+                  "bar_fingerprint": observation.bar_fingerprint,
+              },
+              "timing": {
+                  "opened_at": opened_at.isoformat(),
+                  "finished_at": datetime.now(timezone.utc).isoformat(),
+              },
+              "assertions": [
+                  "exact market-data-only WSS host and raw-stream path were validated before I/O",
+                  "stream required explicit enabled=True",
+                  "only closed kline evidence advanced the authoritative cursor",
+                  "open kline updates were non-authoritative",
+                  "receive attempts and transport buffers were bounded",
+                  "client adapter exposes receive/close only and no application send method",
+                  "no OMS, broker order, user-data or PAPER/LIVE authority was used",
+              ],
+              "capital_authority": "NONE",
+              "live_trading": "BLOCKED",
+          }
+          path = Path(os.environ["R5_LIVE_EVIDENCE_PATH"])
+          path.write_text(json.dumps(evidence, indent=2) + "\n", encoding="utf-8")
+          print(json.dumps(evidence, sort_keys=True))
+          PY
+
+      - name: Recheck R5 authority and canonical contracts
+        run: |
+          python scripts/check_r5_authority.py
+          python scripts/check_debt_register.py
+          python scripts/check_knowledge_contract.py
+
+      - name: Commit evidence and self-clean atomically
+        run: |
+          git config user.name "arendon7"
+          git config user.email "102555888+arendon7@users.noreply.github.com"
+          git add knowledge/60_EVIDENCE/R5_LIVE_CLOSED_KLINE_STREAM_EVIDENCE.json
+          git rm -f .github/workflows/r5-live-stream-evidence-one-shot.yml
+          git commit -m "docs(r5): record bounded live closed-kline evidence"
+          git push origin HEAD:reconstruction/r5-stream-shadow-forward
