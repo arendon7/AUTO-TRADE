@@ -5,6 +5,8 @@ from dataclasses import replace
 import pytest
 
 from autotrade.brokers.alpaca_paper_operator_decision import (
+    PaperOperatorDecisionConflict,
+    PaperOperatorDecisionStatus,
     SQLitePaperOperatorDecisionRegistry,
 )
 from autotrade.brokers.alpaca_paper_writer import PaperWriterBlocked
@@ -144,8 +146,8 @@ def test_missing_durable_human_decision_never_reaches_transport(tmp_path) -> Non
     assert transport.requests == []
 
 
-def test_human_decision_consumed_by_other_attempt_never_reaches_transport(tmp_path) -> None:
-    instance, values, transport = instance_and_values(tmp_path)
+def test_operator_registry_blocks_cross_attempt_consume_before_writer(tmp_path) -> None:
+    _, values, transport = instance_and_values(tmp_path)
     original = values["operator_decision"]
     registry = SQLitePaperOperatorDecisionRegistry(
         SQLiteRuntime(tmp_path / "wrong-attempt-operator.sqlite")
@@ -156,14 +158,11 @@ def test_human_decision_consumed_by_other_attempt_never_reaches_transport(tmp_pa
         issued_at=original.issued_at,
         expires_at=original.expires_at,
     )
-    registry.consume(
-        decision=issued.decision,
-        attempt_id="writer-attempt-consumed-elsewhere",
-        now=original.issued_at,
-    )
-    altered = dict(values)
-    altered["operator_registry"] = registry
-    altered["operator_decision"] = issued.decision
-    with pytest.raises(PaperWriterBlocked, match="not consumed by this exact attempt"):
-        submit(instance, altered)
+    with pytest.raises(PaperOperatorDecisionConflict, match="another attempt"):
+        registry.consume(
+            decision=issued.decision,
+            attempt_id="writer-attempt-consumed-elsewhere",
+            now=original.issued_at,
+        )
+    assert registry.get(issued.decision.context.preparation_hash).status is PaperOperatorDecisionStatus.ISSUED
     assert transport.requests == []
