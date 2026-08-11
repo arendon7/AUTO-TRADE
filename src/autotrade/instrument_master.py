@@ -196,6 +196,21 @@ class AuthoritativeInstrumentRules:
             raise ValueError(
                 f"invalid instrument-rule payload fields; missing={sorted(missing)} unknown={sorted(unknown)}"
             )
+        supplied_fingerprint = payload.get("fingerprint")
+        if supplied_fingerprint is not None:
+            if (
+                not isinstance(supplied_fingerprint, str)
+                or not _SHA256_RE.fullmatch(supplied_fingerprint)
+            ):
+                raise InstrumentRuleConflict("instrument-rule fingerprint mismatch")
+            raw_payload = dict(payload)
+            raw_payload.pop("fingerprint", None)
+            raw_fingerprint = sha256(
+                _canonical_json(raw_payload).encode("utf-8")
+            ).hexdigest()
+            if supplied_fingerprint != raw_fingerprint:
+                raise InstrumentRuleConflict("instrument-rule fingerprint mismatch")
+
         record = cls(
             venue=_string(payload["venue"]),
             symbol=_string(payload["symbol"]),
