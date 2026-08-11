@@ -636,12 +636,22 @@
     },
     {
       "area": "Unsupported external products and protection modes fail closed",
-      "evidence": [],
+      "evidence": [
+        "src/autotrade/brokers/alpaca_paper_bracket.py",
+        "src/autotrade/brokers/alpaca_paper_trade_updates.py",
+        "scripts/check_r6_product_boundary.py",
+        "scripts/check_r6_authority.py",
+        "tests/test_r6_unsupported_products_boundary.py",
+        "tests/test_r6_equity_bracket.py",
+        ".github/workflows/r6-authority.yml",
+        ".github/workflows/core-tests.yml",
+        "knowledge/60_EVIDENCE/R6_UNSUPPORTED_PRODUCTS_EVIDENCE.json"
+      ],
       "id": "TD-R6-007",
       "next_action": "Reject unsupported order classes/products before I/O. In particular, broker-side bracket/OTO/OCO protection is equity-only for this track; crypto remains simple-order only and cannot be treated as bracket-protected without separate certification. Unknown asset classes, unsupported TIF/order types or missing Instrument Master rules fail closed.",
-      "resolution": "",
+      "resolution": "Certified fail-closed product boundary for R6: exact us_equity BUY LIMIT DAY bracket only, self-validating immutable request, authoritative Instrument Master asset_class/fingerprint, strict TP+stop protection surface, unsupported asset classes/order classes/TIF/types and forged payload/serialization/hash rejected before I/O. Permanent AST boundary forbids direct AlpacaEquityBracketRequest construction outside the certified builder and Core Safety executes the product boundary. Official pre-closure exact-head CI on 081ab06415500c4a2786c347db5a93f3ceb8c21f: Core 31509844731, Knowledge 31509844728, R6 Authority 31509844735 PASS.",
       "severity": "P1",
-      "status": "OPEN",
+      "status": "CLOSED",
       "track": "R6"
     },
     {

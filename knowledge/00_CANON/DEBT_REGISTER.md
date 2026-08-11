@@ -28,11 +28,11 @@ Post-merge R5: Core Safety `31466198629` PASS, Knowledge Contract `31466198624` 
 | `TD-R6-004` | P1 | PAPER qualification evidence | terminality/fills/slippage/reconciliation evidence durable and tamper-evident; incomplete evidence unqualified |
 | `TD-R6-005` | P1 | equity bracket protection | parent + exactly TP/SL legs, coherent prices/qty/TIF, authoritative increments and nested response verification |
 | `TD-R6-006` | P1 | PAPER trade_updates evidence | PAPER-only authenticated bounded stream + order correlation + ordering/terminality/disconnect fail-closed |
-| `TD-R6-007` | P1 | unsupported products | unknown/unsupported products/classes/TIF fail closed; crypto bracket protection explicitly unsupported |
+| `TD-R6-007` | P1 | unsupported products | **CLOSED** — self-validating us_equity-only bracket surface + permanent product-boundary CI; unsupported classes/modes fail closed before I/O |
 | `TD-R6-008` | P1 | permanent PAPER-only authority boundary | CI prevents LIVE host, Safety/OMS bypass, AI authorization and PAPER→LIVE authority creep |
 | `TD-R6-009` | P1 | final write Safety/OMS recheck | **CLOSED** — dual authoritative PRE_CONSUME/PRE_IO recheck, cryptographic phase chain, version-race rejection, zero-I/O fail-closed |
 
-R6 P0/P1/P2 OPEN: **8**. R6 cannot certify until all close with evidence.
+R6 P0/P1/P2 OPEN: **7**. R6 cannot certify until all close with evidence.
 
 ## Deuda no bloqueante fuera de R6
 | ID | Sev | Track | Área |
