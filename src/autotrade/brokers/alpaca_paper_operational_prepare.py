@@ -6,6 +6,7 @@ from decimal import Decimal
 from hashlib import sha256
 import json
 from pathlib import Path
+from typing import Mapping
 
 from autotrade.domain import MarketSnapshot, OrderIntent, RiskDecision
 
@@ -13,6 +14,7 @@ from .alpaca_paper_bracket import PaperEquityVenueRules
 from .alpaca_paper_canary_coordinator import (
     PaperCanaryCoordinator,
     PaperCanaryPreparationResult,
+    PreparedPaperCanaryPackage,
 )
 from .alpaca_paper_canary_permit import SQLitePaperCanaryPermitRegistry
 from .alpaca_paper_core_provenance import (
@@ -37,6 +39,37 @@ from .alpaca_paper_submission import SQLitePaperSubmissionRegistry
 
 
 _CORE_PROVENANCE_FILENAME = "core_provenance.json"
+_CORE_FIELDS = {
+    "core_db_sha256",
+    "health_bridge_fingerprint",
+    "health_bridge_version",
+    "intent_fingerprint",
+    "order_id",
+    "order_record_fingerprint",
+    "order_status",
+    "portfolio_snapshot_hash",
+    "portfolio_version",
+    "provenance_hash",
+    "risk_decision_fingerprint",
+    "safety_observed_fingerprint",
+    "safety_version",
+    "strategy_health_fingerprint",
+    "strategy_health_version",
+    "strategy_id",
+    "verified_at",
+}
+_DOCUMENT_FIELDS = {
+    "schema_version",
+    "environment",
+    "attempt_id",
+    "package_hash",
+    "order_id",
+    "core_provenance",
+    "network_write_authorized",
+    "external_order_submitted",
+    "live_trading",
+    "document_hash",
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -181,10 +214,11 @@ class PaperOperationalCanaryPreparer:
             provenance=provenance,
         )
         _write_json_idempotent(core_provenance_path, provenance_document)
-        if _read_json_object(core_provenance_path) != provenance_document:
-            raise PaperOperationalIntegrityError(
-                "persisted core provenance differs from verified durable state"
-            )
+        verify_core_provenance_document(
+            self._workspace,
+            package=result.package,
+            observed=provenance,
+        )
 
         package_path, context_path, manifest_path = self._workspace.write_prepared_canary(
             result.package,
@@ -200,6 +234,97 @@ class PaperOperationalCanaryPreparer:
             operator_context_path=context_path,
             manifest_path=manifest_path,
         )
+
+
+def core_provenance_path(workspace: PaperOperationalWorkspace) -> Path:
+    if not isinstance(workspace, PaperOperationalWorkspace):
+        raise TypeError("operational workspace is required")
+    return workspace.root / _CORE_PROVENANCE_FILENAME
+
+
+def verify_core_provenance_document(
+    workspace: PaperOperationalWorkspace,
+    *,
+    package: PreparedPaperCanaryPackage,
+    observed: PaperCoreProvenance,
+) -> str:
+    """Verify persisted provenance against the exact prepared package and current core.
+
+    ``observed`` must come from a fresh read-only ``core.sqlite3`` verification.
+    Verification timestamps may differ between preparation and operator review;
+    all durable state identities, versions, fingerprints and the DB byte hash
+    must remain identical.
+    """
+
+    if not isinstance(workspace, PaperOperationalWorkspace):
+        raise TypeError("operational workspace is required")
+    if not isinstance(package, PreparedPaperCanaryPackage):
+        raise TypeError("prepared PAPER canary package is required")
+    if not isinstance(observed, PaperCoreProvenance):
+        raise TypeError("observed core provenance is required")
+    path = core_provenance_path(workspace)
+    if not path.is_file() or path.is_symlink():
+        raise PaperOperationalIntegrityError("core provenance artifact must be a regular file")
+    raw = _read_json_object(path)
+    if set(raw) != _DOCUMENT_FIELDS:
+        raise PaperOperationalIntegrityError("core provenance document is non-canonical")
+    document_hash = _required_hash(raw, "document_hash")
+    body = {key: value for key, value in raw.items() if key != "document_hash"}
+    if document_hash != _document_hash(body):
+        raise PaperOperationalIntegrityError("core provenance document hash mismatch")
+    if raw.get("schema_version") != 1 or raw.get("environment") != "PAPER":
+        raise PaperOperationalIntegrityError("core provenance document is not PAPER schema v1")
+    if raw.get("attempt_id") != package.attempt_id:
+        raise PaperOperationalIntegrityError("core provenance attempt does not match prepared package")
+    if raw.get("package_hash") != package.package_hash:
+        raise PaperOperationalIntegrityError("core provenance package hash mismatch")
+    if raw.get("order_id") != package.order_id:
+        raise PaperOperationalIntegrityError("core provenance order does not match prepared package")
+    if raw.get("network_write_authorized") is not False:
+        raise PaperOperationalIntegrityError("core provenance cannot authorize network write")
+    if raw.get("external_order_submitted") is not False:
+        raise PaperOperationalIntegrityError("core provenance cannot claim external submission")
+    if raw.get("live_trading") != "BLOCKED":
+        raise PaperOperationalIntegrityError("core provenance must keep LIVE trading blocked")
+
+    core_raw = raw.get("core_provenance")
+    if not isinstance(core_raw, dict) or set(core_raw) != _CORE_FIELDS:
+        raise PaperOperationalIntegrityError("core provenance payload is non-canonical")
+    stored = _parse_core_provenance(core_raw)
+    if stored.order_id != package.order_id:
+        raise PaperOperationalIntegrityError("stored core provenance order mismatch")
+    if stored.intent_fingerprint != package.intent_fingerprint:
+        raise PaperOperationalIntegrityError("stored core provenance intent mismatch")
+    if stored.risk_decision_fingerprint != package.risk_decision_fingerprint:
+        raise PaperOperationalIntegrityError("stored core provenance RiskDecision mismatch")
+    if stored.safety_version != package.risk_decision_safety_state_version:
+        raise PaperOperationalIntegrityError("stored core provenance Safety version mismatch")
+
+    durable_fields = (
+        "order_id",
+        "order_status",
+        "order_record_fingerprint",
+        "strategy_id",
+        "intent_fingerprint",
+        "risk_decision_fingerprint",
+        "safety_version",
+        "safety_observed_fingerprint",
+        "portfolio_version",
+        "portfolio_snapshot_hash",
+        "strategy_health_version",
+        "strategy_health_fingerprint",
+        "health_bridge_version",
+        "health_bridge_fingerprint",
+        "core_db_sha256",
+    )
+    for field in durable_fields:
+        if getattr(stored, field) != getattr(observed, field):
+            raise PaperOperationalIntegrityError(
+                f"current core provenance differs from prepared evidence: {field}"
+            )
+    if observed.verified_at < stored.verified_at:
+        raise PaperOperationalIntegrityError("current core provenance predates prepared evidence")
+    return document_hash
 
 
 def _core_provenance_document(
@@ -249,6 +374,57 @@ def _core_provenance_document(
         "external_order_submitted": False,
         "live_trading": "BLOCKED",
     }
+    return {**body, "document_hash": _document_hash(body)}
+
+
+def _parse_core_provenance(payload: Mapping[str, object]) -> PaperCoreProvenance:
+    try:
+        verified_at = datetime.fromisoformat(_required_str(payload, "verified_at"))
+        return PaperCoreProvenance(
+            order_id=_required_str(payload, "order_id"),
+            order_status=_required_str(payload, "order_status"),
+            order_record_fingerprint=_required_hash(payload, "order_record_fingerprint"),
+            strategy_id=_required_str(payload, "strategy_id"),
+            intent_fingerprint=_required_hash(payload, "intent_fingerprint"),
+            risk_decision_fingerprint=_required_hash(payload, "risk_decision_fingerprint"),
+            safety_version=_required_int(payload, "safety_version"),
+            safety_observed_fingerprint=_required_hash(payload, "safety_observed_fingerprint"),
+            portfolio_version=_required_int(payload, "portfolio_version"),
+            portfolio_snapshot_hash=_required_hash(payload, "portfolio_snapshot_hash"),
+            strategy_health_version=_required_int(payload, "strategy_health_version"),
+            strategy_health_fingerprint=_required_hash(payload, "strategy_health_fingerprint"),
+            health_bridge_version=_required_int(payload, "health_bridge_version"),
+            health_bridge_fingerprint=_required_hash(payload, "health_bridge_fingerprint"),
+            core_db_sha256=_required_hash(payload, "core_db_sha256"),
+            verified_at=verified_at,
+            provenance_hash=_required_hash(payload, "provenance_hash"),
+        )
+    except (TypeError, ValueError) as exc:
+        raise PaperOperationalIntegrityError("core provenance payload is invalid") from exc
+
+
+def _required_str(payload: Mapping[str, object], key: str) -> str:
+    value = payload.get(key)
+    if not isinstance(value, str) or not value:
+        raise PaperOperationalIntegrityError(f"core provenance {key} must be non-empty text")
+    return value
+
+
+def _required_hash(payload: Mapping[str, object], key: str) -> str:
+    value = _required_str(payload, key)
+    if len(value) != 64 or any(char not in "0123456789abcdef" for char in value):
+        raise PaperOperationalIntegrityError(f"core provenance {key} must be lowercase SHA-256")
+    return value
+
+
+def _required_int(payload: Mapping[str, object], key: str) -> int:
+    value = payload.get(key)
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise PaperOperationalIntegrityError(f"core provenance {key} must be integer")
+    return value
+
+
+def _document_hash(body: Mapping[str, object]) -> str:
     canonical = json.dumps(
         body,
         sort_keys=True,
@@ -256,4 +432,4 @@ def _core_provenance_document(
         allow_nan=False,
         ensure_ascii=True,
     ).encode("utf-8")
-    return {**body, "document_hash": sha256(canonical).hexdigest()}
+    return sha256(canonical).hexdigest()
