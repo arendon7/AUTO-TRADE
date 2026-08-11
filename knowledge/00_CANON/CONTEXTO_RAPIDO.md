@@ -1,6 +1,6 @@
 # CONTEXTO RÁPIDO — AUTO-TRADE
 
-Estado actual: **v0.28R R0–R4 certified; R4 PR #11 pending integration**.
+Estado actual: **v0.28R R0–R4 certified; R4 PR #11 ready and pending integration**.
 
 ## Leer primero
 1. `knowledge/00_CANON/SOURCE_OF_TRUTH.md`
@@ -12,7 +12,9 @@ Estado actual: **v0.28R R0–R4 certified; R4 PR #11 pending integration**.
 7. `knowledge/60_EVIDENCE/R4_CERTIFICATION.json`
 
 ## Certificación R4
-Basis `350efd43ac133c95a1997b4a821a2e0bab4afaf2`: 480 tests PASS /86.58% coverage; 10 contracts; authority/debt/knowledge gates PASS. R4 blocking debt open: 0.
+Basis `350efd43ac133c95a1997b4a821a2e0bab4afaf2`: **479 tests PASS / 86.45% coverage**; 10 contracts; authority/debt/knowledge gates PASS. R4 blocking debt open: 0.
+
+La cifra previa 480 / 86.58% fue una inconsistencia documental; los logs del run citado confirman 479 / 86.45%.
 
 ## Regla operativa inmediata
 No empezar R5 desde la rama R4. Primero PR #11 -> merge -> CI verde sobre SHA exacto de `main`; después crear rama R5 desde ese SHA.
