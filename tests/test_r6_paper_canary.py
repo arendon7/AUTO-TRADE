@@ -37,9 +37,7 @@ def order(
     order_type: OrderType = OrderType.LIMIT,
     quantity: str = "1",
     limit_price: str | None = "10",
-    stop_price: str | None = None,
     status: OrderStatus = OrderStatus.VALIDATED,
-    broker_order_id: str | None = None,
 ) -> OrderRecord:
     intent = OrderIntent(
         intent_id="canary-intent-001",
@@ -49,7 +47,6 @@ def order(
         order_type=order_type,
         quantity=Decimal(quantity),
         limit_price=Decimal(limit_price) if limit_price is not None else None,
-        stop_price=Decimal(stop_price) if stop_price is not None else None,
         idempotency_key="canary-idempotency-001",
         created_at=NOW - timedelta(seconds=1),
     )
@@ -58,8 +55,7 @@ def order(
         intent=intent,
         status=status,
         risk_decision_id="canary-risk-001",
-        broker_order_id=broker_order_id,
-        updated_at=NOW - timedelta(milliseconds=500),
+        created_at=NOW - timedelta(milliseconds=500),
     )
 
 
@@ -176,13 +172,11 @@ def test_canary_requires_exact_r0_through_r5_certification(tmp_path) -> None:
         (order(status=OrderStatus.SUBMITTING), "VALIDATED"),
         (order(side=Side.SELL), "BUY-only"),
         (order(order_type=OrderType.MARKET, limit_price=None), "LIMIT"),
-        (order(stop_price="9"), "stop field"),
-        (order(broker_order_id="broker-already"), "already bound"),
     ],
 )
 def test_canary_rejects_nonminimal_order_surface(tmp_path, current_order, reason) -> None:
     if current_order.status is not OrderStatus.VALIDATED:
-        base_order, att, bind, state, _ = prepared_components(tmp_path)
+        _, att, bind, state, _ = prepared_components(tmp_path)
         ctx = PaperCanaryContext(
             order=current_order,
             binding=bind,
@@ -226,6 +220,12 @@ def test_binding_must_match_current_order_attestation_and_submission_state(tmp_p
     with pytest.raises(PaperCanaryRejected, match="current PAPER attestation"):
         PaperCanaryGate(enabled_policy()).approve(
             replace(ctx, account_attestation=wrong_attestation)
+        )
+
+    broker_bound = replace(ctx.submission_state, broker_order_id="broker-already")
+    with pytest.raises(PaperCanaryRejected, match="already broker-bound"):
+        PaperCanaryGate(enabled_policy()).approve(
+            replace(ctx, submission_state=broker_bound)
         )
 
 
