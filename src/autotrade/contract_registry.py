@@ -28,6 +28,7 @@ class FieldSpec:
     non_empty: bool = False
     enum: tuple[str, ...] = ()
     items_contract: str = ""
+    object_contract: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -67,10 +68,11 @@ class ContractRegistry:
             self._contracts[spec.contract_id] = spec
         for spec in self._contracts.values():
             for field in spec.fields.values():
-                if field.items_contract and field.items_contract not in self._contracts:
-                    raise ContractRegistryError(
-                        f"{spec.contract_id} references missing items contract {field.items_contract}"
-                    )
+                for referenced in (field.items_contract, field.object_contract):
+                    if referenced and referenced not in self._contracts:
+                        raise ContractRegistryError(
+                            f"{spec.contract_id} references missing contract {referenced}"
+                        )
 
     @classmethod
     def load_default(cls) -> "ContractRegistry":
@@ -191,6 +193,7 @@ def _parse_contract(raw: object) -> ContractSpec:
             "non_empty",
             "enum",
             "items_contract",
+            "object_contract",
         }
         if field_unknown:
             raise ContractRegistryError(
@@ -204,6 +207,7 @@ def _parse_contract(raw: object) -> ContractSpec:
             "integer",
             "boolean",
             "timestamp",
+            "nullable_timestamp",
             "object",
             "array",
         }:
@@ -216,11 +220,16 @@ def _parse_contract(raw: object) -> ContractSpec:
         if not isinstance(raw_enum, list) or any(not isinstance(v, str) for v in raw_enum):
             raise ContractRegistryError(f"{name}.{field_name}.enum must be string array")
         items_contract = field_raw.get("items_contract", "")
-        if not isinstance(items_contract, str):
-            raise ContractRegistryError(f"{name}.{field_name}.items_contract must be string")
+        object_contract = field_raw.get("object_contract", "")
+        if not isinstance(items_contract, str) or not isinstance(object_contract, str):
+            raise ContractRegistryError(f"{name}.{field_name} contract references must be strings")
         if items_contract and type_name != "array":
             raise ContractRegistryError(
                 f"{name}.{field_name}.items_contract requires array type"
+            )
+        if object_contract and type_name != "object":
+            raise ContractRegistryError(
+                f"{name}.{field_name}.object_contract requires object type"
             )
         fields[field_name] = FieldSpec(
             type_name=type_name,
@@ -228,6 +237,7 @@ def _parse_contract(raw: object) -> ContractSpec:
             non_empty=non_empty,
             enum=tuple(raw_enum),
             items_contract=items_contract,
+            object_contract=object_contract,
         )
     return ContractSpec(
         name=name,
@@ -269,7 +279,9 @@ def _validate_field(
     elif spec.type_name == "boolean":
         if not isinstance(value, bool):
             raise ContractValidationError(f"{prefix} must be boolean")
-    elif spec.type_name == "timestamp":
+    elif spec.type_name in {"timestamp", "nullable_timestamp"}:
+        if value is None and spec.type_name == "nullable_timestamp":
+            return
         if not isinstance(value, str):
             raise ContractValidationError(f"{prefix} must be ISO timestamp string")
         try:
@@ -281,6 +293,8 @@ def _validate_field(
     elif spec.type_name == "object":
         if not isinstance(value, dict):
             raise ContractValidationError(f"{prefix} must be object")
+        if spec.object_contract:
+            registry.validate(spec.object_contract, value)
     elif spec.type_name == "array":
         if not isinstance(value, list):
             raise ContractValidationError(f"{prefix} must be array")
@@ -313,6 +327,7 @@ def _contract_document(spec: ContractSpec) -> dict[str, object]:
                 "non_empty": field.non_empty,
                 "enum": list(field.enum),
                 "items_contract": field.items_contract,
+                "object_contract": field.object_contract,
             }
             for name, field in sorted(spec.fields.items())
         },
