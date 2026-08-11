@@ -20,6 +20,10 @@ from .alpaca_paper_operational import (
     read_expected_bracket,
     read_prepared_package,
 )
+from .alpaca_paper_preparation_snapshot import (
+    read_preparation_snapshot,
+    write_preparation_snapshot,
+)
 from .alpaca_paper_submission import SQLitePaperSubmissionRegistry
 
 
@@ -29,6 +33,7 @@ class PaperOperationalPreparation:
     account_attestation_path: Path
     prepared_package_path: Path
     expected_bracket_path: Path
+    preparation_snapshot_path: Path
     operator_context_path: Path
     manifest_path: Path
 
@@ -41,6 +46,7 @@ class PaperOperationalPreparation:
             self.account_attestation_path,
             self.prepared_package_path,
             self.expected_bracket_path,
+            self.preparation_snapshot_path,
             self.operator_context_path,
             self.manifest_path,
         ):
@@ -112,8 +118,19 @@ class PaperOperationalCanaryPreparer:
             result.package,
             result.bracket,
         )
+        snapshot_path = write_preparation_snapshot(
+            self._workspace,
+            package=result.package,
+            decision=decision,
+            market=market,
+            approval=result.approval,
+        )
         persisted = read_prepared_package(package_path)
         persisted_bracket = read_expected_bracket(self._workspace.expected_bracket_path)
+        snapshot_decision, snapshot_market, snapshot_approval = read_preparation_snapshot(
+            self._workspace,
+            package=result.package,
+        )
         if persisted != result.package:
             raise PaperOperationalIntegrityError(
                 "persisted canary package differs from coordinator result"
@@ -122,11 +139,20 @@ class PaperOperationalCanaryPreparer:
             raise PaperOperationalIntegrityError(
                 "persisted expected bracket differs from coordinator result"
             )
+        if (
+            snapshot_decision != decision
+            or snapshot_market != market
+            or snapshot_approval != result.approval
+        ):
+            raise PaperOperationalIntegrityError(
+                "persisted preparation snapshot differs from coordinator inputs"
+            )
         return PaperOperationalPreparation(
             result=result,
             account_attestation_path=account_path,
             prepared_package_path=package_path,
             expected_bracket_path=self._workspace.expected_bracket_path,
+            preparation_snapshot_path=snapshot_path,
             operator_context_path=context_path,
             manifest_path=manifest_path,
         )
