@@ -69,7 +69,7 @@ def main() -> int:
     errors: list[str] = []
     for path, label in ((RUNTIME, "runtime"), (LAUNCHER, "launcher")):
         if not path.is_file():
-            errors.append(f"R6 operational execution {label} missing: {path.relative_to(ROOT)}")
+            errors.append(f"R6 operational execution {label} missing: {_relative(path)}")
             continue
         errors.extend(_scan_forbidden_imports(path))
 
@@ -155,7 +155,7 @@ def _scan_forbidden_imports(path: Path) -> list[str]:
     try:
         tree = ast.parse(source, filename=str(path))
     except SyntaxError as exc:
-        return [f"{path.relative_to(ROOT)}: syntax error: {exc}"]
+        return [f"{_relative(path)}: syntax error: {exc}"]
     for node in ast.walk(tree):
         modules: list[str] = []
         if isinstance(node, ast.Import):
@@ -168,9 +168,16 @@ def _scan_forbidden_imports(path: Path) -> list[str]:
                 for prefix in FORBIDDEN_IMPORT_PREFIXES
             ):
                 errors.append(
-                    f"{path.relative_to(ROOT)}:{node.lineno}: forbidden execution import {module}"
+                    f"{_relative(path)}:{node.lineno}: forbidden execution import {module}"
                 )
     return errors
+
+
+def _relative(path: Path) -> Path:
+    try:
+        return path.relative_to(ROOT)
+    except ValueError:
+        return path
 
 
 if __name__ == "__main__":
