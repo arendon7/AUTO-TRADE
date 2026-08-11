@@ -1,4 +1,3 @@
-from dataclasses import replace
 from datetime import timedelta
 from decimal import Decimal
 
@@ -113,7 +112,6 @@ def test_tournament_minimize_direction_is_explicit(tmp_path, now):
 def test_exact_metric_tie_uses_immutable_identity_not_iteration_order(tmp_path, now):
     ledger = SQLiteTrialLedger(tmp_path / "tie.db")
     ledger.create_campaign(_campaign(ids=("dev-a", "dev-b")), now=now)
-    # Register in reverse order; frozen IDs and immutable identity still define rank.
     ledger.preregister(_trial("dev-b", strategy_id="strategy-z"), now=now + timedelta(seconds=1))
     ledger.preregister(_trial("dev-a", strategy_id="strategy-a"), now=now + timedelta(seconds=2))
     for offset, trial_id in enumerate(("dev-b", "dev-a"), start=3):
@@ -123,18 +121,14 @@ def test_exact_metric_tie_uses_immutable_identity_not_iteration_order(tmp_path, 
             p_value=None,
             now=now + timedelta(seconds=offset),
         )
-    spec = _spec(ids=("dev-a", "dev-b"))
-    evidence = evaluate_strategy_tournament(ledger, spec)
+    evidence = evaluate_strategy_tournament(ledger, _spec(ids=("dev-a", "dev-b")))
     assert [entry.trial_id for entry in evidence.entries] == ["dev-a", "dev-b"]
 
 
 def test_candidate_cherry_picking_or_noncanonical_order_fails(tmp_path, now):
     ledger = _complete_development_campaign(tmp_path, now)
     with pytest.raises(TournamentGovernanceError, match="complete frozen DEVELOPMENT"):
-        evaluate_strategy_tournament(
-            ledger,
-            _spec(ids=("dev-a", "dev-b")),
-        )
+        evaluate_strategy_tournament(ledger, _spec(ids=("dev-a", "dev-b")))
     with pytest.raises(ValueError, match="canonical sorted"):
         _spec(ids=("dev-b", "dev-a", "dev-c"))
 
@@ -154,23 +148,16 @@ def test_incomplete_campaign_cannot_be_ranked(tmp_path, now):
 
 
 def test_tournament_rejects_any_campaign_that_has_seen_final_holdout(tmp_path, now):
-    # A consumed permit is unnecessary for this test because Tournament must
-    # reject HOLDOUT presence before using any HOLDOUT result as ranking input.
-    ledger = SQLiteTrialLedger(tmp_path / "holdout.db")
-    campaign = _campaign(ids=("dev-a", "holdout-a"))
-    ledger.create_campaign(campaign, now=now)
+    from autotrade.research.registry import HoldoutPermit, SQLiteExperimentRegistry
+
+    db = tmp_path / "holdout.db"
+    ledger = SQLiteTrialLedger(db)
+    ledger.create_campaign(_campaign(ids=("dev-a", "holdout-a")), now=now)
     ledger.preregister(_trial("dev-a"), now=now + timedelta(seconds=1))
 
-    # Build the holdout permit table using the certified R1 registry and consume it.
-    from autotrade.research.registry import SQLiteExperimentRegistry
-
-    registry = SQLiteExperimentRegistry(ledger._runtime)
-    permit = registry.issue_holdout_permit(
-        purpose="final_validation",
-        issued_to="r3-tournament-test",
-        now=now + timedelta(seconds=2),
-    )
-    registry.consume_holdout_permit(permit.permit_id, now=now + timedelta(seconds=3))
+    registry = SQLiteExperimentRegistry(db)
+    permit = HoldoutPermit(permit_id="tournament-holdout-permit", issued_by="r3-test")
+    registry.consume_holdout_permit(permit=permit, now=now + timedelta(seconds=2))
     ledger.preregister(
         _trial(
             "holdout-a",
@@ -178,19 +165,19 @@ def test_tournament_rejects_any_campaign_that_has_seen_final_holdout(tmp_path, n
             split="protected_holdout",
             authorization=permit.permit_id,
         ),
-        now=now + timedelta(seconds=4),
+        now=now + timedelta(seconds=3),
     )
     ledger.record_completed(
         trial_id="dev-a",
         metrics={"sharpe": 1.1},
         p_value=None,
-        now=now + timedelta(seconds=5),
+        now=now + timedelta(seconds=4),
     )
     ledger.record_completed(
         trial_id="holdout-a",
         metrics={"sharpe": 99.0},
         p_value=None,
-        now=now + timedelta(seconds=6),
+        now=now + timedelta(seconds=5),
     )
     with pytest.raises(TournamentGovernanceError, match="FINAL_HOLDOUT"):
         evaluate_strategy_tournament(
@@ -206,8 +193,8 @@ def test_tournament_rejects_any_campaign_that_has_seen_final_holdout(tmp_path, n
 
 
 def test_completed_candidate_requires_finite_numeric_metric(tmp_path, now):
-    for bad in (None, True, "not-a-number", float("nan"), float("inf")):
-        ledger = SQLiteTrialLedger(tmp_path / f"bad-{str(bad).replace('/', '-')}.db")
+    for index, bad in enumerate((None, True, "not-a-number", float("nan"), float("inf"))):
+        ledger = SQLiteTrialLedger(tmp_path / f"bad-{index}.db")
         ledger.create_campaign(_campaign(ids=("dev-a",)), now=now)
         ledger.preregister(_trial("dev-a"), now=now + timedelta(seconds=1))
         metrics = {} if bad is None else {"sharpe": bad}
@@ -218,10 +205,7 @@ def test_completed_candidate_requires_finite_numeric_metric(tmp_path, now):
             now=now + timedelta(seconds=2),
         )
         with pytest.raises(TournamentGovernanceError, match="ranking metric|numeric|finite|boolean"):
-            evaluate_strategy_tournament(
-                ledger,
-                _spec(ids=("dev-a",)),
-            )
+            evaluate_strategy_tournament(ledger, _spec(ids=("dev-a",)))
 
 
 def test_all_failed_campaign_produces_evidence_without_false_winner(tmp_path, now):
@@ -244,10 +228,7 @@ def test_all_failed_campaign_produces_evidence_without_false_winner(tmp_path, no
 def test_tournament_spec_and_evidence_fingerprints_bind_governance(tmp_path, now):
     ledger = _complete_development_campaign(tmp_path, now)
     maximize = evaluate_strategy_tournament(ledger, _spec())
-    minimize = evaluate_strategy_tournament(
-        ledger,
-        _spec(direction=RankingDirection.MINIMIZE),
-    )
+    minimize = evaluate_strategy_tournament(ledger, _spec(direction=RankingDirection.MINIMIZE))
     assert maximize.spec_fingerprint != minimize.spec_fingerprint
     assert maximize.fingerprint != minimize.fingerprint
     payload = maximize.to_payload()
