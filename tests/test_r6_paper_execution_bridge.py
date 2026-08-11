@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from datetime import timedelta
+from decimal import Decimal
 
 import pytest
 
@@ -119,6 +120,15 @@ def test_risk_decision_market_fingerprint_is_bound_to_package(tmp_path) -> None:
     assert broker.calls == 0
 
 
+def test_current_market_snapshot_must_match_human_reviewed_package(tmp_path) -> None:
+    prepared, bridge, registry, operator_decision, broker, _ = prepared_stack(tmp_path)
+    changed_market = replace(market(), last=Decimal("10.50"))
+    with pytest.raises(PaperExecutionBridgeBlocked, match="MarketSnapshot does not match"):
+        stage(prepared, bridge, registry, operator_decision, current_market=changed_market)
+    assert registry.get(operator_decision.context.preparation_hash).status is PaperOperatorDecisionStatus.ISSUED
+    assert broker.calls == 0
+
+
 def test_safety_worsening_after_human_consume_blocks_oms_staging_zero_io(tmp_path) -> None:
     prepared, bridge, registry, operator_decision, broker, safety = prepared_stack(tmp_path)
     safety.activate(reason="bridge-race", now=NOW + timedelta(milliseconds=500))
@@ -158,4 +168,59 @@ def test_decision_from_another_prepared_package_is_rejected(tmp_path) -> None:
 
     with pytest.raises(PaperExecutionBridgeBlocked, match="exact prepared package"):
         stage(prepared, bridge, registry, decision2)
+    assert broker.calls == 0
+
+
+@pytest.mark.parametrize(
+    ("field", "bad_value", "message"),
+    [
+        ("package", None, "prepared PAPER canary package"),
+        ("operator_decision", None, "human operator decision"),
+        ("operator_registry", object(), "operator decision registry"),
+        ("risk_decision", None, "RiskDecision is required"),
+        ("market", None, "MarketSnapshot is required"),
+    ],
+)
+def test_execution_bridge_requires_typed_authoritative_inputs(
+    tmp_path, field, bad_value, message
+) -> None:
+    prepared, bridge, registry, operator_decision, broker, _ = prepared_stack(tmp_path / field)
+    kwargs = {
+        "package": prepared.package,
+        "operator_decision": operator_decision,
+        "operator_registry": registry,
+        "risk_decision": decision(),
+        "market": market(),
+        "now": NOW + timedelta(seconds=1),
+    }
+    kwargs[field] = bad_value
+    with pytest.raises(PaperExecutionBridgeBlocked, match=message):
+        bridge.stage_after_operator_decision(**kwargs)
+    assert broker.calls == 0
+
+
+def test_missing_durable_operator_decision_blocks_before_consume_or_stage(tmp_path) -> None:
+    prepared, bridge, _, operator_decision, broker, _ = prepared_stack(tmp_path)
+    empty = SQLitePaperOperatorDecisionRegistry(SQLiteRuntime(tmp_path / "empty-operator.sqlite"))
+    with pytest.raises(PaperExecutionBridgeBlocked, match="unavailable or invalid"):
+        stage(prepared, bridge, empty, operator_decision)
+    assert broker.calls == 0
+
+
+def test_operator_decision_consumed_by_other_attempt_blocks_before_oms_stage(tmp_path) -> None:
+    prepared, bridge, _, operator_decision, broker, _ = prepared_stack(tmp_path)
+    registry = SQLitePaperOperatorDecisionRegistry(SQLiteRuntime(tmp_path / "other-attempt-operator.sqlite"))
+    issued = registry.record_operator_approval(
+        context=operator_decision.context,
+        operator_id=operator_decision.operator_id,
+        issued_at=operator_decision.issued_at,
+        expires_at=operator_decision.expires_at,
+    )
+    registry.consume(
+        decision=issued.decision,
+        attempt_id="bridge-attempt-consumed-elsewhere",
+        now=operator_decision.issued_at,
+    )
+    with pytest.raises(PaperExecutionBridgeBlocked, match="another attempt"):
+        stage(prepared, bridge, registry, issued.decision)
     assert broker.calls == 0
