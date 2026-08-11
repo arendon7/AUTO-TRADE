@@ -221,11 +221,15 @@ def test_gap_fails_closed_without_imputation_and_reconnect_cannot_hide_it() -> N
 
 
 def test_out_of_order_closed_kline_fails_closed() -> None:
-    stream, _, _ = open_stream(payload(START + timedelta(minutes=1)), payload(START))
-    stream.poll_once(received_at=received(START + timedelta(minutes=1)))
+    observation_time = received(START + timedelta(minutes=1))
+    stream, _, _ = open_stream(
+        payload(START + timedelta(minutes=1)),
+        payload(START, event_time=observation_time),
+    )
+    stream.poll_once(received_at=observation_time)
 
     with pytest.raises(StreamIntegrityError, match="out-of-order"):
-        stream.poll_once(received_at=received(START + timedelta(minutes=1)))
+        stream.poll_once(received_at=observation_time)
     assert stream.state == StreamState.DEGRADED
 
 
