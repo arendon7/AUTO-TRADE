@@ -145,13 +145,38 @@ class PairCorrelation:
 @dataclass(frozen=True, slots=True)
 class DependenceEvidence:
     phase: CalibrationPhase
+    min_common_observations: int
+    cluster_abs_correlation: Decimal
     spec_fingerprint: str
     strategy_fingerprints: tuple[tuple[str, str], ...]
     common_timestamps: tuple[datetime, ...]
+    aligned_returns: tuple[tuple[str, tuple[Decimal, ...]], ...]
     pairs: tuple[PairCorrelation, ...]
     clusters: tuple[tuple[str, ...], ...]
 
     def __post_init__(self) -> None:
+        if not isinstance(self.phase, CalibrationPhase):
+            raise ValueError("phase must be TRAIN or DEVELOPMENT")
+        if (
+            isinstance(self.min_common_observations, bool)
+            or not isinstance(self.min_common_observations, int)
+            or self.min_common_observations < 2
+        ):
+            raise ValueError("min_common_observations must be integer >= 2")
+        if (
+            not _finite(self.cluster_abs_correlation)
+            or self.cluster_abs_correlation < _ZERO
+            or self.cluster_abs_correlation > _ONE
+        ):
+            raise ValueError("cluster_abs_correlation must be within [0,1]")
+        expected_spec_fingerprint = DependenceSpec(
+            phase=self.phase,
+            min_common_observations=self.min_common_observations,
+            cluster_abs_correlation=self.cluster_abs_correlation,
+        ).fingerprint
+        if self.spec_fingerprint != expected_spec_fingerprint:
+            raise ValueError("dependence spec fingerprint mismatch")
+
         if not self.strategy_fingerprints:
             raise ValueError("strategy_fingerprints cannot be empty")
         keys = tuple(key for key, _ in self.strategy_fingerprints)
@@ -159,19 +184,51 @@ class DependenceEvidence:
             raise ValueError("strategy_fingerprints must use unique canonical sorted keys")
         if any(not _SHA256_RE.fullmatch(value) for _, value in self.strategy_fingerprints):
             raise ValueError("strategy fingerprint must be SHA-256 hex")
+
         if not self.common_timestamps:
             raise ValueError("common_timestamps cannot be empty")
         if self.common_timestamps != tuple(sorted(self.common_timestamps)):
             raise ValueError("common_timestamps must be sorted")
         if len(set(self.common_timestamps)) != len(self.common_timestamps):
             raise ValueError("common_timestamps must be unique")
-        cluster_members = tuple(member for cluster in self.clusters for member in cluster)
-        if tuple(sorted(cluster_members)) != keys:
-            raise ValueError("clusters must partition the complete strategy universe")
-        if any(cluster != tuple(sorted(cluster)) for cluster in self.clusters):
-            raise ValueError("cluster members must be sorted")
-        if self.clusters != tuple(sorted(self.clusters)):
-            raise ValueError("clusters must be canonical sorted order")
+        if any(not _aware(value) for value in self.common_timestamps):
+            raise ValueError("common_timestamps must be timezone-aware")
+        if len(self.common_timestamps) < self.min_common_observations:
+            raise InsufficientDependenceEvidence(
+                "evidence common timestamps are below min_common_observations"
+            )
+
+        aligned_keys = tuple(key for key, _ in self.aligned_returns)
+        if aligned_keys != keys:
+            raise ValueError("aligned_returns must exactly match canonical strategy universe")
+        aligned_map: dict[str, tuple[Decimal, ...]] = {}
+        for key, values in self.aligned_returns:
+            if len(values) != len(self.common_timestamps):
+                raise ValueError("aligned return length must equal common timestamp length")
+            if any(not _finite(value) for value in values):
+                raise ValueError("aligned returns must be finite Decimal values")
+            aligned_map[key] = values
+
+        expected_pairs: list[PairCorrelation] = []
+        for left_index, left in enumerate(keys):
+            for right in keys[left_index + 1 :]:
+                expected_pairs.append(
+                    PairCorrelation(
+                        left_strategy=left,
+                        right_strategy=right,
+                        correlation=_pearson(aligned_map[left], aligned_map[right]),
+                    )
+                )
+        if self.pairs != tuple(expected_pairs):
+            raise ValueError("pair correlations do not match aligned return evidence")
+
+        expected_clusters = _clusters(
+            keys,
+            tuple(expected_pairs),
+            self.cluster_abs_correlation,
+        )
+        if self.clusters != expected_clusters:
+            raise ValueError("clusters do not match correlation evidence and threshold")
 
     @property
     def strategy_keys(self) -> tuple[str, ...]:
@@ -199,9 +256,15 @@ class DependenceEvidence:
     def to_payload(self, *, include_fingerprint: bool = True) -> dict[str, object]:
         payload: dict[str, object] = {
             "phase": self.phase.value,
+            "min_common_observations": self.min_common_observations,
+            "cluster_abs_correlation": str(self.cluster_abs_correlation),
             "spec_fingerprint": self.spec_fingerprint,
             "strategy_fingerprints": [list(item) for item in self.strategy_fingerprints],
             "common_timestamps": [value.isoformat() for value in self.common_timestamps],
+            "aligned_returns": [
+                [key, [str(value) for value in values]]
+                for key, values in self.aligned_returns
+            ],
             "pairs": [
                 {
                     "left_strategy": pair.left_strategy,
@@ -322,9 +385,12 @@ def build_dependence_evidence(
     clusters = _clusters(keys, tuple(pairs), spec.cluster_abs_correlation)
     return DependenceEvidence(
         phase=spec.phase,
+        min_common_observations=spec.min_common_observations,
+        cluster_abs_correlation=spec.cluster_abs_correlation,
         spec_fingerprint=spec.fingerprint,
         strategy_fingerprints=tuple((key, by_key[key].fingerprint) for key in keys),
         common_timestamps=common_timestamps,
+        aligned_returns=tuple((key, aligned[key]) for key in keys),
         pairs=tuple(pairs),
         clusters=clusters,
     )
