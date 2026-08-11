@@ -17,6 +17,7 @@ from .domain import (
     intent_fingerprint,
 )
 from .oms import (
+    BrokerCancellationAmbiguous,
     BrokerSubmissionAmbiguous,
     IdempotencyConflict,
     OrderManagementSystem,
@@ -76,13 +77,7 @@ class ConcurrentRiskStateChanged(RuntimeError):
 
 
 class DurableTradingPipeline:
-    """Cross-process guarded path with optimistic, durable risk reservations.
-
-    The safety decision is made against the persisted portfolio plus every
-    active reservation. Reservation insertion succeeds only if both the
-    portfolio version and reservation generation are unchanged, preventing two
-    processes from approving against the same stale risk capacity.
-    """
+    """Cross-process guarded path with durable risk reservations and fill accounting."""
 
     def __init__(
         self,
@@ -95,6 +90,8 @@ class DurableTradingPipeline:
     ) -> None:
         if max_reservation_retries <= 0:
             raise ValueError("max_reservation_retries must be > 0")
+        if not hasattr(portfolio_store, "apply_fills"):
+            raise ValueError("durable pipeline requires a fill-aware portfolio store")
         self._safety = safety
         self._oms = oms
         self._portfolio_store = portfolio_store
@@ -179,46 +176,20 @@ class DurableTradingPipeline:
             )
             raise
         except BrokerSubmissionAmbiguous:
-            self._reservations.set_status(
-                idempotency_key=intent.idempotency_key,
-                status=ReservationStatus.UNKNOWN,
-                now=now,
-            )
-            self._portfolio_store.set_reconciliation_status(
-                reconciliation_ok=False,
-                broker_state_known=False,
-                now=now,
-            )
+            self._mark_ambiguous(idempotency_key=intent.idempotency_key, now=now)
             raise
         except Exception:
-            # Unknown failures after reservation are conservatively retained.
-            self._reservations.set_status(
-                idempotency_key=intent.idempotency_key,
-                status=ReservationStatus.UNKNOWN,
-                now=now,
-            )
-            self._portfolio_store.set_reconciliation_status(
-                reconciliation_ok=False,
-                broker_state_known=False,
-                now=now,
-            )
+            self._mark_ambiguous(idempotency_key=intent.idempotency_key, now=now)
             raise
 
-        if order.filled_quantity > 0:
-            self._portfolio_store.apply_order_result(order, now=now)
-
-        if order.status is OrderStatus.FILLED:
-            reservation_status = ReservationStatus.RELEASED
-        elif order.status in {OrderStatus.SUBMITTED, OrderStatus.PARTIALLY_FILLED}:
-            reservation_status = ReservationStatus.OPEN
-        else:
-            reservation_status = ReservationStatus.UNKNOWN
+        self._apply_known_fills(order=order, now=now)
+        reservation_status = _reservation_status_for_order(order)
+        if reservation_status is ReservationStatus.UNKNOWN:
             self._portfolio_store.set_reconciliation_status(
                 reconciliation_ok=False,
                 broker_state_known=False,
                 now=now,
             )
-
         self._reservations.set_status(
             idempotency_key=intent.idempotency_key,
             status=reservation_status,
@@ -230,6 +201,61 @@ class DurableTradingPipeline:
             replayed=False,
             recovery_required=reservation_status is ReservationStatus.UNKNOWN,
         )
+
+    def cancel_order(self, *, order_id: str, now: datetime) -> OrderRecord:
+        order = self._oms.get_by_order_id(order_id)
+        if order is None:
+            raise KeyError(order_id)
+        try:
+            final = self._oms.cancel(order_id=order_id, now=now)
+        except BrokerCancellationAmbiguous:
+            self._mark_ambiguous(idempotency_key=order.intent.idempotency_key, now=now)
+            raise
+
+        self._apply_known_fills(order=final, now=now)
+        status = _reservation_status_for_order(final)
+        self._reservations.set_status(
+            idempotency_key=final.intent.idempotency_key,
+            status=status,
+            now=now,
+        )
+        if status is ReservationStatus.UNKNOWN:
+            self._portfolio_store.set_reconciliation_status(
+                reconciliation_ok=False,
+                broker_state_known=False,
+                now=now,
+            )
+        return final
+
+    def _apply_known_fills(self, *, order: OrderRecord, now: datetime) -> None:
+        fills = self._oms.fills_for_order(order.order_id)
+        if fills:
+            self._portfolio_store.apply_fills(order, fills, now=now)
+
+    def _mark_ambiguous(self, *, idempotency_key: str, now: datetime) -> None:
+        self._reservations.set_status(
+            idempotency_key=idempotency_key,
+            status=ReservationStatus.UNKNOWN,
+            now=now,
+        )
+        self._portfolio_store.set_reconciliation_status(
+            reconciliation_ok=False,
+            broker_state_known=False,
+            now=now,
+        )
+
+
+def _reservation_status_for_order(order: OrderRecord) -> ReservationStatus:
+    if order.status.terminal:
+        return ReservationStatus.RELEASED
+    if order.status in {
+        OrderStatus.SUBMITTED,
+        OrderStatus.PARTIALLY_FILLED,
+        OrderStatus.CANCEL_PENDING,
+        OrderStatus.REPLACE_PENDING,
+    }:
+        return ReservationStatus.OPEN
+    return ReservationStatus.UNKNOWN
 
 
 def _effective_portfolio(
