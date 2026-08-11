@@ -7,6 +7,7 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 R5_FILES = (
     ROOT / "src/autotrade/research/streaming.py",
+    ROOT / "src/autotrade/research/stream_transport.py",
     ROOT / "src/autotrade/research/shadow.py",
     ROOT / "src/autotrade/research/forward.py",
 )
@@ -45,6 +46,7 @@ FORBIDDEN_SYMBOLS = {
     "OMS",
 }
 FORBIDDEN_CALLS = {
+    "send",
     "submit",
     "submit_order",
     "place_order",
@@ -61,7 +63,7 @@ FORBIDDEN_LITERAL_FRAGMENTS = {
     "/v2/orders",
     "trade_updates",
 }
-NETWORK_FORBIDDEN_OUTSIDE_STREAMING = {
+NETWORK_FORBIDDEN_OUTSIDE_STREAM = {
     "socket",
     "ssl",
     "http",
@@ -69,6 +71,7 @@ NETWORK_FORBIDDEN_OUTSIDE_STREAMING = {
     "websocket",
     "websockets",
 }
+STREAM_NETWORK_FILES = {"streaming.py", "stream_transport.py"}
 
 
 def main() -> int:
@@ -78,6 +81,10 @@ def main() -> int:
             errors.append(f"{path.relative_to(ROOT)}: required R5 module is missing")
             continue
         errors.extend(_scan_path(path))
+
+    streaming_source = (ROOT / "src/autotrade/research/streaming.py").read_text(encoding="utf-8")
+    if "data-stream.binance.vision" not in streaming_source:
+        errors.append("streaming.py: exact Binance market-data-only host is missing")
 
     if errors:
         for error in errors:
@@ -95,14 +102,14 @@ def _scan_path(path: Path) -> list[str]:
         rel = path
     source = path.read_text(encoding="utf-8")
     tree = ast.parse(source, filename=str(rel))
-    is_streaming = path.name == "streaming.py"
+    is_stream_network = path.name in STREAM_NETWORK_FILES
 
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for alias in node.names:
                 if _forbidden_absolute_import(alias.name):
                     errors.append(f"{rel}:{node.lineno}: forbidden R5 import {alias.name}")
-                if not is_streaming and _network_import(alias.name):
+                if not is_stream_network and _network_import(alias.name):
                     errors.append(
                         f"{rel}:{node.lineno}: shadow/forward evidence cannot import network module {alias.name}"
                     )
@@ -114,7 +121,7 @@ def _scan_path(path: Path) -> list[str]:
                 errors.append(
                     f"{rel}:{node.lineno}: R5 cannot import holdout/research-selection module .{module}"
                 )
-            if not is_streaming and _network_import(module):
+            if not is_stream_network and _network_import(module):
                 errors.append(
                     f"{rel}:{node.lineno}: shadow/forward evidence cannot import network module {module}"
                 )
@@ -127,7 +134,7 @@ def _scan_path(path: Path) -> list[str]:
             call_name = _call_name(node.func)
             if call_name in FORBIDDEN_CALLS:
                 errors.append(
-                    f"{rel}:{node.lineno}: R5 calls execution-like method {call_name}"
+                    f"{rel}:{node.lineno}: R5 calls execution-like/outbound method {call_name}"
                 )
         elif isinstance(node, ast.Name) and node.id in FORBIDDEN_SYMBOLS:
             errors.append(f"{rel}:{node.lineno}: R5 references forbidden symbol {node.id}")
@@ -137,7 +144,7 @@ def _scan_path(path: Path) -> list[str]:
                     errors.append(
                         f"{rel}:{node.lineno}: R5 contains forbidden authority/holdout literal {fragment}"
                     )
-            if not is_streaming and ("wss://" in node.value or "https://" in node.value):
+            if not is_stream_network and ("wss://" in node.value or "https://" in node.value):
                 errors.append(
                     f"{rel}:{node.lineno}: shadow/forward evidence cannot contain network endpoints"
                 )
@@ -154,7 +161,7 @@ def _forbidden_absolute_import(module: str) -> bool:
 
 def _network_import(module: str) -> bool:
     root = module.split(".")[0]
-    return root in NETWORK_FORBIDDEN_OUTSIDE_STREAMING
+    return root in NETWORK_FORBIDDEN_OUTSIDE_STREAM
 
 
 def _call_name(func: ast.expr) -> str:
