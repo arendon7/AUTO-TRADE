@@ -17,6 +17,7 @@ from .alpaca_paper_gateway import AlpacaPaperAccountAttestation
 from .alpaca_paper_operational import (
     PaperOperationalIntegrityError,
     PaperOperationalWorkspace,
+    read_expected_bracket,
     read_prepared_package,
 )
 from .alpaca_paper_submission import SQLitePaperSubmissionRegistry
@@ -27,6 +28,7 @@ class PaperOperationalPreparation:
     result: PaperCanaryPreparationResult
     account_attestation_path: Path
     prepared_package_path: Path
+    expected_bracket_path: Path
     operator_context_path: Path
     manifest_path: Path
 
@@ -38,6 +40,7 @@ class PaperOperationalPreparation:
         for path in (
             self.account_attestation_path,
             self.prepared_package_path,
+            self.expected_bracket_path,
             self.operator_context_path,
             self.manifest_path,
         ):
@@ -106,17 +109,24 @@ class PaperOperationalCanaryPreparer:
             prior_canary_submissions=prior_canary_submissions,
         )
         package_path, context_path, manifest_path = self._workspace.write_prepared_canary(
-            result.package
+            result.package,
+            result.bracket,
         )
         persisted = read_prepared_package(package_path)
+        persisted_bracket = read_expected_bracket(self._workspace.expected_bracket_path)
         if persisted != result.package:
             raise PaperOperationalIntegrityError(
                 "persisted canary package differs from coordinator result"
+            )
+        if persisted_bracket != result.bracket:
+            raise PaperOperationalIntegrityError(
+                "persisted expected bracket differs from coordinator result"
             )
         return PaperOperationalPreparation(
             result=result,
             account_attestation_path=account_path,
             prepared_package_path=package_path,
+            expected_bracket_path=self._workspace.expected_bracket_path,
             operator_context_path=context_path,
             manifest_path=manifest_path,
         )
