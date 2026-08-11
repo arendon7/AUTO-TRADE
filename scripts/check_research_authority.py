@@ -51,7 +51,12 @@ def main() -> int:
 
 def _scan_file(path: Path, *, forbid_execution_calls: bool) -> list[str]:
     errors: list[str] = []
-    rel = path.relative_to(ROOT)
+    try:
+        rel: Path | str = path.relative_to(ROOT)
+    except ValueError:
+        # Synthetic probes used by the checker tests intentionally live outside
+        # the repository. Path rendering must never change the security rules.
+        rel = path
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(rel))
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
