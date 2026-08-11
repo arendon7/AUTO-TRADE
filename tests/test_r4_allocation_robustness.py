@@ -153,7 +153,7 @@ def test_fragile_dominant_strategy_fails_leave_one_out_policy(now):
         )
 
 
-def test_policy_exact_observed_worst_boundaries_pass_and_epsilon_tighter_fails(now):
+def test_policy_exact_observed_worst_boundaries_pass_and_materially_tighter_fails(now):
     dep = dependence(now)
     seed = evaluate_allocation_robustness(
         dep, budget_policy(), weights(), robust_spec(), loose_policy()
@@ -166,17 +166,23 @@ def test_policy_exact_observed_worst_boundaries_pass_and_epsilon_tighter_fails(n
     )
     assert exact_evidence.robust
 
-    epsilon = D("1e-30")
+    # Tighten by a representable, material amount derived from the observed
+    # boundary. An arbitrary 1e-30 delta can disappear under the Decimal
+    # precision used by the robustness metric and therefore is not a valid
+    # strict-boundary test.
     if worst_degradation > 0:
         tighter = AllocationRobustnessPolicy(
-            max(D("0"), worst_degradation - epsilon),
+            worst_degradation / D("2"),
             worst_volatility,
         )
-    else:
+    elif worst_volatility > 0:
         tighter = AllocationRobustnessPolicy(
             worst_degradation,
-            max(D("0"), worst_volatility - epsilon),
+            worst_volatility / D("2"),
         )
+    else:
+        pytest.fail("fixture must produce at least one positive robustness degradation")
+
     tighter_evidence = evaluate_allocation_robustness(
         dep, budget_policy(), weights(), robust_spec(), tighter
     )
