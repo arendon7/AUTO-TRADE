@@ -3,6 +3,7 @@ from decimal import Decimal
 
 import pytest
 
+from autotrade.domain import Fill, OrderRecord, OrderStatus, Side
 from autotrade.portfolio_integrity import (
     PortfolioIntegrityError,
     portfolio_snapshot_error,
@@ -125,3 +126,72 @@ def test_inmemory_initialize_is_idempotent_but_does_not_replace_existing_state(n
     second = store.initialize(alternate, now=now)
     assert second == first
     assert store.get() == first
+
+
+def _order(now, market_buy_intent) -> OrderRecord:
+    return OrderRecord(
+        order_id="order-r4-audit",
+        intent=market_buy_intent,
+        risk_decision_id="risk-r4-audit",
+        status=OrderStatus.PARTIALLY_FILLED,
+        created_at=now,
+        submitted_at=now,
+    )
+
+
+def test_inmemory_fill_batch_failure_is_atomic_and_does_not_consume_valid_fill_id(
+    now, empty_portfolio, market_buy_intent
+):
+    store = InMemoryPortfolioStore()
+    initial = store.initialize(empty_portfolio, now=now)
+    order = _order(now, market_buy_intent)
+    valid = Fill(
+        fill_id="fill-valid",
+        order_id=order.order_id,
+        symbol=order.intent.symbol,
+        side=order.intent.side,
+        quantity=Decimal("1"),
+        price=Decimal("100"),
+        occurred_at=now,
+    )
+    invalid_late = Fill(
+        fill_id="fill-invalid",
+        order_id="wrong-order",
+        symbol=order.intent.symbol,
+        side=order.intent.side,
+        quantity=Decimal("1"),
+        price=Decimal("100"),
+        occurred_at=now,
+    )
+
+    with pytest.raises(ValueError, match="fill order_id mismatch"):
+        store.apply_fills(order, (valid, invalid_late), now=now)
+    assert store.get() == initial
+
+    # If the failed batch had prematurely consumed fill-valid, this retry would
+    # be a no-op instead of producing the expected exposure/version transition.
+    applied = store.apply_fills(order, (valid,), now=now)
+    assert applied.version == initial.version + 1
+    assert applied.snapshot.net_exposure == Decimal("100")
+
+
+def test_inmemory_conflicting_duplicate_within_same_batch_fails_without_state_change(
+    now, empty_portfolio, market_buy_intent
+):
+    store = InMemoryPortfolioStore()
+    initial = store.initialize(empty_portfolio, now=now)
+    order = _order(now, market_buy_intent)
+    first = Fill(
+        fill_id="fill-dup",
+        order_id=order.order_id,
+        symbol=order.intent.symbol,
+        side=Side.BUY,
+        quantity=Decimal("1"),
+        price=Decimal("100"),
+        occurred_at=now,
+    )
+    conflicting = replace(first, price=Decimal("101"))
+
+    with pytest.raises(ValueError, match="conflicting fill identity within batch"):
+        store.apply_fills(order, (first, conflicting), now=now)
+    assert store.get() == initial
