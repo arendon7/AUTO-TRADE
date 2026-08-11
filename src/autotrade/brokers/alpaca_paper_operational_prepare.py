@@ -134,8 +134,9 @@ class PaperOperationalCanaryPreparer:
         # Stage only evidence that cannot authorize execution. In particular,
         # operator_context.json and manifest.json do not exist until the exact
         # workspace core.sqlite3 has passed read-only provenance verification.
+        package_path = self._workspace.prepared_package_path
         _write_json_idempotent(
-            self._workspace.prepared_package_path,
+            package_path,
             result.package.canonical_payload(),
         )
         _write_json_idempotent(
@@ -150,7 +151,7 @@ class PaperOperationalCanaryPreparer:
             approval=result.approval,
         )
 
-        persisted = read_prepared_package(self._workspace.prepared_package_path)
+        persisted = read_prepared_package(package_path)
         persisted_bracket = read_expected_bracket(self._workspace.expected_bracket_path)
         snapshot_decision, snapshot_market, snapshot_approval = read_preparation_snapshot(
             self._workspace,
