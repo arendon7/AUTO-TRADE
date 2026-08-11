@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from hashlib import sha256
 import json
 
 import pytest
@@ -33,6 +34,11 @@ def write_snapshot(tmp_path):
         approval=result.approval,
     )
     return workspace, result, path
+
+
+def artifact_hash(payload: dict[str, object]) -> str:
+    raw = json.dumps(payload, sort_keys=True, separators=(",", ":"), allow_nan=False)
+    return sha256(raw.encode("utf-8")).hexdigest()
 
 
 def test_snapshot_roundtrip_is_exact_and_idempotent(tmp_path) -> None:
@@ -104,9 +110,14 @@ def test_snapshot_hash_authority_and_package_tamper_fail_closed(tmp_path) -> Non
             approval=result.approval,
         )
 
-    wrong_package = replace(result.package, package_hash="f" * 64)
-    with pytest.raises((ValueError, PaperOperationalIntegrityError)):
-        read_preparation_snapshot(workspace, package=wrong_package)
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    raw["package_hash"] = "f" * 64
+    without_hash = dict(raw)
+    without_hash.pop("snapshot_hash")
+    raw["snapshot_hash"] = artifact_hash(without_hash)
+    path.write_text(json.dumps(raw), encoding="utf-8")
+    with pytest.raises(PaperOperationalIntegrityError, match="package mismatch"):
+        read_preparation_snapshot(workspace, package=result.package)
 
 
 def test_snapshot_refuses_conflicting_overwrite_and_symlink(tmp_path) -> None:
