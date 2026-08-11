@@ -408,6 +408,19 @@
       "severity": "P1",
       "status": "CLOSED",
       "track": "R4"
+    },
+    {
+      "area": "Allocation robustness exact Decimal normalization",
+      "evidence": [
+        "src/autotrade/research/allocation_robustness.py",
+        "tests/test_r4_portfolio_manager.py"
+      ],
+      "id": "TD-R4-011",
+      "next_action": "Replace independently rounded normalized weights with deterministic exact-sum normalization (last canonical component is the remainder to 1), apply it to baseline and leave-one-out scenarios, and add repeating-decimal regression tests before re-closing robustness.",
+      "resolution": "",
+      "severity": "P1",
+      "status": "OPEN",
+      "track": "R4"
     }
   ],
   "registry_version": 1
