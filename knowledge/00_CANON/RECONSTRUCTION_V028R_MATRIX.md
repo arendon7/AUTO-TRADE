@@ -41,10 +41,10 @@ Objetivo: reconstruir todas las capacidades históricamente verificadas sin deud
 | R3 | bounded real-data reproducibility evidence | reconstructed strengthening | PASS | 2 independent 10-bar fetches + identical hashes + artifact roundtrip |
 | R4 | authoritative instrument master | reconstructed safety prerequisite | PASS | versioned venue rules/provenance; unknown/stale/conflicting metadata fail closed (`TD-R4-001`) |
 | R4 | versioned Portfolio State / reconciliation infrastructure | v0.18 lineage | PASS | durable/versioned base exists from R0/R2; R4 portfolio-governance invariants still need certification |
-| R4 | correlation-aware portfolio research | v0.18 | TODO | diversification/concentration constraints using authorized research evidence |
-| R4 | allocation perturbation + leave-one-out | v0.18 | TODO | deterministic robustness reports tied to immutable inputs |
-| R4 | TRAIN-calibrated regimes | v0.18 | TODO | no HOLDOUT-derived thresholds; unknown regime conservative |
-| R4 | Strategy/Portfolio Health & Drift | v0.19 | TODO | immutable baselines/reports + explicit state transitions |
+| R4 | correlation-aware portfolio research | v0.18 | PASS | common-panel dependence + anti-forgery clusters + exact strategy/cluster/portfolio budgets (`TD-R4-002`) |
+| R4 | allocation perturbation + leave-one-out | v0.18 | PASS | complete deterministic scenario set + recomputable robustness gate (`TD-R4-003`) |
+| R4 | TRAIN-calibrated regimes | v0.18 | PASS | TRAIN/DEVELOPMENT-only calibration + frozen HOLDOUT evaluation + UNKNOWN on stale/missing evidence (`TD-R4-004`) |
+| R4 | Strategy/Portfolio Health & Drift | v0.19 | PASS | immutable baseline/policy-bound durable state + monotone automatic worsening + acknowledged fresh-evidence recovery (`TD-R4-005`) |
 | R4 | Defensive Health Bridge | v0.20 | TODO | automatic actions reduce/block only + explicit human/policy recovery |
 | R4 | deterministic Portfolio Manager / sizing + cross-strategy budgets | reconstructed strengthening | TODO | bounded advisory/control-plane output; no OMS bypass or capital authority |
 | R5 | closed-kline read-only stream | v0.22 | TODO | disabled default + fixed host + stream state |

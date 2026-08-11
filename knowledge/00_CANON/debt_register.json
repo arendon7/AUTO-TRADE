@@ -273,42 +273,61 @@
     },
     {
       "area": "Correlation-aware portfolio research",
-      "evidence": [],
+      "evidence": [
+        "src/autotrade/research/portfolio_dependence.py",
+        "tests/test_r4_portfolio_dependence.py",
+        "tests/test_r4_dependence_integrity.py",
+        "tests/test_r4_dependence_universe_integrity.py",
+        "knowledge/60_EVIDENCE/R4_RESEARCH_GOVERNANCE_CERTIFICATION.json"
+      ],
       "id": "TD-R4-002",
-      "next_action": "Implement canonical strategy return/exposure evidence, dependence/correlation estimates, diversification constraints and cross-strategy/cluster budgets using authorized TRAIN/DEVELOPMENT data only; insufficient evidence must not increase risk.",
-      "resolution": "",
+      "next_action": "",
+      "resolution": "Canonical correlation/dependence evidence uses one common aligned panel, deterministic recomputed clusters and exact strategy/cluster/portfolio budget validation; insufficient or forged evidence fails closed and the module has no execution authority.",
       "severity": "P1",
-      "status": "OPEN",
+      "status": "CLOSED",
       "track": "R4"
     },
     {
       "area": "Allocation robustness",
-      "evidence": [],
+      "evidence": [
+        "src/autotrade/research/allocation_robustness.py",
+        "tests/test_r4_allocation_robustness.py",
+        "knowledge/60_EVIDENCE/R4_RESEARCH_GOVERNANCE_CERTIFICATION.json"
+      ],
       "id": "TD-R4-003",
-      "next_action": "Implement deterministic allocation perturbation and leave-one-strategy/component-out robustness evidence tied to immutable strategy/dataset/config fingerprints; fragile point optima must fail robustness gates.",
-      "resolution": "",
+      "next_action": "",
+      "resolution": "Deterministic complete leave-one-out and bounded allocation perturbation evidence is recomputed from source inputs; non-positive/degenerate baselines, budget violations and fragile allocations fail closed.",
       "severity": "P1",
-      "status": "OPEN",
+      "status": "CLOSED",
       "track": "R4"
     },
     {
       "area": "Regime governance",
-      "evidence": [],
+      "evidence": [
+        "src/autotrade/research/regimes.py",
+        "tests/test_r4_regime_governance.py",
+        "knowledge/60_EVIDENCE/R4_RESEARCH_GOVERNANCE_CERTIFICATION.json"
+      ],
       "id": "TD-R4-004",
-      "next_action": "Implement versioned regime features/models calibrated only on TRAIN/authorized development evidence, structurally prohibit HOLDOUT-derived threshold recalibration and treat missing/stale regime state conservatively.",
-      "resolution": "",
+      "next_action": "",
+      "resolution": "Regime calibration structurally permits TRAIN/DEVELOPMENT only; FINAL_HOLDOUT evaluates frozen models only. Missing/stale/future features are UNKNOWN and the append-only registry verifies durable lineage, row identity and parser integrity before advancing versions.",
       "severity": "P1",
-      "status": "OPEN",
+      "status": "CLOSED",
       "track": "R4"
     },
     {
       "area": "Strategy/Portfolio Health & Drift",
-      "evidence": [],
+      "evidence": [
+        "src/autotrade/research/health.py",
+        "tests/test_r4_health_drift.py",
+        "tests/test_r4_health_binding_integrity.py",
+        "knowledge/60_EVIDENCE/R4_RESEARCH_GOVERNANCE_CERTIFICATION.json"
+      ],
       "id": "TD-R4-005",
-      "next_action": "Implement immutable health baselines, deterministic drift evidence, explicit health-state transitions and auditable quarantine/retirement criteria with idempotent replay.",
-      "resolution": "",
+      "next_action": "",
+      "resolution": "Durable Strategy/Portfolio Health & Drift uses immutable baseline/policy binding, separate entity namespaces, hash-verified state, monotone automatic worsening, non-consecutive replay idempotency and explicit fresh-evidence acknowledged recovery.",
       "severity": "P1",
-      "status": "OPEN",
+      "status": "CLOSED",
       "track": "R4"
     },
     {
