@@ -1,7 +1,7 @@
 # DEBT REGISTER — v0.28R
 
 Fecha: 2026-08-11
-Estado: ACTIVE — **R0–R4 CERTIFIED; R5 ACTIVE**
+Estado: **R0–R5 CERTIFIED; R5 PR #13 pending integration; R6 gated**
 
 ## Authority
 La autoridad machine-readable es `knowledge/00_CANON/debt_register.json`. Si esta vista humana discrepa, manda el JSON + CI.
@@ -14,27 +14,29 @@ Ningún track puede certificarse con deuda conocida P0/P1/P2 asignada a ese trac
 - **R1 — PASS**
 - **R2 — PASS**
 - **R3 — PASS**
-- **R4 — PASS e integrado; post-merge recertificado en `main` `c294aa69f35b64559e3aea58a1c0661e66599db8`**
+- **R4 — PASS e integrado/post-merge recertificado en `main` `c294aa69f35b64559e3aea58a1c0661e66599db8`**
+- **R5 — PASS en branch; PR #13 pendiente de integración y recertificación post-merge**
 
-Post-merge R4: Core Safety `31463746764` PASS, Knowledge Contract `31463746745` PASS, **483 tests / 86.45% coverage**.
+Certificación R5: `knowledge/60_EVIDENCE/R5_CERTIFICATION.json`, basis `0d4f75d083a055b83646bb861f08731aecace560`: **606 tests PASS / 86.49% coverage**, Contract Registry 10 PASS, Research Authority PASS, R5 Authority Boundary PASS, Debt Register PASS y Knowledge Contract PASS.
 
-## R5 — deuda registrada antes de implementación
-| ID | Sev | Área | Condición de cierre |
-|---|---|---|---|
-| `TD-R5-001` | P1 | Closed-kline read-only streaming boundary | disabled-by-default, allowlist exacta, closed-only, bounded I/O, sin broker/order authority |
-| `TD-R5-002` | P1 | Duplicate/order/gap integrity | duplicate idéntico idempotente; conflicto/out-of-order/gap fail closed; sin imputación |
-| `TD-R5-003` | P1 | DEGRADED lifecycle | EOF/timeout/ambigüedad => DEGRADED; reconnect no oculta gaps |
-| `TD-R5-004` | P1 | Synchronized portfolio shadow | pesos/config/timestamps congelados, hash-bound, reproducible e idempotente |
-| `TD-R5-005` | P1 | Forward evidence vs HOLDOUT | evidencia post-activation separada; FINAL_HOLDOUT no recalibra decisiones |
-| `TD-R5-006` | P1 | Execution-authority boundary | stream/shadow/forward sin OMS submit, broker orders, LIVE endpoints ni risk increase por evidencia degradada |
+## R5 debt closure
+Todos los P0/P1/P2 conocidos de R5 están CLOSED: `TD-R5-001..006`.
+Incluye stream WSS market-data-only acotado, continuidad fail-closed, DEGRADED sticky, shadow sincronizado/hash-bound, forward evidence post-activation y CI authority boundary permanente.
 
-R5 P0/P1/P2 OPEN: **6**. Por definición R5 NO puede certificarse hasta cerrarlas con evidencia.
+## Deuda abierta
+| ID | Sev | Track | Área | Condición de cierre |
+|---|---|---|---|---|
+| `TD-OPS-001` | P3 | OPS | Graphify | generar graph semántico/deep real en runtime soportado y vincularlo a `SOURCE_SHA`; nunca fabricar artefactos |
 
-## Deuda no bloqueante fuera de R5
-| ID | Sev | Track | Área |
-|---|---|---|---|
-| `TD-OPS-001` | P3 | OPS | Graphify semántico/deep real pendiente de runtime soportado |
+No existe P0/P1/P2 OPEN de R5. `TD-OPS-001` no bloquea R5.
+
+## Próximo orden
+1. mantener PR #13 verde y sin nuevas features;
+2. merge sólo contra el expected head certificado;
+3. recertificar el SHA exacto de `main` post-merge;
+4. crear R6 únicamente desde ese `main` verde;
+5. registrar deuda R6 antes de implementar external PAPER.
 
 ## Capital
 **LIVE TRADING: BLOQUEADO.**
-R5 no puede conceder external PAPER/LIVE authority.
+R5 no concede external PAPER/LIVE authority ni demuestra rentabilidad.

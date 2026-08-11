@@ -47,11 +47,11 @@ Objetivo: reconstruir todas las capacidades históricamente verificadas sin deud
 | R4 | Strategy/Portfolio Health & Drift | v0.19 | PASS | baseline/policy-bound durable health + retry-safe recovery + tamper-evident ACK-chain anchored in Health state (`TD-R4-005`,`TD-R4-012`,`TD-R4-014`) |
 | R4 | Defensive Health Bridge | v0.20 | PASS | reduce/block-only bridge + retry-safe recovery + authoritative unsynced-worsening overlay + Safety/OMS rechecks (`TD-R4-006`,`TD-R4-012`,`TD-R4-013`) |
 | R4 | deterministic Portfolio Manager / sizing + cross-strategy budgets | reconstructed strengthening | PASS | advisory-only sizing + base/Health/venue budget+robustness recomputation + authoritative metadata + CI authority gate (`TD-R4-007`) |
-| R5 | closed-kline read-only stream | v0.22 | TODO | disabled default + fixed host + stream state |
-| R5 | duplicate idempotency + gap fail-closed | v0.22 | TODO | no silent imputation |
-| R5 | socket termination -> DEGRADED | v0.22 | TODO | no reconnect that hides gaps |
-| R5 | synchronized portfolio shadow | v0.25 | TODO | frozen weights + exact timestamps |
-| R5 | forward evidence without HOLDOUT | v0.25 | TODO | post-activation evidence separation |
+| R5 | closed-kline read-only stream | v0.22 | PASS | disabled default + exact market-data-only WSS host/path + bounded receive-only transport + strict closed-kline validation + live 1s evidence (`TD-R5-001`) |
+| R5 | duplicate idempotency + gap fail-closed | v0.22 | PASS | identical replay no-op; conflict/out-of-order/gap fail closed; no silent imputation or cursor advance (`TD-R5-002`) |
+| R5 | socket termination -> DEGRADED | v0.22 | PASS | timeout/EOF/socket/integrity failure => sticky DEGRADED + session teardown; reconnect cannot hide unresolved continuity (`TD-R5-003`) |
+| R5 | synchronized portfolio shadow | v0.25 | PASS | exact Decimal frozen weights + synchronized timestamps + recomputable components/NAV + append-only hash-chain + anchored head (`TD-R5-004`) |
+| R5 | forward evidence without HOLDOUT | v0.25 | PASS | verified-shadow-sourced append-only post-activation evidence + frozen policy/config + structural FINAL_HOLDOUT/selection separation (`TD-R5-005`,`TD-R5-006`) |
 | R6 | external Alpaca PAPER gateway | v0.26 | TODO | PAPER host fixed + disabled default + no LIVE host |
 | R6 | bounded external PAPER canary | v0.26 | TODO | prerequisites + tighter notional cap |
 | R6 | PAPER evidence qualification | v0.27 | TODO | terminality/fills/slippage/reconciliation |
@@ -86,17 +86,18 @@ Certification artifact: `knowledge/60_EVIDENCE/R4_CERTIFICATION.json`.
 
 R4 adds no external PAPER/LIVE authority; Portfolio Manager remains advisory-only and the Defensive Health Bridge can only maintain/reduce/block risk.
 
-## Active target — R5
-R5 starts only from post-merge-green `main` `c294aa69f35b64559e3aea58a1c0661e66599db8`. Registered blocking debt before implementation: `TD-R5-001..006`.
+## Certification closure — R5
 
-R5 reconstruye read-only streaming/shadow/forward evidence sin habilitar capital externo:
-1. closed-kline read-only stream, disabled by default y host fijo;
-2. duplicate idempotency + gap fail-closed, sin silent imputation;
-3. unexpected socket termination -> DEGRADED, sin reconnect que oculte gaps;
-4. synchronized portfolio shadow con pesos/timestamps congelados;
-5. forward evidence post-activation separado de HOLDOUT;
-6. registrar deuda R5 antes de implementar cualquier gap descubierto;
-7. mantener external PAPER/LIVE bloqueado.
+### R5
+Branch certification basis: `0d4f75d083a055b83646bb861f08731aecace560` from exact post-R4-green `main` `c294aa69f35b64559e3aea58a1c0661e66599db8`.
+Certified closure evidence: **606 tests PASS / 86.49% branch coverage**, Contract Registry 10 PASS, Research/Advisory Authority PASS, R5 Authority Boundary PASS, Debt Register PASS and Knowledge Contract PASS.
+Bounded live market-data-only WebSocket evidence: run `31465471204`, source `ba0ec1198c60234fa0f9b3f8184ad591aaa87c61`, `BTCUSDT` `1s`, exact `data-stream.binance.vision` endpoint, no application send surface.
+Certification artifact: `knowledge/60_EVIDENCE/R5_CERTIFICATION.json`.
+
+R5 adds no external PAPER/LIVE order authority and does not reuse FINAL_HOLDOUT for forward recalibration.
+
+## Next target — R6
+R6 is gated until PR #13 is merged and the exact resulting `main` SHA is recertified green. R6 will cover external Alpaca PAPER only, bounded canary qualification and broker-side protection evidence; LIVE remains blocked.
 
 ## Debt policy
 A track cannot be PASS with known P0/P1/P2 defects assigned to that track, skipped negative tests, reduced coverage, untracked mismatches, hidden critical TODOs or temporary broker/network bypasses. `knowledge/00_CANON/debt_register.json` is the machine-readable authority; this matrix is the capability view.

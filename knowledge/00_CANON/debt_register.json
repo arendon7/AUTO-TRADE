@@ -4,7 +4,8 @@
     "R1",
     "R2",
     "R3",
-    "R4"
+    "R4",
+    "R5"
   ],
   "items": [
     {
@@ -480,62 +481,97 @@
     },
     {
       "area": "Closed-kline read-only streaming boundary",
-      "evidence": [],
+      "evidence": [
+        "src/autotrade/research/streaming.py",
+        "src/autotrade/research/stream_transport.py",
+        "tests/test_r5_closed_kline_stream.py",
+        "tests/test_r5_stream_state_authority.py",
+        "tests/test_r5_websocket_transport.py",
+        "tests/test_r5_adversarial_edges_v2.py",
+        "knowledge/60_EVIDENCE/R5_LIVE_CLOSED_KLINE_STREAM_EVIDENCE.json",
+        "knowledge/60_EVIDENCE/R5_CERTIFICATION.json"
+      ],
       "id": "TD-R5-001",
-      "next_action": "Implement a disabled-by-default read-only closed-kline stream with exact allowlisted HTTPS/WSS host/path/protocol, bounded I/O and no broker/order authority; certify malformed/open/future/stale input rejection before closing.",
-      "resolution": "",
+      "next_action": "",
+      "resolution": "Implemented a disabled-by-default closed-kline market-data-only WebSocket boundary with exact WSS host/path validation before I/O, pinned audited client dependency, proxy/compression disabled, bounded timeouts/message size/queue, receive-only adapter, strict closed-kline parsing and bounded live BTCUSDT 1s evidence from data-stream.binance.vision. No user-data, broker order or capital authority is exposed.",
       "severity": "P1",
-      "status": "OPEN",
+      "status": "CLOSED",
       "track": "R5"
     },
     {
       "area": "Streaming duplicate, ordering and gap integrity",
-      "evidence": [],
+      "evidence": [
+        "src/autotrade/research/streaming.py",
+        "tests/test_r5_closed_kline_stream.py",
+        "tests/test_r5_adversarial_edges_v2.py",
+        "knowledge/60_EVIDENCE/R5_CERTIFICATION.json"
+      ],
       "id": "TD-R5-002",
-      "next_action": "Implement deterministic sequence/timestamp continuity with identical-duplicate idempotent no-op, conflicting duplicate/out-of-order/gap fail-closed semantics and no silent imputation; certify replay behavior.",
-      "resolution": "",
+      "next_action": "",
+      "resolution": "Implemented deterministic closed-kline identity and continuity: identical duplicates are idempotent no-ops; conflicting duplicates, out-of-order bars, timestamp/sequence gaps, malformed/open/future/stale evidence fail closed; no silent imputation or cursor advance occurs.",
       "severity": "P1",
-      "status": "OPEN",
+      "status": "CLOSED",
       "track": "R5"
     },
     {
       "area": "Streaming DEGRADED lifecycle and reconnect safety",
-      "evidence": [],
+      "evidence": [
+        "src/autotrade/research/streaming.py",
+        "src/autotrade/research/stream_transport.py",
+        "tests/test_r5_closed_kline_stream.py",
+        "tests/test_r5_websocket_transport.py",
+        "knowledge/60_EVIDENCE/R5_CERTIFICATION.json"
+      ],
       "id": "TD-R5-003",
-      "next_action": "Implement durable/read-only stream health where EOF, timeout, protocol ambiguity or unexpected termination enters DEGRADED and reconnect cannot clear or hide an unresolved continuity gap.",
-      "resolution": "",
+      "next_action": "",
+      "resolution": "Implemented sticky DEGRADED lifecycle for timeout, EOF, socket/protocol failure and continuity integrity failure. DEGRADED state tears down the session and refuses reconnect/advance until an explicit future recovery design exists, preventing reconnect from hiding an unresolved gap.",
       "severity": "P1",
-      "status": "OPEN",
+      "status": "CLOSED",
       "track": "R5"
     },
     {
       "area": "Synchronized portfolio shadow integrity",
-      "evidence": [],
+      "evidence": [
+        "src/autotrade/research/shadow.py",
+        "tests/test_r5_portfolio_shadow.py",
+        "tests/test_r5_adversarial_edges_v2.py",
+        "knowledge/60_EVIDENCE/R5_CERTIFICATION.json"
+      ],
       "id": "TD-R5-004",
-      "next_action": "Implement reproducible hash-bound portfolio shadow state using frozen strategy weights/configuration and exact market timestamps; reject stale, mismatched or non-reproducible shadow evidence and prevent double counting.",
-      "resolution": "",
+      "next_action": "",
+      "resolution": "Implemented research-only SQLite portfolio shadow evidence with exact Decimal frozen weights, exact synchronized timestamps, canonical component observations, recomputable weighted return/NAV, append-only SHA-256 record chain and separately hash-protected head/control anchor. Replay is idempotent and config/timestamp/hash/tail-deletion tampering fails closed.",
       "severity": "P1",
-      "status": "OPEN",
+      "status": "CLOSED",
       "track": "R5"
     },
     {
       "area": "Forward evidence separation from FINAL_HOLDOUT",
-      "evidence": [],
+      "evidence": [
+        "src/autotrade/research/forward.py",
+        "tests/test_r5_forward_evidence.py",
+        "tests/test_r5_adversarial_edges_v2.py",
+        "knowledge/60_EVIDENCE/R5_CERTIFICATION.json"
+      ],
       "id": "TD-R5-005",
-      "next_action": "Implement append-only post-activation forward evidence that is structurally separated from FINAL_HOLDOUT and cannot recalibrate frozen thresholds, weights or selection decisions; certify idempotency and provenance.",
-      "resolution": "",
+      "next_action": "",
+      "resolution": "Implemented append-only FORWARD_POST_ACTIVATION evidence sourced only from a fully verified shadow record hash and frozen policy/config fingerprints. Evidence predating activation, gaps, policy/config mismatch or conflicting replay fail closed. The API imports no split/validation/FINAL_HOLDOUT authority and cannot recalibrate frozen thresholds, weights or selection decisions.",
       "severity": "P1",
-      "status": "OPEN",
+      "status": "CLOSED",
       "track": "R5"
     },
     {
       "area": "R5 streaming/shadow execution-authority boundary",
-      "evidence": [],
+      "evidence": [
+        "scripts/check_r5_authority.py",
+        ".github/workflows/core-tests.yml",
+        "tests/test_r5_authority_checker.py",
+        "knowledge/60_EVIDENCE/R5_CERTIFICATION.json"
+      ],
       "id": "TD-R5-006",
-      "next_action": "Extend permanent CI authority checks so R5 stream/shadow/forward modules cannot import or invoke OMS submission, broker order methods, LIVE endpoints or capital-promotion paths; stale/missing/gapped evidence must never increase risk.",
-      "resolution": "",
+      "next_action": "",
+      "resolution": "Added a permanent Core Safety R5 authority scanner covering stream transport, streaming, shadow and forward modules. It forbids OMS/engine/broker/Safety/operational Portfolio State imports, order/send calls, Alpaca/PAPER/LIVE endpoints, FINAL_HOLDOUT/selection imports, and networking outside the approved stream surface. Adversarial checker tests prove the boundary fails closed.",
       "severity": "P1",
-      "status": "OPEN",
+      "status": "CLOSED",
       "track": "R5"
     }
   ],

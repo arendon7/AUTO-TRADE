@@ -1,0 +1,126 @@
+{
+  "schema_version": 1,
+  "track": "R5",
+  "reconstruction_target": "v0.28R",
+  "status": "CERTIFIED_BRANCH_PENDING_PR_INTEGRATION",
+  "base_main": "c294aa69f35b64559e3aea58a1c0661e66599db8",
+  "certification_basis_head": "0d4f75d083a055b83646bb861f08731aecace560",
+  "ci": {
+    "core_safety_run_id": 31465755866,
+    "knowledge_contract_run_id": 31465755855,
+    "tests_passed": 606,
+    "coverage_percent": 86.49,
+    "coverage_minimum_percent": 85.0,
+    "contract_registry": "PASS",
+    "contract_count": 10,
+    "contract_registry_sha256": "ddb94afa8916be37d0d956e6c32f775ea41c0fb79f4ea26d2d65dfa286c62785",
+    "research_advisory_authority_boundary": "PASS",
+    "r5_stream_shadow_forward_authority_boundary": "PASS",
+    "debt_register_contract": "PASS",
+    "knowledge_contract": "PASS"
+  },
+  "live_stream_evidence": {
+    "artifact": "knowledge/60_EVIDENCE/R5_LIVE_CLOSED_KLINE_STREAM_EVIDENCE.json",
+    "run_id": 31465471204,
+    "source_head": "ba0ec1198c60234fa0f9b3f8184ad591aaa87c61",
+    "venue": "BINANCE_SPOT",
+    "symbol": "BTCUSDT",
+    "interval": "1s",
+    "market_data_only": true,
+    "application_send_surface": "NONE",
+    "status": "PASS"
+  },
+  "closed_r5_debt_ids": [
+    "TD-R5-001",
+    "TD-R5-002",
+    "TD-R5-003",
+    "TD-R5-004",
+    "TD-R5-005",
+    "TD-R5-006"
+  ],
+  "open_r5_blocking_debt_ids": [],
+  "open_nonblocking_ops_debt_ids": [
+    "TD-OPS-001"
+  ],
+  "capabilities": {
+    "closed_kline_read_only_stream": {
+      "status": "PASS",
+      "evidence": [
+        "src/autotrade/research/streaming.py",
+        "src/autotrade/research/stream_transport.py",
+        "tests/test_r5_closed_kline_stream.py",
+        "tests/test_r5_stream_state_authority.py",
+        "tests/test_r5_websocket_transport.py",
+        "tests/test_r5_adversarial_edges_v2.py",
+        "knowledge/60_EVIDENCE/R5_LIVE_CLOSED_KLINE_STREAM_EVIDENCE.json",
+        "knowledge/60_EVIDENCE/R5_CERTIFICATION.json"
+      ]
+    },
+    "duplicate_gap_order_integrity": {
+      "status": "PASS",
+      "evidence": [
+        "src/autotrade/research/streaming.py",
+        "tests/test_r5_closed_kline_stream.py",
+        "tests/test_r5_adversarial_edges_v2.py",
+        "knowledge/60_EVIDENCE/R5_CERTIFICATION.json"
+      ]
+    },
+    "degraded_socket_lifecycle": {
+      "status": "PASS",
+      "evidence": [
+        "src/autotrade/research/streaming.py",
+        "src/autotrade/research/stream_transport.py",
+        "tests/test_r5_closed_kline_stream.py",
+        "tests/test_r5_websocket_transport.py",
+        "knowledge/60_EVIDENCE/R5_CERTIFICATION.json"
+      ]
+    },
+    "synchronized_portfolio_shadow": {
+      "status": "PASS",
+      "evidence": [
+        "src/autotrade/research/shadow.py",
+        "tests/test_r5_portfolio_shadow.py",
+        "tests/test_r5_adversarial_edges_v2.py",
+        "knowledge/60_EVIDENCE/R5_CERTIFICATION.json"
+      ]
+    },
+    "post_activation_forward_evidence": {
+      "status": "PASS",
+      "evidence": [
+        "src/autotrade/research/forward.py",
+        "tests/test_r5_forward_evidence.py",
+        "tests/test_r5_adversarial_edges_v2.py",
+        "knowledge/60_EVIDENCE/R5_CERTIFICATION.json"
+      ]
+    },
+    "r5_execution_authority_boundary": {
+      "status": "PASS",
+      "evidence": [
+        "scripts/check_r5_authority.py",
+        ".github/workflows/core-tests.yml",
+        "tests/test_r5_authority_checker.py",
+        "knowledge/60_EVIDENCE/R5_CERTIFICATION.json"
+      ]
+    }
+  },
+  "cross_boundary_invariants": [
+    "Streaming is disabled by default and exact market-data-only endpoint policy is validated before I/O.",
+    "Only authoritative closed klines may advance the stream cursor; malformed/open/future/stale/conflicting/gapped evidence cannot advance state.",
+    "Unexpected transport or continuity failure becomes sticky DEGRADED and reconnect cannot hide unresolved gaps.",
+    "Portfolio shadow weights/config/timestamps are frozen, exact-Decimal and fully recomputable from canonical persisted components.",
+    "Shadow and forward evidence use append-only hash chains with separately anchored durable heads so tail deletion is detectable.",
+    "Forward evidence is post-activation only, sourced from verified shadow hashes and structurally separated from FINAL_HOLDOUT/selection authority.",
+    "Permanent CI rejects OMS/broker/Safety/operational Portfolio State imports, order/send calls, Alpaca/LIVE endpoints and unauthorized networking in R5 modules.",
+    "No R5 path grants external PAPER or LIVE execution authority or may increase capital risk from stale/missing/gapped evidence."
+  ],
+  "explicit_non_claims": [
+    "R5 certification is not profitability evidence.",
+    "R5 certification is not external PAPER qualification.",
+    "R5 certification is not LIVE trading approval.",
+    "The bounded live WebSocket observation validates market-data transport behavior only, not strategy edge or expected returns."
+  ],
+  "capital_authority": "NONE",
+  "external_paper_authority": "NONE_ADDED_BY_R5",
+  "live_trading": "BLOCKED",
+  "next_track": "R6_AFTER_R5_MERGE_AND_POST_MERGE_MAIN_RECERTIFICATION"
+}
