@@ -1,0 +1,46 @@
+name: R2 Canonical Closure
+
+on:
+  push:
+    branches: ["reconstruction/r2-capital-oms"]
+    paths: [".r2close/TRIGGER"]
+
+permissions:
+  contents: write
+
+jobs:
+  close-r2-canon:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout exact branch
+        uses: actions/checkout@v5
+        with:
+          ref: reconstruction/r2-capital-oms
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Verify gated evidence exists
+        run: test -f knowledge/60_EVIDENCE/R2_CERTIFICATION.json
+
+      - name: Apply canonical closure
+        run: python .r2close/finalize.py
+
+      - name: Verify resulting contracts
+        run: |
+          python -m compileall -q src tests scripts
+          python scripts/check_contract_registry.py
+          python scripts/check_debt_register.py
+          python scripts/check_knowledge_contract.py
+
+      - name: Commit self-cleaned closure
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "docs(r2): close certified track and hand off to R3"
+          git push origin HEAD:reconstruction/r2-capital-oms
