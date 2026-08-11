@@ -16,7 +16,6 @@ from autotrade.brokers.alpaca_paper_operator_decision import (
 )
 from autotrade.domain import OrderStatus
 from autotrade.persistence import SQLiteRuntime
-from autotrade.safety import SafetyControlState
 from test_r6_paper_canary_coordinator import NOW, decision, market, prepare, stack
 
 
