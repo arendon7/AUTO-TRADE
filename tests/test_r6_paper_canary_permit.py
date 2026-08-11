@@ -47,7 +47,6 @@ def order(suffix: str = "001") -> OrderRecord:
         order_type=OrderType.LIMIT,
         quantity=Decimal("1"),
         limit_price=Decimal("10"),
-        stop_price=None,
         idempotency_key=f"permit-idempotency-{suffix}",
         created_at=NOW - timedelta(seconds=2),
     )
@@ -56,8 +55,7 @@ def order(suffix: str = "001") -> OrderRecord:
         intent=intent,
         status=OrderStatus.VALIDATED,
         risk_decision_id=f"permit-risk-{suffix}",
-        broker_order_id=None,
-        updated_at=NOW - timedelta(seconds=1),
+        created_at=NOW - timedelta(seconds=1),
     )
 
 

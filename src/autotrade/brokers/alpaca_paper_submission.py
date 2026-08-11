@@ -216,14 +216,18 @@ class SQLitePaperSubmissionRegistry:
                 (binding.client_order_id,),
             ).fetchone()
 
-            if by_order is not None or by_client is not None:
-                if by_order is None or by_client is None:
-                    raise PaperSubmissionIntegrityError("submission binding indexes disagree")
+            if by_order is None and by_client is not None:
+                raise PaperSubmissionConflict(
+                    "client_order_id is already bound to another local order"
+                )
+            if by_order is not None:
                 existing = _binding_from_row(by_order)
-                if str(by_client["order_id"]) != existing.order_id:
+                if existing.client_order_id != binding.client_order_id:
                     raise PaperSubmissionConflict(
-                        "client_order_id is already bound to another local order"
+                        "local order is already bound to a different client_order_id"
                     )
+                if by_client is None or str(by_client["order_id"]) != existing.order_id:
+                    raise PaperSubmissionIntegrityError("submission binding indexes disagree")
                 if existing.fingerprint != binding.fingerprint:
                     raise PaperSubmissionConflict(
                         "order/client_order_id is already bound to different immutable data"
@@ -336,6 +340,10 @@ class SQLitePaperSubmissionRegistry:
             ) is not None:
                 conn.execute("COMMIT")
                 return state
+            if now.astimezone(timezone.utc) < state.updated_at.astimezone(timezone.utc):
+                raise PaperSubmissionIntegrityError(
+                    "submission event time cannot move backwards"
+                )
             if state.status is not PaperSubmissionStatus.PREPARED:
                 raise PaperSubmissionBlocked(
                     f"external PAPER submit blocked from {state.status.value}; reconcile first"

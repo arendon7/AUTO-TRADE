@@ -58,7 +58,6 @@ def make_order(*, status: OrderStatus = OrderStatus.VALIDATED) -> OrderRecord:
         order_type=OrderType.MARKET,
         quantity=Decimal("1"),
         limit_price=None,
-        stop_price=None,
         idempotency_key="idem-order-record",
         created_at=T0,
     )
@@ -67,8 +66,7 @@ def make_order(*, status: OrderStatus = OrderStatus.VALIDATED) -> OrderRecord:
         intent=intent,
         status=status,
         risk_decision_id="risk-order-record",
-        broker_order_id=None,
-        updated_at=T0,
+        created_at=T0,
     )
 
 
@@ -97,7 +95,7 @@ def test_binding_from_validated_order_uses_deterministic_client_order_id() -> No
 def test_binding_from_nonvalidated_order_is_rejected() -> None:
     with pytest.raises(ValueError, match="VALIDATED or SUBMITTING"):
         PaperSubmissionBinding.from_order(
-            order=make_order(status=OrderStatus.CREATED),
+            order=make_order(status=OrderStatus.SUBMITTED),
             account_attestation_fingerprint=h("attestation"),
             order_payload_hash=h("external-payload"),
             created_at=T0,
