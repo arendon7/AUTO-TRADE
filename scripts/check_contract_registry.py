@@ -18,6 +18,7 @@ REQUIRED_CONTRACTS = {
     "SafetyControlState@1",
     "RiskTelemetryState@1",
     "LedgerEvent@1",
+    "AuthoritativeInstrumentRules@1",
 }
 
 
@@ -26,7 +27,7 @@ def main() -> int:
     ids = {spec.contract_id for spec in registry.all_contracts()}
     missing = REQUIRED_CONTRACTS - ids
     if missing:
-        raise ContractRegistryError(f"missing required R2 contracts: {sorted(missing)}")
+        raise ContractRegistryError(f"missing required capital/control-plane contracts: {sorted(missing)}")
 
     now = datetime.now(timezone.utc).isoformat()
     fill = {
@@ -42,13 +43,38 @@ def main() -> int:
         "BrokerExecution@1",
         {"status": "FILLED", "fills": [fill]},
     )
+    registry.validate(
+        "AuthoritativeInstrumentRules@1",
+        {
+            "venue": "TEST-VENUE",
+            "symbol": "TEST-USD",
+            "base_currency": "TEST",
+            "quote_currency": "USD",
+            "version": 1,
+            "price_tick": "0.01",
+            "quantity_step": "0.001",
+            "min_quantity": "0.001",
+            "max_quantity": "10",
+            "min_notional": "10",
+            "max_notional": "100000",
+            "trading_status": "TRADING",
+            "source": "ci-fixture",
+            "source_version": "1",
+            "source_payload_sha256": "a" * 64,
+            "observed_at": now,
+            "valid_until": None,
+            "fingerprint": "b" * 64,
+        },
+    )
 
     fingerprint = registry.registry_fingerprint()
     if len(fingerprint) != 64:
         raise ContractRegistryError("registry fingerprint is not SHA-256 length")
 
     source = Path(__file__).resolve().parents[1] / "src" / "autotrade" / "contracts" / "registry.json"
-    json.loads(source.read_text(encoding="utf-8"))
+    document = json.loads(source.read_text(encoding="utf-8"))
+    if document.get("registry_version", 0) < 2:
+        raise ContractRegistryError("R4 requires contract registry_version >= 2")
     print(
         f"AUTO-TRADE contract registry: PASS ({len(ids)} contracts, sha256={fingerprint})"
     )
