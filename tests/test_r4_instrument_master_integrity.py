@@ -192,6 +192,7 @@ def test_nonfinite_candidate_inputs_fail_before_tick_math(now):
 
 def test_invalid_decimal_payload_is_normalized_to_value_error(now):
     payload = rules(now).to_payload()
+    payload.pop("fingerprint")
     payload["price_tick"] = "not-decimal"
     with pytest.raises(ValueError, match="invalid decimal"):
         AuthoritativeInstrumentRules.from_payload(payload)
