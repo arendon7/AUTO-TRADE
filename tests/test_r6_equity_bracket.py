@@ -161,7 +161,7 @@ def test_semantically_equal_decimal_inputs_produce_same_payload_hash() -> None:
 @pytest.mark.parametrize(
     "current_order,reason",
     [
-        (order(status=OrderStatus.CREATED), "VALIDATED"),
+        (order(status=OrderStatus.SUBMITTED), "VALIDATED"),
         (order(broker_order_id="already-broker-bound"), "broker-bound"),
         (order(symbol="MSFT"), "symbol mismatch"),
         (order(side=Side.SELL), "BUY-only"),
