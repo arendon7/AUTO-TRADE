@@ -1,0 +1,32 @@
+name: R6 Stale One-Shot Cleanup
+
+on:
+  push:
+    branches:
+      - reconstruction/r6-external-paper-protection
+    paths:
+      - .github/workflows/r6-clean-stale-one-shots.yml
+
+permissions:
+  contents: write
+
+jobs:
+  clean:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: reconstruction/r6-external-paper-protection
+          fetch-depth: 0
+      - name: Remove every R6 temporary one-shot workflow
+        run: |
+          git config user.name arendon7
+          git config user.email 102555888+arendon7@users.noreply.github.com
+          files="$(git ls-files '.github/workflows/r6-*-one-shot.yml')"
+          test -n "$files"
+          printf '%s\n' "$files"
+          printf '%s\n' "$files" | xargs git rm --
+          test -z "$(git ls-files '.github/workflows/r6-*-one-shot.yml')"
+          test -f .github/workflows/r6-authority.yml
+          git commit -m "chore(r6): purge temporary R6 one-shot workflows"
+          git push origin HEAD:reconstruction/r6-external-paper-protection
