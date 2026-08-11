@@ -42,16 +42,36 @@ def main() -> int:
     if ISSUER.is_file():
         source = ISSUER.read_text(encoding="utf-8")
         for anchor in (
+            'parser.add_argument(\n        "--workspace"',
+            "PaperOperationalWorkspace",
+            "read_prepared_package(workspace.prepared_package_path)",
+            "PaperOperatorDecisionContext.from_prepared_package(package)",
+            "PaperOperationalCoreProvenanceReader(workspace).verify(now=now)",
+            "verify_core_provenance_document(",
+            "first_checked_at = datetime.now(timezone.utc)",
+            "second_provenance_hash = _verify_current_core(",
+            "if second_provenance_hash != provenance_hash:",
+            "SQLiteRuntime(workspace.operator_db_path)",
             "sys.stdin.isatty()",
             "sys.stdout.isatty()",
             "operator_confirmation_challenge(context)",
             "entered = input(",
             "registry.record_operator_approval(",
+            '"core_provenance_document_hash": provenance_hash',
             '"external_order_submitted": False',
             '"live_trading": "BLOCKED"',
         ):
             if anchor not in source:
                 errors.append(f"interactive operator issuer anchor missing: {anchor}")
+        if source.count("_verify_current_core(") != 3:
+            errors.append(
+                "interactive issuer must define _verify_current_core and invoke it exactly twice"
+            )
+        for forbidden_cli in ('"--db"', '"--context"'):
+            if forbidden_cli in source:
+                errors.append(
+                    f"interactive issuer must derive decision paths from workspace, not accept {forbidden_cli}"
+                )
 
     allowed_caller = ISSUER.resolve()
     for root in (SRC, SCRIPTS):
@@ -93,7 +113,8 @@ def main() -> int:
         return 1
     print(
         "AUTO-TRADE R6 human operator decision boundary: PASS "
-        "(interactive issuer only; no network/OMS/AI authority; package-bound PAPER one-shot)"
+        "(interactive issuer only; fresh same-workspace core provenance before/after challenge; "
+        "no network/OMS/AI authority; package-bound PAPER one-shot)"
     )
     return 0
 
