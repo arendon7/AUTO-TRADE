@@ -1,6 +1,6 @@
 # DEBT REGISTER — v0.28R
 
-Fecha: 2026-08-10
+Fecha: 2026-08-11
 Estado: ACTIVE — **R0–R4 CERTIFIED; R5 NEXT**
 
 ## Authority
@@ -16,7 +16,7 @@ Ningún track puede certificarse con deuda conocida P0/P1/P2 asignada a ese trac
 - **R3 — PASS e integrado en `main` `c585a84b5197076b210723bb70980b828e4e3026`**
 - **R4 — PASS en branch; PR #11 pendiente de integración y recertificación post-merge**
 
-Certificación R4: `knowledge/60_EVIDENCE/R4_CERTIFICATION.json`, basis `350efd43ac133c95a1997b4a821a2e0bab4afaf2`: **480 tests PASS / 86.58% coverage**, 10 contratos, Research/Advisory Authority PASS, Debt Register PASS y Knowledge Contract PASS.
+Certificación R4: `knowledge/60_EVIDENCE/R4_CERTIFICATION.json`, basis `350efd43ac133c95a1997b4a821a2e0bab4afaf2`: **479 tests PASS / 86.45% coverage**, 10 contratos, Research/Advisory Authority PASS, Debt Register PASS y Knowledge Contract PASS.
 
 ## R4 debt closure
 Todos los P0/P1/P2 conocidos de R4 están CLOSED: `TD-R4-001..014`.
@@ -30,14 +30,16 @@ Esto incluye los hardenings tardíos de exact Decimal normalization, retry-safe 
 No existe P0/P1/P2 OPEN de R4. Graphify P3/OPS no bloquea la certificación R4 y permanece explícitamente visible.
 
 ## Próximo orden — R5
-1. registrar deuda/capacidades R5 antes de implementar;
-2. closed-kline read-only stream;
-3. duplicate idempotency + gap fail-closed;
-4. socket termination -> DEGRADED;
-5. synchronized portfolio shadow;
-6. forward evidence sin HOLDOUT;
-7. certificación adversarial y debt closure;
-8. external PAPER/LIVE continúa bloqueado.
+1. integrar PR #11 sólo contra su head validado;
+2. recertificar el SHA exacto de `main` post-merge;
+3. registrar deuda/capacidades R5 antes de implementar;
+4. closed-kline read-only stream;
+5. duplicate idempotency + gap fail-closed;
+6. socket termination -> DEGRADED;
+7. synchronized portfolio shadow;
+8. forward evidence sin HOLDOUT;
+9. certificación adversarial y debt closure;
+10. external PAPER/LIVE continúa bloqueado.
 
 ## Capital
 **LIVE TRADING: BLOQUEADO.**
