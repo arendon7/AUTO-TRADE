@@ -1,20 +1,20 @@
 # v0.28R CAPABILITY EQUIVALENCE MATRIX
 
 Fecha: 2026-08-10
-Estado: ACTIVE — R1 certified, R2 active
-Objetivo: reconstruir todas las capacidades históricamente verificadas sin deuda oculta.
+Estado: ACTIVE — **R0–R3 certified; R4 next**
+Objetivo: reconstruir todas las capacidades históricamente verificadas sin deuda oculta y sin declarar equivalencia por número de versión.
 
 ## Status legend
-- `PASS`: implementado + certificado en el árbol actual.
-- `PARTIAL`: existe base útil, falta equivalencia completa.
-- `TODO`: no implementado todavía.
+- `PASS`: implementado + certificado en el árbol/track correspondiente.
+- `PARTIAL`: existe base útil certificada, falta cerrar la capacidad completa del track.
+- `TODO`: no implementado/certificado todavía.
 - `BLOCKED`: depende de una capacidad previa.
 
 | Track | Capability | Historical evidence | Current | Evidence / exit requirement |
 |---|---|---|---|---|
 | R0 | deterministic safety authority separation | v0.1 | PASS | AI has no execution authority; deterministic gates only |
 | R0 | tamper-detect durable Event Ledger | v0.1+ | PASS | hash-chain + persistence + verification tests |
-| R0 | durable OMS + idempotency + UNKNOWN/reconciliation base | v0.10 lineage | PARTIAL | base PASS; lifecycle completeness closes in R2 |
+| R0 | durable OMS + idempotency + UNKNOWN/reconciliation base | v0.10 lineage | PASS | base plus full lifecycle/ambiguity maturity certified in R2 |
 | R0 | persistent kill switch + stale safety decision invalidation | reconstructed strengthening | PASS | restart + race tests |
 | R0 | atomic risk reservations cross-process | reconstructed strengthening | PASS | concurrency tests |
 | R1 | canonical market data + hashes/provenance | v0.3–v0.5 lineage | PASS | strict timezone/OHLCV/order/gap handling + reproducible dataset hash |
@@ -25,22 +25,28 @@ Objetivo: reconstruir todas las capacidades históricamente verificadas sin deud
 | R1 | walk-forward robustness | v0.5 | PASS | chronological rolling/expanding folds + distinct evaluation datasets |
 | R1 | moving-block bootstrap | v0.5 | PASS | contiguous block bootstrap + explicit seed/config + failure tests |
 | R1 | sample adequacy + immutable validation registry | v0.5 | PASS | adequacy gates + append-only-by-fingerprint evidence |
-| R2 | fat-finger and price sanity bands | v0.10 | PARTIAL | complete boundaries + stale/invalid price tests |
-| R2 | portfolio/strategy/order/position exposure + leverage | v0.10 | PARTIAL | complete risk-policy matrix + reservation interaction |
-| R2 | daily loss + drawdown + circuit state | v0.10 | PARTIAL | durable counters/state + restart/race tests |
-| R2 | full partial-fill/cancel/replace lifecycle | implied execution maturity | TODO | state machine + idempotency + reconciliation + chaos tests |
-| R2 | versioned machine-readable contracts | v0.10 77 schemas | TODO | schema registry + compatibility/validation CI |
-| R3 | Binance read-only historical intake | v0.15 | TODO | fixed hosts, GET-only, disabled default, provenance |
-| R3 | malformed/ambiguous network results fail closed | v0.15 | TODO | negative network fixtures |
-| R3 | preregistration + Trial Ledger | v0.16 | TODO | immutable trial accounting |
-| R3 | Strategy Tournament | v0.16 | TODO | deterministic ranking + governance |
-| R3 | PBO / Deflated Sharpe | v0.16 | TODO | complete-trial accounting prerequisite |
-| R3 | Research Control Center read-only | v0.16 | TODO | no mutation/capital authority |
-| R4 | correlation-aware portfolio research | v0.18 | TODO | diversification constraints |
-| R4 | allocation perturbation + leave-one-out | v0.18 | TODO | robustness reports |
-| R4 | TRAIN-calibrated regimes | v0.18 | TODO | no holdout-derived thresholds |
-| R4 | Strategy/Portfolio Health & Drift | v0.19 | TODO | immutable baselines/reports |
-| R4 | Defensive Health Bridge | v0.20 | TODO | reduce/block only + human recovery |
+| R2 | fat-finger and price sanity bands | v0.10 | PASS | exact boundaries, stale/invalid/crossed/future price rejection |
+| R2 | portfolio/strategy/order/position exposure + leverage | v0.10 | PASS | full risk matrix + reservation interaction + snapshot-integrity checks |
+| R2 | daily loss + drawdown + circuit state | v0.10 | PASS | durable UTC-session telemetry, persistent circuit, human acknowledgement recovery |
+| R2 | full partial-fill/cancel/replace lifecycle | implied execution maturity | PASS | fill-level idempotency, cancel-first replace, reconciliation + crash evidence |
+| R2 | versioned machine-readable contracts | v0.10 77 schemas | PASS | real contract registry + payload validation + compatibility CI; no artificial quota |
+| R2 | crash/UNKNOWN/reconciliation ambiguity semantics | v0.10 lineage | PASS | broker ambiguity fail-closed + semantic replay + exact-once projection recovery |
+| R3 | Binance/public read-only historical intake | v0.15 | PASS | fixed public host/path, GET-only, disabled-by-default/explicit opt-in, provenance |
+| R3 | malformed/ambiguous network results fail closed | v0.15 | PASS | redirect/content-type/size/range/time coverage/duplicate/gap negative tests |
+| R3 | preregistration + Trial Ledger | v0.16 | PASS | frozen campaign universe + immutable preregistration/terminal accounting |
+| R3 | Strategy Tournament | v0.16 | PASS | complete DEVELOPMENT universe, deterministic ranking/tie-break, failures retained, no HOLDOUT |
+| R3 | PBO / Deflated Sharpe / multiple testing | v0.16 | PASS | complete-trial accounting + Holm; advanced statistics require explicit prerequisites |
+| R3 | Research Control Center read-only | v0.16 | PASS | immutable evidence projection + CI authority separation |
+| R3 | FINAL_HOLDOUT authority separation | reconstructed strengthening | PASS | one-use consumed permit bound one-to-one to final trial + research authority gate |
+| R3 | bounded real-data reproducibility evidence | reconstructed strengthening | PASS | 2 independent 10-bar fetches + identical hashes + artifact roundtrip |
+| R4 | authoritative instrument master | reconstructed safety prerequisite | TODO | versioned venue rules/provenance; unknown/stale/conflicting metadata fail closed (`TD-R4-001`) |
+| R4 | versioned Portfolio State / reconciliation infrastructure | v0.18 lineage | PARTIAL | durable/versioned base exists from R0/R2; R4 portfolio-governance invariants still need certification |
+| R4 | correlation-aware portfolio research | v0.18 | TODO | diversification/concentration constraints using authorized research evidence |
+| R4 | allocation perturbation + leave-one-out | v0.18 | TODO | deterministic robustness reports tied to immutable inputs |
+| R4 | TRAIN-calibrated regimes | v0.18 | TODO | no HOLDOUT-derived thresholds; unknown regime conservative |
+| R4 | Strategy/Portfolio Health & Drift | v0.19 | TODO | immutable baselines/reports + explicit state transitions |
+| R4 | Defensive Health Bridge | v0.20 | TODO | automatic actions reduce/block only + explicit human/policy recovery |
+| R4 | deterministic Portfolio Manager / sizing + cross-strategy budgets | reconstructed strengthening | TODO | bounded advisory/control-plane output; no OMS bypass or capital authority |
 | R5 | closed-kline read-only stream | v0.22 | TODO | disabled default + fixed host + stream state |
 | R5 | duplicate idempotency + gap fail-closed | v0.22 | TODO | no silent imputation |
 | R5 | socket termination -> DEGRADED | v0.22 | TODO | no reconnect that hides gaps |
@@ -53,32 +59,40 @@ Objetivo: reconstruir todas las capacidades históricamente verificadas sin deud
 | R6 | PAPER trade_updates protection evidence | v0.28 | TODO | event evidence when policy requires |
 | R6 | unsupported products fail closed | v0.28 | TODO | crypto bracket unsupported unless separately certified |
 
-## R1 certification
+## Certification ledger
+### R1
 Merged SHA: `ed1c0689299b625e8092bad99814d93a4fb77438`.
+Pre-merge evidence: 161 tests PASS / 90.34% coverage; post-merge Core Safety + Knowledge Contract PASS.
 
-Post-merge CI:
-- Core Safety Tests: PASS;
-- Knowledge Contract: PASS.
+### R2
+Certified and integrated on `main` before R3. All R2 P0/P1/P2 reconstruction debt is CLOSED in the machine-readable Debt Register.
 
-Pre-merge functional evidence retained by ADR-0004:
-- 161 tests PASS;
-- 90.34% total coverage; 85% gate unchanged;
-- bootstrap 100%, DSL 96%, gates 96%, market 100%, validation 94%, splits 95%, strategy 100%, backtest 95%.
+### R3
+Branch certification basis: `74ca661eeda57ec17e501ba3bf99d1fe0eb7a34a`.
+Latest certified closure evidence: **272 tests PASS / 87.56% coverage**, Contract Registry PASS, Research Authority PASS, Debt Register PASS, Knowledge Contract PASS.
+Certification artifact: `knowledge/60_EVIDENCE/R3_CERTIFICATION.json`.
 
-No known R1 P0/P1 debt at certification. Explicit R1 scope limits are documented and are not represented as completed capabilities outside R1.
+Bounded real-data campaign hashes:
+- source: `4bebe7cba7379cce8ac55916433997c333e9e845651333f320a10eba36d84a6d`;
+- dataset: `652ead045ba8bfe92c60aabc32e64913f0b397d9226ed8ac9158d9aa35b5d9a0`;
+- manifest: `4240f9558b4e409c8433b8123dae79a06cb984ecd4e7f3f89d50e757b877ce79`.
 
-## Active target — R2
-R2 closes control-plane maturity before any external market/broker integration:
-1. complete risk-policy matrix;
-2. durable loss/drawdown/circuit semantics;
-3. partial-fill/cancel/replace lifecycle;
-4. reconciliation/UNKNOWN chaos paths;
-5. versioned machine-readable contract registry;
-6. raise coverage on persistence/reconciliation hotspots;
-7. keep PAPER/LIVE fail-closed.
+This campaign is reproducibility/intake evidence, **not profitability proof**.
+
+## Active target — R4
+R4 closes portfolio/regime/health governance before R5 shadow/forward monitoring:
+1. authoritative instrument master;
+2. audit/reuse existing versioned portfolio state and certify R4 invariants;
+3. correlation-aware diversification/concentration research;
+4. allocation perturbation + leave-one-out;
+5. TRAIN-only regime calibration;
+6. Strategy/Portfolio Health & Drift;
+7. reduce/block-only Defensive Health Bridge;
+8. deterministic sizing + cross-strategy budgets;
+9. keep PAPER/LIVE fail-closed.
 
 ## Debt policy
-A track cannot be PASS with known P0/P1 defects, skipped negative tests, reduced coverage, untracked mismatches, hidden critical TODOs or temporary broker/network bypasses. All actual debt is tracked in `DEBT_REGISTER.md`.
+A track cannot be PASS with known P0/P1/P2 defects assigned to that track, skipped negative tests, reduced coverage, untracked mismatches, hidden critical TODOs or temporary broker/network bypasses. `knowledge/00_CANON/debt_register.json` is the machine-readable authority; this matrix is the capability view.
 
 ## Final release condition
-`v0.28R` exists only when every required row is `PASS`, CI is green on the release SHA, canon/handoff/debt register are synchronized and LIVE remains blocked unless a separate future promotion explicitly changes that state.
+`v0.28R` exists only when every required R0–R6 row is `PASS`, CI is green on the release SHA, canon/handoff/debt register are synchronized and LIVE remains blocked unless a separate future promotion explicitly changes that state.

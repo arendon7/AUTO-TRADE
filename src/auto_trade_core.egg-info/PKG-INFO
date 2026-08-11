@@ -1,0 +1,8 @@
+Metadata-Version: 2.4
+Name: auto-trade-core
+Version: 0.4.0.dev0
+Summary: Capital-safe algorithmic trading core
+Requires-Python: >=3.12
+Provides-Extra: dev
+Requires-Dist: pytest<9,>=8.3; extra == "dev"
+Requires-Dist: pytest-cov<7,>=5; extra == "dev"

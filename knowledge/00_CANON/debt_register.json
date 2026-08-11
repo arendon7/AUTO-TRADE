@@ -1,0 +1,193 @@
+{
+  "certified_tracks": [
+    "R0",
+    "R1",
+    "R2",
+    "R3"
+  ],
+  "items": [
+    {
+      "area": "OMS lifecycle",
+      "evidence": ["tests/test_r2_fill_lifecycle.py", "tests/test_r2_partial_cancel.py", "tests/test_r2_replace.py", "tests/test_r2_replace_evidence.py", "knowledge/20_ARQUITECTURA/R2_FAILURE_PATH_REVIEW.md"],
+      "id": "TD-R2-001",
+      "resolution": "Partial-fill, cancel, replace, ambiguity and restart lifecycle certified with cancel-first fresh-risk replace semantics.",
+      "severity": "P1",
+      "status": "CLOSED",
+      "track": "R2"
+    },
+    {
+      "area": "Contracts",
+      "evidence": ["src/autotrade/contracts/registry.json", "tests/test_contract_registry.py", "tests/test_contract_payloads.py", "scripts/check_contract_registry.py"],
+      "id": "TD-R2-002",
+      "resolution": "Strict versioned machine-readable registry, explicit runtime serializers, compatibility policy and CI gate.",
+      "severity": "P1",
+      "status": "CLOSED",
+      "track": "R2"
+    },
+    {
+      "area": "Risk policy",
+      "evidence": ["tests/test_r2_risk_matrix.py", "tests/test_durable_state.py"],
+      "id": "TD-R2-003",
+      "resolution": "Exact-boundary/+epsilon capital-limit matrix plus durable reservation-capacity and cross-process reservation-race tests are certified.",
+      "severity": "P1",
+      "status": "CLOSED",
+      "track": "R2"
+    },
+    {
+      "area": "Daily risk state",
+      "evidence": ["src/autotrade/risk_state.py", "tests/test_r2_risk_telemetry.py"],
+      "id": "TD-R2-004",
+      "resolution": "Durable UTC-session loss/drawdown telemetry atomically activates persistent circuit state; recovery requires explicit acknowledgement.",
+      "severity": "P1",
+      "status": "CLOSED",
+      "track": "R2"
+    },
+    {
+      "area": "Control-plane coverage",
+      "evidence": ["knowledge/20_ARQUITECTURA/R2_FAILURE_PATH_REVIEW.md", ".github/workflows/core-tests.yml", "pyproject.toml"],
+      "id": "TD-R2-005",
+      "resolution": "Critical R2 failure paths have targeted adversarial tests and the repository enforces branch coverage with an 85% minimum gate.",
+      "severity": "P2",
+      "status": "CLOSED",
+      "track": "R2"
+    },
+    {
+      "area": "Crash recovery",
+      "evidence": ["tests/test_r2_crash_projection_recovery.py", "src/autotrade/reconciliation.py"],
+      "id": "TD-R2-006",
+      "resolution": "Startup reconciliation repairs terminal OMS/fill commit that crashed before portfolio projection/reservation release, exactly once.",
+      "severity": "P1",
+      "status": "CLOSED",
+      "track": "R2"
+    },
+    {
+      "area": "Portfolio snapshot integrity",
+      "evidence": ["tests/test_r2_portfolio_snapshot_integrity.py", "tests/test_r2_risk_matrix.py", "src/autotrade/safety.py"],
+      "id": "TD-R2-007",
+      "resolution": "Safety input validates finite values plus exact gross/net and per-strategy gross consistency against position maps.",
+      "severity": "P1",
+      "status": "CLOSED",
+      "track": "R2"
+    },
+    {
+      "area": "Fill projection integrity",
+      "evidence": ["tests/test_r2_projection_integrity.py", "src/autotrade/execution_state.py", "src/autotrade/state.py"],
+      "id": "TD-R2-008",
+      "resolution": "Both durable and in-memory portfolio projection bind fill_id to immutable fill content; conflicting reuse fails closed.",
+      "severity": "P2",
+      "status": "CLOSED",
+      "track": "R2"
+    },
+    {
+      "area": "Replace evidence",
+      "evidence": ["tests/test_r2_replace_evidence.py", "tests/test_r2_replace.py", "src/autotrade/oms.py", "src/autotrade/engine.py"],
+      "id": "TD-R2-009",
+      "resolution": "ORDER_REPLACE_REQUESTED/REPLACE_PENDING is durable and retry-safe across crash between cancel and replacement submission, with conflicting replacement identity failing closed.",
+      "severity": "P2",
+      "status": "CLOSED",
+      "track": "R2"
+    },
+    {
+      "area": "GitHub Actions runtime",
+      "evidence": [".github/workflows/core-tests.yml", ".github/workflows/knowledge-contract.yml"],
+      "id": "TD-CI-001",
+      "resolution": "Core/knowledge workflows moved to Node-24-generation official actions (checkout@v5, setup-python@v6).",
+      "severity": "P3",
+      "status": "CLOSED",
+      "track": "OPS"
+    },
+    {
+      "area": "Graphify",
+      "evidence": ["knowledge/50_RUNBOOKS/GRAPHIFY_OBSIDIAN.md"],
+      "id": "TD-OPS-001",
+      "next_action": "Generate a real semantic/deep graph from a supported coding assistant when that runtime is available; never fake graphify-out artifacts.",
+      "resolution": "",
+      "severity": "P3",
+      "status": "OPEN",
+      "track": "OPS"
+    },
+    {
+      "area": "External market-data boundary",
+      "evidence": ["src/autotrade/research/external_data.py", "tests/test_r3_external_data.py", "tests/test_r3_external_data_hardening.py", "scripts/check_research_authority.py"],
+      "id": "TD-R3-001",
+      "resolution": "Deny-by-default GET-only HTTPS exact-host/path public-data boundary is bounded by timeout, response size and range, validates redirect targets before redirected I/O, and exposes no private/trading endpoint authority.",
+      "severity": "P1",
+      "status": "CLOSED",
+      "track": "R3"
+    },
+    {
+      "area": "Canonical external-data intake",
+      "evidence": ["src/autotrade/research/external_data.py", "tests/test_r3_external_data.py", "tests/test_r3_external_data_hardening.py", "knowledge/60_EVIDENCE/R3_REAL_DATA_BTCUSDT_1M_20260101.json", "knowledge/60_EVIDENCE/R3_REAL_DATA_CAMPAIGN.json"],
+      "id": "TD-R3-002",
+      "resolution": "External klines are converted into the certified R1 MarketDataset contract with exact half-open coverage, no silent imputation, source/dataset/manifest hashes, tamper detection and verified artifact roundtrip.",
+      "severity": "P1",
+      "status": "CLOSED",
+      "track": "R3"
+    },
+    {
+      "area": "Trial Ledger / preregistration",
+      "evidence": ["src/autotrade/research/trials.py", "tests/test_r3_trial_ledger.py"],
+      "id": "TD-R3-003",
+      "resolution": "Durable frozen campaign universes require preregistration before evaluation and immutable terminal accounting for every registered trial.",
+      "severity": "P1",
+      "status": "CLOSED",
+      "track": "R3"
+    },
+    {
+      "area": "HOLDOUT governance / authority separation",
+      "evidence": ["src/autotrade/research/trials.py", "tests/test_r3_holdout_governance.py", "scripts/check_research_authority.py", ".github/workflows/core-tests.yml"],
+      "id": "TD-R3-004",
+      "resolution": "FINAL_HOLDOUT trials require one-use consumed final_validation permits bound one-to-one to a trial; CI statically forbids research imports/symbols that would create execution authority.",
+      "severity": "P1",
+      "status": "CLOSED",
+      "track": "R3"
+    },
+    {
+      "area": "Multiple-testing governance",
+      "evidence": ["src/autotrade/research/multiple_testing.py", "tests/test_r3_multiple_testing.py"],
+      "id": "TD-R3-005",
+      "resolution": "Holm evidence is computed over the complete frozen trial family; PBO/CSCV and Deflated Sharpe require explicit statistical preconditions and fail closed when the trial universe/evidence is incomplete.",
+      "severity": "P1",
+      "status": "CLOSED",
+      "track": "R3"
+    },
+    {
+      "area": "Bounded real-data campaign",
+      "evidence": ["scripts/run_r3_real_data_campaign.py", "knowledge/60_EVIDENCE/R3_REAL_DATA_BTCUSDT_1M_20260101.json", "knowledge/60_EVIDENCE/R3_REAL_DATA_CAMPAIGN.json"],
+      "id": "TD-R3-006",
+      "resolution": "An explicit opt-in 10-bar BTCUSDT public-data campaign performed two independent read-only fetches with equal source/dataset/manifest hashes and verified artifact roundtrip; no API keys, trading endpoints or execution authority were used. This is intake/reproducibility evidence, not profitability evidence.",
+      "severity": "P2",
+      "status": "CLOSED",
+      "track": "R3"
+    },
+    {
+      "area": "Research Control Center",
+      "evidence": ["src/autotrade/research/control_center.py", "tests/test_r3_control_center.py", "scripts/check_research_authority.py"],
+      "id": "TD-R3-007",
+      "resolution": "Research Control Center is a read-only projection over immutable research evidence and remains outside OMS/broker/capital authority by construction and CI policy.",
+      "severity": "P2",
+      "status": "CLOSED",
+      "track": "R3"
+    },
+    {
+      "area": "Strategy Tournament",
+      "evidence": ["src/autotrade/research/tournament.py", "tests/test_r3_strategy_tournament.py", "scripts/check_research_authority.py"],
+      "id": "TD-R3-008",
+      "resolution": "Strategy Tournament deterministically ranks the complete frozen DEVELOPMENT universe, includes failed trials, uses explicit metric direction and immutable identity tie-breaking, rejects HOLDOUT-containing campaigns/cherry-picked candidate sets, binds evidence to terminal result hashes and exposes no execution or promotion authority.",
+      "severity": "P1",
+      "status": "CLOSED",
+      "track": "R3"
+    },
+    {
+      "area": "Authoritative instrument metadata",
+      "evidence": [],
+      "id": "TD-R4-001",
+      "next_action": "Introduce a versioned authoritative instrument master for tick size, quantity step, min/max quantity/notional and symbol trading status before any PAPER/execution path relies on instrument filters. R3 research serialization precision must never be treated as broker/exchange rule evidence.",
+      "resolution": "",
+      "severity": "P1",
+      "status": "OPEN",
+      "track": "R4"
+    }
+  ],
+  "registry_version": 1
+}

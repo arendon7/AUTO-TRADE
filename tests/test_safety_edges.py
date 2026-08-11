@@ -97,7 +97,18 @@ def test_strategy_gross_limit(limits, market, empty_portfolio, market_buy_intent
     portfolio = replace(
         empty_portfolio,
         gross_exposure=Decimal("24500"),
+        net_exposure=Decimal("24500"),
+        signed_position_notional_by_symbol={
+            "ALT1-USD": Decimal("12250"),
+            "ALT2-USD": Decimal("12250"),
+        },
         strategy_gross_exposure={"strategy-a": Decimal("24500")},
+        strategy_signed_position_notional_by_symbol={
+            "strategy-a": {
+                "ALT1-USD": Decimal("12250"),
+                "ALT2-USD": Decimal("12250"),
+            }
+        },
     )
     decision = safety.evaluate(intent=market_buy_intent, market=market, portfolio=portfolio, now=market.observed_at)
     assert decision.reason_code == "MAX_STRATEGY_GROSS"
@@ -105,21 +116,73 @@ def test_strategy_gross_limit(limits, market, empty_portfolio, market_buy_intent
 
 def test_portfolio_gross_limit(limits, market, empty_portfolio, market_buy_intent):
     safety, _ = make_kernel(limits)
-    portfolio = replace(empty_portfolio, gross_exposure=Decimal("49500"))
+    portfolio = replace(
+        empty_portfolio,
+        gross_exposure=Decimal("49500"),
+        net_exposure=Decimal("16500"),
+        signed_position_notional_by_symbol={
+            "ALT1-USD": Decimal("16500"),
+            "ALT2-USD": Decimal("16500"),
+            "ALT3-USD": Decimal("-16500"),
+        },
+        strategy_gross_exposure={
+            "strategy-a": Decimal("16500"),
+            "strategy-b": Decimal("16500"),
+            "strategy-c": Decimal("16500"),
+        },
+        strategy_signed_position_notional_by_symbol={
+            "strategy-a": {"ALT1-USD": Decimal("16500")},
+            "strategy-b": {"ALT2-USD": Decimal("16500")},
+            "strategy-c": {"ALT3-USD": Decimal("-16500")},
+        },
+    )
     decision = safety.evaluate(intent=market_buy_intent, market=market, portfolio=portfolio, now=market.observed_at)
     assert decision.reason_code == "MAX_PORTFOLIO_GROSS"
 
 
 def test_net_exposure_limit(limits, market, empty_portfolio, market_buy_intent):
     safety, _ = make_kernel(limits)
-    portfolio = replace(empty_portfolio, gross_exposure=Decimal("29000"), net_exposure=Decimal("29500"))
+    portfolio = replace(
+        empty_portfolio,
+        gross_exposure=Decimal("29500"),
+        net_exposure=Decimal("29500"),
+        signed_position_notional_by_symbol={
+            "ALT1-USD": Decimal("14750"),
+            "ALT2-USD": Decimal("14750"),
+        },
+        strategy_gross_exposure={
+            "strategy-a": Decimal("14750"),
+            "strategy-b": Decimal("14750"),
+        },
+        strategy_signed_position_notional_by_symbol={
+            "strategy-a": {"ALT1-USD": Decimal("14750")},
+            "strategy-b": {"ALT2-USD": Decimal("14750")},
+        },
+    )
     decision = safety.evaluate(intent=market_buy_intent, market=market, portfolio=portfolio, now=market.observed_at)
     assert decision.reason_code == "MAX_NET_EXPOSURE"
 
 
 def test_leverage_limit(limits, market, empty_portfolio, market_buy_intent):
     safety, _ = make_kernel(limits)
-    portfolio = replace(empty_portfolio, equity=Decimal("10000"), gross_exposure=Decimal("19500"))
+    portfolio = replace(
+        empty_portfolio,
+        equity=Decimal("10000"),
+        gross_exposure=Decimal("19500"),
+        net_exposure=Decimal("0"),
+        signed_position_notional_by_symbol={
+            "ALT1-USD": Decimal("9750"),
+            "ALT2-USD": Decimal("-9750"),
+        },
+        strategy_gross_exposure={
+            "strategy-a": Decimal("9750"),
+            "strategy-b": Decimal("9750"),
+        },
+        strategy_signed_position_notional_by_symbol={
+            "strategy-a": {"ALT1-USD": Decimal("9750")},
+            "strategy-b": {"ALT2-USD": Decimal("-9750")},
+        },
+    )
     decision = safety.evaluate(intent=market_buy_intent, market=market, portfolio=portfolio, now=market.observed_at)
     assert decision.reason_code == "MAX_LEVERAGE"
 
