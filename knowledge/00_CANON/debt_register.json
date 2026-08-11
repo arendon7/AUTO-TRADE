@@ -170,12 +170,11 @@
     },
     {
       "area": "Strategy Tournament",
-      "evidence": [],
+      "evidence": ["src/autotrade/research/tournament.py", "tests/test_r3_strategy_tournament.py", "scripts/check_research_authority.py"],
       "id": "TD-R3-008",
-      "next_action": "Implement deterministic Strategy Tournament evidence over the complete frozen DEVELOPMENT candidate universe, including failed trials, with explicit metric direction/tie-breaking, no HOLDOUT inputs and no promotion/execution authority.",
-      "resolution": "",
+      "resolution": "Strategy Tournament deterministically ranks the complete frozen DEVELOPMENT universe, includes failed trials, uses explicit metric direction and immutable identity tie-breaking, rejects HOLDOUT-containing campaigns/cherry-picked candidate sets, binds evidence to terminal result hashes and exposes no execution or promotion authority.",
       "severity": "P1",
-      "status": "OPEN",
+      "status": "CLOSED",
       "track": "R3"
     },
     {
