@@ -2,7 +2,7 @@
   "schema_version": 1,
   "track": "R6",
   "debt_id": "TD-R6-008",
-  "status": "IMPLEMENTED_PENDING_OFFICIAL_EXACT_HEAD_CI",
+  "status": "CLOSED_AFTER_OFFICIAL_EXACT_HEAD_CI",
   "purpose": "Permanent fail-closed CI boundary that prevents R6 PAPER execution surfaces from acquiring LIVE endpoint authority, unaudited network/write authority, AI/research authorization, or PAPER-to-LIVE promotion semantics.",
   "controls": [
     "Scans every production alpaca_paper_* module, not only known network files.",
@@ -32,5 +32,21 @@
     "This boundary does not prove profitability.",
     "This boundary does not authorize LIVE trading."
   ],
-  "next_gate": "Run full Core Safety, Knowledge Contract and R6 Authority on the exact implementation SHA; only then may TD-R6-008 close."
+  "next_gate": "Post-closure exact-head CI must remain green; TD-R6-001..006 remain OPEN.",
+  "implementation_certification": {
+    "head_sha": "5a4f4730ef6ac242c52f925bb94ccdd0bd7eb5fc",
+    "tests_passed": 966,
+    "coverage_percent": 85.89,
+    "core_safety_run_id": 31513050038,
+    "knowledge_contract_run_id": 31513049813,
+    "r6_authority_run_id": 31513049786,
+    "contract_registry": "PASS",
+    "research_authority": "PASS",
+    "r5_authority": "PASS",
+    "r6_authority": "PASS",
+    "r6_live_deny_boundary": "PASS",
+    "r6_product_boundary": "PASS",
+    "debt_register": "PASS",
+    "knowledge_contract": "PASS"
+  }
 }

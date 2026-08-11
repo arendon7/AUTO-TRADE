@@ -656,12 +656,20 @@
     },
     {
       "area": "Permanent R6 PAPER-only authority boundary",
-      "evidence": [],
+      "evidence": [
+        "scripts/check_r6_live_deny_boundary.py",
+        "scripts/check_r6_authority.py",
+        "tests/test_r6_live_deny_boundary.py",
+        "tests/test_r6_authority_checker.py",
+        ".github/workflows/core-tests.yml",
+        ".github/workflows/r6-authority.yml",
+        "knowledge/60_EVIDENCE/R6_PAPER_ONLY_AUTHORITY_EVIDENCE.json"
+      ],
       "id": "TD-R6-008",
       "next_action": "Add permanent CI/static authority checks proving R6 external execution code contains no LIVE Trading API host, cannot bypass Safety/OMS, cannot accept AI/research output as authorization, cannot silently broaden host/method scope and cannot promote PAPER evidence into LIVE authority. Keep LIVE fail-closed globally.",
-      "resolution": "",
+      "resolution": "Permanent fail-closed R6 PAPER-only authority boundary scans every alpaca_paper_* production module. It permits only explicit LIVE deny constants, prevents LIVE URL construction, fixes HTTP Request methods and low-level I/O budgets, allows exactly one audited writer transport write, bounds trade_updates to one WSS connect plus auth/listen control frames, forbids OpenAI/Anthropic/autotrade.research authority imports, and forbids new LIVE promotion identifiers. Safety/OMS final-write and exact PAPER host/path anchors remain mandatory. Official implementation exact-head CI on 5a4f4730ef6ac242c52f925bb94ccdd0bd7eb5fc: Core 31513050038, Knowledge 31513049813, R6 Authority 31513049786 PASS; 966 tests / 85.89% coverage.",
       "severity": "P1",
-      "status": "OPEN",
+      "status": "CLOSED",
       "track": "R6"
     },
     {
