@@ -26,6 +26,8 @@ from autotrade.brokers.alpaca_paper_gateway import (
 )
 from autotrade.brokers.alpaca_paper_final_guard import PaperFinalWriteGuard
 from autotrade.health_bridge import EffectiveHealthControl, HealthRiskMode
+from autotrade.ledger import InMemoryEventLedger
+from autotrade.oms import OrderManagementSystem
 from autotrade.brokers.alpaca_paper_submission import (
     PaperSubmissionBinding,
     PaperSubmissionStatus,
@@ -41,12 +43,17 @@ from autotrade.brokers.alpaca_paper_writer import (
     PaperWriterPolicyError,
 )
 from autotrade.domain import (
+    MarketSnapshot,
     OrderIntent,
     OrderRecord,
     OrderStatus,
     OrderType,
     PortfolioSnapshot,
+    RiskDecision,
+    RiskDecisionStatus,
     Side,
+    intent_fingerprint,
+    market_fingerprint,
 )
 from autotrade.persistence import SQLiteRuntime
 from autotrade.state import (
@@ -109,6 +116,37 @@ def order() -> OrderRecord:
     )
 
 
+
+def market() -> MarketSnapshot:
+    return MarketSnapshot(
+        symbol="AAPL",
+        bid=Decimal("9.99"),
+        ask=Decimal("10.01"),
+        last=Decimal("10"),
+        observed_at=NOW - timedelta(milliseconds=200),
+    )
+
+
+def risk_decision(current_order=None) -> RiskDecision:
+    current_order = current_order or order()
+    current_market = market()
+    return RiskDecision(
+        decision_id=current_order.risk_decision_id,
+        intent_id=current_order.intent.intent_id,
+        status=RiskDecisionStatus.APPROVED,
+        reason_code="APPROVED",
+        reason_detail="R6 writer fixture",
+        evaluated_at=NOW - timedelta(milliseconds=150),
+        valid_until=NOW + timedelta(seconds=10),
+        limits_version="r6-writer-test",
+        intent_fingerprint=intent_fingerprint(current_order.intent),
+        market_fingerprint=market_fingerprint(current_market),
+        approved_notional=Decimal("10"),
+        risk_reducing=False,
+        safety_state_version=0,
+    )
+
+
 def bracket():
     return AlpacaEquityBracketBuilder().build(
         order=order(),
@@ -123,6 +161,16 @@ def bracket():
         take_profit_price=Decimal("10.50"),
         stop_loss_price=Decimal("9.50"),
     )
+
+
+class NeverCalledBroker:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def submit(self, *, order, market, now):
+        del order, market, now
+        self.calls += 1
+        raise AssertionError("OMS external handoff must never invoke internal broker")
 
 
 class FakeWriteTransport:
@@ -197,8 +245,11 @@ class FlipToKillSwitchStore:
 
     def get(self):
         self.calls += 1
-        if self.calls == 1:
-            return SafetyControlState(version=1, updated_at=NOW)
+        # stage_external_submission performs two authoritative Safety reads;
+        # PRE_CONSUME performs the third. Flip only at PRE_IO so this fixture
+        # continues to prove the post-permit, pre-network race.
+        if self.calls <= 3:
+            return SafetyControlState(version=0, updated_at=NOW)
         return SafetyControlState(
             kill_switch_active=True,
             kill_switch_reason="test-final-recheck",
@@ -255,14 +306,23 @@ def stack(tmp_path, *, safety_store=None):
 
     order_store = InMemoryOrderStore()
     order_store.create_if_absent(current_order)
-    order_store.update(
-        replace(
-            current_order,
-            status=OrderStatus.SUBMITTING,
-            submitted_at=NOW + timedelta(milliseconds=100),
-        )
-    )
     safety_store = safety_store or InMemorySafetyStateStore()
+    health_bridge = HealthyBridge()
+    oms = OrderManagementSystem(
+        broker=NeverCalledBroker(),
+        ledger=InMemoryEventLedger(),
+        order_store=order_store,
+        safety_state_store=safety_store,
+        health_bridge=health_bridge,
+        portfolio_health_entity_id="portfolio-r6-canary",
+    )
+    _, external_handoff = oms.stage_external_submission(
+        order_id=current_order.order_id,
+        handoff_id=approval.approval_hash,
+        decision=risk_decision(current_order),
+        market=market(),
+        now=NOW + timedelta(milliseconds=100),
+    )
     portfolio_store = InMemoryPortfolioStore()
     portfolio_store.initialize(
         PortfolioSnapshot(
@@ -285,7 +345,7 @@ def stack(tmp_path, *, safety_store=None):
         order_store=order_store,
         safety_state_store=safety_store,
         portfolio_store=portfolio_store,
-        health_bridge=HealthyBridge(),
+        health_bridge=health_bridge,
         portfolio_health_entity_id="portfolio-r6-canary",
     )
     return {
@@ -299,6 +359,8 @@ def stack(tmp_path, *, safety_store=None):
         "order_store": order_store,
         "safety_store": safety_store,
         "portfolio_store": portfolio_store,
+        "oms": oms,
+        "handoff": external_handoff,
         "final_guard": final_guard,
     }
 
@@ -318,6 +380,8 @@ def submit(instance, values, *, now=NOW + timedelta(seconds=1), attempt_id="writ
         approval=values["approval"],
         permit_registry=values["permit_registry"],
         submission_registry=values["submission_registry"],
+        oms=values["oms"],
+        external_handoff=values["handoff"],
         final_guard=values["final_guard"],
         attempt_id=attempt_id,
         now=now,
@@ -571,7 +635,7 @@ def test_final_pre_io_recheck_blocks_changed_kill_switch_after_permit_consumptio
     with pytest.raises(PaperWriterBlocked, match="PRE_IO"):
         submit(writer(transport), values)
 
-    assert flipping.calls == 2
+    assert flipping.calls == 4
     assert transport.requests == []
     assert values["submission_registry"].get(values["binding"].order_id).status is PaperSubmissionStatus.UNKNOWN
     assert values["permit_registry"].get(values["approval"].approval_hash).status is PaperCanaryPermitStatus.CONSUMED

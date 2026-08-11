@@ -16,6 +16,8 @@ from urllib.request import (
     build_opener,
 )
 
+from autotrade.oms import ExternalSubmissionHandoff, OrderManagementSystem
+
 from .alpaca_paper_bracket import AlpacaEquityBracketRequest
 from .alpaca_paper_canary import PaperCanaryApproval
 from .alpaca_paper_final_guard import (
@@ -204,6 +206,8 @@ class AlpacaPaperSingleShotWriter:
         approval: PaperCanaryApproval,
         permit_registry: SQLitePaperCanaryPermitRegistry,
         submission_registry: SQLitePaperSubmissionRegistry,
+        oms: OrderManagementSystem,
+        external_handoff: ExternalSubmissionHandoff,
         final_guard: PaperFinalWriteGuard,
         attempt_id: str,
         now,
@@ -212,6 +216,10 @@ class AlpacaPaperSingleShotWriter:
             raise PaperWriterDisabled("external PAPER writer is disabled by default")
         if not isinstance(final_guard, PaperFinalWriteGuard):
             raise PaperWriterBlocked("writer requires authoritative PaperFinalWriteGuard")
+        if not isinstance(oms, OrderManagementSystem):
+            raise PaperWriterBlocked("writer requires authoritative OrderManagementSystem")
+        if not isinstance(external_handoff, ExternalSubmissionHandoff):
+            raise PaperWriterBlocked("writer requires durable OMS external handoff")
         _validate_writer_base_url(self._config.base_url)
         if credentials.credential_reference != account_attestation.credential_reference:
             raise PaperWriterPolicyError("writer credentials do not match PAPER account attestation")
@@ -248,6 +256,25 @@ class AlpacaPaperSingleShotWriter:
         if approval.account_attestation_fingerprint != account_attestation.fingerprint:
             raise PaperWriterBlocked("canary approval account attestation mismatch")
 
+        if external_handoff.handoff_id != approval.approval_hash:
+            raise PaperWriterBlocked("OMS external handoff is not bound to canary approval")
+        if external_handoff.order_id != binding.order_id:
+            raise PaperWriterBlocked("OMS external handoff order_id mismatch")
+        if external_handoff.intent_fingerprint != binding.intent_fingerprint:
+            raise PaperWriterBlocked("OMS external handoff intent fingerprint mismatch")
+        if external_handoff.risk_decision_id != binding.risk_decision_id:
+            raise PaperWriterBlocked("OMS external handoff risk decision mismatch")
+        if external_handoff.authorized_at < approval.issued_at or external_handoff.authorized_at >= approval.expires_at:
+            raise PaperWriterBlocked("OMS external handoff is outside canary approval window")
+        if now > external_handoff.decision_valid_until:
+            raise PaperWriterBlocked("OMS external handoff RiskDecision has expired")
+        try:
+            staged_order = oms.verify_external_submission_handoff(external_handoff)
+        except Exception as exc:  # OMS/ledger/order evidence must fail closed
+            raise PaperWriterBlocked("durable OMS external handoff verification failed") from exc
+        if staged_order.order_id != binding.order_id:
+            raise PaperWriterBlocked("verified OMS external handoff order mismatch")
+
         permit = permit_registry.get(approval.approval_hash)
         if permit.status is not PaperCanaryPermitStatus.ISSUED:
             raise PaperWriterBlocked("canary permit must be ISSUED before writer starts")
@@ -268,6 +295,8 @@ class AlpacaPaperSingleShotWriter:
             )
         except PaperFinalWriteBlocked as exc:
             raise PaperWriterBlocked(f"final PRE_CONSUME guard rejected: {exc}") from exc
+        if pre_consume_guard.safety_state_version != external_handoff.safety_state_version:
+            raise PaperWriterBlocked("Safety version changed after OMS external handoff")
 
         # Crash-safety order is deliberate:
         # 1) consume permit; a crash now leaves PREPARED + consumed permit, so only
