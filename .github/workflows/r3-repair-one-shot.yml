@@ -1,0 +1,39 @@
+name: R3 Compatibility Repair One-Shot
+
+on:
+  push:
+    branches: ["reconstruction/r3-real-data-governance"]
+    paths: [".r3repair/TRIGGER"]
+
+permissions:
+  contents: write
+
+jobs:
+  apply-repair:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout exact branch
+        uses: actions/checkout@v5
+        with:
+          ref: reconstruction/r3-real-data-governance
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Apply reviewed repair
+        run: python .r3repair/apply.py
+
+      - name: Compile repaired tree
+        run: python -m compileall -q src tests scripts
+
+      - name: Commit self-cleaned repair
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "fix(r3): repair R1 compatibility and OMS semantic replay"
+          git push origin HEAD:reconstruction/r3-real-data-governance
