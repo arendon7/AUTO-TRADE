@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "track": "R6",
+  "debt_id": "TD-R6-011",
+  "purpose": "Direct post-closure anchor so normal Core/Knowledge/R6 Authority CI independently certifies the canon after the bot-authored self-cleaning closure commit.",
+  "implementation_head_sha": "5e947ad51477cd3f6a4a544714caaf474624a970",
+  "canonical_closure_commit_sha": "2e3d02ec2de1687e785d05a4294993cbf5238296",
+  "closure_workflow_run_id": 31524314106,
+  "preclosure_exact_head_ci": {
+    "core_safety_run_id": 31524002513,
+    "knowledge_contract_run_id": 31524002588,
+    "r6_authority_run_id": 31524002550,
+    "tests_passed": 1050,
+    "coverage_percent": 85.04
+  },
+  "expected_canonical_state": {
+    "TD-R6-011": "CLOSED",
+    "r6_blocking_open": 6
+  },
+  "external_paper_order_sent": false,
+  "capital_authority": "NONE",
+  "live_trading": "BLOCKED",
+  "status": "CLOSED_AWAITING_INDEPENDENT_POST_CLOSURE_EXACT_HEAD_CI"
+}
