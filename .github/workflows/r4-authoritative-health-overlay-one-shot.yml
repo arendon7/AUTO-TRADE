@@ -35,6 +35,14 @@ jobs:
           if old not in text:
               raise SystemExit("overlay patcher start anchor not found")
           path.write_text(text.replace(old, new, 1))
+
+          test_path = Path("tests/test_r4_health_bridge.py")
+          test_text = test_path.read_text()
+          old_expectation = 'assert "STALE_STRATEGY_HEALTH_CONTROL" in stale.reason'
+          new_expectation = 'assert "STALE_STRATEGY_AUTHORITATIVE_HEALTH" in stale.reason'
+          if old_expectation not in test_text:
+              raise SystemExit("legacy stale-health expectation not found")
+          test_path.write_text(test_text.replace(old_expectation, new_expectation, 1))
           PY
           python scripts/r4_harden_authoritative_health_overlay.py
       - name: Targeted cross-boundary suite
@@ -52,7 +60,7 @@ jobs:
         run: |
           git config user.name "arendon7"
           git config user.email "102555888+arendon7@users.noreply.github.com"
-          git add src/autotrade/health_bridge.py
+          git add src/autotrade/health_bridge.py tests/test_r4_health_bridge.py
           git rm -f scripts/r4_harden_authoritative_health_overlay.py
           git rm -f .github/workflows/r4-authoritative-health-overlay-one-shot.yml
           git commit -m "fix(r4): overlay authoritative Health on every control read"
