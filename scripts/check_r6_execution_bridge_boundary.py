@@ -95,7 +95,12 @@ def _scan_bridge(source: str, path: Path) -> list[str]:
         if isinstance(node, ast.Import):
             modules = [alias.name for alias in node.names]
         elif isinstance(node, ast.ImportFrom):
-            modules = [node.module or ""]
+            base = node.module or ""
+            modules = [base]
+            modules.extend(
+                f"{base}.{alias.name}" if base else alias.name
+                for alias in node.names
+            )
         else:
             modules = []
         for module in modules:
