@@ -70,7 +70,7 @@ class PaperReadinessReport:
     execution_authorized: bool = False
     capital_authority: str = "NONE"
     profitability_claim: bool = False
-    live_trading: str = "BLOCKED"
+    production_status: str = "BLOCKED"
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -96,7 +96,7 @@ class PaperReadinessReport:
             "execution_authorized": self.execution_authorized,
             "capital_authority": self.capital_authority,
             "profitability_claim": self.profitability_claim,
-            "live_trading": self.live_trading,
+            "live_trading": self.production_status,
         }
 
 
