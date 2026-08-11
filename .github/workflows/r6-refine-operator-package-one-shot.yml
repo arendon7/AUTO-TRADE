@@ -9,7 +9,7 @@ permissions:
 
 jobs:
   refine:
-    if: github.event.head_commit.message == 'chore(r6) apply prepared-package operator decision refinement'
+    if: github.event.head_commit.message == 'chore(r6) retry prepared-package operator decision refinement'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
