@@ -32,10 +32,10 @@ Post-merge R5: Core Safety `31466198629` PASS, Knowledge Contract `31466198624` 
 | `TD-R6-008` | P1 | permanent PAPER-only authority boundary | **CLOSED** — dual permanent CI gates enforce exact PAPER-only network/write authority, LIVE-deny, Safety/OMS and AI/research separation |
 | `TD-R6-009` | P1 | final write Safety/OMS recheck | **CLOSED** — dual authoritative PRE_CONSUME/PRE_IO recheck, cryptographic phase chain, version-race rejection, zero-I/O fail-closed |
 | `TD-R6-010` | P1 | OMS-owned external PAPER handoff | **CLOSED** — OMS owns durable VALIDATED→SUBMITTING; handoff event precedes state change; direct R6 OrderStore mutation prohibited |
-| `TD-R6-011` | P1 | human final PAPER execution decision | OPEN — durable one-shot operator authority must bind exact prepared canary and be consumed before POST |
+| `TD-R6-011` | P1 | human final PAPER execution decision | **CLOSED** — exact prepared package → durable human-only one-shot decision → no-network execution bridge → OMS SUBMITTING → human-gated single POST writer |
 | `TD-R6-012` | P1 | crash-safe same-attempt resume | **CLOSED** — only PREPARED + zero attempts + same-attempt CONSUMED may resume; UNKNOWN/different/stale remain fail-closed |
 
-R6 P0/P1/P2 OPEN: **7**. R6 cannot certify until all close with evidence.
+R6 P0/P1/P2 OPEN: **6**. R6 cannot certify until all close with evidence.
 
 ## Deuda no bloqueante fuera de R6
 | ID | Sev | Track | Área |
