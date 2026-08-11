@@ -435,28 +435,31 @@
       "area": "Health recovery acknowledgement idempotency",
       "evidence": [
         "src/autotrade/research/health.py",
-        "src/autotrade/health_bridge.py"
+        "src/autotrade/health_bridge.py",
+        "tests/test_r4_recovery_ack_idempotency.py",
+        "knowledge/60_EVIDENCE/R4_RECOVERY_IDEMPOTENCY_CERTIFICATION.json"
       ],
       "id": "TD-R4-012",
-      "next_action": "Require an explicit recovery_id/idempotency key for Health and Defensive Health Bridge acknowledgements; persist request identity and binding, make same-request replay a no-op, reject conflicting reuse, and prove duplicate retries cannot relax more than one level or bump safety_state twice.",
-      "resolution": "",
+      "next_action": "",
+      "resolution": "Health and Defensive Health Bridge recovery acknowledgements now require durable recovery_id binding. Same-request retries are no-ops, conflicting reuse fails closed, and a duplicate bridge retry cannot relax twice, bump safety_state twice or append a second recovery ledger event.",
       "severity": "P1",
-      "status": "OPEN",
+      "status": "CLOSED",
       "track": "R4"
     },
     {
       "area": "Defensive Health Bridge authoritative-state synchronization gap",
       "evidence": [
-        "src/autotrade/research/health.py",
         "src/autotrade/health_bridge.py",
         "src/autotrade/safety.py",
-        "src/autotrade/oms.py"
+        "src/autotrade/oms.py",
+        "tests/test_r4_authoritative_health_overlay.py",
+        "knowledge/60_EVIDENCE/R4_AUTHORITATIVE_HEALTH_OVERLAY_CERTIFICATION.json"
       ],
       "id": "TD-R4-013",
-      "next_action": "Make effective_control compare the durable bridge projection with the current authoritative HealthControlState on every Safety/OMS read. Missing/stale/future/conflicting/backward authoritative state must fail closed; a newer stricter Health state must tighten immediately even before sync; a newer less-restrictive state must not relax until explicit bridge recovery/sync policy permits it.",
-      "resolution": "",
+      "next_action": "",
+      "resolution": "Every effective bridge read now overlays the current authoritative Health state. Missing/stale/future/backward/conflicting authoritative evidence fails closed, newer worsening tightens immediately before sync, and newer recovery evidence never relaxes the durable bridge without explicit recovery/synchronization. Safety and OMS inherit the overlay on every control read.",
       "severity": "P1",
-      "status": "OPEN",
+      "status": "CLOSED",
       "track": "R4"
     }
   ],

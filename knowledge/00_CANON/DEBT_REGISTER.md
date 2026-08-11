@@ -25,6 +25,8 @@ Slices cerrados con evidencia:
 - `TD-R4-006` — Defensive Health Bridge durable, reduce/block-only, integrado con Safety/OMS.
 - `TD-R4-007` — Portfolio Manager determinista, acotado y advisory-only; sin autoridad OMS/broker.
 - `TD-R4-011` — normalización Decimal exacta de robustez; `sum(weights)==1` preservado para ratios periódicos.
+- `TD-R4-012` — acknowledgements de recovery retry-safe mediante `recovery_id` durable.
+- `TD-R4-013` — overlay de Health autoritativo en cada lectura Safety/OMS; worsening no sincronizado endurece inmediatamente.
 - `TD-R4-008` — auditoría de invariantes de Portfolio State.
 - `TD-R4-009` — integridad durable de fills en lectura/replay.
 - `TD-R4-010` — compromiso hash + validación semántica durable de Portfolio State.
@@ -34,8 +36,6 @@ Evidencia conjunta para `TD-R4-002..005`: **412 tests PASS / 86.79% coverage**, 
 ## Deuda abierta
 | ID | Sev | Track | Área | Condición de cierre |
 |---|---|---|---|---|
-| `TD-R4-012` | P1 | R4 | Health recovery idempotency | require durable recovery_id binding in Health + Defensive Bridge so a retried acknowledgement cannot relax two levels or bump safety state twice |
-| `TD-R4-013` | P1 | R4 | Authoritative Health overlay | every effective bridge read must compare current authoritative Health; unsynced worsening tightens immediately, unsynced recovery never relaxes |
 | `TD-OPS-001` | P3 | OPS | Graphify | generar graph semántico/deep real en runtime soportado y vincularlo a `SOURCE_SHA`; nunca fabricar artefactos |
 
 Graphify P3/OPS no es una deuda P0/P1/P2 del track R4, pero permanece explícitamente abierta.
