@@ -36,6 +36,7 @@ jobs:
                   knowledge/00_CANON/RECONSTRUCTION_V028R_MATRIX.md \
                   knowledge/00_CANON/ESTADO_ACTUAL.md \
                   knowledge/00_CANON/TAREA_ACTIVA.md \
+                  knowledge/40_HANDOFF/HANDOFF_ACTUAL.md \
                   knowledge/60_EVIDENCE/R4_CERTIFICATION.json
           git rm -f scripts/r4_finalize_track_certification.py
           git rm -f .github/workflows/r4-finalize-track-one-shot.yml
