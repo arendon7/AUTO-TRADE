@@ -1,6 +1,6 @@
 # ESTADO ACTUAL — AUTO-TRADE
 
-Fecha: 2026-08-10
+Fecha: 2026-08-11
 Estado canónico: **v0.28R reconstruction — R0–R4 CERTIFIED; PR #11 integration pending**
 
 ## Fuente de verdad
@@ -11,7 +11,7 @@ El proyecto histórico v0.28 alcanzó mayor madurez que la reconstrucción inici
 - R1: Market Data + Strategy DSL + Research Integrity — PASS.
 - R2: Capital Safety + OMS maturity — PASS.
 - R3: bounded real-data/research governance — PASS e integrado en `main` `c585a84b5197076b210723bb70980b828e4e3026`.
-- R4: portfolio/regimes/health governance — **PASS en branch**, certificado sobre `350efd43ac133c95a1997b4a821a2e0bab4afaf2` con 480 tests PASS / 86.58% coverage y todos los gates verdes.
+- R4: portfolio/regimes/health governance — **PASS en branch**, certificado sobre `350efd43ac133c95a1997b4a821a2e0bab4afaf2` con **479 tests PASS / 86.45% coverage** y todos los gates verdes.
 
 ## R4 certificado
 Incluye:
@@ -26,6 +26,13 @@ Incluye:
 - reduce/block-only Defensive Health Bridge integrado con Safety/OMS;
 - deterministic advisory-only Portfolio Manager/sizing con post-Health/post-venue revalidation;
 - permanent Research/Advisory Authority CI boundary.
+
+## Evidencia verificada
+- Core Safety run `31460825121`: PASS — 479 tests / 86.45% coverage;
+- Knowledge Contract run `31460825110`: PASS;
+- Contract Registry: 10 PASS, SHA-256 `ddb94afa8916be37d0d956e6c32f775ea41c0fb79f4ea26d2d65dfa286c62785`;
+- Debt Register: 33 items, 1 open, 0 bloqueantes para tracks certificados;
+- R4 certification artifact: `knowledge/60_EVIDENCE/R4_CERTIFICATION.json`.
 
 ## Estado de integración
 - PR #11 permanece pendiente de merge hasta que el head canónico de cierre vuelva a pasar Core Safety + Knowledge Contract.
