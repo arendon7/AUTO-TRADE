@@ -1,0 +1,77 @@
+name: R4 Regime Registry Hardening One-Shot
+
+on:
+  push:
+    branches:
+      - reconstruction/r4-portfolio-health
+    paths:
+      - .github/workflows/r4-regime-hardening-one-shot.yml
+
+permissions:
+  contents: write
+
+jobs:
+  harden:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: reconstruction/r4-portfolio-health
+          fetch-depth: 0
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Patch regime registry integrity
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('src/autotrade/research/regimes.py')
+          text = path.read_text()
+
+          text = text.replace(
+              'from decimal import Decimal, ROUND_CEILING',
+              'from decimal import Decimal, InvalidOperation, ROUND_CEILING',
+          )
+
+          old = '''            latest = conn.execute(\n                "SELECT version FROM regime_models WHERE model_id=? ORDER BY version DESC LIMIT 1",\n                (model.model_id,),\n            ).fetchone()\n            if latest is None:\n                if model.version != 1:\n                    conn.rollback()\n                    raise RegimeModelConflict("first regime model version must be 1")\n            elif model.version != int(latest["version"]) + 1:\n                conn.rollback()\n                raise RegimeModelConflict("regime model versions must advance exactly by one")\n'''
+          new = '''            latest = conn.execute(\n                "SELECT model_id,version,fingerprint,payload_json FROM regime_models WHERE model_id=? ORDER BY version DESC LIMIT 1",\n                (model.model_id,),\n            ).fetchone()\n            if latest is None:\n                if model.version != 1:\n                    conn.rollback()\n                    raise RegimeModelConflict("first regime model version must be 1")\n            else:\n                previous = _model_from_storage(latest["fingerprint"], latest["payload_json"])\n                if previous.model_id != latest["model_id"] or previous.version != int(latest["version"]):\n                    conn.rollback()\n                    raise RegimeModelConflict("stored regime row identity mismatch")\n                if model.version != previous.version + 1:\n                    conn.rollback()\n                    raise RegimeModelConflict("regime model versions must advance exactly by one")\n'''
+          if old not in text:
+              raise SystemExit('register latest block not found')
+          text = text.replace(old, new, 1)
+
+          old = '''    def latest(self, model_id: str) -> RegimeModel:\n        conn = self._connect()\n        try:\n            row = conn.execute(\n                "SELECT fingerprint,payload_json FROM regime_models WHERE model_id=? ORDER BY version DESC LIMIT 1",\n                (model_id,),\n            ).fetchone()\n        finally:\n            conn.close()\n        if row is None:\n            raise KeyError(model_id)\n        return _model_from_storage(row["fingerprint"], row["payload_json"])\n'''
+          new = '''    def latest(self, model_id: str) -> RegimeModel:\n        conn = self._connect()\n        try:\n            row = conn.execute(\n                "SELECT model_id,version,fingerprint,payload_json FROM regime_models WHERE model_id=? ORDER BY version DESC LIMIT 1",\n                (model_id,),\n            ).fetchone()\n        finally:\n            conn.close()\n        if row is None:\n            raise KeyError(model_id)\n        model = _model_from_storage(row["fingerprint"], row["payload_json"])\n        if model.model_id != row["model_id"] or model.version != int(row["version"]):\n            raise RegimeModelConflict("stored regime row identity mismatch")\n        return model\n'''
+          if old not in text:
+              raise SystemExit('latest method block not found')
+          text = text.replace(old, new, 1)
+
+          old = '''def _decimal(value: object) -> Decimal:\n    if not isinstance(value, str):\n        raise ValueError("decimal must be encoded as string")\n    return Decimal(value)\n'''
+          new = '''def _decimal(value: object) -> Decimal:\n    if not isinstance(value, str):\n        raise ValueError("decimal must be encoded as string")\n    try:\n        return Decimal(value)\n    except InvalidOperation as exc:\n        raise ValueError("decimal string is invalid") from exc\n'''
+          if old not in text:
+              raise SystemExit('_decimal block not found')
+          text = text.replace(old, new, 1)
+          path.write_text(text)
+
+          tests = Path('tests/test_r4_regime_governance.py')
+          t = tests.read_text()
+          marker = 'def test_registry_refuses_append_when_previous_row_is_corrupt'
+          if marker not in t:
+              t += '''\n\ndef test_registry_refuses_append_when_previous_row_is_corrupt(tmp_path, now):\n    import sqlite3\n\n    path = tmp_path / "append-after-corrupt.db"\n    registry = SQLiteRegimeModelRegistry(path)\n    v1 = model(now)\n    registry.register(v1, now=now + timedelta(minutes=5))\n\n    conn = sqlite3.connect(path)\n    try:\n        conn.execute(\n            "UPDATE regime_models SET payload_json=? WHERE model_id=? AND version=1",\n            ("{not-json", v1.model_id),\n        )\n        conn.commit()\n    finally:\n        conn.close()\n\n    v2 = replace(v1, version=2, calibrated_at=now + timedelta(days=1))\n    with pytest.raises(RegimeModelConflict, match="stored regime payload is invalid"):\n        registry.register(v2, now=now + timedelta(days=1, minutes=1))\n\n    conn = sqlite3.connect(path)\n    try:\n        assert conn.execute("SELECT COUNT(*) FROM regime_models").fetchone()[0] == 1\n    finally:\n        conn.close()\n\n\ndef test_registry_latest_rejects_row_version_identity_mismatch(tmp_path, now):\n    import sqlite3\n\n    path = tmp_path / "row-identity.db"\n    registry = SQLiteRegimeModelRegistry(path)\n    v1 = model(now)\n    registry.register(v1, now=now + timedelta(minutes=5))\n\n    conn = sqlite3.connect(path)\n    try:\n        conn.execute(\n            "UPDATE regime_models SET version=2 WHERE model_id=? AND version=1",\n            (v1.model_id,),\n        )\n        conn.commit()\n    finally:\n        conn.close()\n\n    with pytest.raises(RegimeModelConflict, match="stored regime row identity mismatch"):\n        registry.latest(v1.model_id)\n\n\ndef test_registry_invalid_decimal_payload_is_fail_closed_conflict(tmp_path, now):\n    import sqlite3\n\n    path = tmp_path / "invalid-decimal.db"\n    registry = SQLiteRegimeModelRegistry(path)\n    v1 = model(now)\n    registry.register(v1, now=now + timedelta(minutes=5))\n\n    payload = v1.to_payload(include_fingerprint=False)\n    payload["low_threshold"] = "not-a-decimal"\n    conn = sqlite3.connect(path)\n    try:\n        conn.execute(\n            "UPDATE regime_models SET payload_json=? WHERE model_id=? AND version=1",\n            (json.dumps(payload, sort_keys=True, separators=(",", ":")), v1.model_id),\n        )\n        conn.commit()\n    finally:\n        conn.close()\n\n    with pytest.raises(RegimeModelConflict, match="stored regime payload is invalid"):\n        registry.latest(v1.model_id)\n'''
+              tests.write_text(t)
+          PY
+      - name: Targeted regime tests
+        run: |
+          python -m pip install -e '.[dev]'
+          pytest -q tests/test_r4_regime_governance.py
+      - name: Commit hardening
+        run: |
+          git config user.name "arendon7"
+          git config user.email "102555888+arendon7@users.noreply.github.com"
+          git add src/autotrade/research/regimes.py tests/test_r4_regime_governance.py
+          if git diff --cached --quiet; then
+            echo "No patch required"
+            exit 0
+          fi
+          git commit -m "fix(r4): validate durable regime lineage before append"
+          git push origin HEAD:reconstruction/r4-portfolio-health
