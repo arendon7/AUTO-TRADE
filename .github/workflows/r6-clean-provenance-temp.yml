@@ -1,0 +1,34 @@
+name: R6 Clean Provenance Temporary Machinery
+
+on:
+  push:
+    branches: ["reconstruction/r6-external-paper-protection"]
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: reconstruction/r6-external-paper-protection
+          fetch-depth: 0
+      - name: Remove temporary provenance machinery only
+        run: |
+          rm -f scripts/r6_refactor_core_provenance_health.py
+          rm -f .github/workflows/r6-core-provenance-health-refactor.yml
+          rm -f .github/workflows/r6-core-provenance-diagnostic.yml
+          rm -f knowledge/60_EVIDENCE/TEMP_R6_CORE_PROVENANCE_DIAGNOSTIC.txt
+          rm -f .github/workflows/r6-clean-provenance-temp.yml
+      - name: Publish cleanup
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m "chore(r6): remove temporary provenance machinery"
+          git push origin HEAD:reconstruction/r6-external-paper-protection
