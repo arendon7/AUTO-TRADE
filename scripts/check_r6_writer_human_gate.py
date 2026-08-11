@@ -68,11 +68,12 @@ def _scan_writer(source: str, path: Path) -> list[str]:
         tree = ast.parse(source, filename=str(path))
     except SyntaxError as exc:
         return [f"{path}: syntax error: {exc}"]
+    rel = _relative(path)
     for node in ast.walk(tree):
         if isinstance(node, ast.Call):
             call = _call_name(node.func)
             if call in FORBIDDEN_WRITER_CALLS:
-                errors.append(f"{path.relative_to(ROOT)}:{node.lineno}: forbidden writer call {call}")
+                errors.append(f"{rel}:{node.lineno}: forbidden writer call {call}")
     return errors
 
 
@@ -105,6 +106,13 @@ def _validate_ordering(source: str) -> list[str]:
     if "stage_external_submission(" in source:
         errors.append("writer must never stage OMS; execution bridge owns SUBMITTING")
     return errors
+
+
+def _relative(path: Path) -> Path:
+    try:
+        return path.relative_to(ROOT)
+    except ValueError:
+        return path
 
 
 def _call_name(func: ast.expr) -> str:
