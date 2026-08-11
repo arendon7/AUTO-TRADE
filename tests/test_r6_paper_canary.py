@@ -151,7 +151,6 @@ def test_exact_notional_boundary_is_approved_and_one_cent_above_is_rejected(tmp_
 
 def test_account_fraction_cap_can_be_stricter_than_absolute_cap(tmp_path) -> None:
     small = attestation(portfolio_value="5000")
-    # 5000 * 0.001 = 5, stricter than max_notional 10.
     with pytest.raises(PaperCanaryRejected, match="exceeds strict effective cap"):
         PaperCanaryGate(enabled_policy()).approve(
             context(tmp_path, account_attestation=small)
@@ -173,7 +172,7 @@ def test_canary_requires_exact_r0_through_r5_certification(tmp_path) -> None:
 @pytest.mark.parametrize(
     "current_order,reason",
     [
-        (order(status=OrderStatus.CREATED), "VALIDATED"),
+        (order(status=OrderStatus.SUBMITTED), "VALIDATED"),
         (order(status=OrderStatus.SUBMITTING), "VALIDATED"),
         (order(side=Side.SELL), "BUY-only"),
         (order(order_type=OrderType.MARKET, limit_price=None), "LIMIT"),
@@ -182,8 +181,6 @@ def test_canary_requires_exact_r0_through_r5_certification(tmp_path) -> None:
     ],
 )
 def test_canary_rejects_nonminimal_order_surface(tmp_path, current_order, reason) -> None:
-    # Non-VALIDATED orders cannot create a submission binding; emulate a frozen
-    # VALIDATED binding/state and then present a changed operational order to gate.
     if current_order.status is not OrderStatus.VALIDATED:
         base_order, att, bind, state, _ = prepared_components(tmp_path)
         ctx = PaperCanaryContext(
