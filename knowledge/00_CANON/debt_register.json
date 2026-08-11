@@ -723,12 +723,20 @@
     },
     {
       "area": "Crash-safe same-attempt resume after one-shot authorization consumption",
-      "evidence": [],
+      "evidence": [
+        "src/autotrade/brokers/alpaca_paper_writer.py",
+        "src/autotrade/brokers/alpaca_paper_canary_permit.py",
+        "src/autotrade/brokers/alpaca_paper_submission.py",
+        "tests/test_r6_writer_same_attempt_resume.py",
+        "tests/test_r6_paper_writer.py",
+        "tests/test_r6_paper_canary_permit.py",
+        "knowledge/60_EVIDENCE/R6_SAME_ATTEMPT_RESUME_EVIDENCE.json"
+      ],
       "id": "TD-R6-012",
       "next_action": "Align writer restart semantics with the durable one-shot permit/decision ledgers. If a crash occurs after the same attempt consumes authorization but before UNKNOWN is persisted, PREPARED + same-attempt CONSUMED may resume only through the exact frozen identities and fresh guards. Any UNKNOWN state, different attempt, conflicting evidence, or uncertainty about whether POST could have happened remains reconciliation-only and must never blind retry.",
-      "resolution": "",
+      "resolution": "Writer restart semantics now permit exactly one narrow recovery case: durable submission PREPARED with zero submit attempts and a canary permit already CONSUMED by the exact same attempt_id. This state proves by code ordering that UNKNOWN was not persisted and therefore POST could not have been reached. The retry re-runs all freshness/OMS/Safety/final guards and idempotently reuses the same permit consumption before persisting UNKNOWN. A different attempt, expired approval, any UNKNOWN/ACKNOWLEDGED state, or conflicting/tampered permit remains fail-closed/reconciliation-only. Official clean-head CI on e163dc74dfe2bc36e2be004d3d77d6d6e1df2ef4: Core 31518438417, Knowledge 31518438421, R6 Authority 31518438415 PASS; 983 tests / 85.54% coverage.",
       "severity": "P1",
-      "status": "OPEN",
+      "status": "CLOSED",
       "track": "R6"
     }
   ],

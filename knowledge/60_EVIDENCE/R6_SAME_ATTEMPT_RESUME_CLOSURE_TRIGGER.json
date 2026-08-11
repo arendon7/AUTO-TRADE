@@ -1,8 +1,0 @@
-{
-  "schema_version": 1,
-  "track": "R6",
-  "debt_id": "TD-R6-012",
-  "implementation_head_sha": "e163dc74dfe2bc36e2be004d3d77d6d6e1df2ef4",
-  "external_paper_order_sent": false,
-  "live_trading": "BLOCKED"
-}

@@ -17,7 +17,7 @@ Branch activa: `reconstruction/r6-external-paper-protection`.
 - `TD-R6-008` — permanent PAPER-only/LIVE-deny authority boundary.
 - `TD-R6-010` — **CLOSED** — OMS-owned external PAPER handoff certified; no direct OrderStore status mutation.
 - `TD-R6-011` — durable explicit human final PAPER execution decision; no AI/research/application-default authority.
-- `TD-R6-012` — crash-safe same-attempt resume after one-shot authorization consumption.
+- `TD-R6-012` — **CLOSED** — crash-safe same-attempt resume certified; UNKNOWN/different attempt remains reconciliation-only.
 
 ## Orden de implementación
 1. PAPER gateway policy + account/environment attestation, **without submit path enabled**;
@@ -28,7 +28,7 @@ Branch activa: `reconstruction/r6-external-paper-protection`.
 6. qualification evidence store and reconciliation proofs;
 7. OMS-owned external PAPER handoff: durable `VALIDATED -> SUBMITTING` without internal-broker I/O or direct store mutation;
 8. integrated manual single-shot canary coordinator that stops before network I/O;
-9. durable explicit human execution decision + crash-safe same-attempt resume (`TD-R6-011/012`);
+9. durable explicit human execution decision (`TD-R6-011`); crash-safe same-attempt resume (`TD-R6-012`) is certified CLOSED;
 10. bounded external PAPER evidence only after all prior gates are green and an explicit final operator decision exists;
 11. adversarial certification + debt closure.
 
