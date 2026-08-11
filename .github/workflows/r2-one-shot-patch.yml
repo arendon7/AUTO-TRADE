@@ -1,0 +1,36 @@
+name: R2 One-Shot Reviewed Patch
+
+on:
+  push:
+    branches: ["reconstruction/r2-capital-oms"]
+    paths: [".r2patch/TRIGGER"]
+
+permissions:
+  contents: write
+
+jobs:
+  apply-reviewed-patch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout exact branch
+        uses: actions/checkout@v4
+        with:
+          ref: reconstruction/r2-capital-oms
+          fetch-depth: 0
+
+      - name: Apply staged patch
+        run: python .r2patch/apply.py
+
+      - name: Remove one-shot patch machinery
+        run: |
+          rm -rf .r2patch
+          rm -f .github/workflows/r2-one-shot-patch.yml
+
+      - name: Commit reviewed result
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "fix(r2): close crash projection and snapshot integrity gaps"
+          git push origin HEAD:reconstruction/r2-capital-oms
