@@ -228,6 +228,47 @@ class SQLitePaperCanaryPermitRegistry:
         finally:
             conn.close()
 
+    def get_issued_event_hash(self, approval_hash: str) -> str:
+        """Return the immutable, verified ISSUED-event hash for one permit.
+
+        PaperCanaryPermitState.event_hash tracks the latest event and therefore
+        changes from ISSUED to CONSUMED. Prepared canary packages must bind the
+        immutable issuance evidence so the same-attempt crash-safe resume can
+        verify the original permit without mistaking the later CONSUMED event
+        for tampering. The entire ledger/control chain is verified first.
+        """
+        _validate_hash(approval_hash, "approval_hash")
+        conn = self._runtime.connect()
+        try:
+            states, _, _ = self._verify_locked(conn)
+            if approval_hash not in states:
+                raise KeyError(approval_hash)
+            rows = conn.execute(
+                """
+                SELECT sequence, event_type, approval_hash, occurred_at,
+                       payload_json, previous_event_hash, event_hash
+                FROM alpaca_paper_canary_permit_events
+                WHERE approval_hash = ? AND event_type = ?
+                ORDER BY sequence
+                """,
+                (approval_hash, PaperCanaryPermitEventType.ISSUED.value),
+            ).fetchall()
+            if len(rows) != 1:
+                raise PaperCanaryPermitIntegrityError(
+                    "canary permit must have exactly one verified issuance event"
+                )
+            event = _event_from_row(rows[0])
+            if (
+                event.event_type is not PaperCanaryPermitEventType.ISSUED
+                or event.approval_hash != approval_hash
+            ):
+                raise PaperCanaryPermitIntegrityError(
+                    "canary permit issuance event identity mismatch"
+                )
+            return event.event_hash
+        finally:
+            conn.close()
+
     def list_states(self) -> tuple[PaperCanaryPermitState, ...]:
         conn = self._runtime.connect()
         try:

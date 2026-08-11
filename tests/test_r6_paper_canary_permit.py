@@ -129,6 +129,7 @@ def test_issue_is_idempotent_and_persists_across_restart(tmp_path) -> None:
     assert first.attempt_id is None
     assert first.consumed_at is None
     assert first.approval_hash == approved.approval_hash
+    assert registry.get_issued_event_hash(approved.approval_hash) == first.event_hash
     assert len(registry.list_states()) == 1
     assert SQLitePaperCanaryPermitRegistry(rt).get(approved.approval_hash) == first
 
@@ -137,7 +138,7 @@ def test_consume_is_one_shot_and_same_attempt_replay_is_idempotent(tmp_path) -> 
     approved = approval(tmp_path)
     rt = permit_runtime(tmp_path)
     registry = SQLitePaperCanaryPermitRegistry(rt)
-    registry.issue(approved)
+    issued = registry.issue(approved)
 
     consumed = registry.consume(
         approval=approved,
@@ -154,6 +155,8 @@ def test_consume_is_one_shot_and_same_attempt_replay_is_idempotent(tmp_path) -> 
     assert consumed.status is PaperCanaryPermitStatus.CONSUMED
     assert consumed.attempt_id == "permit-attempt-001"
     assert consumed.consumed_at == NOW + timedelta(seconds=1)
+    assert consumed.event_hash != issued.event_hash
+    assert registry.get_issued_event_hash(approved.approval_hash) == issued.event_hash
     assert SQLitePaperCanaryPermitRegistry(rt).get(approved.approval_hash) == consumed
 
     with pytest.raises(PaperCanaryPermitConflict, match="another attempt"):
