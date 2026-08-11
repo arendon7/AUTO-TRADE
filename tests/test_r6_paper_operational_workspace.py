@@ -3,14 +3,16 @@ from __future__ import annotations
 from dataclasses import replace
 import json
 import os
-from pathlib import Path
 
 import pytest
 
+from autotrade.brokers.alpaca_paper_bracket import AlpacaNestedBracketAttestation
 from autotrade.brokers.alpaca_paper_operational import (
     PaperOperationalConflict,
     PaperOperationalIntegrityError,
     PaperOperationalWorkspace,
+    read_bracket_attestation,
+    read_expected_bracket,
     read_prepared_package,
 )
 from autotrade.brokers.alpaca_paper_operator_decision import PaperOperatorDecisionContext
@@ -37,10 +39,12 @@ def test_workspace_writes_only_sanitized_canonical_artifacts(tmp_path) -> None:
     workspace, account = workspace_with_account(tmp_path)
     prepared_result = prepared(tmp_path)
     package_path, context_path, manifest_path = workspace.write_prepared_canary(
-        prepared_result.package
+        prepared_result.package,
+        prepared_result.bracket,
     )
 
     assert read_prepared_package(package_path) == prepared_result.package
+    assert read_expected_bracket(workspace.expected_bracket_path) == prepared_result.bracket
     context = PaperOperatorDecisionContext.from_dict(
         json.loads(context_path.read_text(encoding="utf-8"))
     )
@@ -51,6 +55,7 @@ def test_workspace_writes_only_sanitized_canonical_artifacts(tmp_path) -> None:
     assert manifest["external_order_submitted"] is False
     assert manifest["live_trading"] == "BLOCKED"
     assert manifest["files"]["account_attestation.json"]
+    assert manifest["files"]["expected_bracket.json"]
 
     account_payload = json.loads(
         workspace.account_attestation_path.read_text(encoding="utf-8")
@@ -63,6 +68,7 @@ def test_workspace_writes_only_sanitized_canonical_artifacts(tmp_path) -> None:
         for path in (
             workspace.account_attestation_path,
             package_path,
+            workspace.expected_bracket_path,
             context_path,
             manifest_path,
         )
@@ -75,6 +81,7 @@ def test_workspace_writes_only_sanitized_canonical_artifacts(tmp_path) -> None:
         for path in (
             workspace.account_attestation_path,
             package_path,
+            workspace.expected_bracket_path,
             context_path,
             manifest_path,
         ):
@@ -85,8 +92,8 @@ def test_operational_artifact_writes_are_idempotent_but_never_overwrite_conflict
     workspace, account = workspace_with_account(tmp_path)
     prepared_result = prepared(tmp_path)
     assert workspace.write_account_attestation(account) == workspace.account_attestation_path
-    first = workspace.write_prepared_canary(prepared_result.package)
-    second = workspace.write_prepared_canary(prepared_result.package)
+    first = workspace.write_prepared_canary(prepared_result.package, prepared_result.bracket)
+    second = workspace.write_prepared_canary(prepared_result.package, prepared_result.bracket)
     assert second == first
 
     package_payload = json.loads(workspace.prepared_package_path.read_text(encoding="utf-8"))
@@ -96,7 +103,7 @@ def test_operational_artifact_writes_are_idempotent_but_never_overwrite_conflict
         encoding="utf-8",
     )
     with pytest.raises(PaperOperationalConflict, match="refusing to overwrite"):
-        workspace.write_prepared_canary(prepared_result.package)
+        workspace.write_prepared_canary(prepared_result.package, prepared_result.bracket)
 
 
 def test_conflicting_account_attestation_is_never_overwritten(tmp_path) -> None:
@@ -106,18 +113,23 @@ def test_conflicting_account_attestation_is_never_overwritten(tmp_path) -> None:
         workspace.write_account_attestation(different)
 
 
-def test_prepared_package_requires_exact_persisted_account_evidence(tmp_path) -> None:
+def test_prepared_package_requires_exact_persisted_account_and_bracket_evidence(tmp_path) -> None:
     result = prepared(tmp_path)
     workspace = PaperOperationalWorkspace.initialize(tmp_path / "missing")
     with pytest.raises(PaperOperationalIntegrityError, match="must be persisted before"):
-        workspace.write_prepared_canary(result.package)
+        workspace.write_prepared_canary(result.package, result.bracket)
 
     mismatch = PaperOperationalWorkspace.initialize(tmp_path / "mismatch")
     mismatch.write_account_attestation(
         replace(coordinator_attestation(), request_id="mismatch-request")
     )
     with pytest.raises(PaperOperationalIntegrityError, match="does not match"):
-        mismatch.write_prepared_canary(result.package)
+        mismatch.write_prepared_canary(result.package, result.bracket)
+
+    workspace, _ = workspace_with_account(tmp_path / "bracket")
+    wrong_bracket = replace(result.bracket, order_id="different-order")
+    with pytest.raises(PaperOperationalIntegrityError, match="order_id mismatch"):
+        workspace.write_prepared_canary(result.package, wrong_bracket)
 
 
 def test_tampered_account_environment_or_credential_persistence_blocks_package(tmp_path) -> None:
@@ -133,13 +145,45 @@ def test_tampered_account_environment_or_credential_persistence_blocks_package(t
             json.dumps(payload, sort_keys=True, indent=2) + "\n", encoding="utf-8"
         )
         with pytest.raises(PaperOperationalIntegrityError, match=message):
-            workspace.write_prepared_canary(result.package)
+            workspace.write_prepared_canary(result.package, result.bracket)
+
+
+def test_expected_bracket_and_broker_attestation_detect_tamper(tmp_path) -> None:
+    workspace, _ = workspace_with_account(tmp_path)
+    result = prepared(tmp_path)
+    workspace.write_prepared_canary(result.package, result.bracket)
+    raw = json.loads(workspace.expected_bracket_path.read_text(encoding="utf-8"))
+    raw["payload_hash"] = "f" * 64
+    workspace.expected_bracket_path.write_text(json.dumps(raw), encoding="utf-8")
+    with pytest.raises(PaperOperationalIntegrityError, match="invalid"):
+        read_expected_bracket(workspace.expected_bracket_path)
+
+    workspace.expected_bracket_path.unlink()
+    workspace.write_prepared_canary(result.package, result.bracket)
+    broker_attestation = AlpacaNestedBracketAttestation(
+        parent_order_id="parent-001",
+        client_order_id=result.bracket.client_order_id,
+        take_profit_order_id="take-profit-001",
+        stop_loss_order_id="stop-loss-001",
+        request_id="request-001",
+        response_hash="a" * 64,
+    )
+    path = workspace.write_bracket_attestation(
+        broker_attestation,
+        expected_bracket=result.bracket,
+    )
+    assert read_bracket_attestation(path) == broker_attestation
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload["live_trading"] = "ENABLED"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    with pytest.raises(PaperOperationalIntegrityError, match="authority changed"):
+        read_bracket_attestation(path)
 
 
 def test_read_prepared_package_detects_hash_and_noncanonical_tamper(tmp_path) -> None:
     workspace, _ = workspace_with_account(tmp_path)
     result = prepared(tmp_path)
-    workspace.write_prepared_canary(result.package)
+    workspace.write_prepared_canary(result.package, result.bracket)
     raw = json.loads(workspace.prepared_package_path.read_text(encoding="utf-8"))
     raw["package_hash"] = "f" * 64
     workspace.prepared_package_path.write_text(json.dumps(raw), encoding="utf-8")
@@ -150,7 +194,7 @@ def test_read_prepared_package_detects_hash_and_noncanonical_tamper(tmp_path) ->
 def test_read_prepared_package_rejects_noncanonical_extra_field(tmp_path) -> None:
     workspace, _ = workspace_with_account(tmp_path)
     result = prepared(tmp_path)
-    workspace.write_prepared_canary(result.package)
+    workspace.write_prepared_canary(result.package, result.bracket)
     raw = json.loads(workspace.prepared_package_path.read_text(encoding="utf-8"))
     raw["unexpected"] = "field"
     workspace.prepared_package_path.write_text(json.dumps(raw), encoding="utf-8")
@@ -173,7 +217,7 @@ def test_read_prepared_package_rejects_noncanonical_extra_field(tmp_path) -> Non
 def test_read_prepared_package_rejects_invalid_field_shapes(tmp_path, field, value) -> None:
     workspace, _ = workspace_with_account(tmp_path / field)
     result = prepared(tmp_path / field)
-    workspace.write_prepared_canary(result.package)
+    workspace.write_prepared_canary(result.package, result.bracket)
     raw = json.loads(workspace.prepared_package_path.read_text(encoding="utf-8"))
     raw[field] = value
     workspace.prepared_package_path.write_text(json.dumps(raw), encoding="utf-8")
@@ -202,7 +246,7 @@ def test_package_claiming_network_authority_cannot_be_written(tmp_path) -> None:
     result = prepared(tmp_path)
     with pytest.raises(ValueError, match="cannot authorize network write"):
         forged = replace(result.package, network_write_authorized=True)
-        workspace.write_prepared_canary(forged)
+        workspace.write_prepared_canary(forged, result.bracket)
 
 
 def test_workspace_rejects_wrong_types_and_symlink_root(tmp_path) -> None:
