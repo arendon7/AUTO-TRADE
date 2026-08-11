@@ -40,6 +40,7 @@ REQUIRED_BRIDGE_ANCHORS = (
     "operator_registry.get(expected_context.preparation_hash)",
     "operator_registry.consume(",
     "self._oms.stage_external_submission(",
+    "risk_decision_fingerprint(risk_decision) != package.risk_decision_fingerprint",
     "package.risk_decision_safety_state_version",
     "package.market_fingerprint",
     "consumed.status is not PaperOperatorDecisionStatus.CONSUMED",

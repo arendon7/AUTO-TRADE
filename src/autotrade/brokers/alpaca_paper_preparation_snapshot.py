@@ -9,7 +9,13 @@ from pathlib import Path
 import tempfile
 from typing import Mapping
 
-from autotrade.domain import MarketSnapshot, RiskDecision, RiskDecisionStatus, market_fingerprint
+from autotrade.domain import (
+    MarketSnapshot,
+    RiskDecision,
+    RiskDecisionStatus,
+    market_fingerprint,
+    risk_decision_fingerprint,
+)
 
 from .alpaca_paper_canary import PaperCanaryApproval
 from .alpaca_paper_canary_coordinator import PreparedPaperCanaryPackage
@@ -39,6 +45,7 @@ def preparation_snapshot_payload(
         "package_hash": package.package_hash,
         "risk_decision": {
             "decision_id": decision.decision_id,
+            "risk_decision_fingerprint": risk_decision_fingerprint(decision),
             "intent_id": decision.intent_id,
             "status": decision.status.value,
             "reason_code": decision.reason_code,
@@ -181,6 +188,8 @@ def read_preparation_snapshot(
             risk_reducing=_boolean(decision_raw, "risk_reducing"),
             safety_state_version=_integer(decision_raw, "safety_state_version"),
         )
+        if decision_raw.get("risk_decision_fingerprint") != risk_decision_fingerprint(decision):
+            raise PaperOperationalIntegrityError("snapshot RiskDecision fingerprint mismatch")
         market = MarketSnapshot(
             symbol=_string(market_raw, "symbol"),
             bid=_decimal(market_raw, "bid"),
@@ -236,6 +245,8 @@ def _verify_bindings(
         raise PaperOperationalIntegrityError("RiskDecision Safety version differs from package")
     if decision.valid_until != package.risk_decision_valid_until:
         raise PaperOperationalIntegrityError("RiskDecision expiry differs from package")
+    if risk_decision_fingerprint(decision) != package.risk_decision_fingerprint:
+        raise PaperOperationalIntegrityError("RiskDecision fingerprint differs from package")
     if market_fingerprint(market) != package.market_fingerprint:
         raise PaperOperationalIntegrityError("MarketSnapshot differs from package")
     if approval.approval_hash != package.canary_approval_hash:

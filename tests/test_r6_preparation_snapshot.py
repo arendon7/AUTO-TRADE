@@ -89,6 +89,87 @@ def test_snapshot_rejects_changed_market_decision_or_approval_before_write(tmp_p
         )
 
 
+def test_snapshot_binds_full_risk_decision_identity(tmp_path) -> None:
+    result = prepared(tmp_path)
+    workspace = PaperOperationalWorkspace.initialize(tmp_path / "workspace")
+    for forged in (
+        replace(decision(), approved_notional=decision().approved_notional + 1),
+        replace(decision(), reason_detail="forged reason"),
+        replace(decision(), limits_version="forged-limits"),
+    ):
+        with pytest.raises(PaperOperationalIntegrityError, match="fingerprint"):
+            write_preparation_snapshot(
+                workspace,
+                package=result.package,
+                decision=forged,
+                market=market(),
+                approval=result.approval,
+            )
+
+
+def test_snapshot_rejects_malformed_and_wrong_authority_artifacts(tmp_path) -> None:
+    workspace, result, path = write_snapshot(tmp_path)
+    mutations = (
+        ({"schema_version": 2}, "header"),
+        ({"environment": "LIVE"}, "header"),
+        ({"credentials_persisted": True}, "persist credentials"),
+        ({"next_action": "EXECUTE"}, "action changed"),
+    )
+    original = json.loads(path.read_text(encoding="utf-8"))
+    for changed, message in mutations:
+        raw = dict(original)
+        raw.update(changed)
+        without_hash = dict(raw)
+        without_hash.pop("snapshot_hash", None)
+        raw["snapshot_hash"] = artifact_hash(without_hash)
+        path.write_text(json.dumps(raw), encoding="utf-8")
+        with pytest.raises(PaperOperationalIntegrityError, match=message):
+            read_preparation_snapshot(workspace, package=result.package)
+    path.write_text("[]", encoding="utf-8")
+    with pytest.raises(PaperOperationalIntegrityError, match="root must be object"):
+        read_preparation_snapshot(workspace, package=result.package)
+    path.write_text("{bad-json", encoding="utf-8")
+    with pytest.raises(PaperOperationalIntegrityError, match="cannot read"):
+        read_preparation_snapshot(workspace, package=result.package)
+
+
+def test_snapshot_rejects_nested_shape_and_field_tamper(tmp_path) -> None:
+    workspace, result, path = write_snapshot(tmp_path)
+    original = json.loads(path.read_text(encoding="utf-8"))
+    cases = [
+        ("risk_decision", None, "risk_decision must be object"),
+        ("market", [], "market must be object"),
+        ("approval", "bad", "approval must be object"),
+    ]
+    for field, value, message in cases:
+        raw = dict(original)
+        raw[field] = value
+        without_hash = dict(raw)
+        without_hash.pop("snapshot_hash", None)
+        raw["snapshot_hash"] = artifact_hash(without_hash)
+        path.write_text(json.dumps(raw), encoding="utf-8")
+        with pytest.raises(PaperOperationalIntegrityError, match=message):
+            read_preparation_snapshot(workspace, package=result.package)
+
+    raw = json.loads(json.dumps(original))
+    raw["risk_decision"]["reason_detail"] = "tampered after preparation"
+    without_hash = dict(raw)
+    without_hash.pop("snapshot_hash", None)
+    raw["snapshot_hash"] = artifact_hash(without_hash)
+    path.write_text(json.dumps(raw), encoding="utf-8")
+    with pytest.raises(PaperOperationalIntegrityError, match="RiskDecision fingerprint"):
+        read_preparation_snapshot(workspace, package=result.package)
+
+    raw = json.loads(json.dumps(original))
+    raw["market"]["market_fingerprint"] = "f" * 64
+    without_hash = dict(raw)
+    without_hash.pop("snapshot_hash", None)
+    raw["snapshot_hash"] = artifact_hash(without_hash)
+    path.write_text(json.dumps(raw), encoding="utf-8")
+    with pytest.raises(PaperOperationalIntegrityError, match="MarketSnapshot fingerprint"):
+        read_preparation_snapshot(workspace, package=result.package)
+
+
 def test_snapshot_hash_authority_and_package_tamper_fail_closed(tmp_path) -> None:
     workspace, result, path = write_snapshot(tmp_path)
     for field, value, message in (

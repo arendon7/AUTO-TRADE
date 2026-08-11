@@ -3,7 +3,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
-from autotrade.domain import MarketSnapshot, OrderRecord, OrderStatus, RiskDecision, market_fingerprint
+from autotrade.domain import (
+    MarketSnapshot,
+    OrderRecord,
+    OrderStatus,
+    RiskDecision,
+    market_fingerprint,
+    risk_decision_fingerprint,
+)
 from autotrade.oms import ExternalSubmissionHandoff, OrderManagementSystem
 
 from .alpaca_paper_canary_coordinator import PreparedPaperCanaryPackage
@@ -99,6 +106,8 @@ class PaperCanaryExecutionBridge:
             raise PaperExecutionBridgeBlocked("RiskDecision market fingerprint does not match prepared package")
         if risk_decision.intent_fingerprint != package.intent_fingerprint:
             raise PaperExecutionBridgeBlocked("RiskDecision intent fingerprint does not match prepared package")
+        if risk_decision_fingerprint(risk_decision) != package.risk_decision_fingerprint:
+            raise PaperExecutionBridgeBlocked("RiskDecision fingerprint does not match prepared package")
         if market_fingerprint(market) != package.market_fingerprint:
             raise PaperExecutionBridgeBlocked("MarketSnapshot does not match prepared package")
 

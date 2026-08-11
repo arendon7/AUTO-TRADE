@@ -21,6 +21,8 @@ REQUIRED = (
     "submission_registry.prepare(binding)",
     "permit_registry.issue(approval)",
     "deterministic_canary_attempt_id(",
+    "risk_decision_fingerprint",
+    '"risk_decision_fingerprint": risk_decision_fingerprint(decision)',
 )
 FORBIDDEN_IMPORT_FRAGMENTS = (
     "alpaca_paper_writer",

@@ -349,6 +349,7 @@ def read_prepared_package(path: Path) -> PreparedPaperCanaryPackage:
             client_order_id=_string(raw, "client_order_id"),
             intent_fingerprint=_string(raw, "intent_fingerprint"),
             risk_decision_id=_string(raw, "risk_decision_id"),
+            risk_decision_fingerprint=_string(raw, "risk_decision_fingerprint"),
             risk_decision_safety_state_version=_integer(
                 raw, "risk_decision_safety_state_version"
             ),

@@ -104,6 +104,19 @@ def test_expired_human_decision_blocks_before_oms_stage(tmp_path) -> None:
     assert broker.calls == 0
 
 
+def test_full_risk_decision_identity_is_bound_before_human_consume(tmp_path) -> None:
+    prepared, bridge, registry, operator_decision, broker, _ = prepared_stack(tmp_path)
+    for forged in (
+        replace(decision(), approved_notional=Decimal("9")),
+        replace(decision(), reason_detail="different authority explanation"),
+        replace(decision(), limits_version="different-limits"),
+    ):
+        with pytest.raises(PaperExecutionBridgeBlocked, match="RiskDecision fingerprint"):
+            stage(prepared, bridge, registry, operator_decision, risk_decision=forged)
+        assert registry.get(operator_decision.context.preparation_hash).status is PaperOperatorDecisionStatus.ISSUED
+        assert broker.calls == 0
+
+
 def test_risk_decision_safety_version_is_bound_to_human_reviewed_package(tmp_path) -> None:
     prepared, bridge, registry, operator_decision, broker, _ = prepared_stack(tmp_path)
     forged = replace(decision(), safety_state_version=1)

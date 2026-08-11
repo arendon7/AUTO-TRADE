@@ -14,6 +14,7 @@ from autotrade.domain import (
     OrderStatus,
     RiskDecision,
     intent_fingerprint,
+    risk_decision_fingerprint,
 )
 from autotrade.oms import OrderManagementSystem
 
@@ -60,6 +61,7 @@ class PreparedPaperCanaryPackage:
     client_order_id: str
     intent_fingerprint: str
     risk_decision_id: str
+    risk_decision_fingerprint: str
     risk_decision_safety_state_version: int
     market_fingerprint: str
     risk_decision_valid_until: datetime
@@ -93,6 +95,7 @@ class PreparedPaperCanaryPackage:
             _require_id(value, label)
         for label, value in (
             ("intent_fingerprint", self.intent_fingerprint),
+            ("risk_decision_fingerprint", self.risk_decision_fingerprint),
             ("market_fingerprint", self.market_fingerprint),
             ("account_attestation_fingerprint", self.account_attestation_fingerprint),
             ("submission_binding_hash", self.submission_binding_hash),
@@ -318,6 +321,7 @@ def deterministic_canary_attempt_id(
         "intent_fingerprint": intent_fingerprint(order.intent),
         "order_id": order.order_id,
         "risk_decision_id": order.risk_decision_id,
+        "risk_decision_fingerprint": risk_decision_fingerprint(decision),
         "risk_decision_safety_state_version": decision.safety_state_version,
         "market_fingerprint": decision.market_fingerprint,
     }
@@ -341,6 +345,7 @@ def _build_package(
         "client_order_id": binding.client_order_id,
         "intent_fingerprint": intent_fingerprint(order.intent),
         "risk_decision_id": decision.decision_id,
+        "risk_decision_fingerprint": risk_decision_fingerprint(decision),
         "risk_decision_safety_state_version": decision.safety_state_version,
         "market_fingerprint": decision.market_fingerprint,
         "risk_decision_valid_until": decision.valid_until,
@@ -374,6 +379,7 @@ def _package_payload(package: PreparedPaperCanaryPackage, *, include_hash: bool)
         "client_order_id": package.client_order_id,
         "intent_fingerprint": package.intent_fingerprint,
         "risk_decision_id": package.risk_decision_id,
+        "risk_decision_fingerprint": package.risk_decision_fingerprint,
         "risk_decision_safety_state_version": package.risk_decision_safety_state_version,
         "market_fingerprint": package.market_fingerprint,
         "risk_decision_valid_until": package.risk_decision_valid_until,
@@ -423,6 +429,7 @@ def _package_payload_from_values(values: dict[str, object]) -> dict[str, object]
         "permit_event_hash": values["permit_event_hash"],
         "prepared_at": _iso(values["prepared_at"]),
         "risk_decision_id": values["risk_decision_id"],
+        "risk_decision_fingerprint": values["risk_decision_fingerprint"],
         "risk_decision_safety_state_version": values["risk_decision_safety_state_version"],
         "market_fingerprint": values["market_fingerprint"],
         "risk_decision_valid_until": _iso(values["risk_decision_valid_until"]),
