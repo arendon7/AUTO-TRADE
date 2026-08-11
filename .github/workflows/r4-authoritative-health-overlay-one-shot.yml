@@ -22,7 +22,21 @@ jobs:
         with:
           python-version: '3.12'
       - name: Apply authoritative overlay
-        run: python scripts/r4_harden_authoritative_health_overlay.py
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path("scripts/r4_harden_authoritative_health_overlay.py")
+          text = path.read_text()
+          old = 'start = text.index("    def effective_control(\\n")\n'
+          new = (
+              'class_start = text.index("class SQLiteHealthBridgeStore")\n'
+              'start = text.index("    def effective_control(\\n", class_start)\n'
+          )
+          if old not in text:
+              raise SystemExit("overlay patcher start anchor not found")
+          path.write_text(text.replace(old, new, 1))
+          PY
+          python scripts/r4_harden_authoritative_health_overlay.py
       - name: Targeted cross-boundary suite
         run: |
           python -m pip install -e '.[dev]'
