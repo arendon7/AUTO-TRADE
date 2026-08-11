@@ -8,6 +8,7 @@ ROOT = Path(__file__).resolve().parents[1]
 PREFLIGHT = ROOT / "scripts/r6_external_paper_preflight.py"
 OPERATIONAL = ROOT / "src/autotrade/brokers/alpaca_paper_operational.py"
 PREPARER = ROOT / "src/autotrade/brokers/alpaca_paper_operational_prepare.py"
+SNAPSHOT = ROOT / "src/autotrade/brokers/alpaca_paper_preparation_snapshot.py"
 EVIDENCE = ROOT / "src/autotrade/brokers/alpaca_paper_operational_evidence.py"
 CORE = ROOT / ".github/workflows/core-tests.yml"
 R6 = ROOT / ".github/workflows/r6-authority.yml"
@@ -88,12 +89,26 @@ REQUIRED_PREPARER = (
     "self._workspace.write_account_attestation(account_attestation)",
     "result = self._coordinator.prepare(",
     "self._workspace.write_prepared_canary(",
+    "write_preparation_snapshot(",
+    "read_preparation_snapshot(",
     "result.package,",
     "result.bracket,",
     "persisted = read_prepared_package(package_path)",
     "persisted_bracket = read_expected_bracket(self._workspace.expected_bracket_path)",
     '"operational preparation cannot authorize network write"',
     '"operational preparation must stop at operator decision"',
+)
+REQUIRED_SNAPSHOT = (
+    'SNAPSHOT_NAME = "preparation_snapshot.json"',
+    "preparation_snapshot_payload(",
+    "write_preparation_snapshot(",
+    "read_preparation_snapshot(",
+    '"credentials_persisted": False',
+    '"network_write_authorized": False',
+    '"next_action": "OPERATOR_DECISION_REQUIRED"',
+    '"live_trading": "BLOCKED"',
+    'raise PaperOperationalIntegrityError("preparation snapshot hash mismatch")',
+    "os.fsync(sync_fd)",
 )
 REQUIRED_EVIDENCE = (
     "class PaperOperationalEvidenceCollector:",
@@ -155,6 +170,18 @@ def main() -> int:
         if source.count("self._coordinator.prepare(") != 1:
             errors.append("operational preparer must call coordinator.prepare exactly once")
 
+    if not SNAPSHOT.is_file():
+        errors.append("R6 restart-safe preparation snapshot module missing")
+    else:
+        source = SNAPSHOT.read_text(encoding="utf-8")
+        for anchor in REQUIRED_SNAPSHOT:
+            if anchor not in source:
+                errors.append(f"preparation snapshot anchor missing: {anchor}")
+        errors.extend(_scan_no_execution_surface(source, SNAPSHOT, "snapshot", FORBIDDEN_PREPARER_IMPORTS))
+        for forbidden in ("/v2/orders", "api.alpaca.markets", "APCA-API-SECRET-KEY"):
+            if forbidden in source:
+                errors.append(f"preparation snapshot contains forbidden surface: {forbidden}")
+
     if not EVIDENCE.is_file():
         errors.append("R6 operational evidence collector missing")
     else:
@@ -187,7 +214,7 @@ def main() -> int:
         return 1
     print(
         "AUTO-TRADE R6 operational lifecycle boundary: PASS "
-        "(sanitized durable workspace; GET-only preflight; offline preparer; "
+        "(sanitized workspace; GET-only preflight; restart-safe offline preparation; "
         "GET/receive-only evidence collector; no execution/write authority)"
     )
     return 0
