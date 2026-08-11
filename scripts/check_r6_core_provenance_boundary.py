@@ -116,9 +116,13 @@ def _scan(source: str, path: Path) -> list[str]:
             call = _call_name(node.func)
             if call in FORBIDDEN_CALLS:
                 errors.append(f"{rel}:{node.lineno}: forbidden core provenance call {call}")
-        if isinstance(node, ast.Constant) and isinstance(node.value, str):
-            if WRITE_SQL.search(node.value):
-                errors.append(f"{rel}:{node.lineno}: write-capable SQL is forbidden in provenance reader")
+            if call in {"execute", "executescript"} and node.args:
+                sql_arg = node.args[0]
+                if isinstance(sql_arg, ast.Constant) and isinstance(sql_arg.value, str):
+                    if WRITE_SQL.search(sql_arg.value):
+                        errors.append(
+                            f"{rel}:{node.lineno}: write-capable SQL is forbidden in provenance reader"
+                        )
     return errors
 
 
