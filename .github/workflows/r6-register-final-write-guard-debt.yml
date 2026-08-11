@@ -1,0 +1,66 @@
+name: R6 Register Final Write Guard Debt
+
+on:
+  push:
+    branches:
+      - reconstruction/r6-external-paper-protection
+    paths:
+      - .github/workflows/r6-register-final-write-guard-debt.yml
+
+permissions:
+  contents: write
+
+jobs:
+  register:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: reconstruction/r6-external-paper-protection
+          fetch-depth: 0
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Register newly discovered P1 before implementation
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          register = Path('knowledge/00_CANON/debt_register.json')
+          doc = json.loads(register.read_text(encoding='utf-8'))
+          debt_id = 'TD-R6-009'
+          if any(item.get('id') == debt_id for item in doc['items']):
+              raise SystemExit(f'{debt_id} already exists')
+          doc['items'].append({
+              'area': 'Just-in-time deterministic Safety/OMS recheck before external PAPER write',
+              'evidence': [],
+              'id': debt_id,
+              'next_action': 'Add an authoritative final-write guard that re-reads the current OMS order plus durable Safety/circuit, reconciliation/UNKNOWN and Health state immediately before permit consumption and POST. Approval TTL alone is insufficient: any intervening worsening must block the write fail-closed.',
+              'resolution': '',
+              'severity': 'P1',
+              'status': 'OPEN',
+              'track': 'R6',
+          })
+          register.write_text(json.dumps(doc, indent=2, sort_keys=True) + '\n', encoding='utf-8')
+
+          human = Path('knowledge/00_CANON/DEBT_REGISTER.md')
+          text = human.read_text(encoding='utf-8')
+          row = '| `TD-R6-009` | P1 | final write Safety/OMS recheck | authoritative just-in-time re-read immediately before permit consumption/POST; any intervening worsening blocks |\n'
+          marker = '| `TD-R6-008` | P1 | permanent PAPER-only authority boundary | CI prevents LIVE host, Safety/OMS bypass, AI authorization and PAPER→LIVE authority creep |\n'
+          if marker not in text:
+              raise SystemExit('R6-008 human debt marker missing')
+          text = text.replace(marker, marker + row, 1)
+          text = text.replace('R6 P0/P1/P2 OPEN: **8**.', 'R6 P0/P1/P2 OPEN: **9**.', 1)
+          human.write_text(text, encoding='utf-8')
+          PY
+          python scripts/check_debt_register.py
+          python scripts/check_knowledge_contract.py
+      - name: Commit registration and remove this helper
+        run: |
+          git config user.name arendon7
+          git config user.email 102555888+arendon7@users.noreply.github.com
+          git add knowledge/00_CANON/debt_register.json knowledge/00_CANON/DEBT_REGISTER.md
+          git rm .github/workflows/r6-register-final-write-guard-debt.yml
+          git commit -m "docs(r6): register just-in-time final write guard debt"
+          git push origin HEAD:reconstruction/r6-external-paper-protection
