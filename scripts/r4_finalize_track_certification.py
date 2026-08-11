@@ -9,6 +9,7 @@ DEBT_MD = ROOT / "knowledge/00_CANON/DEBT_REGISTER.md"
 MATRIX = ROOT / "knowledge/00_CANON/RECONSTRUCTION_V028R_MATRIX.md"
 STATE = ROOT / "knowledge/00_CANON/ESTADO_ACTUAL.md"
 TASK = ROOT / "knowledge/00_CANON/TAREA_ACTIVA.md"
+HANDOFF = ROOT / "knowledge/40_HANDOFF/HANDOFF_ACTUAL.md"
 CERT = ROOT / "knowledge/60_EVIDENCE/R4_CERTIFICATION.json"
 
 BASIS = "556a91ddeb5866313d5117898e97eb4e0308bab2"
@@ -250,11 +251,72 @@ Capacidades objetivo según `RECONSTRUCTION_V028R_MATRIX.md`:
 - cualquier shadow state debe ser reproducible, hash-bound e idempotente;
 - promoción a R6 queda bloqueada hasta certificar R5 y recertificar su merge SHA.
 
+## Negative tests obligatorios R5
+- stream deshabilitado por defecto no abre conexiones ni hace I/O;
+- host/path/protocolo no permitido => reject antes de I/O;
+- vela abierta, fuera de orden, duplicada conflictiva o timestamp futuro => fail closed;
+- duplicado idéntico => idempotent no-op; duplicado conflictivo => fail closed;
+- gap temporal o sequence gap => `DEGRADED`, sin imputación ni avance optimista;
+- socket EOF/error/timeout/ambigüedad => `DEGRADED`; reconnect no puede ocultar un gap no resuelto;
+- shadow con pesos/config/dataset/hash no coincidente => reject;
+- repeated identical shadow/forward evidence => idempotent, sin doble conteo;
+- forward evidence no puede leer FINAL_HOLDOUT ni recalibrar thresholds/pesos congelados;
+- stale/missing stream o shadow no puede incrementar allocation/risk;
+- ninguna ruta R5 puede importar o invocar broker order submission, OMS authority o LIVE execution.
+
 ## Deuda no bloqueante
 `TD-OPS-001` — P3/OPS Graphify real. Mantener abierta hasta disponer de runtime soportado; nunca fabricar `graphify-out/`.
 
 ## Capital
 **LIVE TRADING: BLOQUEADO.**
+"""
+    )
+
+
+def write_handoff() -> None:
+    HANDOFF.write_text(
+        """# HANDOFF ACTUAL — AUTO-TRADE
+
+Fecha: 2026-08-11
+Estado: **R4 branch certified for merge; PR #11 integration pending**
+
+## Base integrada conocida
+R3 está integrado y post-merge certificado en `main` `c585a84b5197076b210723bb70980b828e4e3026`.
+
+## R4
+Branch: `reconstruction/r4-portfolio-health`
+PR: #11
+Certification basis: `556a91ddeb5866313d5117898e97eb4e0308bab2`
+Evidence: `knowledge/60_EVIDENCE/R4_CERTIFICATION.json`
+Result: **479 tests PASS / 86.45% coverage**, 10 contracts, Research/Advisory Authority PASS, Debt Register PASS, Knowledge Contract PASS.
+
+Todos los P0/P1/P2 conocidos de R4 (`TD-R4-001..014`) están CLOSED. Todas las filas requeridas R4 de la capability matrix están PASS.
+
+## Invariantes de cierre que no se deben perder
+- Instrument Master autoritativo separado de research metadata.
+- exact Decimal normalization; no tolerance weakening.
+- Health recovery explicit + retry-safe + ACK-chain tamper-evident.
+- unsynced authoritative worsening tightens immediately.
+- Defensive Health Bridge automatic actions reduce/block only.
+- Portfolio Manager advisory-only; no OrderIntent/OMS/broker authority.
+- Safety + OMS remain mandatory; true risk reductions remain available under restrictive health states only when Safety classifies them as reducing.
+
+## Próxima acción exacta
+1. mantener CI final verde sobre el branch canónico de cierre;
+2. actualizar PR #11 como R4 certified for merge;
+3. merge únicamente por decisión explícita, contra el expected head SHA;
+4. recertificar exact merge SHA en `main`;
+5. crear R5 únicamente desde ese `main` verde.
+
+## R5 después del merge
+Read-only closed-kline stream -> duplicate/gap fail-closed -> DEGRADED socket semantics -> synchronized shadow -> forward evidence without HOLDOUT.
+
+## Deuda no bloqueante
+`TD-OPS-001` Graphify P3/OPS sigue OPEN; no se fabrican artefactos semánticos/deep sin runtime soportado y `SOURCE_SHA` verificable.
+
+## Capital
+**LIVE TRADING: BLOQUEADO.**
+R4 no añadió external PAPER/LIVE authority.
 """
     )
 
@@ -279,7 +341,7 @@ def write_certification() -> None:
             "contract_registry_sha256": "ddb94afa8916be37d0d956e6c32f775ea41c0fb79f4ea26d2d65dfa286c62785",
             "research_authority_boundary": "PASS",
             "debt_register_contract": "PASS",
-            "knowledge_contract": "PASS",
+            "knowledge_contract": "PASS"
         },
         "closed_r4_debt": [f"TD-R4-{n:03d}" for n in range(1, 15)],
         "certified_capabilities": [
@@ -291,17 +353,17 @@ def write_certification() -> None:
             "durable Strategy/Portfolio Health & Drift with immutable baseline/policy binding",
             "retry-safe and tamper-evident recovery acknowledgements anchored by an append-only hash chain",
             "reduce/block-only Defensive Health Bridge with stricter-state-wins and authoritative Health overlay",
-            "deterministic bounded Portfolio Manager / sizing that remains advisory-only and recomputes safety constraints",
+            "deterministic bounded Portfolio Manager / sizing that remains advisory-only and recomputes safety constraints"
         ],
         "open_debt_outside_r4": ["TD-OPS-001"],
         "explicit_non_claims": [
             "R4 certification is not profitability evidence.",
             "R4 certification does not authorize external PAPER order submission.",
             "R4 certification does not authorize LIVE trading or capital promotion.",
-            "Graphify semantic/deep artifacts remain unavailable until a supported runtime generates them from a bound SOURCE_SHA.",
+            "Graphify semantic/deep artifacts remain unavailable until a supported runtime generates them from a bound SOURCE_SHA."
         ],
         "capital_state": "LIVE_TRADING_BLOCKED",
-        "next_track": "R5_AFTER_R4_MERGE_AND_POST_MERGE_MAIN_RECERTIFICATION",
+        "next_track": "R5_AFTER_R4_MERGE_AND_POST_MERGE_MAIN_RECERTIFICATION"
     }
     CERT.write_text(json.dumps(cert, indent=2) + "\n")
 
@@ -312,6 +374,7 @@ def main() -> None:
     update_matrix()
     write_state()
     write_task()
+    write_handoff()
     write_certification()
 
 
