@@ -101,10 +101,7 @@ def test_tournament_ranks_complete_development_universe_and_keeps_failures(tmp_p
 
 def test_tournament_minimize_direction_is_explicit(tmp_path, now):
     ledger = _complete_development_campaign(tmp_path, now)
-    evidence = evaluate_strategy_tournament(
-        ledger,
-        _spec(direction=RankingDirection.MINIMIZE),
-    )
+    evidence = evaluate_strategy_tournament(ledger, _spec(direction=RankingDirection.MINIMIZE))
     assert [entry.trial_id for entry in evidence.entries[:2]] == ["dev-a", "dev-b"]
     assert evidence.winner_trial_id == "dev-a"
 
@@ -192,9 +189,9 @@ def test_tournament_rejects_any_campaign_that_has_seen_final_holdout(tmp_path, n
         )
 
 
-def test_completed_candidate_requires_finite_numeric_metric(tmp_path, now):
-    for index, bad in enumerate((None, True, "not-a-number", float("nan"), float("inf"))):
-        ledger = SQLiteTrialLedger(tmp_path / f"bad-{index}.db")
+def test_completed_candidate_requires_numeric_ranking_metric(tmp_path, now):
+    for index, bad in enumerate((None, True, "not-a-number")):
+        ledger = SQLiteTrialLedger(tmp_path / f"bad-metric-{index}.db")
         ledger.create_campaign(_campaign(ids=("dev-a",)), now=now)
         ledger.preregister(_trial("dev-a"), now=now + timedelta(seconds=1))
         metrics = {} if bad is None else {"sharpe": bad}
@@ -204,8 +201,22 @@ def test_completed_candidate_requires_finite_numeric_metric(tmp_path, now):
             p_value=None,
             now=now + timedelta(seconds=2),
         )
-        with pytest.raises(TournamentGovernanceError, match="ranking metric|numeric|finite|boolean"):
+        with pytest.raises(TournamentGovernanceError, match="ranking metric|numeric|boolean"):
             evaluate_strategy_tournament(ledger, _spec(ids=("dev-a",)))
+
+
+def test_nonfinite_trial_metric_fails_even_before_tournament(tmp_path, now):
+    for index, bad in enumerate((float("nan"), float("inf"), float("-inf"))):
+        ledger = SQLiteTrialLedger(tmp_path / f"nonfinite-{index}.db")
+        ledger.create_campaign(_campaign(ids=("dev-a",)), now=now)
+        ledger.preregister(_trial("dev-a"), now=now + timedelta(seconds=1))
+        with pytest.raises(ValueError, match="canonical JSON"):
+            ledger.record_completed(
+                trial_id="dev-a",
+                metrics={"sharpe": bad},
+                p_value=None,
+                now=now + timedelta(seconds=2),
+            )
 
 
 def test_all_failed_campaign_produces_evidence_without_false_winner(tmp_path, now):
