@@ -4,6 +4,7 @@
   "debt_id": "TD-R4-006",
   "status": "CERTIFIED_SLICE_NOT_TRACK_CERTIFICATION",
   "certification_basis_head": "2caf1d8b3f1748660a00b7018cd2c2b9cb2bd453",
+  "debt_closure_head": "1338765d484683271e144e1125039272a09afd29",
   "ci": {
     "core_safety_run_id": 31457978757,
     "knowledge_contract_run_id": 31457978749,
