@@ -44,8 +44,7 @@ jobs:
               'tests/test_r6_final_write_guard.py',
               'tests/test_r6_final_guard_phase_chain.py',
               'tests/test_r6_paper_writer.py',
-              'knowledge/60_EVIDENCE/R6_FINAL_WRITE_GUARD_EVIDENCE.json',
-              'GitHub Actions 31505993933 / 31506151261 / 31506151276 / 31506151231',
+              'knowledge/60_EVIDENCE/R6_FINAL_WRITE_GUARD_EVIDENCE.json'
           ]
           item['resolution'] = (
               'Implemented no-network authoritative final-write guard with PRE_CONSUME and PRE_IO '
@@ -53,7 +52,8 @@ jobs:
               'tamper-verified global submission state. PRE_IO is cryptographically chained to PRE_CONSUME, '
               'blocks intervening Safety/Portfolio version changes, occurs after request validation and '
               'immediately before the single audited PAPER transport write. Intervening worsening performs '
-              'zero I/O and retains consumed permit + durable UNKNOWN for reconciliation only.'
+              'zero I/O and retains consumed permit + durable UNKNOWN for reconciliation only. Official '
+              'pre-closure clean-head CI: Core 31506151261, Knowledge 31506151276, R6 Authority 31506151231.'
           )
           register.write_text(json.dumps(doc, indent=2, sort_keys=True) + '\n', encoding='utf-8')
 
@@ -77,7 +77,7 @@ jobs:
               'core_safety_run_id': 31506151261,
               'knowledge_contract_run_id': 31506151276,
               'r6_authority_run_id': 31506151231,
-              'result': 'PASS',
+              'result': 'PASS'
           }
           ev['next_gate'] = 'Post-closure exact-head CI must remain green; TD-R6-001..008 remain OPEN.'
           evidence.write_text(json.dumps(ev, indent=2, sort_keys=True) + '\n', encoding='utf-8')
