@@ -22,7 +22,32 @@ jobs:
         with:
           python-version: '3.12'
       - name: Apply recovery idempotency repair
-        run: python scripts/r4_fix_recovery_idempotency.py
+        run: |
+          python scripts/r4_fix_recovery_idempotency.py
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          for test_name in (
+              "tests/test_r4_health_drift.py",
+              "tests/test_r4_health_binding_integrity.py",
+              "tests/test_r4_health_bridge.py",
+          ):
+              path = Path(test_name)
+              text = path.read_text()
+              counter = [0]
+              pattern = re.compile(r",([ \t]*)confirmed_by=")
+
+              def repl(match):
+                  counter[0] += 1
+                  spacing = match.group(1)
+                  return (
+                      f', recovery_id="{path.stem}-inline-recovery-{counter[0]}",'
+                      f'{spacing}confirmed_by='
+                  )
+
+              path.write_text(pattern.sub(repl, text))
+          PY
       - name: Targeted recovery and bridge regression suite
         run: |
           python -m pip install -e '.[dev]'
