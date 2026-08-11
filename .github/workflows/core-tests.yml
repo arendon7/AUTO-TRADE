@@ -44,6 +44,9 @@ jobs:
       - name: R6 permanent LIVE-deny authority boundary
         run: python scripts/check_r6_live_deny_boundary.py
 
+      - name: R6 OMS external-handoff boundary
+        run: python scripts/check_r6_oms_handoff_boundary.py
+
       - name: R6 unsupported-product boundary
         run: python scripts/check_r6_product_boundary.py
 
