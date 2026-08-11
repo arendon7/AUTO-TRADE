@@ -106,6 +106,24 @@ class PaperOperationalWorkspace:
             raise PaperOperationalIntegrityError("prepared package cannot authorize network write")
         if package.next_action != "OPERATOR_DECISION_REQUIRED":
             raise PaperOperationalIntegrityError("prepared package must require operator decision")
+        if not self.account_attestation_path.exists():
+            raise PaperOperationalIntegrityError(
+                "exact PAPER account attestation must be persisted before canary package"
+            )
+        account_payload = _read_json_object(self.account_attestation_path)
+        if _string(account_payload, "environment") != "PAPER":
+            raise PaperOperationalIntegrityError("workspace account evidence is not PAPER")
+        if (
+            _string(account_payload, "attestation_fingerprint")
+            != package.account_attestation_fingerprint
+        ):
+            raise PaperOperationalIntegrityError(
+                "prepared package account attestation does not match workspace evidence"
+            )
+        if account_payload.get("credentials_persisted") is not False:
+            raise PaperOperationalIntegrityError(
+                "workspace account evidence cannot claim persisted credentials"
+            )
 
         package_payload = package.canonical_payload()
         context = PaperOperatorDecisionContext.from_prepared_package(package)
@@ -113,10 +131,7 @@ class PaperOperationalWorkspace:
         _write_json_idempotent(self.prepared_package_path, package_payload)
         _write_json_idempotent(self.operator_context_path, context_payload)
 
-        attestation_hash = ""
-        if self.account_attestation_path.exists():
-            attestation_raw = self.account_attestation_path.read_bytes()
-            attestation_hash = sha256(attestation_raw).hexdigest()
+        attestation_hash = _file_sha256(self.account_attestation_path)
         manifest = {
             "schema_version": 1,
             "environment": "PAPER",
@@ -222,17 +237,21 @@ def _write_json_idempotent(path: Path, payload: Mapping[str, object]) -> None:
     fd, temp_name = tempfile.mkstemp(
         prefix=f".{path.name}.", suffix=".tmp", dir=path.parent
     )
+    temp_path = Path(temp_name)
     try:
-        with os.fdopen(fd, "wb") as handle:
-            handle.write(raw)
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.chmod(temp_name, 0o600)
-        os.replace(temp_name, path)
+        os.close(fd)
+        temp_path.write_bytes(raw)
+        sync_fd = os.open(temp_path, os.O_RDONLY)
+        try:
+            os.fsync(sync_fd)
+        finally:
+            os.close(sync_fd)
+        temp_path.chmod(0o600)
+        os.replace(temp_path, path)
         path.chmod(0o600)
     finally:
-        if os.path.exists(temp_name):
-            os.unlink(temp_name)
+        if temp_path.exists():
+            temp_path.unlink()
 
 
 def _read_json_object(path: Path) -> dict[str, object]:
@@ -291,7 +310,10 @@ def _datetime(raw: Mapping[str, object], key: str) -> datetime:
     value = raw.get(key)
     if not isinstance(value, str):
         raise ValueError(f"{key} must be datetime string")
-    parsed = datetime.fromisoformat(value)
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError as exc:
+        raise ValueError(f"{key} is invalid datetime") from exc
     if parsed.tzinfo is None or parsed.utcoffset() is None:
         raise ValueError(f"{key} must be timezone-aware")
     return parsed
