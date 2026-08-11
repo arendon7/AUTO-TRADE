@@ -1,0 +1,35 @@
+name: R4 Dependence Universe One-Shot
+
+on:
+  push:
+    branches: ["reconstruction/r4-portfolio-health"]
+    paths: [".r4depminor/TRIGGER"]
+
+permissions:
+  contents: write
+
+jobs:
+  apply-hardening:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout exact R4 branch
+        uses: actions/checkout@v5
+        with:
+          ref: reconstruction/r4-portfolio-health
+          fetch-depth: 0
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Apply reviewed hardening
+        run: python .r4depminor/apply.py
+      - name: Compile hardened tree
+        run: python -m compileall -q src tests scripts
+      - name: Commit self-cleaned hardening
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "fix(r4): harden dependence evidence universe identity"
+          git push origin HEAD:reconstruction/r4-portfolio-health
