@@ -690,6 +690,16 @@
       "severity": "P1",
       "status": "CLOSED",
       "track": "R6"
+    },
+    {
+      "area": "OMS-owned external PAPER handoff and durable SUBMITTING transition",
+      "evidence": [],
+      "id": "TD-R6-010",
+      "next_action": "Implement a deterministic OMS-owned staging boundary for the first external PAPER canary. It must revalidate the existing durable order/control-plane identity and transition exactly VALIDATED -> SUBMITTING without invoking the internal broker, while forbidding direct R6 OrderStore mutation or any Safety/OMS bypass. The staged order must then be consumed only by the certified canary/final-write path and remain restart/ambiguity safe.",
+      "resolution": "",
+      "severity": "P1",
+      "status": "OPEN",
+      "track": "R6"
     }
   ],
   "registry_version": 1

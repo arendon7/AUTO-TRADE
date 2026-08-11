@@ -15,6 +15,7 @@ Branch activa: `reconstruction/r6-external-paper-protection`.
 - `TD-R6-006` — PAPER trade_updates protection evidence.
 - `TD-R6-007` — unsupported products/protection modes fail closed.
 - `TD-R6-008` — permanent PAPER-only/LIVE-deny authority boundary.
+- `TD-R6-010` — OMS-owned external PAPER handoff; no direct OrderStore status mutation.
 
 ## Orden de implementación
 1. PAPER gateway policy + account/environment attestation, **without submit path enabled**;
@@ -23,8 +24,9 @@ Branch activa: `reconstruction/r6-external-paper-protection`.
 4. equity bracket request/response protection validation;
 5. PAPER trade_updates ingestion/correlation;
 6. qualification evidence store and reconciliation proofs;
-7. bounded external PAPER evidence only after all prior gates are green;
-8. adversarial certification + debt closure.
+7. OMS-owned external PAPER handoff: durable `VALIDATED -> SUBMITTING` without internal-broker I/O or direct store mutation;
+8. bounded external PAPER evidence only after all prior gates, including `TD-R6-010`, are green;
+9. adversarial certification + debt closure.
 
 ## Negative tests obligatorios para R6
 - gateway disabled by default => zero network and zero order submission;
@@ -32,6 +34,7 @@ Branch activa: `reconstruction/r6-external-paper-protection`.
 - missing/wrong paper credentials or account/environment attestation => no write;
 - `trading_blocked`, stale/unknown account or malformed account state => no write;
 - no deterministic Safety/OMS approval => gateway cannot submit;
+- direct R6 mutation of OMS order status to `SUBMITTING`, or staging without fresh control-plane identity, => fail closed;
 - same local order + same client_order_id => idempotent; same client_order_id + changed payload => conflict;
 - timeout/connection reset/ambiguous submit => UNKNOWN + GET by client_order_id/reconciliation; no blind POST retry;
 - restart during UNKNOWN preserves ambiguity and blocks new exposure until resolved;
@@ -48,7 +51,7 @@ Branch activa: `reconstruction/r6-external-paper-protection`.
 ## Restricciones
 - Coverage gate >=85% intacto.
 - No reduce/relax negative tests to close R6.
-- No external PAPER submit until gateway + ambiguity + canary + authority gates are implemented and green.
+- No external PAPER submit until gateway + ambiguity + canary + authority gates are implemented and green, and `TD-R6-010` proves the OMS-owned external handoff.
 - Any real PAPER test must be explicitly enabled, bounded and evidenced; no unbounded loops or broad market activity.
 - `TD-OPS-001` remains visible; never fabricate Graphify.
 - No profitability claim from paper simulation.

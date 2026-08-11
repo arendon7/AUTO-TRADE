@@ -31,8 +31,9 @@ Post-merge R5: Core Safety `31466198629` PASS, Knowledge Contract `31466198624` 
 | `TD-R6-007` | P1 | unsupported products | **CLOSED** — self-validating us_equity-only bracket surface + permanent product-boundary CI; unsupported classes/modes fail closed before I/O |
 | `TD-R6-008` | P1 | permanent PAPER-only authority boundary | **CLOSED** — dual permanent CI gates enforce exact PAPER-only network/write authority, LIVE-deny, Safety/OMS and AI/research separation |
 | `TD-R6-009` | P1 | final write Safety/OMS recheck | **CLOSED** — dual authoritative PRE_CONSUME/PRE_IO recheck, cryptographic phase chain, version-race rejection, zero-I/O fail-closed |
+| `TD-R6-010` | P1 | OMS-owned external PAPER handoff | OPEN — production must own the VALIDATED→SUBMITTING transition through OMS; direct R6 OrderStore mutation is forbidden |
 
-R6 P0/P1/P2 OPEN: **6**. R6 cannot certify until all close with evidence.
+R6 P0/P1/P2 OPEN: **7**. R6 cannot certify until all close with evidence.
 
 ## Deuda no bloqueante fuera de R6
 | ID | Sev | Track | Área |
