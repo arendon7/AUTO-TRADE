@@ -32,12 +32,14 @@ def test_current_core_provenance_boundary_passes_repository() -> None:
     assert "core provenance boundary: PASS" in result.stdout
 
 
-def test_provenance_cannot_import_execution_network_or_store_initializers(tmp_path) -> None:
+def test_provenance_cannot_import_execution_network_research_or_store_initializers(tmp_path) -> None:
     for source in (
         "from autotrade.brokers.alpaca_paper_writer import AlpacaPaperSingleShotWriter\n",
         "from autotrade.brokers.alpaca_paper_execution_bridge import PaperCanaryExecutionBridge\n",
         "from autotrade.brokers.alpaca_paper_gateway import AlpacaPaperGateway\n",
         "from autotrade import oms\n",
+        "from autotrade.research.health import HealthState\n",
+        "from autotrade.research.forward import ForwardRunner\n",
         "import openai\n",
     ):
         errors = scan(tmp_path, source)
@@ -60,15 +62,6 @@ def rogue():
         "SQLiteHealthBridgeStore",
     ):
         assert name in errors
-
-
-def test_provenance_allows_exact_health_parser_import_only(tmp_path) -> None:
-    assert scan(
-        tmp_path,
-        "from autotrade.research.health import HealthState, _state_from_row\n",
-    ) == []
-    errors = scan(tmp_path, "from autotrade.research.forward import ForwardRunner\n")
-    assert any("only autotrade.research.health is allowed" in error for error in errors)
 
 
 def test_provenance_cannot_contain_write_sql_or_execution_calls(tmp_path) -> None:
