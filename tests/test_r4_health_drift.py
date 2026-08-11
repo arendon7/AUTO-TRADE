@@ -285,7 +285,7 @@ def test_health_state_survives_restart(tmp_path, now):
     first = SQLiteHealthStateStore(path)
     state = first.apply_assessment(assessment, p, now=t)
     restarted = SQLiteHealthStateStore(path)
-    assert restarted.get("strategy-a@1") == state
+    assert restarted.get("strategy-a@1", HealthEntityKind.STRATEGY) == state
 
 
 def test_portfolio_health_uses_same_evidence_contract(now):

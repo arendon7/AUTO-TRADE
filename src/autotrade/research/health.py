@@ -263,11 +263,55 @@ class HealthAssessment:
 @dataclass(frozen=True, slots=True)
 class HealthControlState:
     entity_id: str
+    entity_kind: HealthEntityKind
     state: HealthState
     version: int
     distinct_quarantine_count: int
+    baseline_fingerprint: str
+    policy_fingerprint: str
     last_assessment_fingerprint: str
     updated_at: datetime
+
+    def __post_init__(self) -> None:
+        _identity(self.entity_id, "entity_id")
+        if not isinstance(self.entity_kind, HealthEntityKind):
+            raise ValueError("entity_kind must be HealthEntityKind")
+        if not isinstance(self.state, HealthState):
+            raise ValueError("state must be HealthState")
+        if isinstance(self.version, bool) or not isinstance(self.version, int) or self.version <= 0:
+            raise ValueError("health state version must be integer > 0")
+        if (
+            isinstance(self.distinct_quarantine_count, bool)
+            or not isinstance(self.distinct_quarantine_count, int)
+            or self.distinct_quarantine_count < 0
+        ):
+            raise ValueError("distinct_quarantine_count must be integer >= 0")
+        _hash_value(self.baseline_fingerprint, "baseline_fingerprint")
+        _hash_value(self.policy_fingerprint, "policy_fingerprint")
+        if self.last_assessment_fingerprint:
+            _hash_value(self.last_assessment_fingerprint, "last_assessment_fingerprint")
+        if not _aware(self.updated_at):
+            raise ValueError("health state updated_at must be timezone-aware")
+
+    @property
+    def entity_key(self) -> str:
+        return f"{self.entity_kind.value}:{self.entity_id}"
+
+    @property
+    def fingerprint(self) -> str:
+        return _hash(
+            {
+                "entity_id": self.entity_id,
+                "entity_kind": self.entity_kind.value,
+                "state": self.state.value,
+                "version": self.version,
+                "distinct_quarantine_count": self.distinct_quarantine_count,
+                "baseline_fingerprint": self.baseline_fingerprint,
+                "policy_fingerprint": self.policy_fingerprint,
+                "last_assessment_fingerprint": self.last_assessment_fingerprint,
+                "updated_at": self.updated_at.isoformat(),
+            }
+        )
 
 
 def build_health_baseline(series: HealthBaselineSeries) -> HealthBaseline:
@@ -339,7 +383,13 @@ def assess_health(
 
 
 class SQLiteHealthStateStore:
-    """Durable monotone health state with append-only transition evidence."""
+    """Durable monotone health state bound to immutable baseline + policy.
+
+    Automatic assessments can only maintain or worsen severity. Replay of any
+    previously applied assessment is idempotent even when it is non-consecutive.
+    Recovery requires explicit acknowledgement and a freshly recomputed HEALTHY
+    assessment under the exact baseline/policy bound to the state.
+    """
 
     def __init__(self, path: str | Path) -> None:
         self.path = str(path)
@@ -358,19 +408,34 @@ class SQLiteHealthStateStore:
         try:
             conn.executescript(
                 """
-                CREATE TABLE IF NOT EXISTS health_state (
-                    entity_id TEXT PRIMARY KEY,
+                CREATE TABLE IF NOT EXISTS health_state_v2 (
+                    entity_kind TEXT NOT NULL,
+                    entity_id TEXT NOT NULL,
                     state TEXT NOT NULL,
                     version INTEGER NOT NULL CHECK(version > 0),
                     distinct_quarantine_count INTEGER NOT NULL CHECK(distinct_quarantine_count >= 0),
+                    baseline_fingerprint TEXT NOT NULL,
+                    policy_fingerprint TEXT NOT NULL,
                     last_assessment_fingerprint TEXT NOT NULL,
-                    updated_at TEXT NOT NULL
+                    updated_at TEXT NOT NULL,
+                    state_hash TEXT NOT NULL,
+                    PRIMARY KEY(entity_kind, entity_id)
                 );
-                CREATE TABLE IF NOT EXISTS health_transitions (
+                CREATE TABLE IF NOT EXISTS health_assessments_v2 (
+                    entity_kind TEXT NOT NULL,
+                    entity_id TEXT NOT NULL,
+                    assessment_fingerprint TEXT NOT NULL,
+                    applied_at TEXT NOT NULL,
+                    PRIMARY KEY(entity_kind, entity_id, assessment_fingerprint)
+                );
+                CREATE TABLE IF NOT EXISTS health_transitions_v2 (
                     transition_fingerprint TEXT PRIMARY KEY,
+                    entity_kind TEXT NOT NULL,
                     entity_id TEXT NOT NULL,
                     from_state TEXT NOT NULL,
                     to_state TEXT NOT NULL,
+                    baseline_fingerprint TEXT NOT NULL,
+                    policy_fingerprint TEXT NOT NULL,
                     assessment_fingerprint TEXT NOT NULL,
                     action TEXT NOT NULL,
                     confirmed_by TEXT NOT NULL,
@@ -378,14 +443,34 @@ class SQLiteHealthStateStore:
                 );
                 """
             )
+            legacy = conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='health_state'"
+            ).fetchone()
+            if legacy is not None:
+                legacy_count = int(conn.execute("SELECT COUNT(*) FROM health_state").fetchone()[0])
+                v2_count = int(conn.execute("SELECT COUNT(*) FROM health_state_v2").fetchone()[0])
+                if legacy_count and not v2_count:
+                    raise HealthStateConflict(
+                        "legacy health state lacks entity-kind/baseline/policy binding; explicit rebaseline required"
+                    )
             conn.commit()
         finally:
             conn.close()
 
-    def get(self, entity_id: str) -> HealthControlState | None:
+    def get(
+        self,
+        entity_id: str,
+        entity_kind: HealthEntityKind,
+    ) -> HealthControlState | None:
+        _identity(entity_id, "entity_id")
+        if not isinstance(entity_kind, HealthEntityKind):
+            raise ValueError("entity_kind must be HealthEntityKind")
         conn = self._connect()
         try:
-            row = conn.execute("SELECT * FROM health_state WHERE entity_id=?", (entity_id,)).fetchone()
+            row = conn.execute(
+                "SELECT * FROM health_state_v2 WHERE entity_kind=? AND entity_id=?",
+                (entity_kind.value, entity_id),
+            ).fetchone()
         finally:
             conn.close()
         return None if row is None else _state_from_row(row)
@@ -397,69 +482,108 @@ class SQLiteHealthStateStore:
         *,
         now: datetime,
     ) -> HealthControlState:
+        if not isinstance(assessment, HealthAssessment):
+            raise TypeError("assessment must be HealthAssessment")
+        if not isinstance(policy, HealthPolicy):
+            raise TypeError("policy must be HealthPolicy")
         if not _aware(now):
             raise ValueError("health state update time must be timezone-aware")
         if assessment.evaluated_at > now:
             raise HealthStateConflict("assessment cannot be from the future")
         if assessment.policy_fingerprint != policy.fingerprint:
             raise HealthStateConflict("assessment policy fingerprint mismatch")
+
         conn = self._connect()
         try:
             conn.execute("BEGIN IMMEDIATE")
             row = conn.execute(
-                "SELECT * FROM health_state WHERE entity_id=?", (assessment.entity_id,)
+                "SELECT * FROM health_state_v2 WHERE entity_kind=? AND entity_id=?",
+                (assessment.entity_kind.value, assessment.entity_id),
             ).fetchone()
             if row is None:
+                current = None
+            else:
+                current = _state_from_row(row)
+                self._assert_binding(
+                    current,
+                    baseline_fingerprint=assessment.baseline_fingerprint,
+                    policy_fingerprint=assessment.policy_fingerprint,
+                )
+
+            seen = conn.execute(
+                """
+                SELECT 1 FROM health_assessments_v2
+                WHERE entity_kind=? AND entity_id=? AND assessment_fingerprint=?
+                """,
+                (
+                    assessment.entity_kind.value,
+                    assessment.entity_id,
+                    assessment.fingerprint,
+                ),
+            ).fetchone()
+            if seen is not None:
+                if current is None:
+                    conn.rollback()
+                    raise HealthStateConflict("assessment replay exists without health state")
+                conn.commit()
+                return current
+
+            if current is None:
+                current_state = HealthState.HEALTHY
                 quarantine_count = (
                     1 if assessment.proposed_state is HealthState.QUARANTINED else 0
                 )
                 target = assessment.proposed_state
-                current_state = HealthState.HEALTHY
-                updated = HealthControlState(
-                    entity_id=assessment.entity_id,
-                    state=target,
-                    version=1,
-                    distinct_quarantine_count=quarantine_count,
-                    last_assessment_fingerprint=assessment.fingerprint,
-                    updated_at=now,
-                )
+                if quarantine_count >= policy.retire_after_distinct_quarantines:
+                    target = HealthState.RETIRED
+                version = 1
             else:
-                current = _state_from_row(row)
                 current_state = current.state
-                if current.last_assessment_fingerprint == assessment.fingerprint:
-                    conn.commit()
-                    return current
-
-                target = current.state
                 quarantine_count = current.distinct_quarantine_count
+                target = current.state
                 if assessment.proposed_state is HealthState.QUARANTINED:
                     quarantine_count += 1
-                    target = max(
-                        (target, HealthState.QUARANTINED),
-                        key=lambda state: _SEVERITY[state],
-                    )
+                    if _SEVERITY[target] < _SEVERITY[HealthState.QUARANTINED]:
+                        target = HealthState.QUARANTINED
                     if quarantine_count >= policy.retire_after_distinct_quarantines:
                         target = HealthState.RETIRED
                 elif _SEVERITY[assessment.proposed_state] > _SEVERITY[target]:
                     target = assessment.proposed_state
+                version = current.version + 1
 
-                # Every distinct assessment changes durable evidence state even
-                # if the conservative health severity remains unchanged.
-                updated = HealthControlState(
-                    entity_id=current.entity_id,
-                    state=target,
-                    version=current.version + 1,
-                    distinct_quarantine_count=quarantine_count,
-                    last_assessment_fingerprint=assessment.fingerprint,
-                    updated_at=now,
-                )
-
+            updated = HealthControlState(
+                entity_id=assessment.entity_id,
+                entity_kind=assessment.entity_kind,
+                state=target,
+                version=version,
+                distinct_quarantine_count=quarantine_count,
+                baseline_fingerprint=assessment.baseline_fingerprint,
+                policy_fingerprint=assessment.policy_fingerprint,
+                last_assessment_fingerprint=assessment.fingerprint,
+                updated_at=now,
+            )
             self._upsert_state(conn, updated)
+            conn.execute(
+                """
+                INSERT INTO health_assessments_v2(
+                    entity_kind, entity_id, assessment_fingerprint, applied_at
+                ) VALUES(?,?,?,?)
+                """,
+                (
+                    assessment.entity_kind.value,
+                    assessment.entity_id,
+                    assessment.fingerprint,
+                    now.isoformat(),
+                ),
+            )
             self._append_transition(
                 conn,
-                entity_id=updated.entity_id,
+                entity_kind=assessment.entity_kind,
+                entity_id=assessment.entity_id,
                 from_state=current_state,
                 to_state=updated.state,
+                baseline_fingerprint=assessment.baseline_fingerprint,
+                policy_fingerprint=assessment.policy_fingerprint,
                 assessment_fingerprint=assessment.fingerprint,
                 action="AUTOMATIC_ASSESSMENT",
                 confirmed_by="",
@@ -489,22 +613,30 @@ class SQLiteHealthStateStore:
         assessment = assess_health(baseline, observed, policy, now=now)
         if assessment.proposed_state is not HealthState.HEALTHY:
             raise HealthRecoveryRejected("recovery requires fresh HEALTHY evidence")
+
         conn = self._connect()
         try:
             conn.execute("BEGIN IMMEDIATE")
             row = conn.execute(
-                "SELECT * FROM health_state WHERE entity_id=?", (assessment.entity_id,)
+                "SELECT * FROM health_state_v2 WHERE entity_kind=? AND entity_id=?",
+                (assessment.entity_kind.value, assessment.entity_id),
             ).fetchone()
             if row is None:
                 conn.rollback()
                 raise HealthRecoveryRejected("no health state exists for entity")
             current = _state_from_row(row)
+            self._assert_binding(
+                current,
+                baseline_fingerprint=baseline.fingerprint,
+                policy_fingerprint=policy.fingerprint,
+            )
             if current.state is HealthState.RETIRED:
                 conn.rollback()
                 raise HealthRecoveryRejected("RETIRED state cannot be recovered automatically")
             if current.state is HealthState.HEALTHY:
                 conn.commit()
                 return current
+
             target = (
                 HealthState.HEALTHY
                 if current.state is HealthState.DEGRADED
@@ -512,18 +644,24 @@ class SQLiteHealthStateStore:
             )
             updated = HealthControlState(
                 entity_id=current.entity_id,
+                entity_kind=current.entity_kind,
                 state=target,
                 version=current.version + 1,
                 distinct_quarantine_count=current.distinct_quarantine_count,
+                baseline_fingerprint=current.baseline_fingerprint,
+                policy_fingerprint=current.policy_fingerprint,
                 last_assessment_fingerprint=assessment.fingerprint,
                 updated_at=now,
             )
             self._upsert_state(conn, updated)
             self._append_transition(
                 conn,
+                entity_kind=current.entity_kind,
                 entity_id=current.entity_id,
                 from_state=current.state,
                 to_state=target,
+                baseline_fingerprint=current.baseline_fingerprint,
+                policy_fingerprint=current.policy_fingerprint,
                 assessment_fingerprint=assessment.fingerprint,
                 action="ACKNOWLEDGED_RECOVERY",
                 confirmed_by=confirmed_by,
@@ -538,25 +676,47 @@ class SQLiteHealthStateStore:
         finally:
             conn.close()
 
+    def _assert_binding(
+        self,
+        current: HealthControlState,
+        *,
+        baseline_fingerprint: str,
+        policy_fingerprint: str,
+    ) -> None:
+        if current.baseline_fingerprint != baseline_fingerprint:
+            raise HealthStateConflict("health baseline fingerprint mismatch; explicit rebaseline required")
+        if current.policy_fingerprint != policy_fingerprint:
+            raise HealthStateConflict("health policy fingerprint mismatch; explicit policy transition required")
+
     def _upsert_state(self, conn: sqlite3.Connection, state: HealthControlState) -> None:
         conn.execute(
             """
-            INSERT INTO health_state(entity_id,state,version,distinct_quarantine_count,last_assessment_fingerprint,updated_at)
-            VALUES(?,?,?,?,?,?)
-            ON CONFLICT(entity_id) DO UPDATE SET
+            INSERT INTO health_state_v2(
+                entity_kind, entity_id, state, version, distinct_quarantine_count,
+                baseline_fingerprint, policy_fingerprint, last_assessment_fingerprint,
+                updated_at, state_hash
+            ) VALUES(?,?,?,?,?,?,?,?,?,?)
+            ON CONFLICT(entity_kind,entity_id) DO UPDATE SET
                 state=excluded.state,
                 version=excluded.version,
                 distinct_quarantine_count=excluded.distinct_quarantine_count,
+                baseline_fingerprint=excluded.baseline_fingerprint,
+                policy_fingerprint=excluded.policy_fingerprint,
                 last_assessment_fingerprint=excluded.last_assessment_fingerprint,
-                updated_at=excluded.updated_at
+                updated_at=excluded.updated_at,
+                state_hash=excluded.state_hash
             """,
             (
+                state.entity_kind.value,
                 state.entity_id,
                 state.state.value,
                 state.version,
                 state.distinct_quarantine_count,
+                state.baseline_fingerprint,
+                state.policy_fingerprint,
                 state.last_assessment_fingerprint,
                 state.updated_at.isoformat(),
+                state.fingerprint,
             ),
         )
 
@@ -564,18 +724,24 @@ class SQLiteHealthStateStore:
         self,
         conn: sqlite3.Connection,
         *,
+        entity_kind: HealthEntityKind,
         entity_id: str,
         from_state: HealthState,
         to_state: HealthState,
+        baseline_fingerprint: str,
+        policy_fingerprint: str,
         assessment_fingerprint: str,
         action: str,
         confirmed_by: str,
         now: datetime,
     ) -> None:
         payload = {
+            "entity_kind": entity_kind.value,
             "entity_id": entity_id,
             "from_state": from_state.value,
             "to_state": to_state.value,
+            "baseline_fingerprint": baseline_fingerprint,
+            "policy_fingerprint": policy_fingerprint,
             "assessment_fingerprint": assessment_fingerprint,
             "action": action,
             "confirmed_by": confirmed_by,
@@ -583,12 +749,21 @@ class SQLiteHealthStateStore:
         }
         fingerprint = _hash(payload)
         conn.execute(
-            "INSERT OR IGNORE INTO health_transitions VALUES(?,?,?,?,?,?,?,?)",
+            """
+            INSERT OR IGNORE INTO health_transitions_v2(
+                transition_fingerprint, entity_kind, entity_id, from_state, to_state,
+                baseline_fingerprint, policy_fingerprint, assessment_fingerprint,
+                action, confirmed_by, occurred_at
+            ) VALUES(?,?,?,?,?,?,?,?,?,?,?)
+            """,
             (
                 fingerprint,
+                entity_kind.value,
                 entity_id,
                 from_state.value,
                 to_state.value,
+                baseline_fingerprint,
+                policy_fingerprint,
                 assessment_fingerprint,
                 action,
                 confirmed_by,
@@ -598,14 +773,26 @@ class SQLiteHealthStateStore:
 
 
 def _state_from_row(row) -> HealthControlState:
-    return HealthControlState(
-        entity_id=row["entity_id"],
-        state=HealthState(row["state"]),
-        version=int(row["version"]),
-        distinct_quarantine_count=int(row["distinct_quarantine_count"]),
-        last_assessment_fingerprint=row["last_assessment_fingerprint"],
-        updated_at=datetime.fromisoformat(row["updated_at"]),
-    )
+    try:
+        state = HealthControlState(
+            entity_id=row["entity_id"],
+            entity_kind=HealthEntityKind(row["entity_kind"]),
+            state=HealthState(row["state"]),
+            version=int(row["version"]),
+            distinct_quarantine_count=int(row["distinct_quarantine_count"]),
+            baseline_fingerprint=row["baseline_fingerprint"],
+            policy_fingerprint=row["policy_fingerprint"],
+            last_assessment_fingerprint=row["last_assessment_fingerprint"],
+            updated_at=datetime.fromisoformat(row["updated_at"]),
+        )
+    except (KeyError, TypeError, ValueError) as exc:
+        raise HealthStateConflict("stored health state is malformed") from exc
+    stored_hash = row["state_hash"]
+    if not isinstance(stored_hash, str) or not _SHA256_RE.fullmatch(stored_hash):
+        raise HealthStateConflict("stored health state hash is invalid")
+    if state.fingerprint != stored_hash:
+        raise HealthStateConflict("stored health state hash mismatch")
+    return state
 
 
 def _mean_volatility(values: tuple[Decimal, ...]) -> tuple[Decimal, Decimal]:
