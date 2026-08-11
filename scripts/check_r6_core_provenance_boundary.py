@@ -22,6 +22,7 @@ FORBIDDEN_IMPORTS = (
     "alpaca_paper_reconciliation_gateway",
     "alpaca_paper_trade_updates_transport",
     "autotrade.oms",
+    "autotrade.research",
     "openai",
     "anthropic",
 )
@@ -55,7 +56,7 @@ REQUIRED = (
     "state.version != package.risk_decision_safety_state_version",
     "snapshot.reconciliation_ok",
     "snapshot.broker_state_known",
-    "health.state is not HealthState.HEALTHY",
+    "state != _HEALTHY",
     "bridge.mode is not HealthRiskMode.NORMAL",
     'bridge.risk_multiplier != Decimal("1")',
     "bridge.health_state_fingerprint != health.fingerprint",
@@ -95,7 +96,7 @@ def main() -> int:
         return 1
     print(
         "AUTO-TRADE R6 core provenance boundary: PASS "
-        "(SQLite mode=ro/query_only; no store initialization, mutation, network, or execution authority)"
+        "(SQLite mode=ro/query_only; no store initialization, research, mutation, network, or execution authority)"
     )
     return 0
 
@@ -111,10 +112,6 @@ def _scan(source: str, path: Path) -> list[str]:
         for module in _import_modules(node):
             if any(fragment in module for fragment in FORBIDDEN_IMPORTS):
                 errors.append(f"{rel}:{node.lineno}: forbidden core provenance import {module}")
-            if module.startswith("autotrade.research") and not module.startswith(
-                "autotrade.research.health"
-            ):
-                errors.append(f"{rel}:{node.lineno}: only autotrade.research.health is allowed")
         if isinstance(node, ast.Call):
             call = _call_name(node.func)
             if call in FORBIDDEN_CALLS:
