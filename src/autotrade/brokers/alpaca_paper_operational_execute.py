@@ -3,12 +3,16 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
-import json
 from pathlib import Path
 import sqlite3
 
 from autotrade.domain import OrderRecord, OrderStatus
-from autotrade.health_bridge import SQLiteHealthBridgeStore
+from autotrade.health_bridge import (
+    HealthControlState,
+    HealthEntityKind,
+    HealthState,
+    SQLiteHealthBridgeStore,
+)
 from autotrade.oms import OrderManagementSystem
 from autotrade.persistence import (
     SQLiteEventLedger,
@@ -18,7 +22,6 @@ from autotrade.persistence import (
     SQLiteSafetyStateStore,
     _order_from_json,
 )
-from autotrade.research.health import HealthEntityKind, SQLiteHealthStateStore
 
 from .alpaca_paper_canary_permit import SQLitePaperCanaryPermitRegistry
 from .alpaca_paper_core_provenance import PaperOperationalCoreProvenanceReader
@@ -43,7 +46,6 @@ from .alpaca_paper_operational import (
 )
 from .alpaca_paper_operational_prepare import verify_core_provenance_document
 from .alpaca_paper_operator_decision import (
-    PaperOperatorDecision,
     PaperOperatorDecisionContext,
     PaperOperatorDecisionStatus,
     SQLitePaperOperatorDecisionRegistry,
@@ -68,12 +70,66 @@ class PaperOperationalExecutionBlocked(PaperOperationalExecutionError):
 
 
 class _NoBrokerExecutionSurface:
-    """OMS constructor dependency that can never submit through the legacy broker path."""
+    """OMS constructor dependency that can never use the legacy broker path."""
 
     def submit(self, **_kwargs):
         raise PaperOperationalExecutionBlocked(
             "operational PAPER runtime forbids the legacy OMS broker submission surface"
         )
+
+
+class _ExistingHealthStateReader:
+    """Read existing Health state without importing Research into R6 execution authority."""
+
+    def __init__(self, path: Path) -> None:
+        _require_regular_db(path, "core")
+        self._path = path
+
+    def get(
+        self,
+        entity_id: str,
+        entity_kind: HealthEntityKind,
+    ) -> HealthControlState | None:
+        if not isinstance(entity_id, str) or not entity_id or entity_id != entity_id.strip():
+            raise PaperOperationalExecutionBlocked("Health entity_id is invalid")
+        if not isinstance(entity_kind, HealthEntityKind):
+            raise PaperOperationalExecutionBlocked("Health entity_kind is invalid")
+        uri = f"{self._path.resolve().as_uri()}?mode=ro"
+        try:
+            conn = sqlite3.connect(uri, uri=True, isolation_level=None)
+        except sqlite3.Error as exc:
+            raise PaperOperationalExecutionBlocked("cannot open Health state read-only") from exc
+        conn.row_factory = sqlite3.Row
+        try:
+            conn.execute("PRAGMA query_only=ON")
+            row = conn.execute(
+                "SELECT * FROM health_state_v2 WHERE entity_kind=? AND entity_id=?",
+                (entity_kind.value, entity_id),
+            ).fetchone()
+        except sqlite3.Error as exc:
+            raise PaperOperationalExecutionBlocked("cannot read authoritative Health state") from exc
+        finally:
+            conn.close()
+        if row is None:
+            return None
+        try:
+            state = HealthControlState(
+                entity_id=str(row["entity_id"]),
+                entity_kind=HealthEntityKind(str(row["entity_kind"])),
+                state=HealthState(str(row["state"])),
+                version=int(row["version"]),
+                distinct_quarantine_count=int(row["distinct_quarantine_count"]),
+                baseline_fingerprint=str(row["baseline_fingerprint"]),
+                policy_fingerprint=str(row["policy_fingerprint"]),
+                last_assessment_fingerprint=str(row["last_assessment_fingerprint"]),
+                updated_at=datetime.fromisoformat(str(row["updated_at"])),
+                recovery_ack_head=str(row["recovery_ack_head"]),
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            raise PaperOperationalExecutionBlocked("authoritative Health state is invalid") from exc
+        if str(row["state_hash"]) != state.fingerprint:
+            raise PaperOperationalExecutionBlocked("authoritative Health state hash mismatch")
+        return state
 
 
 @dataclass(frozen=True, slots=True)
@@ -95,14 +151,10 @@ class PaperOperationalExecutionRuntime:
     """Reopen one exact prepared workspace and perform one human-gated PAPER attempt.
 
     This runtime does not prepare a canary and cannot mint operator authority.
-    It accepts only an existing workspace containing the exact package, snapshot,
-    account attestation, permit, submission binding and durable human decision.
-
     Fresh execution is allowed only from OMS VALIDATED after current read-only
-    provenance still matches the preparation artifact. Restart execution is
-    allowed from OMS SUBMITTING only when the durable human decision was already
-    consumed by the exact same attempt; the Execution Bridge then verifies the
-    existing handoff idempotently. Any submission state other than PREPARED is
+    provenance still matches preparation. Restart execution is allowed from
+    OMS SUBMITTING only when the human decision was already consumed by the
+    exact same attempt. Any submission state other than PREPARED is strictly
     reconciliation/evidence territory and can never issue another POST here.
     """
 
@@ -147,8 +199,13 @@ class PaperOperationalExecutionRuntime:
             raise PaperOperationalExecutionBlocked(
                 "runtime credentials do not match prepared PAPER account"
             )
-        if account.source_host != ALPACA_PAPER_TRADING_HOST or account.source_path != ALPACA_PAPER_ACCOUNT_PATH:
-            raise PaperOperationalExecutionBlocked("workspace account attestation endpoint is not exact PAPER")
+        if (
+            account.source_host != ALPACA_PAPER_TRADING_HOST
+            or account.source_path != ALPACA_PAPER_ACCOUNT_PATH
+        ):
+            raise PaperOperationalExecutionBlocked(
+                "workspace account attestation endpoint is not exact PAPER"
+            )
 
         _require_regular_db(self._workspace.core_db_path, "core")
         _require_regular_db(self._workspace.submission_db_path, "submission")
@@ -196,7 +253,9 @@ class PaperOperationalExecutionRuntime:
                 raise PaperOperationalExecutionBlocked(
                     "human decision is expired or not yet valid"
                 )
-            observed = PaperOperationalCoreProvenanceReader(self._workspace).verify(now=instant)
+            observed = PaperOperationalCoreProvenanceReader(self._workspace).verify(
+                now=instant
+            )
             verify_core_provenance_document(
                 self._workspace,
                 package=package,
@@ -221,12 +280,13 @@ class PaperOperationalExecutionRuntime:
         )
 
         # Writable control-plane objects are reconstructed only after all static
-        # workspace and fresh-path provenance checks have passed.
+        # workspace and fresh-path provenance checks have passed. Health reads
+        # remain isolated from Research authority and are validated by state hash.
         core_runtime = SQLiteRuntime(self._workspace.core_db_path)
-        health_store = SQLiteHealthStateStore(self._workspace.core_db_path)
+        health_reader = _ExistingHealthStateReader(self._workspace.core_db_path)
         health_bridge = SQLiteHealthBridgeStore(
             core_runtime,
-            health_reader=health_store,
+            health_reader=health_reader,
         )
         order_store = SQLiteOrderStore(core_runtime)
         safety_store = SQLiteSafetyStateStore(core_runtime)
@@ -301,9 +361,13 @@ def _read_account_attestation(path: Path) -> AlpacaPaperAccountAttestation:
             source_path=_required_str(raw, "source_path"),
         )
     except (TypeError, ValueError, InvalidOperation) as exc:
-        raise PaperOperationalIntegrityError("account attestation artifact is invalid") from exc
+        raise PaperOperationalIntegrityError(
+            "account attestation artifact is invalid"
+        ) from exc
     if account_attestation_payload(attestation) != raw:
-        raise PaperOperationalIntegrityError("account attestation artifact is not canonical")
+        raise PaperOperationalIntegrityError(
+            "account attestation artifact is not canonical"
+        )
     return attestation
 
 
@@ -312,7 +376,9 @@ def _read_core_order_read_only(path: Path, *, order_id: str) -> OrderRecord:
     try:
         conn = sqlite3.connect(uri, uri=True, isolation_level=None)
     except sqlite3.Error as exc:
-        raise PaperOperationalExecutionBlocked("cannot open core database read-only") from exc
+        raise PaperOperationalExecutionBlocked(
+            "cannot open core database read-only"
+        ) from exc
     conn.row_factory = sqlite3.Row
     try:
         conn.execute("PRAGMA query_only=ON")
@@ -325,11 +391,15 @@ def _read_core_order_read_only(path: Path, *, order_id: str) -> OrderRecord:
     finally:
         conn.close()
     if len(rows) != 1:
-        raise PaperOperationalExecutionBlocked("exact durable OMS order is missing or duplicated")
+        raise PaperOperationalExecutionBlocked(
+            "exact durable OMS order is missing or duplicated"
+        )
     try:
         order = _order_from_json(str(rows[0]["record_json"]))
     except Exception as exc:
-        raise PaperOperationalExecutionBlocked("durable OMS order payload is invalid") from exc
+        raise PaperOperationalExecutionBlocked(
+            "durable OMS order payload is invalid"
+        ) from exc
     if order.order_id != order_id:
         raise PaperOperationalExecutionBlocked("durable OMS order identity changed")
     return order
@@ -342,7 +412,9 @@ def _discover_portfolio_health_entity_id(path: Path) -> str:
     try:
         conn = sqlite3.connect(uri, uri=True, isolation_level=None)
     except sqlite3.Error as exc:
-        raise PaperOperationalExecutionBlocked("cannot open core database for Health identity") from exc
+        raise PaperOperationalExecutionBlocked(
+            "cannot open core database for Health identity"
+        ) from exc
     conn.row_factory = sqlite3.Row
     try:
         conn.execute("PRAGMA query_only=ON")
@@ -364,7 +436,11 @@ def _discover_portfolio_health_entity_id(path: Path) -> str:
     finally:
         conn.close()
     identities = tuple(str(row["entity_id"]) for row in rows)
-    if len(identities) != 1 or not identities[0] or identities[0] != identities[0].strip():
+    if (
+        len(identities) != 1
+        or not identities[0]
+        or identities[0] != identities[0].strip()
+    ):
         raise PaperOperationalExecutionBlocked(
             "operational execution requires exactly one canonical durable Portfolio Health identity"
         )
@@ -373,7 +449,9 @@ def _discover_portfolio_health_entity_id(path: Path) -> str:
 
 def _require_regular_db(path: Path, label: str) -> None:
     if not path.is_file() or path.is_symlink():
-        raise PaperOperationalExecutionBlocked(f"{label} SQLite database must already exist as a regular file")
+        raise PaperOperationalExecutionBlocked(
+            f"{label} SQLite database must already exist as a regular file"
+        )
 
 
 def _required_str(raw: dict[str, object], key: str) -> str:
@@ -410,5 +488,9 @@ def _required_datetime(raw: dict[str, object], key: str) -> datetime:
 
 
 def _require_aware(value: datetime) -> None:
-    if not isinstance(value, datetime) or value.tzinfo is None or value.utcoffset() is None:
+    if (
+        not isinstance(value, datetime)
+        or value.tzinfo is None
+        or value.utcoffset() is None
+    ):
         raise ValueError("execution time must be timezone-aware")
