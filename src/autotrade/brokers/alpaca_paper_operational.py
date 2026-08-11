@@ -7,12 +7,20 @@ from hashlib import sha256
 import json
 import os
 from pathlib import Path
+import re
 import tempfile
 from typing import Mapping
 
+from .alpaca_paper_bracket import (
+    AlpacaEquityBracketRequest,
+    AlpacaNestedBracketAttestation,
+)
 from .alpaca_paper_canary_coordinator import PreparedPaperCanaryPackage
 from .alpaca_paper_gateway import AlpacaPaperAccountAttestation
 from .alpaca_paper_operator_decision import PaperOperatorDecisionContext
+
+
+_HASH_RE = re.compile(r"^[0-9a-f]{64}$")
 
 
 class PaperOperationalError(RuntimeError):
@@ -59,8 +67,24 @@ class PaperOperationalWorkspace:
         return self.root / "prepared_package.json"
 
     @property
+    def expected_bracket_path(self) -> Path:
+        return self.root / "expected_bracket.json"
+
+    @property
     def operator_context_path(self) -> Path:
         return self.root / "operator_context.json"
+
+    @property
+    def bracket_attestation_path(self) -> Path:
+        return self.root / "bracket_attestation.json"
+
+    @property
+    def evidence_manifest_path(self) -> Path:
+        return self.root / "evidence_manifest.json"
+
+    @property
+    def qualification_report_path(self) -> Path:
+        return self.root / "qualification_report.json"
 
     @property
     def manifest_path(self) -> Path:
@@ -99,13 +123,29 @@ class PaperOperationalWorkspace:
     def write_prepared_canary(
         self,
         package: PreparedPaperCanaryPackage,
+        expected_bracket: AlpacaEquityBracketRequest,
     ) -> tuple[Path, Path, Path]:
         if not isinstance(package, PreparedPaperCanaryPackage):
             raise TypeError("PreparedPaperCanaryPackage is required")
+        if not isinstance(expected_bracket, AlpacaEquityBracketRequest):
+            raise TypeError("AlpacaEquityBracketRequest is required")
         if package.network_write_authorized is not False:
             raise PaperOperationalIntegrityError("prepared package cannot authorize network write")
         if package.next_action != "OPERATOR_DECISION_REQUIRED":
             raise PaperOperationalIntegrityError("prepared package must require operator decision")
+        if expected_bracket.order_id != package.order_id:
+            raise PaperOperationalIntegrityError("prepared package/bracket order_id mismatch")
+        if expected_bracket.client_order_id != package.client_order_id:
+            raise PaperOperationalIntegrityError("prepared package/bracket client_order_id mismatch")
+        if expected_bracket.payload_hash != package.bracket_payload_hash:
+            raise PaperOperationalIntegrityError("prepared package/bracket payload hash mismatch")
+        if (
+            expected_bracket.instrument_master_fingerprint
+            != package.instrument_master_fingerprint
+        ):
+            raise PaperOperationalIntegrityError(
+                "prepared package/bracket Instrument Master mismatch"
+            )
         if not self.account_attestation_path.exists():
             raise PaperOperationalIntegrityError(
                 "exact PAPER account attestation must be persisted before canary package"
@@ -128,7 +168,9 @@ class PaperOperationalWorkspace:
         package_payload = package.canonical_payload()
         context = PaperOperatorDecisionContext.from_prepared_package(package)
         context_payload = context.to_dict()
+        bracket_payload = expected_bracket_payload(expected_bracket)
         _write_json_idempotent(self.prepared_package_path, package_payload)
+        _write_json_idempotent(self.expected_bracket_path, bracket_payload)
         _write_json_idempotent(self.operator_context_path, context_payload)
 
         attestation_hash = _file_sha256(self.account_attestation_path)
@@ -141,6 +183,7 @@ class PaperOperationalWorkspace:
             "files": {
                 "account_attestation.json": attestation_hash,
                 "prepared_package.json": _file_sha256(self.prepared_package_path),
+                "expected_bracket.json": _file_sha256(self.expected_bracket_path),
                 "operator_context.json": _file_sha256(self.operator_context_path),
             },
             "network_write_authorized": False,
@@ -150,6 +193,24 @@ class PaperOperationalWorkspace:
         }
         _write_json_idempotent(self.manifest_path, manifest)
         return self.prepared_package_path, self.operator_context_path, self.manifest_path
+
+    def write_bracket_attestation(
+        self,
+        attestation: AlpacaNestedBracketAttestation,
+        *,
+        expected_bracket: AlpacaEquityBracketRequest,
+    ) -> Path:
+        if not isinstance(attestation, AlpacaNestedBracketAttestation):
+            raise TypeError("AlpacaNestedBracketAttestation is required")
+        if not isinstance(expected_bracket, AlpacaEquityBracketRequest):
+            raise TypeError("AlpacaEquityBracketRequest is required")
+        if attestation.client_order_id != expected_bracket.client_order_id:
+            raise PaperOperationalIntegrityError(
+                "broker bracket attestation client_order_id mismatch"
+            )
+        payload = bracket_attestation_payload(attestation)
+        _write_json_idempotent(self.bracket_attestation_path, payload)
+        return self.bracket_attestation_path
 
 
 def account_attestation_payload(attestation: AlpacaPaperAccountAttestation) -> dict[str, object]:
@@ -171,6 +232,41 @@ def account_attestation_payload(attestation: AlpacaPaperAccountAttestation) -> d
         "attestation_fingerprint": attestation.fingerprint,
         "credentials_persisted": False,
         "external_order_submitted": False,
+        "live_trading": "BLOCKED",
+    }
+
+
+def expected_bracket_payload(bracket: AlpacaEquityBracketRequest) -> dict[str, object]:
+    if not isinstance(bracket, AlpacaEquityBracketRequest):
+        raise TypeError("AlpacaEquityBracketRequest is required")
+    return {
+        "schema_version": 1,
+        "environment": "PAPER",
+        "order_id": bracket.order_id,
+        "client_order_id": bracket.client_order_id,
+        "asset_class": bracket.asset_class,
+        "instrument_master_fingerprint": bracket.instrument_master_fingerprint,
+        "canonical_payload": dict(bracket.canonical_payload),
+        "payload_json": bracket.payload_json,
+        "payload_hash": bracket.payload_hash,
+        "network_write_authorized": False,
+        "live_trading": "BLOCKED",
+    }
+
+
+def bracket_attestation_payload(
+    attestation: AlpacaNestedBracketAttestation,
+) -> dict[str, object]:
+    return {
+        "schema_version": 1,
+        "environment": "PAPER",
+        "parent_order_id": attestation.parent_order_id,
+        "client_order_id": attestation.client_order_id,
+        "take_profit_order_id": attestation.take_profit_order_id,
+        "stop_loss_order_id": attestation.stop_loss_order_id,
+        "request_id": attestation.request_id,
+        "response_hash": attestation.response_hash,
+        "capital_authority": "NONE",
         "live_trading": "BLOCKED",
     }
 
@@ -217,6 +313,64 @@ def read_prepared_package(path: Path) -> PreparedPaperCanaryPackage:
     if package.canonical_payload() != raw:
         raise PaperOperationalIntegrityError("prepared package artifact is not canonical")
     return package
+
+
+def read_expected_bracket(path: Path) -> AlpacaEquityBracketRequest:
+    raw = _read_json_object(path)
+    if raw.get("schema_version") != 1 or raw.get("environment") != "PAPER":
+        raise PaperOperationalIntegrityError("expected bracket artifact header is invalid")
+    if raw.get("network_write_authorized") is not False or raw.get("live_trading") != "BLOCKED":
+        raise PaperOperationalIntegrityError("expected bracket artifact authority changed")
+    canonical_payload = raw.get("canonical_payload")
+    if not isinstance(canonical_payload, dict):
+        raise PaperOperationalIntegrityError("expected bracket canonical payload is invalid")
+    try:
+        bracket = AlpacaEquityBracketRequest(
+            order_id=_string(raw, "order_id"),
+            client_order_id=_string(raw, "client_order_id"),
+            asset_class=_string(raw, "asset_class"),
+            instrument_master_fingerprint=_string(raw, "instrument_master_fingerprint"),
+            canonical_payload=canonical_payload,
+            payload_json=_string(raw, "payload_json"),
+            payload_hash=_string(raw, "payload_hash"),
+        )
+    except (TypeError, ValueError) as exc:
+        raise PaperOperationalIntegrityError("expected bracket artifact is invalid") from exc
+    if expected_bracket_payload(bracket) != raw:
+        raise PaperOperationalIntegrityError("expected bracket artifact is not canonical")
+    return bracket
+
+
+def read_bracket_attestation(path: Path) -> AlpacaNestedBracketAttestation:
+    raw = _read_json_object(path)
+    if raw.get("schema_version") != 1 or raw.get("environment") != "PAPER":
+        raise PaperOperationalIntegrityError("bracket attestation artifact header is invalid")
+    if raw.get("capital_authority") != "NONE" or raw.get("live_trading") != "BLOCKED":
+        raise PaperOperationalIntegrityError("bracket attestation artifact authority changed")
+    fields = (
+        "parent_order_id",
+        "client_order_id",
+        "take_profit_order_id",
+        "stop_loss_order_id",
+        "request_id",
+    )
+    values = {field: _string(raw, field) for field in fields}
+    if any(not value for value in values.values()):
+        raise PaperOperationalIntegrityError("bracket attestation identifiers cannot be empty")
+    response_hash = _string(raw, "response_hash")
+    if not _HASH_RE.fullmatch(response_hash):
+        raise PaperOperationalIntegrityError("bracket attestation response hash is invalid")
+    attestation = AlpacaNestedBracketAttestation(
+        parent_order_id=values["parent_order_id"],
+        client_order_id=values["client_order_id"],
+        take_profit_order_id=values["take_profit_order_id"],
+        stop_loss_order_id=values["stop_loss_order_id"],
+        request_id=values["request_id"],
+        response_hash=response_hash,
+    )
+    if bracket_attestation_payload(attestation) != raw:
+        raise PaperOperationalIntegrityError("bracket attestation artifact is not canonical")
+    return attestation
 
 
 def _write_json_idempotent(path: Path, payload: Mapping[str, object]) -> None:
