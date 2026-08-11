@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from dataclasses import replace
 from datetime import timedelta
 from decimal import Decimal
+from hashlib import sha256
 import sqlite3
 
 import pytest
@@ -25,6 +25,10 @@ from autotrade.research.portfolio_dependence import CalibrationPhase
 D = Decimal
 
 
+def _source_hash(label: str) -> str:
+    return sha256(label.encode("utf-8")).hexdigest()
+
+
 def _obs(now, values, *, offset=0):
     return tuple(
         HealthReturnObservation(
@@ -43,7 +47,7 @@ def _baseline(now, *, entity_id="shared-id", kind=HealthEntityKind.STRATEGY, sou
             entity_id=entity_id,
             entity_kind=kind,
             phase=CalibrationPhase.TRAIN,
-            source_hash=source * 64,
+            source_hash=_source_hash(source),
             observations=_obs(now, values),
         )
     )
@@ -54,18 +58,27 @@ def _window(now, *, entity_id="shared-id", kind=HealthEntityKind.STRATEGY, sourc
     return HealthObservationSeries(
         entity_id=entity_id,
         entity_kind=kind,
-        source_hash=source * 64,
+        source_hash=_source_hash(source),
         observations=_obs(now, values, offset=offset),
     )
 
 
-def _healthy_window(now, *, entity_id="shared-id", kind=HealthEntityKind.STRATEGY, source="c", offset=10):
+def _healthy_window(
+    now,
+    *,
+    entity_id="shared-id",
+    kind=HealthEntityKind.STRATEGY,
+    source="c",
+    offset=10,
+    values=None,
+):
+    values = values or ("0.011", "0.029", "0.021", "0.039", "0.020")
     return _window(
         now,
         entity_id=entity_id,
         kind=kind,
         source=source,
-        values=("0.011", "0.029", "0.021", "0.039", "0.020"),
+        values=values,
         offset=offset,
     )
 
@@ -94,11 +107,12 @@ def test_strategy_and_portfolio_with_same_text_id_are_independent(tmp_path, now)
     t = now + timedelta(minutes=20)
 
     strategy_baseline = _baseline(now, kind=HealthEntityKind.STRATEGY)
+    portfolio_values = ("0.005", "0.012", "0.008", "0.015", "0.009")
     portfolio_baseline = _baseline(
         now,
         kind=HealthEntityKind.PORTFOLIO,
-        source="d",
-        values=("0.005", "0.012", "0.008", "0.015", "0.009"),
+        source="portfolio-baseline",
+        values=portfolio_values,
     )
     strategy_assessment = _assessment(
         strategy_baseline,
@@ -108,7 +122,12 @@ def test_strategy_and_portfolio_with_same_text_id_are_independent(tmp_path, now)
     )
     portfolio_assessment = _assessment(
         portfolio_baseline,
-        _healthy_window(now, kind=HealthEntityKind.PORTFOLIO, source="e"),
+        _healthy_window(
+            now,
+            kind=HealthEntityKind.PORTFOLIO,
+            source="portfolio-observed",
+            values=("0.0055", "0.0115", "0.0085", "0.0145", "0.0095"),
+        ),
         p,
         t,
     )
@@ -128,18 +147,22 @@ def test_existing_state_rejects_different_baseline_even_for_same_entity(tmp_path
     store = SQLiteHealthStateStore(tmp_path / "baseline-binding.db")
     p = _policy()
     t = now + timedelta(minutes=20)
-    baseline_a = _baseline(now, source="a")
+    baseline_a = _baseline(now, source="baseline-a")
     bad = _assessment(baseline_a, _window(now), p, t)
     store.apply_assessment(bad, p, now=t)
 
     baseline_b = _baseline(
         now,
-        source="f",
+        source="baseline-b",
         values=("0.02", "0.04", "0.03", "0.05", "0.03"),
     )
     later = _assessment(
         baseline_b,
-        _healthy_window(now, source="g"),
+        _healthy_window(
+            now,
+            source="baseline-b-window",
+            values=("0.021", "0.039", "0.031", "0.049", "0.030"),
+        ),
         p,
         t + timedelta(seconds=1),
     )
@@ -158,7 +181,7 @@ def test_existing_state_rejects_policy_change_without_explicit_transition(tmp_pa
     p2 = _policy(degraded_mean_loss_fraction=D("0.20"))
     second = _assessment(
         baseline,
-        _healthy_window(now, source="h"),
+        _healthy_window(now, source="policy-change-window"),
         p2,
         t + timedelta(seconds=1),
     )
@@ -177,13 +200,17 @@ def test_recovery_cannot_swap_to_easier_baseline(tmp_path, now):
 
     easier = _baseline(
         now,
-        source="i",
+        source="easier-baseline",
         values=("0.005", "0.020", "0.010", "0.025", "0.010"),
     )
     with pytest.raises(HealthStateConflict, match="baseline fingerprint mismatch"):
         store.acknowledge_recovery(
             easier,
-            _healthy_window(now, source="j"),
+            _healthy_window(
+                now,
+                source="easier-baseline-window",
+                values=("0.006", "0.019", "0.011", "0.024", "0.010"),
+            ),
             p,
             confirmed_by="risk-officer",
             now=t + timedelta(seconds=1),
@@ -202,7 +229,7 @@ def test_recovery_cannot_swap_policy(tmp_path, now):
     with pytest.raises(HealthStateConflict, match="policy fingerprint mismatch"):
         store.acknowledge_recovery(
             baseline,
-            _healthy_window(now, source="k"),
+            _healthy_window(now, source="recovery-policy-window"),
             p2,
             confirmed_by="risk-officer",
             now=t + timedelta(seconds=1),
@@ -215,13 +242,13 @@ def test_nonconsecutive_replay_does_not_increment_quarantine_counter(tmp_path, n
     p = _policy(retire_after_distinct_quarantines=3)
     t = now + timedelta(minutes=20)
 
-    quarantine = _assessment(baseline, _window(now, source="b"), p, t)
+    quarantine = _assessment(baseline, _window(now, source="quarantine"), p, t)
     first = store.apply_assessment(quarantine, p, now=t)
     assert first.distinct_quarantine_count == 1
 
     healthy = _assessment(
         baseline,
-        _healthy_window(now, source="c"),
+        _healthy_window(now, source="healthy"),
         p,
         t + timedelta(seconds=1),
     )
