@@ -764,6 +764,16 @@
       "severity": "P1",
       "status": "CLOSED",
       "track": "R6"
+    },
+    {
+      "area": "Operational external PAPER qualification lifecycle harness",
+      "evidence": [],
+      "id": "TD-R6-013",
+      "next_action": "Implement a durable, reproducible operational R6 lifecycle with strict authority separation before the first real PAPER canary. A preparation command may load PAPER credentials only from environment, perform exact account attestation/read-only preflight, initialize durable state, prepare the exact bounded canary package and operator-decision context, and emit sanitized artifacts, but it must not import/call the execution bridge, writer or any order POST. Execution must remain a separate explicit human-only command using the certified operator decision and existing execution bridge/writer; evidence collection must separately reconcile by client_order_id, capture the exact nested bracket and bounded trade_updates stream, and build qualification artifacts. Permanent CI must forbid preparation/evidence tools from widening network/write authority, leaking credentials, or converting evidence capture into execution authority. No real PAPER POST is part of closing this structural debt.",
+      "resolution": "",
+      "severity": "P1",
+      "status": "OPEN",
+      "track": "R6"
     }
   ],
   "registry_version": 1

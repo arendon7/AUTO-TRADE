@@ -18,6 +18,7 @@ Branch activa: `reconstruction/r6-external-paper-protection`.
 - `TD-R6-010` — **CLOSED** — OMS-owned external PAPER handoff certified; no direct OrderStore status mutation.
 - `TD-R6-011` — **CLOSED** — exact prepared package + durable explicit human one-shot authority + execution bridge + human-gated writer certified.
 - `TD-R6-012` — **CLOSED** — crash-safe same-attempt resume certified; UNKNOWN/different attempt remains reconciliation-only.
+- `TD-R6-013` — operational external PAPER lifecycle harness; read-only preparation, separate human execution and separate evidence capture.
 
 ## Orden de implementación
 1. PAPER gateway policy + account/environment attestation, **without submit path enabled**;
@@ -29,8 +30,9 @@ Branch activa: `reconstruction/r6-external-paper-protection`.
 7. OMS-owned external PAPER handoff: durable `VALIDATED -> SUBMITTING` without internal-broker I/O or direct store mutation;
 8. integrated manual single-shot canary coordinator that stops before network I/O;
 9. durable explicit human execution decision (`TD-R6-011`) and crash-safe same-attempt resume (`TD-R6-012`) are certified CLOSED;
-10. bounded external PAPER evidence only after all prior gates are green and an explicit final operator decision exists;
-11. adversarial certification + debt closure.
+10. operational external PAPER lifecycle harness (`TD-R6-013`): durable read-only preparation, separate human execution and separate evidence capture;
+11. bounded external PAPER evidence only after all prior gates are green and an explicit final operator decision exists;
+12. adversarial certification + debt closure.
 
 ## Negative tests obligatorios para R6
 - gateway disabled by default => zero network and zero order submission;
@@ -58,6 +60,7 @@ Branch activa: `reconstruction/r6-external-paper-protection`.
 - Coverage gate >=85% intacto.
 - No reduce/relax negative tests to close R6.
 - No external PAPER submit until gateway + ambiguity + canary + authority gates are green; `TD-R6-010/011/012` now prove OMS-owned handoff, explicit human-only operator authority and crash-safe same-attempt semantics, but they do not themselves authorize a real external PAPER order.
+- `TD-R6-013` must close structurally before any real canary: preparation and evidence commands must remain non-authorizing; real execution stays separate and explicitly human-triggered.
 - Any real PAPER test must be explicitly enabled, bounded and evidenced; no unbounded loops or broad market activity.
 - `TD-OPS-001` remains visible; never fabricate Graphify.
 - No profitability claim from paper simulation.

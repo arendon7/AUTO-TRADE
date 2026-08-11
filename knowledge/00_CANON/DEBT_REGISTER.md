@@ -34,8 +34,9 @@ Post-merge R5: Core Safety `31466198629` PASS, Knowledge Contract `31466198624` 
 | `TD-R6-010` | P1 | OMS-owned external PAPER handoff | **CLOSED** — OMS owns durable VALIDATED→SUBMITTING; handoff event precedes state change; direct R6 OrderStore mutation prohibited |
 | `TD-R6-011` | P1 | human final PAPER execution decision | **CLOSED** — exact prepared package → durable human-only one-shot decision → no-network execution bridge → OMS SUBMITTING → human-gated single POST writer |
 | `TD-R6-012` | P1 | crash-safe same-attempt resume | **CLOSED** — only PREPARED + zero attempts + same-attempt CONSUMED may resume; UNKNOWN/different/stale remain fail-closed |
+| `TD-R6-013` | P1 | operational external PAPER lifecycle harness | OPEN — durable read-only preparation + separate human execution + separate evidence capture; preparation cannot import/call POST authority |
 
-R6 P0/P1/P2 OPEN: **6**. R6 cannot certify until all close with evidence.
+R6 P0/P1/P2 OPEN: **7**. R6 cannot certify until all close with evidence.
 
 ## Deuda no bloqueante fuera de R6
 | ID | Sev | Track | Área |
