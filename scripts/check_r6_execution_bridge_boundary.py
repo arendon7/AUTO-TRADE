@@ -64,7 +64,7 @@ def main() -> int:
             continue
         for lineno, call in _named_calls(path, "stage_external_submission"):
             errors.append(
-                f"{path.relative_to(ROOT)}:{lineno}: OMS external staging is execution-bridge-only ({call})"
+                f"{_relative(path)}:{lineno}: OMS external staging is execution-bridge-only ({call})"
             )
 
     for workflow, label in ((CORE, "Core Safety"), (R6, "R6 Authority")):
@@ -90,6 +90,7 @@ def _scan_bridge(source: str, path: Path) -> list[str]:
         tree = ast.parse(source, filename=str(path))
     except SyntaxError as exc:
         return [f"{path}: syntax error: {exc}"]
+    rel = _relative(path)
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             modules = [alias.name for alias in node.names]
@@ -99,11 +100,11 @@ def _scan_bridge(source: str, path: Path) -> list[str]:
             modules = []
         for module in modules:
             if any(fragment in module for fragment in FORBIDDEN_BRIDGE_IMPORTS):
-                errors.append(f"{path.relative_to(ROOT)}:{node.lineno}: forbidden bridge import {module}")
+                errors.append(f"{rel}:{node.lineno}: forbidden bridge import {module}")
         if isinstance(node, ast.Call):
             call = _call_name(node.func)
             if call in FORBIDDEN_BRIDGE_CALLS:
-                errors.append(f"{path.relative_to(ROOT)}:{node.lineno}: forbidden bridge call {call}")
+                errors.append(f"{rel}:{node.lineno}: forbidden bridge call {call}")
     return errors
 
 
@@ -132,6 +133,13 @@ def _named_calls(path: Path, name: str) -> list[tuple[int, str]]:
         if isinstance(node, ast.Call) and _call_name(node.func) == name:
             found.append((node.lineno, name))
     return found
+
+
+def _relative(path: Path) -> Path:
+    try:
+        return path.relative_to(ROOT)
+    except ValueError:
+        return path
 
 
 def _call_name(func: ast.expr) -> str:
