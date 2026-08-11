@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from itertools import combinations
 from math import e, isfinite, log, sqrt
-from statistics import NormalDist, pvariance
+from statistics import NormalDist, variance
 from typing import Mapping, Sequence
 
 from .trials import SQLiteTrialLedger, TrialGovernanceError, TrialStatus
@@ -106,6 +106,8 @@ def campaign_pbo(
             "PBO observations must divide evenly into partitions with >=2 rows each"
         )
 
+    if len(expected) < 2:
+        raise TrialGovernanceError("PBO requires at least two trials")
     trial_ids = tuple(sorted(expected))
     series = {
         trial_id: tuple(float(value) for value in returns_by_trial[trial_id])
@@ -122,8 +124,9 @@ def campaign_pbo(
     all_partitions = set(range(partitions))
     for train_parts in combinations(range(partitions), half):
         complement = tuple(sorted(all_partitions - set(train_parts)))
-        if train_parts > complement:
-            continue
+        # CSCV treats every choice of S/2 partitions as an in-sample set;
+        # its complement is the corresponding out-of-sample set. The swapped
+        # orientation is a distinct CSCV combination and must not be dropped.
         train_idx = tuple(i for part in train_parts for i in partition_indices[part])
         test_idx = tuple(i for part in complement for i in partition_indices[part])
         train_scores = {
@@ -190,8 +193,8 @@ def campaign_deflated_sharpe(
         sharpes[trial_id] = value
     if len(sharpes) < 2:
         raise TrialGovernanceError("Deflated Sharpe requires at least two trials")
-    variance = pvariance(sharpes.values())
-    if variance <= 0:
+    sharpe_variance = variance(sharpes.values())
+    if sharpe_variance <= 0:
         raise TrialGovernanceError(
             "Deflated Sharpe requires non-zero trial Sharpe variance"
         )
@@ -199,7 +202,12 @@ def campaign_deflated_sharpe(
     n = len(sharpes)
     normal = NormalDist()
     gamma = 0.5772156649015329
-    expected_max = sqrt(variance) * (
+    selected_best = max(sharpes.values())
+    if sharpes[selected_trial_id] != selected_best:
+        raise TrialGovernanceError(
+            "Deflated Sharpe selected_trial_id must be a maximum-Sharpe trial"
+        )
+    expected_max = sqrt(sharpe_variance) * (
         (1.0 - gamma) * normal.inv_cdf(1.0 - 1.0 / n)
         + gamma * normal.inv_cdf(1.0 - 1.0 / (n * e))
     )
@@ -230,9 +238,5 @@ def _sharpe(values: Sequence[float]) -> float:
     mean = sum(values) / len(values)
     variance = sum((value - mean) ** 2 for value in values) / (len(values) - 1)
     if variance == 0:
-        if mean > 0:
-            return float("inf")
-        if mean < 0:
-            return float("-inf")
-        return 0.0
+        raise ValueError("Sharpe is undefined for a zero-variance return segment")
     return mean / sqrt(variance)

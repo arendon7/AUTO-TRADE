@@ -127,7 +127,7 @@ def test_pbo_stable_strategy_has_low_overfit_probability(tmp_path, now):
     evidence = campaign_pbo(
         ledger, "campaign", {"a": a, "b": b, "c": c}, partitions=4
     )
-    assert evidence.combinations_evaluated == 3
+    assert evidence.combinations_evaluated == 6
     assert evidence.pbo == 0.0
 
 
@@ -238,4 +238,40 @@ def test_deflated_sharpe_rejects_failed_missing_or_zero_variance_family(tmp_path
             sample_size=100,
             skewness=0,
             kurtosis=3,
+        )
+
+
+def test_pbo_counts_all_cscv_orientations(tmp_path, now):
+    ledger = setup_campaign(tmp_path, now, ids=("a", "b"))
+    a = [0.02, 0.01, 0.03, 0.015] * 4
+    b = [0.001, -0.002, 0.003, -0.001] * 4
+    evidence = campaign_pbo(
+        ledger, "campaign", {"a": a, "b": b}, partitions=4
+    )
+    # C(4,2)=6; complement-swapped orientations are distinct CSCV splits.
+    assert evidence.combinations_evaluated == 6
+    assert len(evidence.logits) == 6
+
+
+def test_pbo_zero_variance_segment_is_not_assigned_infinite_sharpe(tmp_path, now):
+    ledger = setup_campaign(tmp_path, now, ids=("a", "b"))
+    with pytest.raises(ValueError, match="zero-variance"):
+        campaign_pbo(
+            ledger,
+            "campaign",
+            {"a": [0.01] * 16, "b": [0.0, 0.01] * 8},
+            partitions=4,
+        )
+
+
+def test_deflated_sharpe_requires_selected_trial_to_be_family_best(tmp_path, now):
+    ledger = setup_campaign(tmp_path, now, ids=("a", "b", "c"))
+    with pytest.raises(TrialGovernanceError, match="maximum-Sharpe"):
+        campaign_deflated_sharpe(
+            ledger,
+            "campaign",
+            selected_trial_id="a",
+            sample_size=250,
+            skewness=0.0,
+            kurtosis=3.0,
         )
