@@ -8,6 +8,7 @@ ROOT = Path(__file__).resolve().parents[1]
 PREFLIGHT = ROOT / "scripts/r6_external_paper_preflight.py"
 OPERATIONAL = ROOT / "src/autotrade/brokers/alpaca_paper_operational.py"
 PREPARER = ROOT / "src/autotrade/brokers/alpaca_paper_operational_prepare.py"
+EVIDENCE = ROOT / "src/autotrade/brokers/alpaca_paper_operational_evidence.py"
 CORE = ROOT / ".github/workflows/core-tests.yml"
 R6 = ROOT / ".github/workflows/r6-authority.yml"
 SELF_COMMAND = "python scripts/check_r6_operational_lifecycle_boundary.py"
@@ -22,7 +23,7 @@ FORBIDDEN_PREFLIGHT_IMPORTS = (
     "anthropic",
     "autotrade.research",
 )
-FORBIDDEN_PREFLIGHT_CALLS = {
+FORBIDDEN_EXECUTION_CALLS = {
     "submit_once",
     "stage_external_submission",
     "write",
@@ -35,6 +36,17 @@ FORBIDDEN_PREPARER_IMPORTS = (
     "alpaca_paper_execution_bridge",
     "alpaca_paper_reconciliation_gateway",
     "alpaca_paper_trade_updates_transport",
+    "openai",
+    "anthropic",
+    "autotrade.research",
+)
+FORBIDDEN_EVIDENCE_IMPORTS = (
+    "alpaca_paper_writer",
+    "alpaca_paper_execution_bridge",
+    "alpaca_paper_canary_permit",
+    "alpaca_paper_canary_coordinator",
+    "autotrade.oms",
+    "autotrade.safety",
     "openai",
     "anthropic",
     "autotrade.research",
@@ -55,6 +67,8 @@ REQUIRED_PREFLIGHT = (
 REQUIRED_OPERATIONAL = (
     "class PaperOperationalWorkspace:",
     "read_prepared_package(",
+    "read_expected_bracket(",
+    "read_bracket_attestation(",
     "PaperOperatorDecisionContext.from_prepared_package(package)",
     '"network_write_authorized": False',
     '"next_action": "OPERATOR_DECISION_REQUIRED"',
@@ -64,6 +78,9 @@ REQUIRED_OPERATIONAL = (
     "temp_path.write_bytes(raw)",
     '"exact PAPER account attestation must be persisted before canary package"',
     '"prepared package account attestation does not match workspace evidence"',
+    '"capital_authority": "NONE"',
+    '"profitability_claim": False',
+    '"live_trading": "BLOCKED"',
 )
 REQUIRED_PREPARER = (
     "class PaperOperationalCanaryPreparer:",
@@ -71,9 +88,26 @@ REQUIRED_PREPARER = (
     "self._workspace.write_account_attestation(account_attestation)",
     "result = self._coordinator.prepare(",
     "self._workspace.write_prepared_canary(",
+    "result.package,",
+    "result.bracket,",
     "persisted = read_prepared_package(package_path)",
+    "persisted_bracket = read_expected_bracket(self._workspace.expected_bracket_path)",
     '"operational preparation cannot authorize network write"',
     '"operational preparation must stop at operator decision"',
+)
+REQUIRED_EVIDENCE = (
+    "class PaperOperationalEvidenceCollector:",
+    "self._reconciler.reconcile(",
+    "self._reconciler.recover_acknowledged_attestation(",
+    "self._trade_updates_transport.connect_and_listen(credentials=credentials)",
+    "session.receive(timeout_seconds=float(timeout_seconds))",
+    "self._parser.parse(frame, scope=scope)",
+    "ledger.append(event)",
+    "self._qualifier.qualify(",
+    "self._workspace.write_qualification_report_payload(report.to_dict())",
+    "self._workspace.write_evidence_manifest(",
+    '"broker reconciliation evidence requires UNKNOWN or ACKNOWLEDGED submission state"',
+    '"trade_updates capture requires persisted reconciled bracket attestation"',
 )
 
 
@@ -121,6 +155,26 @@ def main() -> int:
         if source.count("self._coordinator.prepare(") != 1:
             errors.append("operational preparer must call coordinator.prepare exactly once")
 
+    if not EVIDENCE.is_file():
+        errors.append("R6 operational evidence collector missing")
+    else:
+        source = EVIDENCE.read_text(encoding="utf-8")
+        for anchor in REQUIRED_EVIDENCE:
+            if anchor not in source:
+                errors.append(f"operational evidence anchor missing: {anchor}")
+        errors.extend(_scan_evidence_collector(source, EVIDENCE))
+        if source.count("self._reconciler.reconcile(") != 1:
+            errors.append("evidence collector must contain exactly one UNKNOWN reconciliation call")
+        if source.count("self._trade_updates_transport.connect_and_listen(") != 1:
+            errors.append("evidence collector must contain exactly one trade_updates connect call")
+        if source.count("session.receive(") != 1:
+            errors.append("evidence collector must contain exactly one receive surface")
+        if source.count("self._qualifier.qualify(") != 1:
+            errors.append("evidence collector must contain exactly one offline qualification call")
+        for forbidden in ("/v2/orders", "api.alpaca.markets", "paper-api.alpaca.markets/v2/orders"):
+            if forbidden in source:
+                errors.append(f"operational evidence contains direct endpoint surface: {forbidden}")
+
     for workflow, label in ((CORE, "Core Safety"), (R6, "R6 Authority")):
         if not workflow.is_file() or SELF_COMMAND not in workflow.read_text(encoding="utf-8"):
             errors.append(f"{label}: operational lifecycle checker is not wired into CI")
@@ -133,7 +187,8 @@ def main() -> int:
         return 1
     print(
         "AUTO-TRADE R6 operational lifecycle boundary: PASS "
-        "(sanitized durable workspace; GET-only preflight; offline preparer; no execution/write authority)"
+        "(sanitized durable workspace; GET-only preflight; offline preparer; "
+        "GET/receive-only evidence collector; no execution/write authority)"
     )
     return 0
 
@@ -151,23 +206,13 @@ def _scan_no_execution_surface(
         return [f"{path}: syntax error: {exc}"]
     rel = _relative(path)
     for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            modules = [alias.name for alias in node.names]
-        elif isinstance(node, ast.ImportFrom):
-            base = node.module or ""
-            modules = [base]
-            modules.extend(
-                f"{base}.{alias.name}" if base else alias.name
-                for alias in node.names
-            )
-        else:
-            modules = []
+        modules = _import_modules(node)
         for module in modules:
             if any(fragment in module for fragment in forbidden_imports):
                 errors.append(f"{rel}:{node.lineno}: forbidden {label} import {module}")
         if isinstance(node, ast.Call):
             call = _call_name(node.func)
-            if call in FORBIDDEN_PREFLIGHT_CALLS:
+            if call in FORBIDDEN_EXECUTION_CALLS:
                 errors.append(f"{rel}:{node.lineno}: forbidden {label} call {call}")
     return errors
 
@@ -176,6 +221,32 @@ def _scan_preflight(source: str, path: Path) -> list[str]:
     return _scan_no_execution_surface(
         source, path, "preflight", FORBIDDEN_PREFLIGHT_IMPORTS
     )
+
+
+def _scan_evidence_collector(source: str, path: Path) -> list[str]:
+    errors: list[str] = []
+    try:
+        tree = ast.parse(source, filename=str(path))
+    except SyntaxError as exc:
+        return [f"{path}: syntax error: {exc}"]
+    rel = _relative(path)
+    forbidden_calls = {
+        "submit",
+        "submit_once",
+        "stage_external_submission",
+        "record_operator_approval",
+        "consume",
+        "mark_submit_attempt_unknown",
+    }
+    for node in ast.walk(tree):
+        for module in _import_modules(node):
+            if any(fragment in module for fragment in FORBIDDEN_EVIDENCE_IMPORTS):
+                errors.append(f"{rel}:{node.lineno}: forbidden evidence import {module}")
+        if isinstance(node, ast.Call):
+            call = _call_name(node.func)
+            if call in forbidden_calls:
+                errors.append(f"{rel}:{node.lineno}: forbidden evidence call {call}")
+    return errors
 
 
 def _scan_operational_workspace(source: str, path: Path) -> list[str]:
@@ -193,6 +264,20 @@ def _scan_operational_workspace(source: str, path: Path) -> list[str]:
             if call == "write":
                 errors.append(f"{rel}:{node.lineno}: operational workspace cannot own transport-style write authority")
     return errors
+
+
+def _import_modules(node: ast.AST) -> list[str]:
+    if isinstance(node, ast.Import):
+        return [alias.name for alias in node.names]
+    if isinstance(node, ast.ImportFrom):
+        base = node.module or ""
+        modules = [base]
+        modules.extend(
+            f"{base}.{alias.name}" if base else alias.name
+            for alias in node.names
+        )
+        return modules
+    return []
 
 
 def _relative(path: Path) -> Path:
