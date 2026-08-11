@@ -56,6 +56,9 @@ jobs:
       - name: R6 execution bridge boundary
         run: python scripts/check_r6_execution_bridge_boundary.py
 
+      - name: R6 writer human-execution gate
+        run: python scripts/check_r6_writer_human_gate.py
+
       - name: R6 unsupported-product boundary
         run: python scripts/check_r6_product_boundary.py
 
