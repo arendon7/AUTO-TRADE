@@ -2,9 +2,9 @@
   "schema_version": 1,
   "track": "R4",
   "audit": "POST_MERGE_INTEGRATION",
-  "merge_sha": "aa6d80dc1682967edef367f726a620e41c0af118",
-  "status": "REPAIR_IN_PROGRESS",
-  "runs": {
+  "initial_merge_sha": "aa6d80dc1682967edef367f726a620e41c0af118",
+  "status": "REPAIRED_AND_RECERTIFIED",
+  "initial_runs": {
     "knowledge_contract": {
       "run_id": 31461659067,
       "conclusion": "success"
@@ -24,22 +24,32 @@
       "id": "R4-PM-001",
       "type": "CERTIFICATION_CONTRACT_MISMATCH",
       "file": "tests/test_r4_certification_contract.py",
-      "observed": "certificate contains 479 tests_passed",
-      "incorrect_expectation": "480 tests_passed",
-      "remediation": "bind permanent test to verified 479 / 86.45 branch evidence"
+      "remediation": "permanent contract corrected from 480 to verified 479 tests and exact 86.45% coverage"
     },
     {
       "id": "R4-PM-002",
       "type": "TEMPORARY_WORKFLOW_LEAK",
       "file": ".github/workflows/r4-final-readiness-one-shot.yml",
-      "observed": "temporary R4 readiness workflow present in merged main tree",
-      "remediation": "remove one-shot from the repository tree before post-merge recertification"
+      "remediation": "temporary workflow removed from repository tree"
     }
   ],
+  "repair": {
+    "pull_request": 12,
+    "hotfix_head": "2a8977110b32039d5fdc9d1cbd37278f36758fee",
+    "final_main_sha": "c294aa69f35b64559e3aea58a1c0661e66599db8",
+    "core_safety_run_id": 31463746764,
+    "knowledge_contract_run_id": 31463746745,
+    "tests_passed": 483,
+    "coverage_percent": 86.45,
+    "contract_registry": "PASS",
+    "contract_count": 10,
+    "research_advisory_authority_boundary": "PASS",
+    "debt_register_contract": "PASS",
+    "knowledge_contract": "PASS"
+  },
   "functional_regression_detected": false,
   "r4_blocking_debt_reopened": false,
-  "remediation_branch": "hotfix/r4-post-merge-recertification",
-  "r5_gate": "BLOCKED_UNTIL_EXACT_MAIN_SHA_GREEN",
+  "r5_gate": "OPEN_FROM_CERTIFIED_MAIN_SHA",
   "capital_authority": "NONE",
   "live_trading": "BLOCKED"
 }

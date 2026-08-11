@@ -477,6 +477,66 @@
       "severity": "P1",
       "status": "CLOSED",
       "track": "R4"
+    },
+    {
+      "area": "Closed-kline read-only streaming boundary",
+      "evidence": [],
+      "id": "TD-R5-001",
+      "next_action": "Implement a disabled-by-default read-only closed-kline stream with exact allowlisted HTTPS/WSS host/path/protocol, bounded I/O and no broker/order authority; certify malformed/open/future/stale input rejection before closing.",
+      "resolution": "",
+      "severity": "P1",
+      "status": "OPEN",
+      "track": "R5"
+    },
+    {
+      "area": "Streaming duplicate, ordering and gap integrity",
+      "evidence": [],
+      "id": "TD-R5-002",
+      "next_action": "Implement deterministic sequence/timestamp continuity with identical-duplicate idempotent no-op, conflicting duplicate/out-of-order/gap fail-closed semantics and no silent imputation; certify replay behavior.",
+      "resolution": "",
+      "severity": "P1",
+      "status": "OPEN",
+      "track": "R5"
+    },
+    {
+      "area": "Streaming DEGRADED lifecycle and reconnect safety",
+      "evidence": [],
+      "id": "TD-R5-003",
+      "next_action": "Implement durable/read-only stream health where EOF, timeout, protocol ambiguity or unexpected termination enters DEGRADED and reconnect cannot clear or hide an unresolved continuity gap.",
+      "resolution": "",
+      "severity": "P1",
+      "status": "OPEN",
+      "track": "R5"
+    },
+    {
+      "area": "Synchronized portfolio shadow integrity",
+      "evidence": [],
+      "id": "TD-R5-004",
+      "next_action": "Implement reproducible hash-bound portfolio shadow state using frozen strategy weights/configuration and exact market timestamps; reject stale, mismatched or non-reproducible shadow evidence and prevent double counting.",
+      "resolution": "",
+      "severity": "P1",
+      "status": "OPEN",
+      "track": "R5"
+    },
+    {
+      "area": "Forward evidence separation from FINAL_HOLDOUT",
+      "evidence": [],
+      "id": "TD-R5-005",
+      "next_action": "Implement append-only post-activation forward evidence that is structurally separated from FINAL_HOLDOUT and cannot recalibrate frozen thresholds, weights or selection decisions; certify idempotency and provenance.",
+      "resolution": "",
+      "severity": "P1",
+      "status": "OPEN",
+      "track": "R5"
+    },
+    {
+      "area": "R5 streaming/shadow execution-authority boundary",
+      "evidence": [],
+      "id": "TD-R5-006",
+      "next_action": "Extend permanent CI authority checks so R5 stream/shadow/forward modules cannot import or invoke OMS submission, broker order methods, LIVE endpoints or capital-promotion paths; stale/missing/gapped evidence must never increase risk.",
+      "resolution": "",
+      "severity": "P1",
+      "status": "OPEN",
+      "track": "R5"
     }
   ],
   "registry_version": 1

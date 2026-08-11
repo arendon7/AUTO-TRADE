@@ -87,6 +87,8 @@ Certification artifact: `knowledge/60_EVIDENCE/R4_CERTIFICATION.json`.
 R4 adds no external PAPER/LIVE authority; Portfolio Manager remains advisory-only and the Defensive Health Bridge can only maintain/reduce/block risk.
 
 ## Active target — R5
+R5 starts only from post-merge-green `main` `c294aa69f35b64559e3aea58a1c0661e66599db8`. Registered blocking debt before implementation: `TD-R5-001..006`.
+
 R5 reconstruye read-only streaming/shadow/forward evidence sin habilitar capital externo:
 1. closed-kline read-only stream, disabled by default y host fijo;
 2. duplicate idempotency + gap fail-closed, sin silent imputation;

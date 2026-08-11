@@ -1,45 +1,38 @@
 # HANDOFF ACTUAL — AUTO-TRADE
 
 Fecha: 2026-08-11
-Estado: **R4 integrated; post-merge recertification hotfix active**
+Estado: **R4 post-merge certified; R5 active**
 
-## Base integrada conocida
-R3 está integrado y post-merge certificado en `main` `c585a84b5197076b210723bb70980b828e4e3026`.
+## Base certificada
+`main` `c294aa69f35b64559e3aea58a1c0661e66599db8` es la base exacta verde después de reparar la primera integración R4 mediante PR #12.
+- Core Safety `31463746764`: PASS — 483 tests / 86.45%.
+- Knowledge Contract `31463746745`: PASS.
+- Contract Registry / Research Authority / Debt Register: PASS.
 
-## R4
-Branch certification basis: `350efd43ac133c95a1997b4a821a2e0bab4afaf2`.
-Branch evidence: `knowledge/60_EVIDENCE/R4_CERTIFICATION.json`.
-Branch result: **479 tests PASS / 86.45% coverage**, 10 contracts, Research/Advisory Authority PASS, Debt Register PASS, Knowledge Contract PASS.
+Incidente y reparación: `knowledge/60_EVIDENCE/R4_POST_MERGE_INTEGRATION_AUDIT.json`.
 
-PR #11 fue squash-merged en `main` como `aa6d80dc1682967edef367f726a620e41c0af118`.
+## R5
+Branch: `reconstruction/r5-stream-shadow-forward`.
+Deuda registrada antes de implementar: `TD-R5-001..006`, todas P1 OPEN.
 
-## Post-merge audit
-- Knowledge Contract `31461659067`: PASS.
-- Core Safety `31461659063`: FAIL.
-- Defecto 1: `tests/test_r4_certification_contract.py` exigía `480`, aunque el run certificado real fue `479 / 86.45%`.
-- Defecto 2: `.github/workflows/r4-final-readiness-one-shot.yml` quedó accidentalmente incluido en el squash merge.
+Orden:
+1. closed-kline read-only stream;
+2. duplicate/gap/order integrity;
+3. DEGRADED socket/reconnect semantics;
+4. synchronized hash-bound portfolio shadow;
+5. append-only forward evidence separado de FINAL_HOLDOUT;
+6. permanent authority gate + adversarial certification.
 
-La reparación canónica está en `hotfix/r4-post-merge-recertification`. R5 permanece bloqueado hasta que ese hotfix se fusione y el SHA exacto de `main` quede verde.
-
-## Invariantes R4 que no se deben perder
-- Instrument Master autoritativo separado de research metadata.
-- exact Decimal normalization; no tolerance weakening.
-- Health recovery explicit + retry-safe + ACK-chain tamper-evident.
-- unsynced authoritative worsening tightens immediately.
-- Defensive Health Bridge automatic actions reduce/block only.
-- Portfolio Manager advisory-only; no OrderIntent/OMS/broker authority.
-- Safety + OMS remain mandatory; true risk reductions remain available under restrictive health states only when Safety classifies them as reducing.
-
-## Próxima acción exacta
-1. certificar la rama hotfix con Core Safety + Knowledge Contract;
-2. fusionar sólo contra el expected head SHA verde;
-3. recertificar exact merge SHA en `main`;
-4. crear R5 únicamente desde ese `main` verde;
-5. registrar deuda R5 antes de implementar.
+## Invariantes heredados
+- Safety + OMS son autoridad determinista obligatoria.
+- Portfolio Manager sigue advisory-only.
+- R5 nunca aumenta riesgo por evidencia stale/missing/gapped.
+- No silent imputation.
+- HOLDOUT no se reutiliza para recalibrar forward decisions.
+- External PAPER/LIVE queda fuera de R5.
 
 ## Deuda no bloqueante
-`TD-OPS-001` Graphify P3/OPS sigue OPEN; no fabricar un graph semántico/deep sin runtime soportado y `SOURCE_SHA` verificable.
+`TD-OPS-001` Graphify P3/OPS sigue OPEN; no fabricar artefactos semánticos/deep.
 
 ## Capital
 **LIVE TRADING: BLOQUEADO.**
-R4 no añadió external PAPER/LIVE authority.

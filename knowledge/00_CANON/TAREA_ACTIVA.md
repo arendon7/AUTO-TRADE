@@ -1,46 +1,47 @@
 # TAREA ACTIVA — AUTO-TRADE
 
 ## Objetivo inmediato
-**Reparar la integración post-merge de R4, recertificar el SHA exacto de `main` y solo entonces abrir R5.**
+**R5 — closed-kline read-only streaming + synchronized shadow + forward evidence.**
 
-PR #11 fue fusionado por squash en `main` como `aa6d80dc1682967edef367f726a620e41c0af118`. Knowledge Contract quedó verde, pero Core Safety falló por dos artefactos de cierre: un test permanente exigía incorrectamente `480` en vez de `479`, y quedó el workflow temporal `r4-final-readiness-one-shot.yml` dentro del árbol fusionado.
+Base obligatoria: post-merge-green `main` `c294aa69f35b64559e3aea58a1c0661e66599db8`.
+Branch activa: `reconstruction/r5-stream-shadow-forward`.
 
-Esto NO invalida las capacidades funcionales R4 ya certificadas, pero sí invalida la recertificación post-merge hasta reparar ambos defectos.
+## Deuda registrada antes de programar
+- `TD-R5-001` — closed-kline read-only streaming boundary.
+- `TD-R5-002` — duplicate/order/gap integrity.
+- `TD-R5-003` — DEGRADED lifecycle + reconnect safety.
+- `TD-R5-004` — synchronized portfolio shadow integrity.
+- `TD-R5-005` — forward evidence separation from FINAL_HOLDOUT.
+- `TD-R5-006` — permanent execution-authority boundary.
 
-## Secuencia obligatoria
-1. corregir el contrato permanente R4 a la evidencia real `479 tests / 86.45%`;
-2. eliminar el workflow temporal R4 del árbol;
-3. mantener explícita la evidencia del fallo de integración;
-4. ejecutar Core Safety + Knowledge Contract en la rama hotfix;
-5. fusionar el hotfix únicamente contra su head verde esperado;
-6. verificar ambos gates sobre el SHA exacto resultante en `main`;
-7. solo si `main` queda verde, crear rama R5 desde ese SHA;
-8. antes de programar R5, registrar explícitamente sus deudas/capacidades.
-
-## R5 — alcance siguiente, todavía bloqueado
-- closed-kline read-only stream, disabled by default y fixed host;
-- duplicate idempotency + gap fail-closed; no silent imputation;
-- unexpected socket termination -> DEGRADED; no reconnect que esconda gaps;
-- synchronized portfolio shadow con pesos/timestamps congelados;
-- forward evidence post-activation sin HOLDOUT;
-- ninguna autoridad external PAPER/LIVE.
+## Orden de implementación
+1. modelo de estado + contrato del stream closed-kline read-only;
+2. duplicate idempotency, order/sequence/gap validation;
+3. socket DEGRADED lifecycle y reconnect continuity gate;
+4. synchronized portfolio shadow hash-bound;
+5. forward evidence append-only separado de HOLDOUT;
+6. authority scan + adversarial certification + debt closure.
 
 ## Negative tests obligatorios para R5
-- duplicated closed kline no duplica estado/evidencia;
-- gap o out-of-order stream falla cerrado y no imputa;
-- stale/malformed/future kline rechazada;
-- unexpected socket termination deja estado DEGRADED;
-- reconnect no puede ocultar un gap existente;
-- shadow con weight/timestamp mismatch falla cerrado;
-- forward evidence no toca FINAL_HOLDOUT;
-- cualquier path de stream/shadow sigue sin importar OMS/broker execution authority.
+- stream deshabilitado por defecto no abre conexiones ni hace I/O;
+- host/path/protocolo no permitido => reject antes de I/O;
+- vela abierta, malformed, stale, futura o fuera de orden => fail closed;
+- duplicado idéntico => idempotent no-op; duplicado conflictivo => fail closed;
+- gap temporal/sequence gap => DEGRADED, sin imputación ni avance optimista;
+- socket EOF/error/timeout/ambigüedad => DEGRADED;
+- reconnect no puede borrar ni ocultar un gap no resuelto;
+- shadow con weights/config/timestamp/source hash mismatch => reject;
+- repeated identical shadow/forward evidence => idempotent, sin doble conteo;
+- forward evidence no puede leer FINAL_HOLDOUT ni recalibrar thresholds/pesos congelados;
+- stale/missing/gapped evidence no puede incrementar allocation/risk;
+- ningún path R5 puede importar/invocar broker order submission, OMS authority o LIVE execution.
 
 ## Restricciones
-- `TD-OPS-001` Graphify P3 permanece visible; no fabricar `graphify-out`.
-- No reducir coverage gate ni borrar negative tests para cerrar R5.
-- No declarar rentabilidad por resultados de infraestructura/reproducibilidad.
-- No crear rama R5 desde `aa6d80d...` mientras Core Safety permanezca rojo.
+- No bajar coverage gate de 85%.
+- No borrar/relajar negative tests para cerrar deuda.
+- `TD-OPS-001` permanece visible; no fabricar `graphify-out`.
+- No declarar rentabilidad por infraestructura o forward observability.
 
 ## Capital
 **LIVE TRADING: BLOQUEADO.**
-External PAPER queda fuera de R5 y pertenece al track R6.
+External PAPER pertenece a R6, no a R5.

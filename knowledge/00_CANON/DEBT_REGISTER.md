@@ -1,46 +1,40 @@
 # DEBT REGISTER — v0.28R
 
 Fecha: 2026-08-11
-Estado: ACTIVE — **R0–R4 CERTIFIED; R5 NEXT**
+Estado: ACTIVE — **R0–R4 CERTIFIED; R5 ACTIVE**
 
 ## Authority
 La autoridad machine-readable es `knowledge/00_CANON/debt_register.json`. Si esta vista humana discrepa, manda el JSON + CI.
 
 ## Regla
-Ningún track puede certificarse con deuda conocida P0/P1/P2 asignada a ese track. Deuda nueva se registra antes del cierre y no se rebaja para satisfacer una release.
+Ningún track puede certificarse con deuda conocida P0/P1/P2 asignada a ese track. Deuda nueva se registra antes de implementar y no se rebaja para satisfacer una release.
 
 ## Certified tracks
 - **R0 — PASS**
 - **R1 — PASS**
 - **R2 — PASS**
-- **R3 — PASS e integrado en `main` `c585a84b5197076b210723bb70980b828e4e3026`**
-- **R4 — PASS en branch; PR #11 pendiente de integración y recertificación post-merge**
+- **R3 — PASS**
+- **R4 — PASS e integrado; post-merge recertificado en `main` `c294aa69f35b64559e3aea58a1c0661e66599db8`**
 
-Certificación R4: `knowledge/60_EVIDENCE/R4_CERTIFICATION.json`, basis `350efd43ac133c95a1997b4a821a2e0bab4afaf2`: **479 tests PASS / 86.45% coverage**, 10 contratos, Research/Advisory Authority PASS, Debt Register PASS y Knowledge Contract PASS.
+Post-merge R4: Core Safety `31463746764` PASS, Knowledge Contract `31463746745` PASS, **483 tests / 86.45% coverage**.
 
-## R4 debt closure
-Todos los P0/P1/P2 conocidos de R4 están CLOSED: `TD-R4-001..014`.
-Esto incluye los hardenings tardíos de exact Decimal normalization, retry-safe recovery, authoritative Health overlay y recovery ACK hash-chain.
+## R5 — deuda registrada antes de implementación
+| ID | Sev | Área | Condición de cierre |
+|---|---|---|---|
+| `TD-R5-001` | P1 | Closed-kline read-only streaming boundary | disabled-by-default, allowlist exacta, closed-only, bounded I/O, sin broker/order authority |
+| `TD-R5-002` | P1 | Duplicate/order/gap integrity | duplicate idéntico idempotente; conflicto/out-of-order/gap fail closed; sin imputación |
+| `TD-R5-003` | P1 | DEGRADED lifecycle | EOF/timeout/ambigüedad => DEGRADED; reconnect no oculta gaps |
+| `TD-R5-004` | P1 | Synchronized portfolio shadow | pesos/config/timestamps congelados, hash-bound, reproducible e idempotente |
+| `TD-R5-005` | P1 | Forward evidence vs HOLDOUT | evidencia post-activation separada; FINAL_HOLDOUT no recalibra decisiones |
+| `TD-R5-006` | P1 | Execution-authority boundary | stream/shadow/forward sin OMS submit, broker orders, LIVE endpoints ni risk increase por evidencia degradada |
 
-## Deuda abierta
-| ID | Sev | Track | Área | Condición de cierre |
-|---|---|---|---|---|
-| `TD-OPS-001` | P3 | OPS | Graphify | generar graph semántico/deep real en runtime soportado y vincularlo a `SOURCE_SHA`; nunca fabricar artefactos |
+R5 P0/P1/P2 OPEN: **6**. Por definición R5 NO puede certificarse hasta cerrarlas con evidencia.
 
-No existe P0/P1/P2 OPEN de R4. Graphify P3/OPS no bloquea la certificación R4 y permanece explícitamente visible.
-
-## Próximo orden — R5
-1. integrar PR #11 sólo contra su head validado;
-2. recertificar el SHA exacto de `main` post-merge;
-3. registrar deuda/capacidades R5 antes de implementar;
-4. closed-kline read-only stream;
-5. duplicate idempotency + gap fail-closed;
-6. socket termination -> DEGRADED;
-7. synchronized portfolio shadow;
-8. forward evidence sin HOLDOUT;
-9. certificación adversarial y debt closure;
-10. external PAPER/LIVE continúa bloqueado.
+## Deuda no bloqueante fuera de R5
+| ID | Sev | Track | Área |
+|---|---|---|---|
+| `TD-OPS-001` | P3 | OPS | Graphify semántico/deep real pendiente de runtime soportado |
 
 ## Capital
 **LIVE TRADING: BLOQUEADO.**
-R4 no concede external PAPER/LIVE authority. R5 tampoco podrá hacerlo; esa frontera pertenece a R6 y requerirá certificación separada.
+R5 no puede conceder external PAPER/LIVE authority.
