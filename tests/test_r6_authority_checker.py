@@ -29,7 +29,7 @@ def test_current_r6_authority_checker_passes_repository() -> None:
         check=False,
     )
     assert result.returncode == 0, result.stderr
-    assert "PAPER_SINGLE_SHOT_AND_GET_RECONCILIATION" in result.stdout
+    assert "PAPER_SINGLE_SHOT_GET_RECONCILIATION_AND_TRADE_UPDATES_CONTROL_STREAM" in result.stdout
 
 
 def test_checker_rejects_research_or_ai_authority_imports(tmp_path) -> None:
@@ -58,6 +58,7 @@ def test_checker_allows_network_imports_only_in_audited_gateway_roles(tmp_path) 
         "alpaca_paper_gateway.py",
         "alpaca_paper_reconciliation_gateway.py",
         "alpaca_paper_writer.py",
+        "alpaca_paper_trade_updates_transport.py",
     ):
         assert not any(
             "networking is forbidden" in error
@@ -75,6 +76,35 @@ def test_checker_rejects_unaudited_post_send_or_submit_calls_even_in_writer(tmp_
         filename="alpaca_paper_writer.py",
     )
     assert sum("unaudited external write call" in error for error in errors) == 3
+
+
+def test_checker_allows_only_named_socket_control_send_in_trade_updates_module(tmp_path) -> None:
+    exact = scan(
+        tmp_path / "exact",
+        "def go(socket, a, b):\n    socket.send(a)\n    socket.send(b)\n",
+        filename="alpaca_paper_trade_updates_transport.py",
+    )
+    assert not any("unaudited external write call send" in error for error in exact)
+    assert not any("exactly two socket control sends" in error for error in exact)
+
+    arbitrary = scan(
+        tmp_path / "arbitrary",
+        "def go(client):\n    client.send('order')\n",
+        filename="alpaca_paper_trade_updates_transport.py",
+    )
+    assert any("unaudited external write call send" in error for error in arbitrary)
+
+
+def test_checker_rejects_trade_update_control_send_inside_loop_or_wrong_count(tmp_path) -> None:
+    errors = scan(
+        tmp_path,
+        "def go(socket, payload):\n"
+        "    while True:\n"
+        "        socket.send(payload)\n",
+        filename="alpaca_paper_trade_updates_transport.py",
+    )
+    assert any("cannot execute inside a loop" in error for error in errors)
+    assert any("exactly two socket control sends" in error for error in errors)
 
 
 def test_checker_allows_exactly_one_transport_write_only_in_writer(tmp_path) -> None:
@@ -124,11 +154,21 @@ def test_checker_rejects_live_host_and_unapproved_endpoint_authority(tmp_path) -
     assert any("endpoint literal forbidden" in error for error in errors)
 
 
-def test_checker_rejects_websocket_authority_until_trade_updates_phase(tmp_path) -> None:
+def test_checker_rejects_websocket_authority_outside_exact_trade_updates_module(tmp_path) -> None:
     errors = scan(
         tmp_path,
-        "URL = 'wss://streaming.alpaca.markets/v2/account'\n",
+        "URL = 'wss://paper-api.alpaca.markets/stream'\n",
         filename="alpaca_paper_gateway.py",
+    )
+    assert any("websocket endpoint authority" in error for error in errors)
+
+
+def test_checker_rejects_any_other_wss_literal_even_in_trade_updates_module(tmp_path) -> None:
+    errors = scan(
+        tmp_path,
+        "URL = 'wss://streaming.alpaca.markets/v2/account'\n"
+        "def go(socket, a, b):\n    socket.send(a)\n    socket.send(b)\n",
+        filename="alpaca_paper_trade_updates_transport.py",
     )
     assert any("websocket endpoint authority" in error for error in errors)
 
