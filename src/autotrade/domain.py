@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
 from enum import StrEnum
@@ -33,10 +33,33 @@ class OrderStatus(StrEnum):
     SUBMITTING = "SUBMITTING"
     SUBMITTED = "SUBMITTED"
     PARTIALLY_FILLED = "PARTIALLY_FILLED"
+    CANCEL_PENDING = "CANCEL_PENDING"
+    REPLACE_PENDING = "REPLACE_PENDING"
     FILLED = "FILLED"
     CANCELLED = "CANCELLED"
     REJECTED = "REJECTED"
+    EXPIRED = "EXPIRED"
     UNKNOWN = "UNKNOWN"
+
+    @property
+    def terminal(self) -> bool:
+        return self in {
+            OrderStatus.FILLED,
+            OrderStatus.CANCELLED,
+            OrderStatus.REJECTED,
+            OrderStatus.EXPIRED,
+        }
+
+    @property
+    def broker_open(self) -> bool:
+        return self in {
+            OrderStatus.SUBMITTING,
+            OrderStatus.SUBMITTED,
+            OrderStatus.PARTIALLY_FILLED,
+            OrderStatus.CANCEL_PENDING,
+            OrderStatus.REPLACE_PENDING,
+            OrderStatus.UNKNOWN,
+        }
 
 
 @dataclass(frozen=True, slots=True)
@@ -115,6 +138,11 @@ class OrderRecord:
     submitted_at: datetime | None = None
     filled_quantity: Decimal = Decimal("0")
     average_fill_price: Decimal | None = None
+
+    @property
+    def remaining_quantity(self) -> Decimal:
+        remaining = self.intent.quantity - self.filled_quantity
+        return remaining if remaining > 0 else Decimal("0")
 
 
 def _canonical_decimal(value: Decimal | None) -> str | None:

@@ -17,11 +17,13 @@ from .domain import (
     intent_fingerprint,
 )
 from .oms import (
+    BrokerCancellationAmbiguous,
     BrokerSubmissionAmbiguous,
     IdempotencyConflict,
     OrderManagementSystem,
     OrderRejectedByControlPlane,
 )
+from .risk_state import RiskTelemetryStore
 from .safety import CapitalSafetyKernel
 from .state import (
     PortfolioStore,
@@ -71,18 +73,27 @@ class DurablePipelineResult:
     recovery_required: bool = False
 
 
+@dataclass(frozen=True, slots=True)
+class ReplacePipelineResult:
+    original_order: OrderRecord
+    replacement: DurablePipelineResult | None
+    aborted_reason: str = ""
+
+    @property
+    def replaced(self) -> bool:
+        return self.replacement is not None and self.replacement.order is not None
+
+
 class ConcurrentRiskStateChanged(RuntimeError):
     pass
 
 
-class DurableTradingPipeline:
-    """Cross-process guarded path with optimistic, durable risk reservations.
+class ReplacementAborted(RuntimeError):
+    pass
 
-    The safety decision is made against the persisted portfolio plus every
-    active reservation. Reservation insertion succeeds only if both the
-    portfolio version and reservation generation are unchanged, preventing two
-    processes from approving against the same stale risk capacity.
-    """
+
+class DurableTradingPipeline:
+    """Cross-process guarded path with durable reservations and fill accounting."""
 
     def __init__(
         self,
@@ -91,14 +102,18 @@ class DurableTradingPipeline:
         oms: OrderManagementSystem,
         portfolio_store: PortfolioStore,
         reservation_store: ReservationStore,
+        risk_telemetry_store: RiskTelemetryStore | None = None,
         max_reservation_retries: int = 5,
     ) -> None:
         if max_reservation_retries <= 0:
             raise ValueError("max_reservation_retries must be > 0")
+        if not hasattr(portfolio_store, "apply_fills"):
+            raise ValueError("durable pipeline requires a fill-aware portfolio store")
         self._safety = safety
         self._oms = oms
         self._portfolio_store = portfolio_store
         self._reservations = reservation_store
+        self._risk_telemetry = risk_telemetry_store
         self._max_reservation_retries = max_reservation_retries
 
     def process_intent(
@@ -129,6 +144,7 @@ class DurableTradingPipeline:
                 reservation_view.reservations,
                 reservation_view.generation,
             )
+            effective = self._with_risk_telemetry(effective)
             decision = self._safety.evaluate(
                 intent=intent,
                 market=market,
@@ -179,46 +195,20 @@ class DurableTradingPipeline:
             )
             raise
         except BrokerSubmissionAmbiguous:
-            self._reservations.set_status(
-                idempotency_key=intent.idempotency_key,
-                status=ReservationStatus.UNKNOWN,
-                now=now,
-            )
-            self._portfolio_store.set_reconciliation_status(
-                reconciliation_ok=False,
-                broker_state_known=False,
-                now=now,
-            )
+            self._mark_ambiguous(idempotency_key=intent.idempotency_key, now=now)
             raise
         except Exception:
-            # Unknown failures after reservation are conservatively retained.
-            self._reservations.set_status(
-                idempotency_key=intent.idempotency_key,
-                status=ReservationStatus.UNKNOWN,
-                now=now,
-            )
-            self._portfolio_store.set_reconciliation_status(
-                reconciliation_ok=False,
-                broker_state_known=False,
-                now=now,
-            )
+            self._mark_ambiguous(idempotency_key=intent.idempotency_key, now=now)
             raise
 
-        if order.filled_quantity > 0:
-            self._portfolio_store.apply_order_result(order, now=now)
-
-        if order.status is OrderStatus.FILLED:
-            reservation_status = ReservationStatus.RELEASED
-        elif order.status in {OrderStatus.SUBMITTED, OrderStatus.PARTIALLY_FILLED}:
-            reservation_status = ReservationStatus.OPEN
-        else:
-            reservation_status = ReservationStatus.UNKNOWN
+        self._apply_known_fills(order=order, now=now)
+        reservation_status = _reservation_status_for_order(order)
+        if reservation_status is ReservationStatus.UNKNOWN:
             self._portfolio_store.set_reconciliation_status(
                 reconciliation_ok=False,
                 broker_state_known=False,
                 now=now,
             )
-
         self._reservations.set_status(
             idempotency_key=intent.idempotency_key,
             status=reservation_status,
@@ -230,6 +220,155 @@ class DurableTradingPipeline:
             replayed=False,
             recovery_required=reservation_status is ReservationStatus.UNKNOWN,
         )
+
+    def cancel_order(self, *, order_id: str, now: datetime) -> OrderRecord:
+        order = self._oms.get_by_order_id(order_id)
+        if order is None:
+            raise KeyError(order_id)
+        try:
+            final = self._oms.cancel(order_id=order_id, now=now)
+        except BrokerCancellationAmbiguous:
+            self._mark_ambiguous(idempotency_key=order.intent.idempotency_key, now=now)
+            raise
+
+        self._apply_known_fills(order=final, now=now)
+        status = _reservation_status_for_order(final)
+        self._reservations.set_status(
+            idempotency_key=final.intent.idempotency_key,
+            status=status,
+            now=now,
+        )
+        if status is ReservationStatus.UNKNOWN:
+            self._portfolio_store.set_reconciliation_status(
+                reconciliation_ok=False,
+                broker_state_known=False,
+                now=now,
+            )
+        return final
+
+    def replace_order(
+        self,
+        *,
+        order_id: str,
+        replacement_intent: OrderIntent,
+        market: MarketSnapshot,
+        now: datetime,
+    ) -> ReplacePipelineResult:
+        """Authoritative cancel followed by a completely fresh guarded submit.
+
+        The replace request is durably evidenced before cancellation. Retries
+        after a crash are safe: REPLACE_PENDING resumes cancellation; CANCELLED
+        resumes the fresh replacement submit only when the durable marker binds
+        the same replacement intent.
+        """
+        original = self._oms.get_by_order_id(order_id)
+        if original is None:
+            raise KeyError(order_id)
+        if replacement_intent.idempotency_key == original.intent.idempotency_key:
+            raise ReplacementAborted("replacement requires a new idempotency key")
+        if replacement_intent.intent_id == original.intent.intent_id:
+            raise ReplacementAborted("replacement requires a new intent_id")
+        if (
+            replacement_intent.symbol != original.intent.symbol
+            or replacement_intent.side is not original.intent.side
+            or replacement_intent.strategy_id != original.intent.strategy_id
+        ):
+            raise ReplacementAborted(
+                "replacement must preserve symbol, side and strategy identity"
+            )
+
+        if original.status.terminal:
+            if (
+                original.status is OrderStatus.CANCELLED
+                and self._oms.replacement_request_matches(
+                    order_id=order_id,
+                    replacement_intent_id=replacement_intent.intent_id,
+                )
+            ):
+                new_result = self.process_intent(
+                    intent=replacement_intent,
+                    market=market,
+                    now=now,
+                )
+                return ReplacePipelineResult(
+                    original_order=original,
+                    replacement=new_result,
+                    aborted_reason=(
+                        new_result.decision.reason_code
+                        if new_result.order is None and new_result.decision is not None
+                        else ""
+                    ),
+                )
+            raise ReplacementAborted(
+                f"original order already terminal: {original.status.value}"
+            )
+
+        self._oms.mark_replace_pending(
+            order_id=order_id,
+            replacement_intent_id=replacement_intent.intent_id,
+            now=now,
+        )
+        cancelled = self.cancel_order(order_id=order_id, now=now)
+        if cancelled.status is not OrderStatus.CANCELLED:
+            raise ReplacementAborted(
+                f"replacement aborted because original resolved as {cancelled.status.value}"
+            )
+
+        new_result = self.process_intent(
+            intent=replacement_intent,
+            market=market,
+            now=now,
+        )
+        return ReplacePipelineResult(
+            original_order=cancelled,
+            replacement=new_result,
+            aborted_reason=(
+                new_result.decision.reason_code
+                if new_result.order is None and new_result.decision is not None
+                else ""
+            ),
+        )
+
+    def _with_risk_telemetry(self, portfolio: PortfolioSnapshot) -> PortfolioSnapshot:
+        if self._risk_telemetry is None:
+            return portfolio
+        telemetry = self._risk_telemetry.get()
+        return replace(
+            portfolio,
+            equity=telemetry.current_equity,
+            daily_pnl=telemetry.daily_pnl,
+            drawdown=telemetry.drawdown,
+        )
+
+    def _apply_known_fills(self, *, order: OrderRecord, now: datetime) -> None:
+        fills = self._oms.fills_for_order(order.order_id)
+        if fills:
+            self._portfolio_store.apply_fills(order, fills, now=now)
+
+    def _mark_ambiguous(self, *, idempotency_key: str, now: datetime) -> None:
+        self._reservations.set_status(
+            idempotency_key=idempotency_key,
+            status=ReservationStatus.UNKNOWN,
+            now=now,
+        )
+        self._portfolio_store.set_reconciliation_status(
+            reconciliation_ok=False,
+            broker_state_known=False,
+            now=now,
+        )
+
+
+def _reservation_status_for_order(order: OrderRecord) -> ReservationStatus:
+    if order.status.terminal:
+        return ReservationStatus.RELEASED
+    if order.status in {
+        OrderStatus.SUBMITTED,
+        OrderStatus.PARTIALLY_FILLED,
+        OrderStatus.CANCEL_PENDING,
+        OrderStatus.REPLACE_PENDING,
+    }:
+        return ReservationStatus.OPEN
+    return ReservationStatus.UNKNOWN
 
 
 def _effective_portfolio(

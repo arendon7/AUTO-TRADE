@@ -7,15 +7,16 @@ REQUIRED = [
     "AGENTS.md",
     "knowledge/HOME.md",
     "knowledge/00_CANON/SOURCE_OF_TRUTH.md",
-    "knowledge/00_CANON/CONTEXTO_RAPIDO.md",
     "knowledge/00_CANON/ESTADO_ACTUAL.md",
     "knowledge/00_CANON/TAREA_ACTIVA.md",
+    "knowledge/00_CANON/RECONSTRUCTION_V028R_MATRIX.md",
+    "knowledge/00_CANON/DEBT_REGISTER.md",
     "knowledge/00_CANON/LEGACY_V028_RECOVERY.md",
     "knowledge/00_CANON/LEGACY_RELEASE_MATRIX.md",
     "knowledge/20_ARQUITECTURA/MAPA_PROYECTO.md",
     "knowledge/20_ARQUITECTURA/CONTRATOS_SEGURIDAD.md",
     "knowledge/30_DECISIONES/ADR-0001-architecture-baseline.md",
-    "knowledge/30_DECISIONES/ADR-0005-recover-historical-v028.md",
+    "knowledge/30_DECISIONES/ADR-0006-reconstruct-v028-equivalent.md",
     "knowledge/40_HANDOFF/HANDOFF_ACTUAL.md",
     "knowledge/50_RUNBOOKS/GRAPHIFY_OBSIDIAN.md",
     "knowledge/50_RUNBOOKS/RECOVER_LEGACY_V028.md",
@@ -36,10 +37,14 @@ if not errors:
         encoding="utf-8"
     )
     state = (ROOT / "knowledge/00_CANON/ESTADO_ACTUAL.md").read_text(encoding="utf-8")
+    task = (ROOT / "knowledge/00_CANON/TAREA_ACTIVA.md").read_text(encoding="utf-8")
+    matrix = (ROOT / "knowledge/00_CANON/RECONSTRUCTION_V028R_MATRIX.md").read_text(
+        encoding="utf-8"
+    )
+    debt = (ROOT / "knowledge/00_CANON/DEBT_REGISTER.md").read_text(encoding="utf-8")
     safety = (ROOT / "knowledge/20_ARQUITECTURA/CONTRATOS_SEGURIDAD.md").read_text(
         encoding="utf-8"
     )
-    task = (ROOT / "knowledge/00_CANON/TAREA_ACTIVA.md").read_text(encoding="utf-8")
     graphify_runbook = (
         ROOT / "knowledge/50_RUNBOOKS/GRAPHIFY_OBSIDIAN.md"
     ).read_text(encoding="utf-8")
@@ -53,14 +58,34 @@ if not errors:
             "AI authority contract missing",
         ),
         (
-            "Historical v0.28 evidence",
+            "v0.28R capability reconstruction",
             agents,
-            "historical v0.28 no-regression rule missing from AGENTS.md",
+            "v0.28R reconstruction rule missing from AGENTS.md",
         ),
         (
-            "v0.28",
+            "DEBT_REGISTER.md",
+            agents,
+            "mandatory debt-register workflow missing from AGENTS.md",
+        ),
+        (
+            "v0.28R",
             source_of_truth,
-            "historical source-of-truth precedence missing",
+            "v0.28R source-of-truth rule missing",
+        ),
+        (
+            "R2 active",
+            matrix,
+            "capability matrix does not identify R2 as active",
+        ),
+        (
+            "TD-R2-001",
+            debt,
+            "R2 lifecycle debt is not explicitly tracked",
+        ),
+        (
+            "P0/P1",
+            debt,
+            "debt closing severity rule missing",
         ),
         (
             "LIVE TRADING: BLOQUEADO.",
@@ -70,7 +95,7 @@ if not errors:
         ("OrderIntent", safety, "OrderIntent safety contract missing"),
         ("Idempotency", safety, "idempotency contract missing"),
         ("FAIL CLOSED", safety, "fail-closed contract missing"),
-        ("negativ", task, "negative safety tests missing from active task"),
+        ("Negative tests", task, "negative safety tests missing from active task"),
         (
             "dentro del asistente",
             graphify_runbook,

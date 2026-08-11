@@ -10,6 +10,7 @@ from autotrade.bootstrap import build_durable_paper_core
 from autotrade.brokers.durable_paper import DurablePaperBroker
 from autotrade.domain import OrderIntent, OrderStatus, OrderType, Side, intent_fingerprint
 from autotrade.engine import DurableTradingPipeline
+from autotrade.execution_state import SQLiteFillAwarePortfolioStore, SQLiteFillStore
 from autotrade.ledger import LedgerEvent
 from autotrade.oms import OrderManagementSystem, OrderRejectedByControlPlane
 from autotrade.persistence import (
@@ -226,10 +227,11 @@ def test_startup_reconciliation_recovers_crash_after_broker_commit(
     db = tmp_path / "state.db"
     runtime = SQLiteRuntime(db)
     ledger = SQLiteEventLedger(runtime)
-    portfolio = SQLitePortfolioStore(runtime)
+    portfolio = SQLiteFillAwarePortfolioStore(runtime)
     portfolio.initialize(empty_portfolio, now=market.observed_at)
     safety_state = SQLiteSafetyStateStore(runtime)
     reservations = SQLiteReservationStore(runtime)
+    fill_store = SQLiteFillStore(runtime)
     durable_broker = DurablePaperBroker(runtime)
     safety = CapitalSafetyKernel(limits, ledger, state_store=safety_state)
     oms = OrderManagementSystem(
@@ -237,6 +239,7 @@ def test_startup_reconciliation_recovers_crash_after_broker_commit(
         ledger=ledger,
         order_store=SQLiteOrderStore(runtime),
         safety_state_store=safety_state,
+        fill_store=fill_store,
     )
     pipeline = DurableTradingPipeline(
         safety=safety,

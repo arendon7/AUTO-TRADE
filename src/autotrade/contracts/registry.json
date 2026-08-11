@@ -1,0 +1,144 @@
+{
+  "registry_version": 1,
+  "contracts": [
+    {
+      "name": "OrderIntent",
+      "version": 1,
+      "compatibility": "additive",
+      "allow_extra_fields": false,
+      "fields": {
+        "intent_id": {"type": "string", "non_empty": true},
+        "idempotency_key": {"type": "string", "non_empty": true},
+        "strategy_id": {"type": "string", "non_empty": true},
+        "symbol": {"type": "string", "non_empty": true},
+        "side": {"type": "string", "enum": ["BUY", "SELL"]},
+        "quantity": {"type": "decimal"},
+        "order_type": {"type": "string", "enum": ["MARKET", "LIMIT"]},
+        "created_at": {"type": "timestamp"},
+        "limit_price": {"type": "nullable_decimal"}
+      }
+    },
+    {
+      "name": "RiskDecision",
+      "version": 1,
+      "compatibility": "additive",
+      "allow_extra_fields": false,
+      "fields": {
+        "decision_id": {"type": "string", "non_empty": true},
+        "intent_id": {"type": "string", "non_empty": true},
+        "status": {"type": "string", "enum": ["APPROVED", "REJECTED"]},
+        "reason_code": {"type": "string", "non_empty": true},
+        "reason_detail": {"type": "string"},
+        "evaluated_at": {"type": "timestamp"},
+        "valid_until": {"type": "timestamp"},
+        "limits_version": {"type": "string", "non_empty": true},
+        "intent_fingerprint": {"type": "string", "non_empty": true},
+        "market_fingerprint": {"type": "string", "non_empty": true},
+        "approved_notional": {"type": "nullable_decimal"},
+        "risk_reducing": {"type": "boolean"},
+        "safety_state_version": {"type": "integer"}
+      }
+    },
+    {
+      "name": "Fill",
+      "version": 1,
+      "compatibility": "strict",
+      "allow_extra_fields": false,
+      "fields": {
+        "fill_id": {"type": "string", "non_empty": true},
+        "order_id": {"type": "string", "non_empty": true},
+        "symbol": {"type": "string", "non_empty": true},
+        "side": {"type": "string", "enum": ["BUY", "SELL"]},
+        "quantity": {"type": "decimal"},
+        "price": {"type": "decimal"},
+        "occurred_at": {"type": "timestamp"}
+      }
+    },
+    {
+      "name": "BrokerExecution",
+      "version": 1,
+      "compatibility": "strict",
+      "allow_extra_fields": false,
+      "fields": {
+        "status": {"type": "string", "enum": ["SUBMITTED", "PARTIALLY_FILLED", "FILLED", "CANCELLED", "REJECTED", "EXPIRED"]},
+        "fills": {"type": "array", "items_contract": "Fill@1"}
+      }
+    },
+    {
+      "name": "OrderRecord",
+      "version": 1,
+      "compatibility": "strict",
+      "allow_extra_fields": false,
+      "fields": {
+        "order_id": {"type": "string", "non_empty": true},
+        "intent": {"type": "object", "object_contract": "OrderIntent@1"},
+        "risk_decision_id": {"type": "string", "non_empty": true},
+        "status": {"type": "string", "enum": ["VALIDATED", "SUBMITTING", "SUBMITTED", "PARTIALLY_FILLED", "CANCEL_PENDING", "REPLACE_PENDING", "FILLED", "CANCELLED", "REJECTED", "EXPIRED", "UNKNOWN"]},
+        "created_at": {"type": "timestamp"},
+        "submitted_at": {"type": "nullable_timestamp"},
+        "filled_quantity": {"type": "decimal"},
+        "average_fill_price": {"type": "nullable_decimal"}
+      }
+    },
+    {
+      "name": "RiskReservation",
+      "version": 1,
+      "compatibility": "strict",
+      "allow_extra_fields": false,
+      "fields": {
+        "reservation_id": {"type": "string", "non_empty": true},
+        "idempotency_key": {"type": "string", "non_empty": true},
+        "intent_fingerprint": {"type": "string", "non_empty": true},
+        "strategy_id": {"type": "string", "non_empty": true},
+        "symbol": {"type": "string", "non_empty": true},
+        "signed_notional": {"type": "decimal"},
+        "status": {"type": "string", "enum": ["RESERVED", "OPEN", "UNKNOWN", "RELEASED"]},
+        "portfolio_version": {"type": "integer"},
+        "created_at": {"type": "timestamp"},
+        "updated_at": {"type": "timestamp"}
+      }
+    },
+    {
+      "name": "SafetyControlState",
+      "version": 1,
+      "compatibility": "strict",
+      "allow_extra_fields": false,
+      "fields": {
+        "kill_switch_active": {"type": "boolean"},
+        "kill_switch_reason": {"type": "string"},
+        "circuit_active": {"type": "boolean"},
+        "circuit_reason": {"type": "string"},
+        "version": {"type": "integer"},
+        "updated_at": {"type": "nullable_timestamp"}
+      }
+    },
+    {
+      "name": "RiskTelemetryState",
+      "version": 1,
+      "compatibility": "strict",
+      "allow_extra_fields": false,
+      "fields": {
+        "session_date": {"type": "string", "non_empty": true},
+        "day_start_equity": {"type": "decimal"},
+        "peak_equity": {"type": "decimal"},
+        "current_equity": {"type": "decimal"},
+        "daily_pnl": {"type": "decimal"},
+        "drawdown": {"type": "decimal"},
+        "version": {"type": "integer"},
+        "updated_at": {"type": "timestamp"}
+      }
+    },
+    {
+      "name": "LedgerEvent",
+      "version": 1,
+      "compatibility": "strict",
+      "allow_extra_fields": false,
+      "fields": {
+        "event_id": {"type": "string", "non_empty": true},
+        "event_type": {"type": "string", "non_empty": true},
+        "occurred_at": {"type": "timestamp"},
+        "payload": {"type": "object"}
+      }
+    }
+  ]
+}

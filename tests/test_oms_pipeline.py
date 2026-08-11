@@ -40,8 +40,9 @@ def test_approved_intent_flows_to_fill_once(limits, market, empty_portfolio, mar
     assert result.order.filled_quantity == Decimal("10")
     assert result.order.average_fill_price == Decimal("101")
     assert broker.submission_count == 1
+    # R2 records immutable fill evidence before the derived order summary.
     event_types = [event.event_type for event in ledger.all_events()]
-    assert event_types == ["RISK_DECISION", "ORDER_VALIDATED", "ORDER_BROKER_RESULT", "FILL"]
+    assert event_types == ["RISK_DECISION", "ORDER_VALIDATED", "FILL", "ORDER_BROKER_RESULT"]
 
 
 def test_rejected_intent_never_touches_broker(limits, market, empty_portfolio, market_buy_intent):

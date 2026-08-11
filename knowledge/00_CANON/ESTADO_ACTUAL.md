@@ -1,77 +1,71 @@
 # ESTADO ACTUAL
 
 Fecha: 2026-08-10
-Fase: v0.28R Reconstruction — R1 active
+Fase: v0.28R Reconstruction — R2 active
 
-## Base ejecutable actual
-`main` contiene Foundation v0.3 reconstruida y certificada:
+## Certified foundation
+R0 Foundation durable permanece como base del control plane:
 - SQLite/WAL durable state;
 - hash-chained Event Ledger;
 - OMS/idempotency cross-process;
 - versioned portfolio + atomic risk reservations;
-- persistent kill switch;
+- persistent kill switch + stale safety-decision invalidation;
 - DurablePaperBroker;
 - startup reconciliation + crash recovery;
 - coverage gate 85%.
 
-Esta base constituye **R0** de la nueva reconstrucción.
+## R1 — CERTIFIED
+R1 Market Data + Strategy DSL + Research Integrity fue fusionado en `main` como:
+`ed1c0689299b625e8092bad99814d93a4fb77438`.
 
-## Decisión sobre el source histórico
-El source ZIP/tree v0.28 no pudo recuperarse y el usuario confirma que no dispone de una copia recuperable. Ya no se mantiene el proyecto bloqueado esperando ese paquete.
+Capacidades certificadas:
+- canonical market-data contracts + provenance hash;
+- structural anti-look-ahead / future-bar execution;
+- explicit fees, spread, slippage and bar-delay latency assumption;
+- volume/leverage limits in research fills;
+- safe declarative Strategy DSL + canonical hash;
+- protected chronological HOLDOUT + one-use final-validation permit;
+- rolling/expanding walk-forward robustness;
+- reproducible moving-block bootstrap;
+- sample adequacy gate;
+- immutable Experiment + Validation evidence registries;
+- explicit failure-path review.
 
-Se adopta ADR-0006: reconstrucción equivalente **v0.28R**, capability-by-capability, usando la evidencia histórica como especificación de invariantes y no como código.
+Evidence:
+- pre-merge: 161 tests PASS, 90.34% total coverage, compile PASS, Core Safety PASS, Knowledge Contract PASS;
+- post-merge `ed1c068...`: Core Safety PASS + Knowledge Contract PASS.
 
-## Evidencia histórica conservada
-`LEGACY_RELEASE_MATRIX.md` conserva tracks verificables hasta v0.28, incluyendo:
-- research/validation/HOLDOUT;
-- Trial Ledger, PBO/DSR y Tournament;
-- Capital Safety/OMS/reconciliation;
-- real market-data intake;
-- portfolio robustness;
-- health/drift + Defensive Health Bridge;
-- closed-kline stream;
-- synchronized shadow/forward evidence;
-- external PAPER Canary/Evidence;
-- broker-side equity bracket protection.
+No known R1 P0/P1 debt at certification.
 
-Última referencia histórica: v0.28 con 302 tests PASS / 207 schemas, runtime SIMULATION y LIVE authority NONE. Esos números no son cuotas; los invariantes son el objetivo.
+## Active track — R2 Capital Safety + OMS maturity
+R2 must close the execution/control-plane debt before R3 introduces real market-data networking.
 
-## Matriz de reconstrucción
-`RECONSTRUCTION_V028R_MATRIX.md` es ahora el backlog canónico de equivalencia.
+Primary work:
+1. full fat-finger/price sanity certification;
+2. complete order/position/strategy/portfolio exposure + leverage matrix;
+3. durable daily-loss/drawdown/circuit semantics;
+4. full partial-fill/cancel/replace state machine;
+5. stronger UNKNOWN/reconciliation/crash/chaos behavior;
+6. machine-readable versioned contract/schema registry;
+7. raise control-plane critical coverage where meaningful.
 
-Tracks:
-- R0 Foundation durable: base actual.
-- R1 Market Data + Strategy DSL + Research Engine: **ACTIVE**.
-- R2 Capital Safety + OMS maturity.
-- R3 Real market data + research governance.
-- R4 Portfolio robustness + health.
-- R5 Streaming + shadow/forward evidence.
-- R6 External PAPER + broker-side protection.
+## Debt discipline
+`knowledge/00_CANON/DEBT_REGISTER.md` is now mandatory. Current R2 P1 items are explicit and therefore cannot be hidden by declaring the track complete early.
 
-`v0.28R` solo se declara cuando R0–R6 estén PASS sin P0/P1 conocidos.
+Planned R3–R6 capabilities remain scheduled gaps, not completed claims.
 
-## PR #4
-PR #4 contiene una base Research v0.4 útil: market contracts, event-driven backtester, explicit costs, temporal splits, protected holdout, experiment registry, walk-forward y robustness gates. Su último head certificado reportó 122 tests PASS y 89.40% coverage.
-
-Deja de ser un fallback congelado. Pasa a ser **candidato R1**, pero no se fusiona hasta completar las filas R1 faltantes, especialmente safe Strategy DSL, moving-block bootstrap, sample adequacy/validation completeness y sincronización del canon actual.
+## Historical source
+The exact v0.28 source remains unavailable and no longer blocks the plan. Historical reports are invariant evidence only. If the ZIP ever appears, it is treated as a forensic comparison artifact, not an automatic replacement for v0.28R.
 
 ## Graphify + Obsidian
-La integración fue corregida:
-- Graphify semantic/deep build se ejecuta dentro de un coding assistant soportado;
-- `graphify-out/SOURCE_SHA` controla frescura;
-- este ChatGPT no afirma haber generado un grafo inexistente;
-- Obsidian `knowledge/` + Git/CI mantienen continuidad y evidencia.
-
-## Deuda conocida actual
-No se oculta como deuda cerrada:
-- lifecycle completo partial fill/cancel/replace se cerrará en R2;
-- source histórico exacto seguirá perdido, pero ya no es dependencia del plan;
-- Graphify graph todavía debe ser generado en runtime/asistente compatible;
-- R1 aún está PARTIAL hasta completar y certificar PR #4.
+- Obsidian `knowledge/` remains the human canon.
+- Graphify semantic/deep build must run in a supported assistant/runtime.
+- Any committed graph must carry a valid `graphify-out/SOURCE_SHA`.
+- No graph is treated as current if its SHA differs.
 
 ## Estado de capital
 **LIVE TRADING: BLOQUEADO.**
-La reconstrucción v0.28R no constituye una promoción LIVE.
+R2 is control-plane reconstruction only; no external PAPER/LIVE authority is added.
 
 ## Próximo hito
-Completar R1 sin deuda P0/P1 y certificarlo sobre `main` antes de iniciar R2.
+Close all R2 P1 debt, certify the R2 matrix on `main`, then and only then begin R3 real-data/research-governance networking.

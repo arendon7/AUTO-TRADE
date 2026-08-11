@@ -1,0 +1,34 @@
+name: R2 Final Semantic Idempotency Patch
+
+on:
+  push:
+    branches: ["reconstruction/r2-capital-oms"]
+    paths: [".r2final2/TRIGGER"]
+
+permissions:
+  contents: write
+
+jobs:
+  apply-reviewed-patch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout exact branch
+        uses: actions/checkout@v4
+        with:
+          ref: reconstruction/r2-capital-oms
+          fetch-depth: 0
+
+      - name: Apply reviewed patch
+        run: python .r2final2/apply.py
+
+      - name: Compile patched tree
+        run: python -m compileall -q src tests scripts
+
+      - name: Commit self-cleaned result
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "fix(r2): make recovery events semantically idempotent"
+          git push origin HEAD:reconstruction/r2-capital-oms
