@@ -166,6 +166,7 @@ def test_quarantine_blocks_new_risk_and_recovery_is_explicit_one_step(tmp_path, 
     reduced = store.acknowledge_recovery(
         entity_id="strategy-a",
         entity_kind=HealthEntityKind.STRATEGY,
+        recovery_id="test_r4_health_bridge-recovery-1",
         confirmed_by="risk-officer",
         now=now + timedelta(seconds=2),
     )
@@ -173,6 +174,7 @@ def test_quarantine_blocks_new_risk_and_recovery_is_explicit_one_step(tmp_path, 
     normal = store.acknowledge_recovery(
         entity_id="strategy-a",
         entity_kind=HealthEntityKind.STRATEGY,
+        recovery_id="test_r4_health_bridge-recovery-2",
         confirmed_by="risk-officer",
         now=now + timedelta(seconds=3),
     )
@@ -195,6 +197,7 @@ def test_recovery_rejects_stale_or_nonimproving_health(tmp_path, now):
         store.acknowledge_recovery(
             entity_id="strategy-a",
             entity_kind=HealthEntityKind.STRATEGY,
+            recovery_id="test_r4_health_bridge-recovery-3",
             confirmed_by="risk-officer",
             now=now + timedelta(seconds=1),
         )
@@ -210,6 +213,7 @@ def test_recovery_rejects_stale_or_nonimproving_health(tmp_path, now):
         store.acknowledge_recovery(
             entity_id="strategy-a",
             entity_kind=HealthEntityKind.STRATEGY,
+            recovery_id="test_r4_health_bridge-recovery-4",
             confirmed_by="risk-officer",
             now=now + timedelta(seconds=6),
         )

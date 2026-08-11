@@ -428,6 +428,15 @@ class SQLiteHealthStateStore:
                     applied_at TEXT NOT NULL,
                     PRIMARY KEY(entity_kind, entity_id, assessment_fingerprint)
                 );
+                CREATE TABLE IF NOT EXISTS health_recovery_acks_v2 (
+                    entity_kind TEXT NOT NULL,
+                    entity_id TEXT NOT NULL,
+                    recovery_id TEXT NOT NULL,
+                    request_fingerprint TEXT NOT NULL,
+                    confirmed_by TEXT NOT NULL,
+                    applied_at TEXT NOT NULL,
+                    PRIMARY KEY(entity_kind, entity_id, recovery_id)
+                );
                 CREATE TABLE IF NOT EXISTS health_transitions_v2 (
                     transition_fingerprint TEXT PRIMARY KEY,
                     entity_kind TEXT NOT NULL,
@@ -604,22 +613,34 @@ class SQLiteHealthStateStore:
         observed: HealthObservationSeries,
         policy: HealthPolicy,
         *,
+        recovery_id: str,
         confirmed_by: str,
         now: datetime,
     ) -> HealthControlState:
+        _identity(recovery_id, "recovery_id")
         _identity(confirmed_by, "confirmed_by")
         if not _aware(now):
             raise ValueError("recovery time must be timezone-aware")
-        assessment = assess_health(baseline, observed, policy, now=now)
-        if assessment.proposed_state is not HealthState.HEALTHY:
-            raise HealthRecoveryRejected("recovery requires fresh HEALTHY evidence")
+        if baseline.entity_id != observed.entity_id or baseline.entity_kind is not observed.entity_kind:
+            raise HealthRecoveryRejected("recovery observation entity does not match baseline")
+        request_fingerprint = _hash(
+            {
+                "recovery_id": recovery_id,
+                "entity_id": baseline.entity_id,
+                "entity_kind": baseline.entity_kind.value,
+                "baseline_fingerprint": baseline.fingerprint,
+                "observation_series_fingerprint": observed.fingerprint,
+                "policy_fingerprint": policy.fingerprint,
+                "confirmed_by": confirmed_by,
+            }
+        )
 
         conn = self._connect()
         try:
             conn.execute("BEGIN IMMEDIATE")
             row = conn.execute(
                 "SELECT * FROM health_state_v2 WHERE entity_kind=? AND entity_id=?",
-                (assessment.entity_kind.value, assessment.entity_id),
+                (baseline.entity_kind.value, baseline.entity_id),
             ).fetchone()
             if row is None:
                 conn.rollback()
@@ -630,10 +651,42 @@ class SQLiteHealthStateStore:
                 baseline_fingerprint=baseline.fingerprint,
                 policy_fingerprint=policy.fingerprint,
             )
+
+            ack = conn.execute(
+                """
+                SELECT request_fingerprint FROM health_recovery_acks_v2
+                WHERE entity_kind=? AND entity_id=? AND recovery_id=?
+                """,
+                (baseline.entity_kind.value, baseline.entity_id, recovery_id),
+            ).fetchone()
+            if ack is not None:
+                if ack["request_fingerprint"] != request_fingerprint:
+                    raise HealthStateConflict("recovery_id reused with conflicting request")
+                conn.commit()
+                return current
+
+            assessment = assess_health(baseline, observed, policy, now=now)
+            if assessment.proposed_state is not HealthState.HEALTHY:
+                raise HealthRecoveryRejected("recovery requires fresh HEALTHY evidence")
             if current.state is HealthState.RETIRED:
-                conn.rollback()
                 raise HealthRecoveryRejected("RETIRED state cannot be recovered automatically")
+
             if current.state is HealthState.HEALTHY:
+                conn.execute(
+                    """
+                    INSERT INTO health_recovery_acks_v2(
+                        entity_kind,entity_id,recovery_id,request_fingerprint,confirmed_by,applied_at
+                    ) VALUES(?,?,?,?,?,?)
+                    """,
+                    (
+                        current.entity_kind.value,
+                        current.entity_id,
+                        recovery_id,
+                        request_fingerprint,
+                        confirmed_by,
+                        now.isoformat(),
+                    ),
+                )
                 conn.commit()
                 return current
 
@@ -654,6 +707,21 @@ class SQLiteHealthStateStore:
                 updated_at=now,
             )
             self._upsert_state(conn, updated)
+            conn.execute(
+                """
+                INSERT INTO health_recovery_acks_v2(
+                    entity_kind,entity_id,recovery_id,request_fingerprint,confirmed_by,applied_at
+                ) VALUES(?,?,?,?,?,?)
+                """,
+                (
+                    current.entity_kind.value,
+                    current.entity_id,
+                    recovery_id,
+                    request_fingerprint,
+                    confirmed_by,
+                    now.isoformat(),
+                ),
+            )
             self._append_transition(
                 conn,
                 entity_kind=current.entity_kind,

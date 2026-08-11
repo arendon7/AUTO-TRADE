@@ -262,6 +262,16 @@ class SQLiteHealthBridgeStore:
                     applied_at TEXT NOT NULL,
                     PRIMARY KEY(entity_kind, entity_id, health_state_fingerprint)
                 );
+                CREATE TABLE IF NOT EXISTS health_bridge_recovery_acks (
+                    entity_kind TEXT NOT NULL,
+                    entity_id TEXT NOT NULL,
+                    recovery_id TEXT NOT NULL,
+                    request_fingerprint TEXT NOT NULL,
+                    health_state_fingerprint TEXT NOT NULL,
+                    confirmed_by TEXT NOT NULL,
+                    applied_at TEXT NOT NULL,
+                    PRIMARY KEY(entity_kind, entity_id, recovery_id)
+                );
                 CREATE TABLE IF NOT EXISTS health_bridge_transitions (
                     transition_id TEXT PRIMARY KEY,
                     entity_kind TEXT NOT NULL,
@@ -408,14 +418,24 @@ class SQLiteHealthBridgeStore:
         *,
         entity_id: str,
         entity_kind: HealthEntityKind,
+        recovery_id: str,
         confirmed_by: str,
         now: datetime,
     ) -> HealthBridgeState:
+        _identity(recovery_id, "recovery_id")
         _identity(confirmed_by, "confirmed_by")
         _validate_time(now)
         health = self._authoritative_health(entity_id, entity_kind)
-        self._require_fresh_health(health, now=now)
         desired_mode, _ = self._mapped_control(health.state)
+        request_fingerprint = _hash(
+            {
+                "recovery_id": recovery_id,
+                "entity_id": entity_id,
+                "entity_kind": entity_kind.value,
+                "health_state_fingerprint": health.fingerprint,
+                "confirmed_by": confirmed_by,
+            }
+        )
 
         conn = self._runtime.connect()
         try:
@@ -424,6 +444,21 @@ class SQLiteHealthBridgeStore:
             if current is None:
                 raise HealthBridgeRecoveryRejected("no bridge state exists for entity")
             self._assert_binding(current, health)
+
+            ack = conn.execute(
+                """
+                SELECT request_fingerprint FROM health_bridge_recovery_acks
+                WHERE entity_kind=? AND entity_id=? AND recovery_id=?
+                """,
+                (entity_kind.value, entity_id, recovery_id),
+            ).fetchone()
+            if ack is not None:
+                if ack["request_fingerprint"] != request_fingerprint:
+                    raise HealthBridgeConflict("recovery_id reused with conflicting request")
+                conn.execute("COMMIT")
+                return current
+
+            self._require_fresh_health(health, now=now)
             if health.version < current.health_state_version:
                 raise HealthBridgeRecoveryRejected("recovery health state is older than bridge evidence")
             if (
@@ -460,6 +495,23 @@ class SQLiteHealthBridgeStore:
                 """,
                 (entity_kind.value, entity_id, health.fingerprint, now.isoformat()),
             )
+            conn.execute(
+                """
+                INSERT INTO health_bridge_recovery_acks(
+                    entity_kind,entity_id,recovery_id,request_fingerprint,
+                    health_state_fingerprint,confirmed_by,applied_at
+                ) VALUES(?,?,?,?,?,?,?)
+                """,
+                (
+                    entity_kind.value,
+                    entity_id,
+                    recovery_id,
+                    request_fingerprint,
+                    health.fingerprint,
+                    confirmed_by,
+                    now.isoformat(),
+                ),
+            )
             self._append_transition_tx(
                 conn,
                 state=updated,
@@ -473,13 +525,14 @@ class SQLiteHealthBridgeStore:
                 conn,
                 event_id=(
                     f"health-bridge-recovery:{entity_kind.value}:{entity_id}:"
-                    f"{updated.bridge_version}"
+                    f"{recovery_id}"
                 ),
                 event_type="HEALTH_BRIDGE_RECOVERY_ACKNOWLEDGED",
                 occurred_at=now,
                 payload={
                     "entity_kind": entity_kind.value,
                     "entity_id": entity_id,
+                    "recovery_id": recovery_id,
                     "from_mode": current.mode.value,
                     "to_mode": updated.mode.value,
                     "confirmed_by": confirmed_by,

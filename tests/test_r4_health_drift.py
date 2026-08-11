@@ -232,6 +232,7 @@ def test_recovery_recomputes_fresh_healthy_evidence_and_only_improves_one_level(
         baseline,
         healthy_window,
         p,
+        recovery_id="test_r4_health_drift-recovery-1",
         confirmed_by="risk-officer",
         now=t + timedelta(seconds=1),
     )
@@ -240,6 +241,7 @@ def test_recovery_recomputes_fresh_healthy_evidence_and_only_improves_one_level(
         baseline,
         healthy_window,
         p,
+        recovery_id="test_r4_health_drift-recovery-2",
         confirmed_by="risk-officer",
         now=t + timedelta(seconds=2),
     )
@@ -257,7 +259,7 @@ def test_recovery_rejects_unhealthy_recomputed_evidence_and_retired_state(tmp_pa
 
     with pytest.raises(HealthRecoveryRejected, match="HEALTHY evidence"):
         store.acknowledge_recovery(
-            baseline, bad_window, p, confirmed_by="risk-officer", now=t + timedelta(seconds=1)
+            baseline, bad_window, p, recovery_id="test_r4_health_drift-inline-recovery-1", confirmed_by="risk-officer", now=t + timedelta(seconds=1)
         )
 
     different_bad = observed(now, ("-0.02", "0.001", "-0.004", "0.002", "-0.006"), source_char="e")
@@ -267,7 +269,7 @@ def test_recovery_rejects_unhealthy_recomputed_evidence_and_retired_state(tmp_pa
     healthy_window = observed(now, ("0.011", "0.029", "0.021", "0.039", "0.020"), source_char="b")
     with pytest.raises(HealthRecoveryRejected, match="RETIRED"):
         store.acknowledge_recovery(
-            baseline, healthy_window, p, confirmed_by="risk-officer", now=t + timedelta(seconds=3)
+            baseline, healthy_window, p, recovery_id="test_r4_health_drift-inline-recovery-2", confirmed_by="risk-officer", now=t + timedelta(seconds=3)
         )
 
 

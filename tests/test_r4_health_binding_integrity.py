@@ -212,6 +212,7 @@ def test_recovery_cannot_swap_to_easier_baseline(tmp_path, now):
                 values=("0.006", "0.019", "0.011", "0.024", "0.010"),
             ),
             p,
+            recovery_id="test_r4_health_binding_integrity-recovery-1",
             confirmed_by="risk-officer",
             now=t + timedelta(seconds=1),
         )
@@ -231,6 +232,7 @@ def test_recovery_cannot_swap_policy(tmp_path, now):
             baseline,
             _healthy_window(now, source="recovery-policy-window"),
             p2,
+            recovery_id="test_r4_health_binding_integrity-recovery-2",
             confirmed_by="risk-officer",
             now=t + timedelta(seconds=1),
         )
