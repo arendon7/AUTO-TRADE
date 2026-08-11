@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "track": "R6",
+  "debt_id": "TD-R6-010",
+  "purpose": "One-shot publication trigger for the already certified OMS-owned external PAPER handoff implementation.",
+  "expected_action": "Apply helpers, re-run focused/full certification, publish code/tests only, and delete this trigger plus temporary helper scripts.",
+  "external_paper_order_sent": false,
+  "live_trading": "BLOCKED",
+  "capital_authority": "NONE"
+}
