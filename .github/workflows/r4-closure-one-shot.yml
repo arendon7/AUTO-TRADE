@@ -1,0 +1,42 @@
+name: R4 Certified Slice Closure One-Shot
+
+on:
+  push:
+    branches: ["reconstruction/r4-portfolio-health"]
+    paths: [".r4closure/TRIGGER"]
+
+permissions:
+  contents: write
+
+jobs:
+  close-certified-slices:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout exact R4 branch
+        uses: actions/checkout@v5
+        with:
+          ref: reconstruction/r4-portfolio-health
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Apply reviewed closures
+        run: python .r4closure/apply.py
+
+      - name: Validate debt register
+        run: python scripts/check_debt_register.py
+
+      - name: Validate canonical matrix contract
+        run: python scripts/check_knowledge_contract.py
+
+      - name: Commit self-cleaned closure
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "docs(r4): close certified Portfolio State integrity debt"
+          git push origin HEAD:reconstruction/r4-portfolio-health
