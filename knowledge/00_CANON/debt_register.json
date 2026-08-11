@@ -443,6 +443,21 @@
       "severity": "P1",
       "status": "OPEN",
       "track": "R4"
+    },
+    {
+      "area": "Defensive Health Bridge authoritative-state synchronization gap",
+      "evidence": [
+        "src/autotrade/research/health.py",
+        "src/autotrade/health_bridge.py",
+        "src/autotrade/safety.py",
+        "src/autotrade/oms.py"
+      ],
+      "id": "TD-R4-013",
+      "next_action": "Make effective_control compare the durable bridge projection with the current authoritative HealthControlState on every Safety/OMS read. Missing/stale/future/conflicting/backward authoritative state must fail closed; a newer stricter Health state must tighten immediately even before sync; a newer less-restrictive state must not relax until explicit bridge recovery/sync policy permits it.",
+      "resolution": "",
+      "severity": "P1",
+      "status": "OPEN",
+      "track": "R4"
     }
   ],
   "registry_version": 1

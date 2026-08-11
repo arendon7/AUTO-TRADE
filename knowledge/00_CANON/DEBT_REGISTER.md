@@ -35,6 +35,7 @@ Evidencia conjunta para `TD-R4-002..005`: **412 tests PASS / 86.79% coverage**, 
 | ID | Sev | Track | Área | Condición de cierre |
 |---|---|---|---|---|
 | `TD-R4-012` | P1 | R4 | Health recovery idempotency | require durable recovery_id binding in Health + Defensive Bridge so a retried acknowledgement cannot relax two levels or bump safety state twice |
+| `TD-R4-013` | P1 | R4 | Authoritative Health overlay | every effective bridge read must compare current authoritative Health; unsynced worsening tightens immediately, unsynced recovery never relaxes |
 | `TD-OPS-001` | P3 | OPS | Graphify | generar graph semántico/deep real en runtime soportado y vincularlo a `SOURCE_SHA`; nunca fabricar artefactos |
 
 Graphify P3/OPS no es una deuda P0/P1/P2 del track R4, pero permanece explícitamente abierta.
