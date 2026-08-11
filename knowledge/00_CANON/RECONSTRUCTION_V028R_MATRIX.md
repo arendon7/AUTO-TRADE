@@ -97,7 +97,7 @@ Certification artifact: `knowledge/60_EVIDENCE/R5_CERTIFICATION.json`.
 R5 adds no external PAPER/LIVE order authority and does not reuse FINAL_HOLDOUT for forward recalibration.
 
 ## Next target — R6
-R6 is gated until PR #13 is merged and the exact resulting `main` SHA is recertified green. R6 will cover external Alpaca PAPER only, bounded canary qualification and broker-side protection evidence; LIVE remains blocked.
+R6 starts only from post-R5-green `main` `75dcbef65b061f742745ba7be0665521967e0587`. Blocking debt registered before implementation: `TD-R6-001..008`. R6 is PAPER-only; LIVE remains blocked and outside v0.28R authority.
 
 ## Debt policy
 A track cannot be PASS with known P0/P1/P2 defects assigned to that track, skipped negative tests, reduced coverage, untracked mismatches, hidden critical TODOs or temporary broker/network bypasses. `knowledge/00_CANON/debt_register.json` is the machine-readable authority; this matrix is the capability view.

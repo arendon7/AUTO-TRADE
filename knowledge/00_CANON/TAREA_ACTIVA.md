@@ -1,47 +1,58 @@
 # TAREA ACTIVA — AUTO-TRADE
 
 ## Objetivo inmediato
-**Integrar R5 certificado en `main`, recertificar el SHA exacto resultante y sólo entonces abrir R6.**
+**R6 — external Alpaca PAPER gateway + bounded canary + protection/qualification evidence.**
 
-R5 ya tiene branch certification sobre `0d4f75d083a055b83646bb861f08731aecace560`. No añadir nuevas features R5 ni iniciar external PAPER desde la rama pre-merge.
+Base obligatoria: post-R5-green `main` `75dcbef65b061f742745ba7be0665521967e0587`.
+Branch activa: `reconstruction/r6-external-paper-protection`.
 
-## Secuencia obligatoria
-1. exigir Core Safety + Knowledge Contract verdes en el head final de PR #13;
-2. sacar PR #13 de DRAFT sólo con head exacto certificado;
-3. merge por squash usando `expected_head_sha`;
-4. verificar Core Safety + Knowledge Contract sobre el SHA exacto resultante en `main`;
-5. sólo si `main` queda verde, crear rama R6 desde ese SHA;
-6. registrar explícitamente deuda R6 antes de programar cualquier gateway PAPER.
+## Deuda registrada antes de programar
+- `TD-R6-001` — exact PAPER gateway/environment attestation.
+- `TD-R6-002` — submit ambiguity + durable client_order_id idempotency/reconciliation.
+- `TD-R6-003` — bounded PAPER canary prerequisites/cap.
+- `TD-R6-004` — PAPER terminality/fills/slippage/reconciliation qualification evidence.
+- `TD-R6-005` — broker-side equity bracket protection.
+- `TD-R6-006` — PAPER trade_updates protection evidence.
+- `TD-R6-007` — unsupported products/protection modes fail closed.
+- `TD-R6-008` — permanent PAPER-only/LIVE-deny authority boundary.
 
-## R6 — alcance siguiente, todavía no iniciado
-- external Alpaca PAPER gateway, disabled by default;
-- exact PAPER host allowlist; LIVE host forbidden;
-- bounded external PAPER canary con prerequisites y notional cap más estricto;
-- qualification evidence de terminality/fills/slippage/reconciliation;
-- broker-side equity bracket protection con parent + exactamente 2 legs validadas;
-- PAPER `trade_updates` protection evidence cuando la policy lo requiera;
-- unsupported products fail closed; crypto bracket no soportado salvo certificación separada.
+## Orden de implementación
+1. PAPER gateway policy + account/environment attestation, **without submit path enabled**;
+2. durable submit intent/client_order_id state machine + ambiguous transport reconciliation;
+3. deterministic canary preflight and tighter notional cap;
+4. equity bracket request/response protection validation;
+5. PAPER trade_updates ingestion/correlation;
+6. qualification evidence store and reconciliation proofs;
+7. bounded external PAPER evidence only after all prior gates are green;
+8. adversarial certification + debt closure.
 
 ## Negative tests obligatorios para R6
-- gateway disabled by default => cero red y cero order submission;
-- LIVE host, arbitrary host, credentials/proxy no autorizado o path no permitido => reject antes de I/O;
-- falta de preregistration, Instrument Master, Health/Safety approval, reconciliation o PAPER qualification => canary bloqueado;
-- canary notional exactamente en frontera permitido y un quantum por encima rechazado; nunca auto-upsize a venue minimum;
-- stale/missing/conflicting market/portfolio/broker state => fail closed, no nueva exposición;
-- ambiguous submit/timeout => UNKNOWN + reconciliation; nunca retry ciego que duplique orden;
-- partial fill/cancel/replace/restart preservan idempotencia y reservas;
-- bracket equity debe tener parent + exactamente stop-loss y take-profit coherentes; leg faltante/extra/crossed/invalid => reject;
-- asset/producto sin bracket certificado => fail closed; crypto bracket permanece unsupported;
-- `trade_updates` faltante/stale/conflictivo cuando policy lo exige => protección no certificada;
-- ninguna ruta R6 acepta host LIVE ni puede promover LIVE authority;
-- AI/research output jamás es autorización de orden; Safety + OMS siguen siendo gates deterministas.
+- gateway disabled by default => zero network and zero order submission;
+- exact LIVE host, arbitrary host, redirect, credentials in URL, unsafe proxy or path/method not allowlisted => reject before I/O;
+- missing/wrong paper credentials or account/environment attestation => no write;
+- `trading_blocked`, stale/unknown account or malformed account state => no write;
+- no deterministic Safety/OMS approval => gateway cannot submit;
+- same local order + same client_order_id => idempotent; same client_order_id + changed payload => conflict;
+- timeout/connection reset/ambiguous submit => UNKNOWN + GET by client_order_id/reconciliation; no blind POST retry;
+- restart during UNKNOWN preserves ambiguity and blocks new exposure until resolved;
+- canary prerequisites missing/stale/DEGRADED/UNKNOWN => blocked;
+- canary notional at exact boundary allowed only when all other gates pass; one quantum above rejected; no auto-upsize to venue minimum;
+- missing/partial/contradictory terminal/fill/slippage/reconciliation evidence => PAPER qualification FAIL;
+- bracket equity parent must have exactly one take-profit and one stop-loss; missing/extra/crossed/side/qty/price/TIF/extended-hours mismatch => reject;
+- broker nested response must prove exactly two coherent protection legs before bracket is considered protected;
+- crypto/unknown product bracket, OCO or OTO => fail closed; R6 crypto remains simple-order only;
+- PAPER `trade_updates` wrong host/auth, malformed/binary decode failure, event gap/order mismatch/disconnect ambiguity => protection evidence FAIL;
+- no R6 source may contain/use LIVE trading host or convert PAPER qualification into LIVE authority;
+- AI/research output is never an execution authorization; Safety + OMS remain mandatory deterministic authority.
 
 ## Restricciones
 - Coverage gate >=85% intacto.
-- No relajar negative tests para cerrar R6.
-- `TD-OPS-001` permanece visible; no fabricar Graphify.
-- No declarar rentabilidad por PAPER qualification.
+- No reduce/relax negative tests to close R6.
+- No external PAPER submit until gateway + ambiguity + canary + authority gates are implemented and green.
+- Any real PAPER test must be explicitly enabled, bounded and evidenced; no unbounded loops or broad market activity.
+- `TD-OPS-001` remains visible; never fabricate Graphify.
+- No profitability claim from paper simulation.
 
 ## Capital
 **LIVE TRADING: BLOQUEADO.**
-R6, si se certifica, será PAPER-only; cualquier futuro LIVE requerirá promoción separada y explícita fuera de v0.28R.
+R6 may authorize bounded PAPER only after separate certification; LIVE remains outside v0.28R.

@@ -1,6 +1,6 @@
 # CONTEXTO RÁPIDO — AUTO-TRADE
 
-Estado actual: **v0.28R R0–R5 certified; R5 PR #13 pending integration**.
+Estado actual: **v0.28R R0–R5 certified; R6 active**.
 
 ## Leer primero
 1. `knowledge/00_CANON/SOURCE_OF_TRUTH.md`
@@ -10,18 +10,18 @@ Estado actual: **v0.28R R0–R5 certified; R5 PR #13 pending integration**.
 5. `knowledge/00_CANON/debt_register.json`
 6. `knowledge/40_HANDOFF/HANDOFF_ACTUAL.md`
 7. `knowledge/60_EVIDENCE/R5_CERTIFICATION.json`
-8. `knowledge/60_EVIDENCE/R5_LIVE_CLOSED_KLINE_STREAM_EVIDENCE.json`
 
-## R5 certification
-Basis `0d4f75d083a055b83646bb861f08731aecace560` from post-R4-green `main` `c294aa69f35b64559e3aea58a1c0661e66599db8`: **606 tests PASS / 86.49% coverage**; 10 contracts; Research Authority, R5 Authority, Debt Register and Knowledge Contract PASS. R5 blocking debt open: 0.
+## Base R6
+Exact post-R5-green `main`: `75dcbef65b061f742745ba7be0665521967e0587`.
+Core Safety `31466198629` PASS; Knowledge Contract `31466198624` PASS; **606 tests / 86.49%**.
 
-## Regla operativa inmediata
-No empezar R6 desde la rama R5. Primero PR #13 -> merge -> CI verde sobre SHA exacto de `main`; después crear R6 y registrar su deuda.
+## R6
+Branch `reconstruction/r6-external-paper-protection`.
+`TD-R6-001..008` registered P1 OPEN before implementation.
 
-## Próximo track
-R6 = external Alpaca PAPER gateway + bounded canary + PAPER evidence qualification + broker-side protection. PAPER only; LIVE remains forbidden.
+R6 = exact PAPER gateway -> ambiguity/idempotency/reconciliation -> bounded canary -> bracket/trade_updates protection -> qualification evidence -> adversarial certification.
 
 ## Authority
-AI/research/Portfolio Manager/stream/shadow/forward no tienen autoridad de ejecución. Safety + OMS continúan siendo fronteras deterministas obligatorias.
+External PAPER is not yet enabled. Safety + OMS remain mandatory. AI/research/PAPER evidence cannot authorize LIVE.
 
 **LIVE TRADING: BLOQUEADO.**

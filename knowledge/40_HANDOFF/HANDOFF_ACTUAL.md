@@ -1,41 +1,44 @@
 # HANDOFF ACTUAL — AUTO-TRADE
 
 Fecha: 2026-08-11
-Estado: **R5 branch certified; PR #13 integration pending**
+Estado: **R5 post-merge certified; R6 active**
 
-## Base integrada conocida
-R4 está integrado y post-merge certificado en `main` `c294aa69f35b64559e3aea58a1c0661e66599db8`.
+## Base certificada
+`main` `75dcbef65b061f742745ba7be0665521967e0587` is exact post-R5 green base.
+- Core Safety `31466198629` PASS — 606 tests / 86.49%.
+- Knowledge Contract `31466198624` PASS.
+- Contract Registry / Research Authority / R5 Authority / Debt Register PASS.
 
-## R5
-Branch: `reconstruction/r5-stream-shadow-forward`.
-PR: #13.
-Certification basis: `0d4f75d083a055b83646bb861f08731aecace560`.
-Evidence: `knowledge/60_EVIDENCE/R5_CERTIFICATION.json`.
-Result: **606 tests PASS / 86.49% coverage**, 10 contracts, Research Authority PASS, R5 Authority Boundary PASS, Debt Register PASS, Knowledge Contract PASS.
+## R6
+Branch: `reconstruction/r6-external-paper-protection`.
+Blocking debt registered before implementation: `TD-R6-001..008`, all P1 OPEN.
 
-Todos los P0/P1/P2 conocidos de R5 (`TD-R5-001..006`) están CLOSED. Todas las filas requeridas R5 de la capability matrix están PASS.
+Order:
+1. exact PAPER-only gateway/environment attestation without submit enabled;
+2. durable client_order_id + ambiguity/reconciliation state machine;
+3. bounded canary preflight/cap;
+4. equity bracket protection validation;
+5. PAPER trade_updates evidence;
+6. terminality/fill/slippage/reconciliation qualification;
+7. bounded external PAPER evidence only after prior gates pass;
+8. adversarial certification.
 
-## Invariantes de cierre
-- market-data stream disabled by default; exact host/path validated before I/O;
-- adapter receive-only, bounded, proxy/compression disabled; no application `.send()` surface;
-- only closed klines advance cursor; duplicate conflict/out-of-order/gap fail closed;
-- timeout/EOF/socket/integrity failure => sticky DEGRADED; reconnect cannot hide gaps;
-- shadow uses exact frozen weights/timestamps and fully recomputable canonical components;
-- shadow + forward chains have anchored heads detecting tail deletion;
-- forward evidence is post-activation only and structurally separated from FINAL_HOLDOUT;
-- permanent R5 CI rejects execution-authority creep;
-- no external PAPER/LIVE authority added by R5.
+## R6 external facts locked from official Alpaca docs
+- PAPER Trading API uses `paper-api.alpaca.markets` and separate paper credentials from LIVE.
+- client_order_id can identify/retrieve an order and is required for safe retry reconciliation.
+- bracket class is supported for equities; crypto order class is simple only.
+- PAPER `trade_updates` is available on the PAPER trading WebSocket and uses binary frames.
 
-## Próxima acción exacta
-1. final CI green on clean canonical R5 head;
-2. mark PR #13 ready and update exact evidence;
-3. squash merge using expected head SHA;
-4. recertify exact resulting `main` SHA;
-5. create R6 only from that green SHA and register R6 debt before coding.
+## Inherited invariants
+- Safety + OMS mandatory and deterministic.
+- Kill switch/reconciliation/UNKNOWN semantics remain fail-closed.
+- No stale/missing/ambiguous evidence increases exposure.
+- PAPER simulation is not profitability proof.
+- LIVE host/authority remains prohibited.
 
 ## Deuda no bloqueante
-`TD-OPS-001` Graphify P3/OPS remains OPEN; no fake semantic/deep artifact generation.
+`TD-OPS-001` Graphify P3/OPS remains OPEN.
 
 ## Capital
 **LIVE TRADING: BLOQUEADO.**
-R5 added no external PAPER/LIVE authority.
+External PAPER is still disabled until R6 gates and certification explicitly permit a bounded canary.

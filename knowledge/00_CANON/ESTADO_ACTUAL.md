@@ -1,38 +1,36 @@
 # ESTADO ACTUAL — AUTO-TRADE
 
 Fecha: 2026-08-11
-Estado canónico: **v0.28R reconstruction — R0–R5 CERTIFIED; R5 PR #13 integration pending**
+Estado canónico: **v0.28R reconstruction — R0–R5 CERTIFIED; R6 ACTIVE**
 
-## Base integrada
-R4 está integrado y post-merge recertificado en `main` `c294aa69f35b64559e3aea58a1c0661e66599db8`.
-
-## R5 certificado en branch
-Branch: `reconstruction/r5-stream-shadow-forward`.
-Certification basis: `0d4f75d083a055b83646bb861f08731aecace560`.
-- Core Safety `31465755866`: PASS — **606 tests / 86.49% coverage**.
-- Knowledge Contract `31465755855`: PASS.
-- Contract Registry: 10 PASS — `ddb94afa8916be37d0d956e6c32f775ea41c0fb79f4ea26d2d65dfa286c62785`.
+## Base certificada
+R5 quedó integrado y post-merge recertificado en exact `main` `75dcbef65b061f742745ba7be0665521967e0587`.
+- Core Safety `31466198629`: PASS — **606 tests / 86.49% coverage**.
+- Knowledge Contract `31466198624`: PASS.
+- Contract Registry: 10 PASS.
 - Research/Advisory Authority Boundary: PASS.
 - R5 Stream/Shadow/Forward Authority Boundary: PASS.
-- R5 P0/P1/P2 OPEN: **0**.
+- Debt Register Contract: PASS.
 
-Capacidades:
-- closed-kline market-data-only WSS stream, disabled by default and bounded;
-- identical duplicate idempotency + conflicting duplicate/out-of-order/gap fail-closed;
-- timeout/EOF/socket/integrity failure => sticky DEGRADED, no reconnect hiding gaps;
-- synchronized research-only portfolio shadow with exact frozen weights/timestamps, recomputation and anchored hash chain;
-- append-only post-activation forward evidence sourced from verified shadow and separated from FINAL_HOLDOUT;
-- permanent CI execution-authority boundary.
+## R6 activo
+Branch: `reconstruction/r6-external-paper-protection`.
+Base exacta: `75dcbef65b061f742745ba7be0665521967e0587`.
+Antes de implementar se registraron `TD-R6-001..008`, todas P1 OPEN.
 
-Live transport evidence: `R5_LIVE_CLOSED_KLINE_STREAM_EVIDENCE.json`, run `31465471204`, BTCUSDT 1s from market-data-only endpoint.
-
-## Integración pendiente
-PR #13 must remain feature-frozen. After merge, recertify the exact resulting `main` SHA before creating R6.
+Alcance:
+- exact Alpaca PAPER gateway + paper environment attestation;
+- durable client_order_id/idempotency + UNKNOWN/reconciliation semantics;
+- tightly bounded external PAPER canary;
+- PAPER terminality/fill/slippage/reconciliation qualification evidence;
+- broker-side equity bracket protection;
+- PAPER trade_updates protection evidence;
+- unsupported products fail closed;
+- permanent PAPER-only/LIVE-deny authority boundary.
 
 ## Deuda
-`TD-OPS-001` Graphify P3/OPS remains OPEN and non-blocking.
+- R6 P1 OPEN: **8** (`TD-R6-001..008`).
+- `TD-OPS-001` Graphify P3/OPS: OPEN, non-blocking.
 
 ## Capital
 **LIVE TRADING: BLOQUEADO.**
-External PAPER authority added by R5: NONE.
-R5 certification is infrastructure/evidence integrity, not profitability proof.
+R6 is PAPER-only. Paper simulation results are not profitability proof and cannot promote LIVE authority.

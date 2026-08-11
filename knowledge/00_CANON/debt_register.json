@@ -573,6 +573,86 @@
       "severity": "P1",
       "status": "CLOSED",
       "track": "R5"
+    },
+    {
+      "area": "External Alpaca PAPER gateway and environment attestation",
+      "evidence": [],
+      "id": "TD-R6-001",
+      "next_action": "Implement a disabled-by-default Alpaca Trading API gateway restricted to exact https://paper-api.alpaca.markets, paper credentials and explicit paper-account attestation before any write. Reject LIVE/arbitrary hosts, redirects, unsafe proxying, malformed account state, blocked trading, secret leakage and any submit before deterministic Safety/OMS approval.",
+      "resolution": "",
+      "severity": "P1",
+      "status": "OPEN",
+      "track": "R6"
+    },
+    {
+      "area": "External PAPER submit ambiguity, client-order idempotency and reconciliation",
+      "evidence": [],
+      "id": "TD-R6-002",
+      "next_action": "Bind every external PAPER submit to a deterministic durable client_order_id/idempotency record. On timeout, transport ambiguity or non-terminal acknowledgement enter UNKNOWN and reconcile by client/order ID; never blind-retry a potentially accepted order. Prove restart-safe exact-once local projection and conflict rejection.",
+      "resolution": "",
+      "severity": "P1",
+      "status": "OPEN",
+      "track": "R6"
+    },
+    {
+      "area": "Bounded external PAPER canary prerequisites and capital cap",
+      "evidence": [],
+      "id": "TD-R6-003",
+      "next_action": "Implement an explicit opt-in PAPER canary gate requiring certified R0-R5 state, authoritative Instrument Master, synchronized portfolio/broker state, healthy Safety/Health controls, no unresolved UNKNOWN/reconciliation debt and a canary notional cap strictly tighter than normal portfolio limits. Never auto-upsize to venue minimums.",
+      "resolution": "",
+      "severity": "P1",
+      "status": "OPEN",
+      "track": "R6"
+    },
+    {
+      "area": "PAPER evidence qualification: terminality, fills, slippage and reconciliation",
+      "evidence": [],
+      "id": "TD-R6-004",
+      "next_action": "Persist tamper-evident PAPER qualification evidence for submit/ack/terminal state, fills, prices, timestamps, slippage and broker/local reconciliation. Missing, stale, partial or contradictory evidence must be unqualified and cannot promote authority or profitability claims.",
+      "resolution": "",
+      "severity": "P1",
+      "status": "OPEN",
+      "track": "R6"
+    },
+    {
+      "area": "Broker-side equity bracket protection",
+      "evidence": [],
+      "id": "TD-R6-005",
+      "next_action": "Implement equity-only bracket order construction/validation with one parent plus exactly one take-profit and one stop-loss leg, coherent side/quantity/prices, day/gtc only, extended_hours false, authoritative venue increments and nested broker-response verification. Missing/extra/crossed/mismatched legs fail closed.",
+      "resolution": "",
+      "severity": "P1",
+      "status": "OPEN",
+      "track": "R6"
+    },
+    {
+      "area": "PAPER trade_updates protection evidence",
+      "evidence": [],
+      "id": "TD-R6-006",
+      "next_action": "Implement bounded PAPER-only trade_updates ingestion and durable correlation to submitted client/order IDs. Authentication/listen protocol, binary-frame handling, event ordering, terminality and disconnect ambiguity must fail closed when protection policy requires streaming evidence.",
+      "resolution": "",
+      "severity": "P1",
+      "status": "OPEN",
+      "track": "R6"
+    },
+    {
+      "area": "Unsupported external products and protection modes fail closed",
+      "evidence": [],
+      "id": "TD-R6-007",
+      "next_action": "Reject unsupported order classes/products before I/O. In particular, broker-side bracket/OTO/OCO protection is equity-only for this track; crypto remains simple-order only and cannot be treated as bracket-protected without separate certification. Unknown asset classes, unsupported TIF/order types or missing Instrument Master rules fail closed.",
+      "resolution": "",
+      "severity": "P1",
+      "status": "OPEN",
+      "track": "R6"
+    },
+    {
+      "area": "Permanent R6 PAPER-only authority boundary",
+      "evidence": [],
+      "id": "TD-R6-008",
+      "next_action": "Add permanent CI/static authority checks proving R6 external execution code contains no LIVE Trading API host, cannot bypass Safety/OMS, cannot accept AI/research output as authorization, cannot silently broaden host/method scope and cannot promote PAPER evidence into LIVE authority. Keep LIVE fail-closed globally.",
+      "resolution": "",
+      "severity": "P1",
+      "status": "OPEN",
+      "track": "R6"
     }
   ],
   "registry_version": 1
