@@ -280,12 +280,34 @@ def evaluate_allocation_robustness(
     )
 
 
-def require_robust_allocation(evidence: AllocationRobustnessEvidence) -> None:
-    if not isinstance(evidence, AllocationRobustnessEvidence):
-        raise TypeError("evidence must be AllocationRobustnessEvidence")
-    failed = tuple(scenario.scenario_id for scenario in evidence.scenarios if not scenario.passes_policy)
+def require_robust_allocation(
+    dependence: DependenceEvidence,
+    budget_policy: DiversificationBudgetPolicy,
+    strategy_weights: Mapping[str, Decimal],
+    spec: AllocationRobustnessSpec,
+    policy: AllocationRobustnessPolicy,
+) -> AllocationRobustnessEvidence:
+    """Recompute the complete robustness universe before granting a PASS.
+
+    A serialized or manually constructed AllocationRobustnessEvidence is audit
+    evidence, never a self-authorizing token. Consumers that need a gate must
+    provide the original self-validating dependence evidence and frozen policy
+    inputs so the scenarios are rebuilt deterministically.
+    """
+
+    evidence = evaluate_allocation_robustness(
+        dependence,
+        budget_policy,
+        strategy_weights,
+        spec,
+        policy,
+    )
+    failed = tuple(
+        scenario.scenario_id for scenario in evidence.scenarios if not scenario.passes_policy
+    )
     if failed:
         raise FragileAllocation(f"allocation failed robustness scenarios: {failed}")
+    return evidence
 
 
 def _scenario(

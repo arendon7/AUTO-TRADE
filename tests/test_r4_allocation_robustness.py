@@ -122,7 +122,10 @@ def test_loose_policy_accepts_stable_positive_allocation(now):
     assert evidence.baseline_mean_return > 0
     assert evidence.baseline_volatility > 0
     assert evidence.robust is True
-    require_robust_allocation(evidence)
+    recomputed = require_robust_allocation(
+        dependence(now), budget_policy(), weights(), robust_spec(), loose_policy()
+    )
+    assert recomputed.fingerprint == evidence.fingerprint
 
 
 def test_fragile_dominant_strategy_fails_leave_one_out_policy(now):
@@ -145,7 +148,9 @@ def test_fragile_dominant_strategy_fails_leave_one_out_policy(now):
     assert any(s.scenario_id == "loo:alpha@1" for s in failed)
     assert evidence.robust is False
     with pytest.raises(FragileAllocation, match="loo:alpha@1"):
-        require_robust_allocation(evidence)
+        require_robust_allocation(
+            dep, budget_policy(), weights(), robust_spec(), policy
+        )
 
 
 def test_policy_exact_observed_worst_boundaries_pass_and_epsilon_tighter_fails(now):
@@ -247,6 +252,26 @@ def test_input_mutation_changes_robustness_fingerprint(now):
     assert changed.fingerprint != baseline.fingerprint
 
 
-def test_require_robust_allocation_requires_real_evidence():
-    with pytest.raises(TypeError, match="AllocationRobustnessEvidence"):
-        require_robust_allocation(object())  # type: ignore[arg-type]
+def test_require_robust_allocation_recomputes_from_source_inputs(now):
+    dep = dependence(now)
+    recomputed = require_robust_allocation(
+        dep, budget_policy(), weights(), robust_spec(), loose_policy()
+    )
+    direct = evaluate_allocation_robustness(
+        dep, budget_policy(), weights(), robust_spec(), loose_policy()
+    )
+    assert recomputed.fingerprint == direct.fingerprint
+
+
+def test_require_robust_allocation_does_not_accept_a_serialized_evidence_object(now):
+    evidence = evaluate_allocation_robustness(
+        dependence(now), budget_policy(), weights(), robust_spec(), loose_policy()
+    )
+    with pytest.raises(TypeError):
+        require_robust_allocation(  # type: ignore[call-arg]
+            evidence,
+            budget_policy(),
+            weights(),
+            robust_spec(),
+            loose_policy(),
+        )
