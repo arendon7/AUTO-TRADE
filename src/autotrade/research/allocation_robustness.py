@@ -209,8 +209,7 @@ def evaluate_allocation_robustness(
     positive = tuple((key, value) for key, value in budget_evidence.strategy_weights if value > _ZERO)
     if len(positive) < 2:
         raise AllocationRobustnessError("robustness requires at least two positive-weight strategies")
-    total = sum((value for _, value in positive), _ZERO)
-    normalized = tuple((key, value / total) for key, value in positive)
+    normalized = _normalize_exact(positive)
 
     aligned = dict(dependence.aligned_returns)
     baseline_returns = _portfolio_returns(normalized, aligned)
@@ -225,11 +224,16 @@ def evaluate_allocation_robustness(
     keys = tuple(key for key, _ in normalized)
 
     for removed in keys:
-        remaining_total = _ONE - baseline_map[removed]
-        if remaining_total <= _ZERO:
+        remaining = tuple(
+            (key, baseline_map[key])
+            for key in keys
+            if key != removed and baseline_map[key] > _ZERO
+        )
+        if not remaining:
             raise AllocationRobustnessError("leave-one-out requires positive remaining allocation")
+        remaining_normalized = dict(_normalize_exact(remaining))
         weights = tuple(
-            (key, (_ZERO if key == removed else baseline_map[key] / remaining_total))
+            (key, (_ZERO if key == removed else remaining_normalized[key]))
             for key in keys
         )
         scenarios.append(
@@ -254,7 +258,7 @@ def evaluate_allocation_robustness(
             changed = dict(baseline_map)
             changed[donor] -= delta
             changed[receiver] += delta
-            weights = tuple((key, changed[key]) for key in keys)
+            weights = _normalize_exact(tuple((key, changed[key]) for key in keys))
             scenarios.append(
                 _scenario(
                     scenario_id=f"shift:{donor}->{receiver}:{delta}",
@@ -341,6 +345,48 @@ def _scenario(
         volatility_increase_fraction=volatility_increase,
         passes_policy=passes,
     )
+
+
+def _normalize_exact(
+    weights: tuple[tuple[str, Decimal], ...],
+) -> tuple[tuple[str, Decimal], ...]:
+    """Normalize canonical weights while preserving an exact Decimal sum of 1.
+
+    Decimal division of repeating ratios cannot represent every fraction exactly.
+    Dividing each component independently can therefore create a vector whose
+    arithmetic sum is one representational ulp away from 1. We preserve the
+    exact-sum contract by computing all but the final canonical component and
+    assigning that final component the exact remainder. This is deterministic,
+    does not change the universe/order, and never relaxes the invariant checked
+    by AllocationScenario.
+    """
+
+    if not weights:
+        raise AllocationRobustnessError("weights cannot be empty")
+    keys = tuple(key for key, _ in weights)
+    if keys != tuple(sorted(keys)) or len(set(keys)) != len(keys):
+        raise AllocationRobustnessError("weights must be canonical unique sorted order")
+    if any(not _finite(value) or value < _ZERO for _, value in weights):
+        raise AllocationRobustnessError("weights must be finite Decimal >= 0")
+    total = sum((value for _, value in weights), _ZERO)
+    if total <= _ZERO:
+        raise AllocationRobustnessError("weights must contain positive allocation")
+
+    normalized: list[tuple[str, Decimal]] = []
+    running = _ZERO
+    for index, (key, value) in enumerate(weights):
+        if index == len(weights) - 1:
+            normalized_value = _ONE - running
+        else:
+            normalized_value = value / total
+            running += normalized_value
+        if normalized_value < _ZERO:
+            raise AllocationRobustnessError("normalization produced negative weight")
+        normalized.append((key, normalized_value))
+    result = tuple(normalized)
+    if sum((value for _, value in result), _ZERO) != _ONE:
+        raise AllocationRobustnessError("exact normalization failed to sum to 1")
+    return result
 
 
 def _portfolio_returns(
