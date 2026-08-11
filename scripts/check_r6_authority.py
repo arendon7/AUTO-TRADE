@@ -191,6 +191,16 @@ def _validate_network_roles() -> list[str]:
             errors.append("writer: durable UNKNOWN-before-write guard is missing")
         if "PAPER_ORDER_PATH = \"/v2/orders\"" not in text:
             errors.append("writer: exact /v2/orders path constant is missing")
+        pre_consume = text.find("PaperFinalWritePhase.PRE_CONSUME")
+        durable_unknown = text.find("mark_submit_attempt_unknown")
+        pre_io = text.find("PaperFinalWritePhase.PRE_IO")
+        transport_write = text.find("self._transport.write(request)")
+        if not 0 <= pre_consume < durable_unknown < pre_io < transport_write:
+            errors.append(
+                "writer: final guard ordering must be PRE_CONSUME -> durable UNKNOWN -> PRE_IO -> one transport write"
+            )
+        if "final_guard: PaperFinalWriteGuard" not in text:
+            errors.append("writer: authoritative PaperFinalWriteGuard parameter is required")
 
     return errors
 

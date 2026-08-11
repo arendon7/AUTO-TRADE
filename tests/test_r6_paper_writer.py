@@ -24,6 +24,8 @@ from autotrade.brokers.alpaca_paper_gateway import (
     AlpacaPaperAccountAttestation,
     AlpacaPaperCredentials,
 )
+from autotrade.brokers.alpaca_paper_final_guard import PaperFinalWriteGuard
+from autotrade.health_bridge import EffectiveHealthControl, HealthRiskMode
 from autotrade.brokers.alpaca_paper_submission import (
     PaperSubmissionBinding,
     PaperSubmissionStatus,
@@ -38,8 +40,21 @@ from autotrade.brokers.alpaca_paper_writer import (
     PaperWriterDisabled,
     PaperWriterPolicyError,
 )
-from autotrade.domain import OrderIntent, OrderRecord, OrderStatus, OrderType, Side
+from autotrade.domain import (
+    OrderIntent,
+    OrderRecord,
+    OrderStatus,
+    OrderType,
+    PortfolioSnapshot,
+    Side,
+)
 from autotrade.persistence import SQLiteRuntime
+from autotrade.state import (
+    InMemoryOrderStore,
+    InMemoryPortfolioStore,
+    InMemorySafetyStateStore,
+    SafetyControlState,
+)
 
 
 UTC = timezone.utc
@@ -162,7 +177,37 @@ def error_response(status: int = 422) -> AlpacaPaperWriteResponse:
     )
 
 
-def stack(tmp_path):
+class HealthyBridge:
+    def effective_control(self, *, strategy_id, portfolio_entity_id, now):
+        del strategy_id, portfolio_entity_id, now
+        return EffectiveHealthControl(
+            mode=HealthRiskMode.NORMAL,
+            order_multiplier=Decimal("1"),
+            strategy_multiplier=Decimal("1"),
+            portfolio_multiplier=Decimal("1"),
+            reason="R6_PAPER_CANARY",
+            strategy_state_fingerprint=h("writer-strategy-health"),
+            portfolio_state_fingerprint=h("writer-portfolio-health"),
+        )
+
+
+class FlipToKillSwitchStore:
+    def __init__(self):
+        self.calls = 0
+
+    def get(self):
+        self.calls += 1
+        if self.calls == 1:
+            return SafetyControlState(version=1, updated_at=NOW)
+        return SafetyControlState(
+            kill_switch_active=True,
+            kill_switch_reason="test-final-recheck",
+            version=2,
+            updated_at=NOW + timedelta(seconds=1),
+        )
+
+
+def stack(tmp_path, *, safety_store=None):
     tmp_path.mkdir(parents=True, exist_ok=True)
     current_order = order()
     current_attestation = attestation()
@@ -207,6 +252,42 @@ def stack(tmp_path):
         SQLiteRuntime(tmp_path / "permit.sqlite")
     )
     permit_registry.issue(approval)
+
+    order_store = InMemoryOrderStore()
+    order_store.create_if_absent(current_order)
+    order_store.update(
+        replace(
+            current_order,
+            status=OrderStatus.SUBMITTING,
+            submitted_at=NOW + timedelta(milliseconds=100),
+        )
+    )
+    safety_store = safety_store or InMemorySafetyStateStore()
+    portfolio_store = InMemoryPortfolioStore()
+    portfolio_store.initialize(
+        PortfolioSnapshot(
+            snapshot_id="writer-portfolio-snapshot-001",
+            equity=Decimal("100000"),
+            gross_exposure=Decimal("0"),
+            net_exposure=Decimal("0"),
+            daily_pnl=Decimal("0"),
+            drawdown=Decimal("0"),
+            open_orders=0,
+            signed_position_notional_by_symbol={},
+            strategy_gross_exposure={},
+            strategy_signed_position_notional_by_symbol={},
+            reconciliation_ok=True,
+            broker_state_known=True,
+        ),
+        now=NOW,
+    )
+    final_guard = PaperFinalWriteGuard(
+        order_store=order_store,
+        safety_state_store=safety_store,
+        portfolio_store=portfolio_store,
+        health_bridge=HealthyBridge(),
+        portfolio_health_entity_id="portfolio-r6-canary",
+    )
     return {
         "order": current_order,
         "attestation": current_attestation,
@@ -215,6 +296,10 @@ def stack(tmp_path):
         "binding": binding,
         "approval": approval,
         "permit_registry": permit_registry,
+        "order_store": order_store,
+        "safety_store": safety_store,
+        "portfolio_store": portfolio_store,
+        "final_guard": final_guard,
     }
 
 
@@ -233,6 +318,7 @@ def submit(instance, values, *, now=NOW + timedelta(seconds=1), attempt_id="writ
         approval=values["approval"],
         permit_registry=values["permit_registry"],
         submission_registry=values["submission_registry"],
+        final_guard=values["final_guard"],
         attempt_id=attempt_id,
         now=now,
     )
@@ -475,3 +561,26 @@ def test_writer_has_no_retry_cancel_replace_or_self_ack_surface(tmp_path) -> Non
         "reconcile_acknowledged",
     }
     assert not (forbidden & set(dir(instance)))
+
+
+def test_final_pre_io_recheck_blocks_changed_kill_switch_after_permit_consumption(tmp_path) -> None:
+    flipping = FlipToKillSwitchStore()
+    values = stack(tmp_path, safety_store=flipping)
+    transport = FakeWriteTransport(response=success_response(values["expected"]))
+
+    with pytest.raises(PaperWriterBlocked, match="PRE_IO"):
+        submit(writer(transport), values)
+
+    assert flipping.calls == 2
+    assert transport.requests == []
+    assert values["submission_registry"].get(values["binding"].order_id).status is PaperSubmissionStatus.UNKNOWN
+    assert values["permit_registry"].get(values["approval"].approval_hash).status is PaperCanaryPermitStatus.CONSUMED
+
+
+def test_success_result_binds_both_just_in_time_guard_hashes(tmp_path) -> None:
+    values = stack(tmp_path)
+    transport = FakeWriteTransport(response=success_response(values["expected"]))
+    result = submit(writer(transport), values)
+    assert len(result.pre_consume_guard_hash) == 64
+    assert len(result.pre_io_guard_hash) == 64
+    assert result.pre_consume_guard_hash != result.pre_io_guard_hash

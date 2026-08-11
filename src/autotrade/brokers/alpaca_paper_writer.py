@@ -18,6 +18,11 @@ from urllib.request import (
 
 from .alpaca_paper_bracket import AlpacaEquityBracketRequest
 from .alpaca_paper_canary import PaperCanaryApproval
+from .alpaca_paper_final_guard import (
+    PaperFinalWriteBlocked,
+    PaperFinalWriteGuard,
+    PaperFinalWritePhase,
+)
 from .alpaca_paper_canary_permit import (
     PaperCanaryPermitStatus,
     SQLitePaperCanaryPermitRegistry,
@@ -159,6 +164,8 @@ class PaperSubmitAttemptResult:
     provisionally_accepted: bool
     durable_status: PaperSubmissionStatus
     reconciliation_required: bool
+    pre_consume_guard_hash: str
+    pre_io_guard_hash: str
 
 
 class AlpacaPaperSingleShotWriter:
@@ -197,11 +204,14 @@ class AlpacaPaperSingleShotWriter:
         approval: PaperCanaryApproval,
         permit_registry: SQLitePaperCanaryPermitRegistry,
         submission_registry: SQLitePaperSubmissionRegistry,
+        final_guard: PaperFinalWriteGuard,
         attempt_id: str,
         now,
     ) -> PaperSubmitAttemptResult:
         if not self._config.enabled:
             raise PaperWriterDisabled("external PAPER writer is disabled by default")
+        if not isinstance(final_guard, PaperFinalWriteGuard):
+            raise PaperWriterBlocked("writer requires authoritative PaperFinalWriteGuard")
         _validate_writer_base_url(self._config.base_url)
         if credentials.credential_reference != account_attestation.credential_reference:
             raise PaperWriterPolicyError("writer credentials do not match PAPER account attestation")
@@ -248,6 +258,17 @@ class AlpacaPaperSingleShotWriter:
         ):
             raise PaperWriterBlocked("durable canary permit does not match frozen submission")
 
+        try:
+            pre_consume_guard = final_guard.authorize(
+                approval=approval,
+                expected_bracket=expected_bracket,
+                submission_registry=submission_registry,
+                now=now,
+                phase=PaperFinalWritePhase.PRE_CONSUME,
+            )
+        except PaperFinalWriteBlocked as exc:
+            raise PaperWriterBlocked(f"final PRE_CONSUME guard rejected: {exc}") from exc
+
         # Crash-safety order is deliberate:
         # 1) consume permit; a crash now leaves PREPARED + consumed permit, so only
         #    the SAME attempt may resume and no external request has happened.
@@ -261,6 +282,20 @@ class AlpacaPaperSingleShotWriter:
         )
         if unknown.status is not PaperSubmissionStatus.UNKNOWN:
             raise PaperWriterBlocked("submission failed to persist UNKNOWN before PAPER POST")
+
+        try:
+            pre_io_guard = final_guard.authorize(
+                approval=approval,
+                expected_bracket=expected_bracket,
+                submission_registry=submission_registry,
+                now=now,
+                phase=PaperFinalWritePhase.PRE_IO,
+                expected_attempt_id=attempt_id,
+            )
+        except PaperFinalWriteBlocked as exc:
+            # UNKNOWN is intentionally retained. No POST occurred; only reconciliation
+            # may resolve whether any external order exists.
+            raise PaperWriterBlocked(f"final PRE_IO guard rejected: {exc}") from exc
 
         request = AlpacaPaperWriteRequest(
             method="POST",
@@ -314,6 +349,8 @@ class AlpacaPaperSingleShotWriter:
             provisionally_accepted=provisionally_accepted,
             durable_status=PaperSubmissionStatus.UNKNOWN,
             reconciliation_required=True,
+            pre_consume_guard_hash=pre_consume_guard.attestation_hash,
+            pre_io_guard_hash=pre_io_guard.attestation_hash,
         )
 
 

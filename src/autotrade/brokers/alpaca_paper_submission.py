@@ -138,6 +138,14 @@ class PaperSubmissionState:
         return self.status is PaperSubmissionStatus.UNKNOWN
 
 
+@dataclass(frozen=True, slots=True)
+class PaperSubmissionRegistrySnapshot:
+    binding: PaperSubmissionBinding
+    state: PaperSubmissionState
+    events: tuple[PaperSubmissionEvent, ...]
+    all_states: tuple[PaperSubmissionState, ...]
+
+
 class SQLitePaperSubmissionRegistry:
     """Durable pre-submit ambiguity barrier for external Alpaca PAPER orders.
 
@@ -324,6 +332,39 @@ class SQLitePaperSubmissionRegistry:
         try:
             _, _, events = self._verify_locked(conn, order_id)
             return events
+        finally:
+            conn.close()
+
+    def verified_global_snapshot(
+        self, order_id: str
+    ) -> PaperSubmissionRegistrySnapshot:
+        _validate_id(order_id, "order_id")
+        conn = self._runtime.connect()
+        try:
+            conn.execute("BEGIN")
+            binding, state, events = self._verify_locked(conn, order_id)
+            rows = conn.execute(
+                "SELECT order_id FROM alpaca_paper_submission_bindings ORDER BY order_id"
+            ).fetchall()
+            states: list[PaperSubmissionState] = []
+            for row in rows:
+                current_order_id = str(row["order_id"])
+                if current_order_id == order_id:
+                    states.append(state)
+                else:
+                    _, other_state, _ = self._verify_locked(conn, current_order_id)
+                    states.append(other_state)
+            conn.execute("COMMIT")
+            return PaperSubmissionRegistrySnapshot(
+                binding=binding,
+                state=state,
+                events=events,
+                all_states=tuple(states),
+            )
+        except Exception:
+            if conn.in_transaction:
+                conn.execute("ROLLBACK")
+            raise
         finally:
             conn.close()
 
