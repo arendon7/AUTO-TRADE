@@ -36,8 +36,20 @@ def main() -> int:
     )
     text = replace_once(
         text,
+        '        attempt_id = deterministic_canary_attempt_id(\n            order=order,\n            binding=binding,\n            bracket=bracket,\n            approval=approval,\n        )\n',
+        '        attempt_id = deterministic_canary_attempt_id(\n            order=order,\n            decision=decision,\n            binding=binding,\n            bracket=bracket,\n            approval=approval,\n        )\n',
+        "attempt call RiskDecision binding",
+    )
+    text = replace_once(
+        text,
+        '    order: OrderRecord,\n    binding: PaperSubmissionBinding,\n    bracket: AlpacaEquityBracketRequest,\n    approval: PaperCanaryApproval,\n) -> str:\n',
+        '    order: OrderRecord,\n    decision: RiskDecision,\n    binding: PaperSubmissionBinding,\n    bracket: AlpacaEquityBracketRequest,\n    approval: PaperCanaryApproval,\n) -> str:\n',
+        "attempt signature RiskDecision binding",
+    )
+    text = replace_once(
+        text,
         '        "risk_decision_id": order.risk_decision_id,\n    }\n    return f"r6-paper-attempt-{_hash_json(payload)[:48]}"\n',
-        '        "risk_decision_id": order.risk_decision_id,\n        "risk_decision_safety_state_version": approval.safety_state_version,\n        "market_fingerprint": approval.market_fingerprint,\n    }\n    return f"r6-paper-attempt-{_hash_json(payload)[:48]}"\n',
+        '        "risk_decision_id": order.risk_decision_id,\n        "risk_decision_safety_state_version": decision.safety_state_version,\n        "market_fingerprint": decision.market_fingerprint,\n    }\n    return f"r6-paper-attempt-{_hash_json(payload)[:48]}"\n',
         "attempt control-plane binding",
     )
     text = replace_once(
@@ -58,17 +70,13 @@ def main() -> int:
         '        "risk_decision_id": values["risk_decision_id"],\n        "risk_decision_safety_state_version": values["risk_decision_safety_state_version"],\n        "market_fingerprint": values["market_fingerprint"],\n        "risk_decision_valid_until": _iso(values["risk_decision_valid_until"]),\n',
         "canonical payload control-plane values",
     )
-    # Approval must expose the same control-plane values or preparation cannot
-    # claim that the deterministic attempt is bound to them.
-    if "approval.safety_state_version" not in text or "approval.market_fingerprint" not in text:
-        raise SystemExit("canary approval does not expose required control-plane binding")
     MODULE.write_text(text, encoding="utf-8")
 
     test = TEST.read_text(encoding="utf-8")
     test = replace_once(
         test,
         '    assert result.package.next_action == "OPERATOR_DECISION_REQUIRED"\n',
-        '    assert result.package.next_action == "OPERATOR_DECISION_REQUIRED"\n    assert result.package.risk_decision_safety_state_version == result.approval.safety_state_version\n    assert result.package.market_fingerprint == result.approval.market_fingerprint\n',
+        '    assert result.package.next_action == "OPERATOR_DECISION_REQUIRED"\n    assert result.package.risk_decision_safety_state_version == 0\n    assert result.package.market_fingerprint == market_fingerprint(market())\n',
         "coordinator package control-plane assertions",
     )
     test = replace_once(
@@ -78,7 +86,7 @@ def main() -> int:
         "package tamper/control assertions",
     )
     TEST.write_text(test, encoding="utf-8")
-    print("prepared PAPER canary package now binds market fingerprint and Safety version")
+    print("prepared PAPER canary package now binds RiskDecision market fingerprint and Safety version")
     return 0
 
 
