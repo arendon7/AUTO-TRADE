@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal, localcontext
 from enum import StrEnum
 from hashlib import sha256
@@ -158,25 +158,35 @@ class HealthPolicy:
     degraded_volatility_ratio: Decimal
     quarantined_volatility_ratio: Decimal
     retire_after_distinct_quarantines: int
+    max_observation_age_seconds: int = 3600
 
     def __post_init__(self) -> None:
         if isinstance(self.min_observations, bool) or not isinstance(self.min_observations, int) or self.min_observations < 2:
             raise ValueError("min_observations must be integer >= 2")
-        if not (_ZERO <= self.degraded_mean_loss_fraction <= self.quarantined_mean_loss_fraction <= _ONE):
-            raise ValueError("mean-loss thresholds must satisfy 0 <= degraded <= quarantined <= 1")
+        if not (
+            _ZERO < self.degraded_mean_loss_fraction
+            < self.quarantined_mean_loss_fraction
+            <= _ONE
+        ):
+            raise ValueError("mean-loss thresholds must satisfy 0 < degraded < quarantined <= 1")
         if (
             not _finite(self.degraded_volatility_ratio)
             or not _finite(self.quarantined_volatility_ratio)
-            or self.degraded_volatility_ratio < _ONE
-            or self.quarantined_volatility_ratio < self.degraded_volatility_ratio
+            or not (_ONE < self.degraded_volatility_ratio < self.quarantined_volatility_ratio)
         ):
-            raise ValueError("volatility ratios must satisfy 1 <= degraded <= quarantined")
+            raise ValueError("volatility ratios must satisfy 1 < degraded < quarantined")
         if (
             isinstance(self.retire_after_distinct_quarantines, bool)
             or not isinstance(self.retire_after_distinct_quarantines, int)
             or self.retire_after_distinct_quarantines < 2
         ):
             raise ValueError("retire_after_distinct_quarantines must be integer >= 2")
+        if (
+            isinstance(self.max_observation_age_seconds, bool)
+            or not isinstance(self.max_observation_age_seconds, int)
+            or self.max_observation_age_seconds <= 0
+        ):
+            raise ValueError("max_observation_age_seconds must be integer > 0")
 
     @property
     def fingerprint(self) -> str:
@@ -188,6 +198,7 @@ class HealthPolicy:
                 "degraded_volatility_ratio": str(self.degraded_volatility_ratio),
                 "quarantined_volatility_ratio": str(self.quarantined_volatility_ratio),
                 "retire_after_distinct_quarantines": self.retire_after_distinct_quarantines,
+                "max_observation_age_seconds": self.max_observation_age_seconds,
             }
         )
 
@@ -290,6 +301,9 @@ def assess_health(
         raise HealthGovernanceError("insufficient health observations")
     if any(item.available_at > now for item in observed.observations):
         raise HealthGovernanceError("health assessment cannot use unavailable observations")
+    latest_available = observed.observations[-1].available_at
+    if now - latest_available > timedelta(seconds=policy.max_observation_age_seconds):
+        raise HealthGovernanceError("health assessment observations are stale")
     values = tuple(item.value for item in observed.observations)
     mean, volatility = _mean_volatility(values)
     mean_loss = max(_ZERO, (baseline.mean_return - mean) / abs(baseline.mean_return))
@@ -385,52 +399,67 @@ class SQLiteHealthStateStore:
     ) -> HealthControlState:
         if not _aware(now):
             raise ValueError("health state update time must be timezone-aware")
+        if assessment.evaluated_at > now:
+            raise HealthStateConflict("assessment cannot be from the future")
         if assessment.policy_fingerprint != policy.fingerprint:
             raise HealthStateConflict("assessment policy fingerprint mismatch")
         conn = self._connect()
         try:
             conn.execute("BEGIN IMMEDIATE")
-            row = conn.execute("SELECT * FROM health_state WHERE entity_id=?", (assessment.entity_id,)).fetchone()
+            row = conn.execute(
+                "SELECT * FROM health_state WHERE entity_id=?", (assessment.entity_id,)
+            ).fetchone()
             if row is None:
-                current = HealthControlState(
+                quarantine_count = (
+                    1 if assessment.proposed_state is HealthState.QUARANTINED else 0
+                )
+                target = assessment.proposed_state
+                current_state = HealthState.HEALTHY
+                updated = HealthControlState(
                     entity_id=assessment.entity_id,
-                    state=HealthState.HEALTHY,
+                    state=target,
                     version=1,
-                    distinct_quarantine_count=0,
-                    last_assessment_fingerprint="",
+                    distinct_quarantine_count=quarantine_count,
+                    last_assessment_fingerprint=assessment.fingerprint,
                     updated_at=now,
                 )
             else:
                 current = _state_from_row(row)
-            if current.last_assessment_fingerprint == assessment.fingerprint:
-                conn.commit()
-                return current
+                current_state = current.state
+                if current.last_assessment_fingerprint == assessment.fingerprint:
+                    conn.commit()
+                    return current
 
-            target = current.state
-            quarantine_count = current.distinct_quarantine_count
-            if assessment.proposed_state is HealthState.QUARANTINED:
-                quarantine_count += 1
-                target = max((target, HealthState.QUARANTINED), key=lambda state: _SEVERITY[state])
-                if quarantine_count >= policy.retire_after_distinct_quarantines:
-                    target = HealthState.RETIRED
-            elif _SEVERITY[assessment.proposed_state] > _SEVERITY[target]:
-                target = assessment.proposed_state
+                target = current.state
+                quarantine_count = current.distinct_quarantine_count
+                if assessment.proposed_state is HealthState.QUARANTINED:
+                    quarantine_count += 1
+                    target = max(
+                        (target, HealthState.QUARANTINED),
+                        key=lambda state: _SEVERITY[state],
+                    )
+                    if quarantine_count >= policy.retire_after_distinct_quarantines:
+                        target = HealthState.RETIRED
+                elif _SEVERITY[assessment.proposed_state] > _SEVERITY[target]:
+                    target = assessment.proposed_state
 
-            version = current.version if (target is current.state and quarantine_count == current.distinct_quarantine_count) else current.version + 1
-            updated = HealthControlState(
-                entity_id=current.entity_id,
-                state=target,
-                version=version,
-                distinct_quarantine_count=quarantine_count,
-                last_assessment_fingerprint=assessment.fingerprint,
-                updated_at=now,
-            )
+                # Every distinct assessment changes durable evidence state even
+                # if the conservative health severity remains unchanged.
+                updated = HealthControlState(
+                    entity_id=current.entity_id,
+                    state=target,
+                    version=current.version + 1,
+                    distinct_quarantine_count=quarantine_count,
+                    last_assessment_fingerprint=assessment.fingerprint,
+                    updated_at=now,
+                )
+
             self._upsert_state(conn, updated)
             self._append_transition(
                 conn,
-                entity_id=current.entity_id,
-                from_state=current.state,
-                to_state=target,
+                entity_id=updated.entity_id,
+                from_state=current_state,
+                to_state=updated.state,
                 assessment_fingerprint=assessment.fingerprint,
                 action="AUTOMATIC_ASSESSMENT",
                 confirmed_by="",
@@ -447,7 +476,9 @@ class SQLiteHealthStateStore:
 
     def acknowledge_recovery(
         self,
-        assessment: HealthAssessment,
+        baseline: HealthBaseline,
+        observed: HealthObservationSeries,
+        policy: HealthPolicy,
         *,
         confirmed_by: str,
         now: datetime,
@@ -455,12 +486,15 @@ class SQLiteHealthStateStore:
         _identity(confirmed_by, "confirmed_by")
         if not _aware(now):
             raise ValueError("recovery time must be timezone-aware")
+        assessment = assess_health(baseline, observed, policy, now=now)
         if assessment.proposed_state is not HealthState.HEALTHY:
             raise HealthRecoveryRejected("recovery requires fresh HEALTHY evidence")
         conn = self._connect()
         try:
             conn.execute("BEGIN IMMEDIATE")
-            row = conn.execute("SELECT * FROM health_state WHERE entity_id=?", (assessment.entity_id,)).fetchone()
+            row = conn.execute(
+                "SELECT * FROM health_state WHERE entity_id=?", (assessment.entity_id,)
+            ).fetchone()
             if row is None:
                 conn.rollback()
                 raise HealthRecoveryRejected("no health state exists for entity")
