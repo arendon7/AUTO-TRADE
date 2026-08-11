@@ -7,8 +7,8 @@
   "ci": {
     "core_safety_run_id": 31460515734,
     "knowledge_contract_run_id": 31460515720,
-    "tests_passed": 480,
-    "coverage_percent": 86.58,
+    "tests_passed": 479,
+    "coverage_percent": 86.45,
     "contract_registry": "PASS",
     "contract_count": 10,
     "contract_registry_sha256": "ddb94afa8916be37d0d956e6c32f775ea41c0fb79f4ea26d2d65dfa286c62785",
