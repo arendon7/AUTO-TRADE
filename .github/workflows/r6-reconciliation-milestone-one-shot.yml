@@ -1,0 +1,107 @@
+name: R6 GET-Only Reconciliation Milestone
+
+on:
+  push:
+    branches:
+      - reconstruction/r6-external-paper-protection
+    paths:
+      - .github/workflows/r6-reconciliation-milestone-one-shot.yml
+
+permissions:
+  contents: write
+
+jobs:
+  certify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: reconstruction/r6-external-paper-protection
+          fetch-depth: 0
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Install exact runtime
+        run: python -m pip install -e '.[dev]'
+      - name: Full regression and coverage
+        run: |
+          python -m compileall -q src tests scripts
+          pytest --cov=autotrade --cov-report=term-missing --cov-report=json:r6-reconciliation-coverage.json --junitxml=r6-reconciliation.xml
+      - name: Permanent authority and canon gates
+        run: |
+          python scripts/check_contract_registry.py
+          python scripts/check_research_authority.py
+          python scripts/check_r5_authority.py
+          python scripts/check_r6_authority.py
+          python scripts/check_debt_register.py
+          python scripts/check_knowledge_contract.py
+      - name: Write permanent reconciliation milestone evidence
+        env:
+          OUT: knowledge/60_EVIDENCE/R6_GET_ONLY_RECONCILIATION_MILESTONE.json
+        run: |
+          python - <<'PY'
+          from __future__ import annotations
+          import json
+          import os
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
+
+          coverage = json.loads(Path('r6-reconciliation-coverage.json').read_text())
+          root = ET.parse('r6-reconciliation.xml').getroot()
+          tests = int(root.attrib.get('tests', '0'))
+          failures = int(root.attrib.get('failures', '0'))
+          errors = int(root.attrib.get('errors', '0'))
+          skipped = int(root.attrib.get('skipped', '0'))
+          percent = float(coverage['totals']['percent_covered'])
+          if failures or errors or percent < 85.0:
+              raise SystemExit('cannot certify failing/undercovered reconciliation milestone')
+
+          payload = {
+              'schema_version': 1,
+              'track': 'R6',
+              'control': 'GET-only client_order_id UNKNOWN reconciliation',
+              'status': 'PASS_MILESTONE_NOT_DEBT_CLOSURE',
+              'source_head': os.environ['GITHUB_SHA'],
+              'workflow_run_id': int(os.environ['GITHUB_RUN_ID']),
+              'tests': {
+                  'total': tests,
+                  'failures': failures,
+                  'errors': errors,
+                  'skipped': skipped,
+                  'coverage_percent': round(percent, 2),
+                  'coverage_gate_percent': 85.0,
+              },
+              'certified_invariants': [
+                  'PAPER reconciliation is disabled by default and GET-only on exact paper-api.alpaca.markets endpoints',
+                  'credentials must match the frozen account attestation and environment proxies/redirects cannot widen authority',
+                  'UNKNOWN state is required before broker reads can alter durable submission state',
+                  '404 by client_order_id records durable absence evidence and never re-arms submission',
+                  'found client_order_id must resolve to one broker order and a second nested=true read must remain the same identity',
+                  'nested bracket response must prove the exact frozen parent plus exactly one coherent take-profit and stop-loss leg',
+                  'only after exact nested validation may durable submission state advance UNKNOWN to ACKNOWLEDGED',
+                  'changed expected payload, changed attestation, client/order mismatch, disappearing detail order or malformed/X-Request-ID-missing response fails closed',
+                  'R6 authority checker still forbids POST/send/submit/create/cancel/replace calls during this phase',
+              ],
+              'explicit_non_claims': [
+                  'external PAPER POST remains disabled',
+                  'TD-R6-002 remains OPEN until the complete future submit+reconcile path is integrated and certified end-to-end',
+                  'PAPER trade_updates and qualification remain unimplemented',
+                  'this is not profitability evidence',
+                  'LIVE trading remains blocked',
+              ],
+              'external_paper_submit': 'DISABLED',
+              'capital_authority': 'NONE',
+              'live_trading': 'BLOCKED',
+          }
+          Path(os.environ['OUT']).write_text(json.dumps(payload, indent=2) + '\n')
+          PY
+      - name: Commit evidence and self-clean
+        run: |
+          rm -f r6-reconciliation-coverage.json r6-reconciliation.xml
+          git config user.name "arendon7"
+          git config user.email "102555888+arendon7@users.noreply.github.com"
+          git add knowledge/60_EVIDENCE/R6_GET_ONLY_RECONCILIATION_MILESTONE.json
+          git rm -f .github/workflows/r6-reconciliation-milestone-one-shot.yml
+          git commit -m "docs(r6): certify GET-only reconciliation milestone"
+          git push origin HEAD:reconstruction/r6-external-paper-protection
