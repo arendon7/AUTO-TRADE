@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "track": "R6",
+  "debt_id": "TD-R6-007",
+  "status": "IMPLEMENTED_PENDING_OFFICIAL_EXACT_HEAD_CI",
+  "purpose": "Fail closed for every R6 external PAPER product/protection mode except the explicitly certified first-canary US-equity BUY LIMIT bracket surface.",
+  "clean_tree_commit_before_evidence_anchor": "7a3b7c78b96287186b98137705fbec73b1094fa0",
+  "implementation_certification": {
+    "workflow_run_id": 31509656588,
+    "tests_passed": 958,
+    "coverage_percent": 85.89,
+    "contract_registry": "PASS",
+    "research_authority": "PASS",
+    "r5_authority": "PASS",
+    "r6_authority": "PASS",
+    "r6_product_boundary": "PASS",
+    "debt_register": "PASS",
+    "knowledge_contract": "PASS"
+  },
+  "controls": [
+    "PaperEquityVenueRules rejects every asset_class other than us_equity.",
+    "AlpacaEquityBracketRequest is self-validating and rejects non-equity asset classes even when manually instantiated.",
+    "The request payload surface is exact: BUY, LIMIT, DAY, bracket, extended_hours=false, take_profit limit plus stop_loss stop only.",
+    "Extra/missing payload fields, simple/OCO/trailing/market/stop-limit variants, noncanonical decimals, geometry forgery, serialization forgery and payload-hash forgery fail closed.",
+    "The builder binds the authoritative Instrument Master asset_class and fingerprint into the immutable request.",
+    "PAPER trade_updates parser and event evidence accept us_equity only.",
+    "Permanent AST boundary forbids AlpacaEquityBracketRequest construction anywhere in production R6 except the certified bracket builder.",
+    "Core Safety and R6 Authority both execute the unsupported-product boundary permanently."
+  ],
+  "evidence_files": [
+    "src/autotrade/brokers/alpaca_paper_bracket.py",
+    "src/autotrade/brokers/alpaca_paper_trade_updates.py",
+    "scripts/check_r6_product_boundary.py",
+    "scripts/check_r6_authority.py",
+    "tests/test_r6_unsupported_products_boundary.py",
+    "tests/test_r6_equity_bracket.py",
+    ".github/workflows/r6-authority.yml",
+    ".github/workflows/core-tests.yml"
+  ],
+  "external_paper_order_sent": false,
+  "capital_authority": "NONE",
+  "live_trading": "BLOCKED",
+  "non_claims": [
+    "This evidence does not qualify external PAPER execution.",
+    "This evidence does not demonstrate profitability.",
+    "This evidence does not authorize LIVE trading."
+  ],
+  "next_gate": "Core Safety + Knowledge Contract + R6 Authority must PASS on the exact evidence-anchor head before TD-R6-007 may close."
+}
