@@ -5,6 +5,8 @@
   "status": "CERTIFIED_BRANCH_PENDING_PR_INTEGRATION",
   "base_main": "c294aa69f35b64559e3aea58a1c0661e66599db8",
   "certification_basis_head": "0d4f75d083a055b83646bb861f08731aecace560",
+  "canonical_closure_commit": "b3bd8a85fb83e7f7e969e0fce3af48606819c033",
+  "closure_workflow_run_id": 31465973648,
   "ci": {
     "core_safety_run_id": 31465755866,
     "knowledge_contract_run_id": 31465755855,
