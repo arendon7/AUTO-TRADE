@@ -48,13 +48,13 @@ class FrozenShadowConfig:
             raise ValueError("strategy_weights cannot be empty")
 
         total = Decimal("0")
-        normalized_ids: set[str] = set()
+        seen: set[str] = set()
         for strategy_id, weight in self.strategy_weights.items():
             if not isinstance(strategy_id, str) or not _STRATEGY_ID_RE.fullmatch(strategy_id):
                 raise ValueError("invalid strategy_id in strategy_weights")
-            if strategy_id in normalized_ids:
+            if strategy_id in seen:
                 raise ValueError("duplicate strategy_id in strategy_weights")
-            normalized_ids.add(strategy_id)
+            seen.add(strategy_id)
             if not _finite_positive(weight):
                 raise ValueError("shadow strategy weights must be finite and > 0")
             total += weight
@@ -102,9 +102,16 @@ class ShadowPeriodRecord:
     weighted_return: Decimal
     nav_before: Decimal
     nav_after: Decimal
-    observation_fingerprints: Mapping[str, str]
+    observation_payloads: Mapping[str, str]
     previous_record_hash: str
     record_hash: str
+
+    @property
+    def observation_fingerprints(self) -> Mapping[str, str]:
+        return {
+            strategy_id: sha256(raw.encode("utf-8")).hexdigest()
+            for strategy_id, raw in self.observation_payloads.items()
+        }
 
 
 @dataclass(frozen=True, slots=True)
@@ -119,10 +126,11 @@ class ShadowControlState:
 class SQLitePortfolioShadowRegistry:
     """Research-only synchronized portfolio shadow evidence.
 
-    The registry intentionally has no OMS, broker, Safety or execution imports.
-    It persists one frozen allocation config and an append-only period chain.
-    A separately hash-protected control row anchors the current chain head so
-    tail deletion is detectable as well as mutation, reordering and gaps.
+    One frozen allocation config drives an append-only period chain. Every
+    component observation is persisted canonically so weighted return and NAV
+    are fully recomputable. A separately hash-protected control row anchors the
+    current chain head, detecting tail deletion in addition to row mutation,
+    reordering, sequence gaps and previous-hash corruption.
     """
 
     def __init__(self, path: str | Path) -> None:
@@ -242,7 +250,6 @@ class SQLitePortfolioShadowRegistry:
             config, records, control = self._verify_all_locked(conn)
             normalized = _normalize_observations(config, observation_tuple)
             period_start = normalized[0].period_started_at
-            period_end = normalized[0].period_ended_at
             if _utc(period_start) < _utc(config.activated_at):
                 raise ShadowIntegrityError("shadow period precedes config activation")
 
@@ -265,11 +272,11 @@ class SQLitePortfolioShadowRegistry:
                 last = records[-1]
                 if _utc(period_start) != _utc(last.period_ended_at):
                     raise ShadowIntegrityError("shadow periods must be strictly contiguous")
-            sequence = control.sequence + 1
+
             record = _build_record(
                 config=config,
                 observations=normalized,
-                sequence=sequence,
+                sequence=control.sequence + 1,
                 nav_before=control.nav,
                 previous_record_hash=control.head_hash,
             )
@@ -310,6 +317,8 @@ class SQLitePortfolioShadowRegistry:
                     new_control.control_hash,
                 ),
             )
+            if conn.total_changes < 2:
+                raise ShadowIntegrityError("shadow control anchor update failed")
             conn.commit()
             return record
         except Exception:
@@ -381,15 +390,22 @@ class SQLitePortfolioShadowRegistry:
                 raise ShadowIntegrityError("shadow period continuity mismatch")
             if record.record_hash != _hash_payload(_record_payload_without_hash(record)):
                 raise ShadowIntegrityError("shadow record hash mismatch")
+
+            observations = _observations_from_record(record)
+            expected_weighted_return = sum(
+                (
+                    config.strategy_weights[observation.strategy_id]
+                    * observation.return_fraction
+                    for observation in observations
+                ),
+                Decimal("0"),
+            )
+            if record.weighted_return != expected_weighted_return:
+                raise ShadowIntegrityError("shadow weighted return is not reproducible")
             if record.nav_after != record.nav_before * (Decimal("1") + record.weighted_return):
                 raise ShadowIntegrityError("shadow record NAV arithmetic mismatch")
             if not _finite_positive(record.nav_after):
                 raise ShadowIntegrityError("shadow record NAV must remain finite and positive")
-            for strategy_id, fingerprint in record.observation_fingerprints.items():
-                if strategy_id not in config.strategy_weights or not _HASH_RE.fullmatch(fingerprint):
-                    raise ShadowIntegrityError("shadow record observation fingerprint map is invalid")
-            if set(record.observation_fingerprints) != set(config.strategy_weights):
-                raise ShadowIntegrityError("shadow record strategy universe mismatch")
 
             records.append(record)
             expected_sequence += 1
@@ -439,6 +455,35 @@ def _normalize_observations(
     return tuple(by_strategy[strategy_id] for strategy_id in sorted(by_strategy))
 
 
+def _observations_from_record(
+    record: ShadowPeriodRecord,
+) -> tuple[StrategyShadowObservation, ...]:
+    observations: list[StrategyShadowObservation] = []
+    for strategy_id in sorted(record.observation_payloads):
+        raw = record.observation_payloads[strategy_id]
+        payload = _strict_json_object(raw)
+        try:
+            observation = StrategyShadowObservation(
+                strategy_id=_required_str(payload, "strategy_id"),
+                period_started_at=_parse_datetime(payload.get("period_started_at"), "period_started_at"),
+                period_ended_at=_parse_datetime(payload.get("period_ended_at"), "period_ended_at"),
+                return_fraction=_parse_decimal(payload.get("return_fraction"), "return_fraction"),
+                source_fingerprint=_required_str(payload, "source_fingerprint"),
+            )
+        except ValueError as exc:
+            raise ShadowIntegrityError("invalid persisted shadow component observation") from exc
+        if observation.strategy_id != strategy_id:
+            raise ShadowIntegrityError("shadow component strategy key mismatch")
+        if raw != _canonical_json(_observation_payload(observation)):
+            raise ShadowIntegrityError("shadow component observation is not canonical")
+        if _utc(observation.period_started_at) != _utc(record.period_started_at):
+            raise ShadowIntegrityError("shadow component period start mismatch")
+        if _utc(observation.period_ended_at) != _utc(record.period_ended_at):
+            raise ShadowIntegrityError("shadow component period end mismatch")
+        observations.append(observation)
+    return tuple(observations)
+
+
 def _build_record(
     *,
     config: FrozenShadowConfig,
@@ -452,10 +497,12 @@ def _build_record(
     if not _HASH_RE.fullmatch(previous_record_hash):
         raise ShadowIntegrityError("previous_record_hash is invalid")
     weighted_return = Decimal("0")
-    observation_fingerprints: dict[str, str] = {}
+    observation_payloads: dict[str, str] = {}
     for observation in observations:
         weighted_return += config.strategy_weights[observation.strategy_id] * observation.return_fraction
-        observation_fingerprints[observation.strategy_id] = observation.fingerprint
+        observation_payloads[observation.strategy_id] = _canonical_json(
+            _observation_payload(observation)
+        )
     if not weighted_return.is_finite() or weighted_return <= Decimal("-1"):
         raise ShadowIntegrityError("weighted shadow return is invalid")
     nav_after = nav_before * (Decimal("1") + weighted_return)
@@ -469,7 +516,7 @@ def _build_record(
         weighted_return=weighted_return,
         nav_before=nav_before,
         nav_after=nav_after,
-        observation_fingerprints=observation_fingerprints,
+        observation_payloads=observation_payloads,
         previous_record_hash=previous_record_hash,
         record_hash="",
     )
@@ -482,7 +529,7 @@ def _build_record(
         weighted_return=provisional.weighted_return,
         nav_before=provisional.nav_before,
         nav_after=provisional.nav_after,
-        observation_fingerprints=provisional.observation_fingerprints,
+        observation_payloads=provisional.observation_payloads,
         previous_record_hash=provisional.previous_record_hash,
         record_hash=record_hash,
     )
@@ -520,17 +567,17 @@ def _record_payload_without_hash(record: ShadowPeriodRecord) -> dict[str, object
         "weighted_return": str(record.weighted_return),
         "nav_before": str(record.nav_before),
         "nav_after": str(record.nav_after),
-        "observation_fingerprints": {
-            strategy_id: record.observation_fingerprints[strategy_id]
-            for strategy_id in sorted(record.observation_fingerprints)
+        "observation_payloads": {
+            strategy_id: record.observation_payloads[strategy_id]
+            for strategy_id in sorted(record.observation_payloads)
         },
         "previous_record_hash": record.previous_record_hash,
     }
 
 
 def _config_from_row(row: sqlite3.Row) -> FrozenShadowConfig:
+    payload = _strict_json_object(row["config_json"])
     try:
-        payload = _strict_json_object(row["config_json"])
         config = FrozenShadowConfig(
             config_id=_required_str(payload, "config_id"),
             activated_at=_parse_datetime(payload.get("activated_at"), "activated_at"),
@@ -548,16 +595,16 @@ def _config_from_row(row: sqlite3.Row) -> FrozenShadowConfig:
 
 
 def _record_from_row(row: sqlite3.Row) -> ShadowPeriodRecord:
+    payload = _strict_json_object(row["record_json"])
     try:
-        payload = _strict_json_object(row["record_json"])
-        fingerprints_raw = payload.get("observation_fingerprints")
-        if not isinstance(fingerprints_raw, dict):
-            raise ValueError("observation_fingerprints must be an object")
-        fingerprints: dict[str, str] = {}
-        for strategy_id, fingerprint in fingerprints_raw.items():
-            if not isinstance(strategy_id, str) or not isinstance(fingerprint, str):
-                raise ValueError("invalid observation fingerprint entry")
-            fingerprints[strategy_id] = fingerprint
+        payloads_raw = payload.get("observation_payloads")
+        if not isinstance(payloads_raw, dict):
+            raise ValueError("observation_payloads must be an object")
+        observation_payloads: dict[str, str] = {}
+        for strategy_id, raw in payloads_raw.items():
+            if not isinstance(strategy_id, str) or not isinstance(raw, str):
+                raise ValueError("invalid observation payload entry")
+            observation_payloads[strategy_id] = raw
         record = ShadowPeriodRecord(
             sequence=_parse_int(payload.get("sequence"), "sequence"),
             config_fingerprint=_required_str(payload, "config_fingerprint"),
@@ -566,7 +613,7 @@ def _record_from_row(row: sqlite3.Row) -> ShadowPeriodRecord:
             weighted_return=_parse_decimal(payload.get("weighted_return"), "weighted_return"),
             nav_before=_parse_decimal(payload.get("nav_before"), "nav_before"),
             nav_after=_parse_decimal(payload.get("nav_after"), "nav_after"),
-            observation_fingerprints=fingerprints,
+            observation_payloads=observation_payloads,
             previous_record_hash=_required_str(payload, "previous_record_hash"),
             record_hash=str(row["record_hash"]),
         )
@@ -593,7 +640,10 @@ def _record_from_row(row: sqlite3.Row) -> ShadowPeriodRecord:
 def _control_from_row(row: sqlite3.Row) -> ShadowControlState:
     try:
         config_fingerprint = str(row["config_fingerprint"])
-        sequence = int(row["sequence"])
+        sequence_raw = row["sequence"]
+        if isinstance(sequence_raw, bool) or not isinstance(sequence_raw, int):
+            raise ValueError("sequence must be integer")
+        sequence = sequence_raw
         head_hash = str(row["head_hash"])
         nav = Decimal(str(row["nav"]))
         control_hash = str(row["control_hash"])
