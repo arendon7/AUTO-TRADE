@@ -430,6 +430,19 @@
       "severity": "P1",
       "status": "CLOSED",
       "track": "R4"
+    },
+    {
+      "area": "Health recovery acknowledgement idempotency",
+      "evidence": [
+        "src/autotrade/research/health.py",
+        "src/autotrade/health_bridge.py"
+      ],
+      "id": "TD-R4-012",
+      "next_action": "Require an explicit recovery_id/idempotency key for Health and Defensive Health Bridge acknowledgements; persist request identity and binding, make same-request replay a no-op, reject conflicting reuse, and prove duplicate retries cannot relax more than one level or bump safety_state twice.",
+      "resolution": "",
+      "severity": "P1",
+      "status": "OPEN",
+      "track": "R4"
     }
   ],
   "registry_version": 1

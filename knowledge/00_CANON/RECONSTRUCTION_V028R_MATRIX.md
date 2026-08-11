@@ -44,8 +44,8 @@ Objetivo: reconstruir todas las capacidades históricamente verificadas sin deud
 | R4 | correlation-aware portfolio research | v0.18 | PASS | common-panel dependence + anti-forgery clusters + exact strategy/cluster/portfolio budgets (`TD-R4-002`) |
 | R4 | allocation perturbation + leave-one-out | v0.18 | PASS | deterministic exact-sum Decimal normalization + complete recomputable perturbation/leave-one-out gate (`TD-R4-003`,`TD-R4-011`) |
 | R4 | TRAIN-calibrated regimes | v0.18 | PASS | TRAIN/DEVELOPMENT-only calibration + frozen HOLDOUT evaluation + UNKNOWN on stale/missing evidence (`TD-R4-004`) |
-| R4 | Strategy/Portfolio Health & Drift | v0.19 | PASS | immutable baseline/policy-bound durable state + monotone automatic worsening + acknowledged fresh-evidence recovery (`TD-R4-005`) |
-| R4 | Defensive Health Bridge | v0.20 | PASS | durable reduce/block-only bridge + safety-version invalidation + submit-time OMS recheck + explicit fresh-evidence recovery (`TD-R4-006`) |
+| R4 | Strategy/Portfolio Health & Drift | v0.19 | PARTIAL | health/drift core remains certified; retry-safe recovery acknowledgement is open as `TD-R4-012` |
+| R4 | Defensive Health Bridge | v0.20 | PARTIAL | reduce/block-only bridge remains certified; recovery request idempotency is open as `TD-R4-012` |
 | R4 | deterministic Portfolio Manager / sizing + cross-strategy budgets | reconstructed strengthening | PASS | advisory-only sizing + base/Health/venue budget+robustness recomputation + authoritative metadata + CI authority gate (`TD-R4-007`) |
 | R5 | closed-kline read-only stream | v0.22 | TODO | disabled default + fixed host + stream state |
 | R5 | duplicate idempotency + gap fail-closed | v0.22 | TODO | no silent imputation |
