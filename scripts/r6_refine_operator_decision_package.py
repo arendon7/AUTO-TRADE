@@ -34,7 +34,11 @@ def main() -> int:
         "    prepared_package_hash: str\n",
         "context package field",
     )
+    # Replace both instance-field forms before changing serialized keys. The
+    # first refinement attempt changed the key but left context.oms_handoff_hash
+    # in _context_payload_without_hash; keep this explicit and audit residuals.
     text = text.replace("self.oms_handoff_hash", "self.prepared_package_hash")
+    text = text.replace("context.oms_handoff_hash", "context.prepared_package_hash")
     text = text.replace('"oms_handoff_hash"', '"prepared_package_hash"')
     text = text.replace("oms_handoff_hash=", "prepared_package_hash=")
 
@@ -44,6 +48,8 @@ def main() -> int:
         raise SystemExit("operator context from_evidence block not found")
     new_factory = '''    @classmethod\n    def from_prepared_package(\n        cls,\n        package: PreparedPaperCanaryPackage,\n    ) -> "PaperOperatorDecisionContext":\n        if not isinstance(package, PreparedPaperCanaryPackage):\n            raise TypeError("prepared PAPER canary package is required")\n        if package.network_write_authorized is not False:\n            raise ValueError("operator decision requires a non-authorizing prepared package")\n        if package.next_action != "OPERATOR_DECISION_REQUIRED":\n            raise ValueError("prepared package does not require operator decision")\n        if package.order_status != "VALIDATED":\n            raise ValueError("operator decision requires prepared VALIDATED OMS state")\n        raw = {\n            "environment": "PAPER",\n            "account_attestation_fingerprint": package.account_attestation_fingerprint,\n            "order_id": package.order_id,\n            "client_order_id": package.client_order_id,\n            "binding_hash": package.submission_binding_hash,\n            "bracket_payload_hash": package.bracket_payload_hash,\n            "canary_approval_hash": package.canary_approval_hash,\n            "prepared_package_hash": package.package_hash,\n            "notional": str(package.notional),\n            "attempt_id": package.attempt_id,\n        }\n        return cls(\n            environment="PAPER",\n            account_attestation_fingerprint=package.account_attestation_fingerprint,\n            order_id=package.order_id,\n            client_order_id=package.client_order_id,\n            binding_hash=package.submission_binding_hash,\n            bracket_payload_hash=package.bracket_payload_hash,\n            canary_approval_hash=package.canary_approval_hash,\n            prepared_package_hash=package.package_hash,\n            notional=package.notional,\n            attempt_id=package.attempt_id,\n            preparation_hash=_hash_json(raw),\n        )\n'''
     text = text[:start] + new_factory + text[end:]
+    if "oms_handoff_hash" in text or "ExternalSubmissionHandoff" in text:
+        raise SystemExit("residual pre-operator OMS handoff binding remains after refinement")
     MODULE.write_text(text, encoding="utf-8")
 
     test = TEST.read_text(encoding="utf-8")
@@ -71,16 +77,16 @@ def main() -> int:
     test = test.replace('assert context.attempt_id == "writer-attempt-001"', 'assert context.attempt_id == prepared.package.attempt_id')
     test = test.replace('assert context.oms_handoff_hash == prepared.package.package_hash', 'assert context.prepared_package_hash == prepared.package.package_hash')
 
-    # Replace the old cross-evidence test with a direct prepared-package binding test.
     start = test.find("def test_context_cross_evidence_mismatch_fails_closed")
     end = test.find("\n\ndef test_issue_is_durable", start)
     if start < 0 or end < 0:
         raise SystemExit("operator cross-evidence test block not found")
     replacement = '''def test_context_package_hash_tamper_fails_closed(tmp_path) -> None:\n    _, context, _ = evidence(tmp_path)\n    with pytest.raises(ValueError, match="preparation_hash mismatch"):\n        replace(\n            context,\n            prepared_package_hash="f" * 64,\n            preparation_hash="0" * 64,\n        )\n'''
     test = test[:start] + replacement + test[end:]
-
     test = test.replace('evidence(tmp_path / "tail", attempt_id="writer-attempt-002")', 'evidence(tmp_path / "tail")')
     test = test.replace('evidence(tmp_path / "control", attempt_id="writer-attempt-003")', 'evidence(tmp_path / "control")')
+    if "oms_handoff_hash" in test:
+        raise SystemExit("operator tests retain old OMS handoff binding")
     TEST.write_text(test, encoding="utf-8")
     print("operator decision now binds exact PreparedPaperCanaryPackage")
     return 0
