@@ -38,6 +38,12 @@ jobs:
       - name: R5 stream shadow forward authority boundary
         run: python scripts/check_r5_authority.py
 
+      - name: R6 PAPER-only authority boundary
+        run: python scripts/check_r6_authority.py
+
+      - name: R6 unsupported-product boundary
+        run: python scripts/check_r6_product_boundary.py
+
       - name: Debt register contract
         run: python scripts/check_debt_register.py
 
