@@ -86,7 +86,7 @@ def _validate_ordering(source: str) -> list[str]:
         ("pre_consume", "phase=PaperFinalWritePhase.PRE_CONSUME"),
         ("permit_consume", "permit_registry.consume("),
         ("unknown", "submission_registry.mark_submit_attempt_unknown("),
-        ("request", "request = _build_request("),
+        ("request", "request = AlpacaPaperWriteRequest("),
         ("pre_io", "phase=PaperFinalWritePhase.PRE_IO"),
         ("transport_write", "response = self._transport.write(request)"),
     )
