@@ -2,7 +2,7 @@ name: Core Safety Tests
 
 on:
   push:
-    branches: [main, stable, "foundation/**", "feature/**"]
+    branches: [main, stable, "foundation/**", "feature/**", "reconstruction/**"]
   pull_request:
 
 permissions:
@@ -24,10 +24,13 @@ jobs:
         run: python -m pip install -e '.[dev]'
 
       - name: Compile
-        run: python -m compileall -q src tests
+        run: python -m compileall -q src tests scripts
 
       - name: Tests with branch coverage
         run: pytest --cov=autotrade --cov-report=term-missing
+
+      - name: Machine-readable contract registry
+        run: python scripts/check_contract_registry.py
 
       - name: Canonical knowledge contract
         run: python scripts/check_knowledge_contract.py
