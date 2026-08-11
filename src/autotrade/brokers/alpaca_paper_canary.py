@@ -129,14 +129,10 @@ class PaperCanaryGate:
             reasons.append("OMS order must be VALIDATED immediately before canary")
         if not order.risk_decision_id:
             reasons.append("validated order is missing deterministic risk_decision_id")
-        if order.broker_order_id is not None:
-            reasons.append("canary order is already bound to a broker order")
         if intent.side is not Side.BUY:
             reasons.append("R6 first canary is long BUY-only")
         if intent.order_type is not OrderType.LIMIT or intent.limit_price is None:
             reasons.append("R6 first canary requires an explicit LIMIT price")
-        if intent.stop_price is not None:
-            reasons.append("R6 first canary parent intent cannot carry a stop field")
         if not _finite_positive(intent.quantity):
             reasons.append("canary quantity must be finite and positive")
 
@@ -174,6 +170,8 @@ class PaperCanaryGate:
             reasons.append("submission state must be PREPARED before canary approval")
         if submission.attempt_count != 0:
             reasons.append("canary approval cannot follow an external submit attempt")
+        if submission.broker_order_id is not None or submission.broker_client_order_id is not None:
+            reasons.append("canary submission state is already broker-bound")
 
         if not context.reconciliation_clean:
             reasons.append("portfolio/broker reconciliation is not clean")
