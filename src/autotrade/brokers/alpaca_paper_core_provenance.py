@@ -22,14 +22,13 @@ from autotrade.persistence import (
 )
 from autotrade.research.health import (
     HealthEntityKind,
-    HealthIntegrityError,
     HealthState,
+    HealthStateConflict,
     _state_from_row as _health_state_from_row,
 )
 from autotrade.state import SafetyControlState
 
 from .alpaca_paper_operational import (
-    PaperOperationalIntegrityError,
     PaperOperationalWorkspace,
     read_prepared_package,
 )
@@ -331,7 +330,7 @@ class PaperOperationalCoreProvenanceReader:
             raise PaperCoreProvenanceMissing("strategy Health state is missing")
         try:
             health = _health_state_from_row(row)
-        except HealthIntegrityError as exc:
+        except HealthStateConflict as exc:
             raise PaperCoreProvenanceConflict("strategy Health state integrity failed") from exc
         if health.state is not HealthState.HEALTHY:
             raise PaperCoreProvenanceConflict("strategy Health state is not HEALTHY")
