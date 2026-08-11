@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 import io
 from pathlib import Path
 import runpy
@@ -150,21 +149,21 @@ def test_launcher_exact_challenge_can_only_delegate_to_injected_runtime_no_netwo
         def __init__(self, *, config):
             captured["writer_enabled"] = config.enabled
 
-    @dataclass
     class FakeSubmit:
-        order_id: str = prepared.result.package.order_id
-        client_order_id: str = prepared.result.package.client_order_id
-        attempt_id: str = prepared.result.package.attempt_id
-        http_status: int = 200
-        request_id: str = "fake-request"
-        broker_order_id: str = "fake-paper-order"
-        provisionally_accepted: bool = True
-        durable_status: PaperSubmissionStatus = PaperSubmissionStatus.UNKNOWN
-        reconciliation_required: bool = True
+        def __init__(self) -> None:
+            self.order_id = prepared.result.package.order_id
+            self.client_order_id = prepared.result.package.client_order_id
+            self.attempt_id = prepared.result.package.attempt_id
+            self.http_status = 200
+            self.request_id = "fake-request"
+            self.broker_order_id = "fake-paper-order"
+            self.provisionally_accepted = True
+            self.durable_status = PaperSubmissionStatus.UNKNOWN
+            self.reconciliation_required = True
 
-    @dataclass
     class FakeResult:
-        submit: FakeSubmit = FakeSubmit()
+        def __init__(self) -> None:
+            self.submit = FakeSubmit()
 
     class FakeRuntime:
         def __init__(self, *, workspace, writer):
