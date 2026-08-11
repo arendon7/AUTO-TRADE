@@ -1,0 +1,38 @@
+{
+  "track": "R4",
+  "slice": ["TD-R4-009", "TD-R4-010"],
+  "capability": "Durable Fill + Portfolio State Integrity",
+  "certification_state": "SLICE_CERTIFIED",
+  "certification_basis_commit": "d13d9d0a73e3e1fda1ee1cbd2842abe9003b427b",
+  "ci": {
+    "compile": "PASS",
+    "test_suite": "PASS",
+    "coverage_gate_percent": 85.0,
+    "coverage_gate": "PASS",
+    "contract_registry": "PASS",
+    "research_authority_boundary": "PASS",
+    "debt_register_contract": "PASS",
+    "knowledge_contract": "PASS"
+  },
+  "certified_invariants": [
+    "durable fill replay verifies fill_json against fill_hash on every read",
+    "durable fill replay cross-checks independent fill_id/order_id/occurred_at columns",
+    "duplicate fill replay validates the existing stored payload before treating it as idempotent",
+    "malformed/corrupted fill state fails closed as FillIntegrityConflict",
+    "portfolio_state carries an independent SHA-256 commitment over exact persisted snapshot_json bytes",
+    "every durable portfolio read validates stored hash before semantic use",
+    "every durable portfolio write and CAS validates semantic PortfolioSnapshot integrity before commit",
+    "semantic PortfolioSnapshot validation is shared by persistence and Capital Safety Kernel",
+    "matching recomputed storage hash cannot bless an internally inconsistent portfolio snapshot",
+    "valid legacy portfolio_state rows are semantically validated before snapshot_hash backfill",
+    "invalid legacy portfolio_state rows fail migration and are never blessed with a new hash",
+    "fill-aware portfolio projection maintains snapshot_hash atomically with the versioned snapshot",
+    "risk reservation acquisition validates the current portfolio commitment before reserving against its version"
+  ],
+  "explicit_non_claims": [
+    "A local attacker able to coherently rewrite every independent database commitment is outside this slice's integrity model.",
+    "This slice does not certify the complete R4 Portfolio State audit or portfolio research/allocation/health capabilities.",
+    "No external PAPER or LIVE execution authority is added."
+  ],
+  "capital_state": "LIVE_TRADING_BLOCKED"
+}
