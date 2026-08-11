@@ -93,6 +93,10 @@ class CapitalSafetyKernel:
         return self._state_store.get().kill_switch_active
 
     @property
+    def circuit_active(self) -> bool:
+        return self._state_store.get().circuit_active
+
+    @property
     def state_store(self) -> SafetyStateStore:
         return self._state_store
 
@@ -122,6 +126,46 @@ class CapitalSafetyKernel:
                     occurred_at=now,
                     payload={
                         "confirmed_by": confirmed_by,
+                        "safety_state_version": str(state.version),
+                    },
+                )
+            )
+
+    def activate_circuit(self, *, reason: str, now: datetime) -> None:
+        if not reason.strip():
+            raise ValueError("circuit reason is required")
+        with self._lock:
+            before = self._state_store.get()
+            state = self._state_store.activate_circuit(reason=reason, now=now)
+            if before.circuit_active:
+                return
+            self._ledger.append(
+                LedgerEvent(
+                    event_id=f"circuit:{uuid4()}",
+                    event_type="CIRCUIT_ACTIVATED",
+                    occurred_at=now,
+                    payload={"reason": reason, "safety_state_version": str(state.version)},
+                )
+            )
+
+    def acknowledge_circuit(self, *, confirmed_by: str, reason: str, now: datetime) -> None:
+        if not confirmed_by.strip():
+            raise ValueError("confirmed_by is required")
+        if not reason.strip():
+            raise ValueError("circuit acknowledgement reason is required")
+        with self._lock:
+            before = self._state_store.get()
+            state = self._state_store.acknowledge_circuit(reason=reason, now=now)
+            if not before.circuit_active:
+                return
+            self._ledger.append(
+                LedgerEvent(
+                    event_id=f"circuit-ack:{uuid4()}",
+                    event_type="CIRCUIT_ACKNOWLEDGED",
+                    occurred_at=now,
+                    payload={
+                        "confirmed_by": confirmed_by,
+                        "reason": reason,
                         "safety_state_version": str(state.version),
                     },
                 )
@@ -247,6 +291,8 @@ class CapitalSafetyKernel:
 
         if control_state.kill_switch_active and not risk_reducing:
             return reject("KILL_SWITCH_ACTIVE", control_state.kill_switch_reason, risk_reducing=risk_reducing)
+        if control_state.circuit_active and not risk_reducing:
+            return reject("CIRCUIT_ACTIVE", control_state.circuit_reason, risk_reducing=risk_reducing)
         if portfolio.daily_pnl <= -self._limits.max_daily_loss and not risk_reducing:
             return reject("MAX_DAILY_LOSS", str(portfolio.daily_pnl), risk_reducing=risk_reducing)
         if portfolio.drawdown >= self._limits.max_drawdown and not risk_reducing:
