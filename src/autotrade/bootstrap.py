@@ -7,11 +7,11 @@ from pathlib import Path
 from .brokers.durable_paper import DurablePaperBroker
 from .domain import PortfolioSnapshot
 from .engine import DurableTradingPipeline
+from .execution_state import SQLiteFillAwarePortfolioStore, SQLiteFillStore
 from .oms import OrderManagementSystem
 from .persistence import (
     SQLiteEventLedger,
     SQLiteOrderStore,
-    SQLitePortfolioStore,
     SQLiteReservationStore,
     SQLiteRuntime,
     SQLiteSafetyStateStore,
@@ -27,7 +27,8 @@ class DurablePaperCore:
     broker: DurablePaperBroker
     safety: CapitalSafetyKernel
     oms: OrderManagementSystem
-    portfolio_store: SQLitePortfolioStore
+    portfolio_store: SQLiteFillAwarePortfolioStore
+    fill_store: SQLiteFillStore
     reservation_store: SQLiteReservationStore
     pipeline: DurableTradingPipeline
     reconciliation: ReconciliationEngine
@@ -43,11 +44,12 @@ def build_durable_paper_core(
 ) -> DurablePaperCore:
     runtime = SQLiteRuntime(db_path)
     ledger = SQLiteEventLedger(runtime)
-    portfolio_store = SQLitePortfolioStore(runtime)
+    portfolio_store = SQLiteFillAwarePortfolioStore(runtime)
     portfolio_store.initialize(initial_portfolio, now=now)
     safety_state_store = SQLiteSafetyStateStore(runtime)
     reservation_store = SQLiteReservationStore(runtime)
     order_store = SQLiteOrderStore(runtime)
+    fill_store = SQLiteFillStore(runtime)
     broker = DurablePaperBroker(runtime)
     safety = CapitalSafetyKernel(limits, ledger, state_store=safety_state_store)
     oms = OrderManagementSystem(
@@ -55,6 +57,7 @@ def build_durable_paper_core(
         ledger=ledger,
         order_store=order_store,
         safety_state_store=safety_state_store,
+        fill_store=fill_store,
     )
     pipeline = DurableTradingPipeline(
         safety=safety,
@@ -70,9 +73,8 @@ def build_durable_paper_core(
         ledger=ledger,
     )
 
-    # Every process start is fail-closed until the durable local state and the
-    # broker-side simulator agree. A future real broker adapter must preserve
-    # this startup contract.
+    # Every process start is fail-closed until durable local state and broker
+    # evidence agree. Future external adapters must preserve this contract.
     portfolio_store.set_reconciliation_status(
         reconciliation_ok=False,
         broker_state_known=False,
@@ -87,6 +89,7 @@ def build_durable_paper_core(
         safety=safety,
         oms=oms,
         portfolio_store=portfolio_store,
+        fill_store=fill_store,
         reservation_store=reservation_store,
         pipeline=pipeline,
         reconciliation=reconciliation,
