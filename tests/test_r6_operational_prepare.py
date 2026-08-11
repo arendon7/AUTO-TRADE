@@ -6,7 +6,11 @@ from decimal import Decimal
 import pytest
 
 from autotrade.brokers.alpaca_paper_canary import PaperCanaryRejected
-from autotrade.brokers.alpaca_paper_operational import PaperOperationalWorkspace, read_prepared_package
+from autotrade.brokers.alpaca_paper_operational import (
+    PaperOperationalWorkspace,
+    read_expected_bracket,
+    read_prepared_package,
+)
 from autotrade.brokers.alpaca_paper_operational_prepare import PaperOperationalCanaryPreparer
 from test_r6_paper_canary_coordinator import (
     NOW,
@@ -53,14 +57,16 @@ def run_prepare(preparer, submission, permit, **overrides):
     return preparer.prepare(**values)
 
 
-def test_operational_preparer_persists_exact_coordinator_package_and_stops_before_execution(tmp_path) -> None:
+def test_operational_preparer_persists_exact_coordinator_package_and_bracket_and_stops_before_execution(tmp_path) -> None:
     preparer, workspace, broker, submission, permit = build(tmp_path)
     prepared = run_prepare(preparer, submission, permit)
 
     assert prepared.result.package.network_write_authorized is False
     assert prepared.result.package.next_action == "OPERATOR_DECISION_REQUIRED"
     assert read_prepared_package(prepared.prepared_package_path) == prepared.result.package
+    assert read_expected_bracket(prepared.expected_bracket_path) == prepared.result.bracket
     assert prepared.account_attestation_path == workspace.account_attestation_path
+    assert prepared.expected_bracket_path == workspace.expected_bracket_path
     assert prepared.operator_context_path == workspace.operator_context_path
     assert prepared.manifest_path == workspace.manifest_path
     assert broker.calls == 0
@@ -74,7 +80,9 @@ def test_identical_operational_preparation_is_idempotent(tmp_path) -> None:
     first = run_prepare(preparer, submission, permit)
     second = run_prepare(preparer, submission, permit)
     assert second.result.package == first.result.package
+    assert second.result.bracket == first.result.bracket
     assert second.prepared_package_path.read_bytes() == first.prepared_package_path.read_bytes()
+    assert second.expected_bracket_path.read_bytes() == first.expected_bracket_path.read_bytes()
     assert broker.calls == 0
 
 
@@ -89,6 +97,7 @@ def test_operational_preparation_propagates_canary_fail_closed_without_partial_p
         )
     assert workspace.account_attestation_path.exists()
     assert not workspace.prepared_package_path.exists()
+    assert not workspace.expected_bracket_path.exists()
     assert not workspace.operator_context_path.exists()
     assert not workspace.manifest_path.exists()
     assert broker.calls == 0
@@ -106,6 +115,7 @@ def test_operational_preparation_rejects_stale_account_before_package_persistenc
         )
     assert workspace.account_attestation_path.exists()
     assert not workspace.prepared_package_path.exists()
+    assert not workspace.expected_bracket_path.exists()
     assert broker.calls == 0
 
 
