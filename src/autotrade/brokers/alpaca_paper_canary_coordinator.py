@@ -60,6 +60,8 @@ class PreparedPaperCanaryPackage:
     client_order_id: str
     intent_fingerprint: str
     risk_decision_id: str
+    risk_decision_safety_state_version: int
+    market_fingerprint: str
     risk_decision_valid_until: datetime
     account_attestation_fingerprint: str
     submission_binding_hash: str
@@ -91,6 +93,7 @@ class PreparedPaperCanaryPackage:
             _require_id(value, label)
         for label, value in (
             ("intent_fingerprint", self.intent_fingerprint),
+            ("market_fingerprint", self.market_fingerprint),
             ("account_attestation_fingerprint", self.account_attestation_fingerprint),
             ("submission_binding_hash", self.submission_binding_hash),
             ("submission_control_hash", self.submission_control_hash),
@@ -110,6 +113,12 @@ class PreparedPaperCanaryPackage:
             ("prepared_at", self.prepared_at),
         ):
             _require_aware(value, label)
+        if (
+            isinstance(self.risk_decision_safety_state_version, bool)
+            or not isinstance(self.risk_decision_safety_state_version, int)
+            or self.risk_decision_safety_state_version < 0
+        ):
+            raise ValueError("risk_decision_safety_state_version must be a non-negative integer")
         if not _finite_positive(self.notional):
             raise ValueError("notional must be finite and positive")
         if not _finite_positive(self.effective_notional_cap):
@@ -265,6 +274,7 @@ class PaperCanaryCoordinator:
 
         attempt_id = deterministic_canary_attempt_id(
             order=order,
+            decision=decision,
             binding=binding,
             bracket=bracket,
             approval=approval,
@@ -294,6 +304,7 @@ class PaperCanaryCoordinator:
 def deterministic_canary_attempt_id(
     *,
     order: OrderRecord,
+    decision: RiskDecision,
     binding: PaperSubmissionBinding,
     bracket: AlpacaEquityBracketRequest,
     approval: PaperCanaryApproval,
@@ -307,6 +318,8 @@ def deterministic_canary_attempt_id(
         "intent_fingerprint": intent_fingerprint(order.intent),
         "order_id": order.order_id,
         "risk_decision_id": order.risk_decision_id,
+        "risk_decision_safety_state_version": decision.safety_state_version,
+        "market_fingerprint": decision.market_fingerprint,
     }
     return f"r6-paper-attempt-{_hash_json(payload)[:48]}"
 
@@ -328,6 +341,8 @@ def _build_package(
         "client_order_id": binding.client_order_id,
         "intent_fingerprint": intent_fingerprint(order.intent),
         "risk_decision_id": decision.decision_id,
+        "risk_decision_safety_state_version": decision.safety_state_version,
+        "market_fingerprint": decision.market_fingerprint,
         "risk_decision_valid_until": decision.valid_until,
         "account_attestation_fingerprint": approval.account_attestation_fingerprint,
         "submission_binding_hash": binding.fingerprint,
@@ -359,6 +374,8 @@ def _package_payload(package: PreparedPaperCanaryPackage, *, include_hash: bool)
         "client_order_id": package.client_order_id,
         "intent_fingerprint": package.intent_fingerprint,
         "risk_decision_id": package.risk_decision_id,
+        "risk_decision_safety_state_version": package.risk_decision_safety_state_version,
+        "market_fingerprint": package.market_fingerprint,
         "risk_decision_valid_until": package.risk_decision_valid_until,
         "account_attestation_fingerprint": package.account_attestation_fingerprint,
         "submission_binding_hash": package.submission_binding_hash,
@@ -406,6 +423,8 @@ def _package_payload_from_values(values: dict[str, object]) -> dict[str, object]
         "permit_event_hash": values["permit_event_hash"],
         "prepared_at": _iso(values["prepared_at"]),
         "risk_decision_id": values["risk_decision_id"],
+        "risk_decision_safety_state_version": values["risk_decision_safety_state_version"],
+        "market_fingerprint": values["market_fingerprint"],
         "risk_decision_valid_until": _iso(values["risk_decision_valid_until"]),
         "submission_binding_hash": values["submission_binding_hash"],
         "submission_control_hash": values["submission_control_hash"],

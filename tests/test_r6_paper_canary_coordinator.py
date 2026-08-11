@@ -218,6 +218,8 @@ def test_prepare_integrates_certified_components_but_stops_at_validated(tmp_path
     assert result.package.order_status == "VALIDATED"
     assert result.package.network_write_authorized is False
     assert result.package.next_action == "OPERATOR_DECISION_REQUIRED"
+    assert result.package.risk_decision_safety_state_version == 0
+    assert result.package.market_fingerprint == market_fingerprint(market())
     assert result.package.attempt_id.startswith("r6-paper-attempt-")
     assert result.package.execution_deadline == result.approval.expires_at
     assert result.package.canonical_payload()["package_hash"] == result.package.package_hash
@@ -291,6 +293,10 @@ def test_package_is_self_validating_and_cannot_claim_execution_authority(tmp_pat
         replace(package, next_action="EXECUTE")
     with pytest.raises(ValueError, match="hash mismatch"):
         replace(package, package_hash="0" * 64)
+    with pytest.raises(ValueError, match="hash mismatch"):
+        replace(package, market_fingerprint="f" * 64)
+    with pytest.raises(ValueError, match="non-negative integer"):
+        replace(package, risk_decision_safety_state_version=-1)
 
 
 def test_global_predicates_and_exact_tracks_fail_closed(tmp_path) -> None:
