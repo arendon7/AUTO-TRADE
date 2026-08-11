@@ -6,6 +6,7 @@ from decimal import Decimal
 from enum import StrEnum
 from hashlib import sha256
 import json
+import sqlite3
 from pathlib import Path
 from typing import Mapping
 
@@ -170,6 +171,12 @@ class SQLiteTrialLedger:
                 );
                 CREATE INDEX IF NOT EXISTS idx_research_trials_campaign
                     ON research_trials(campaign_id, trial_id);
+
+                CREATE TABLE IF NOT EXISTS research_holdout_trial_bindings (
+                    permit_id TEXT PRIMARY KEY,
+                    trial_id TEXT NOT NULL UNIQUE,
+                    bound_at TEXT NOT NULL
+                );
                 """
             )
         finally:
@@ -230,8 +237,12 @@ class SQLiteTrialLedger:
                 record = _trial_record_from_row(existing)
                 if record.spec.fingerprint != spec.fingerprint:
                     raise TrialConflict(f"trial identity conflict: {spec.trial_id}")
+                if spec.phase is TrialPhase.FINAL_HOLDOUT:
+                    _bind_holdout_trial_tx(conn, spec=spec, now=now)
                 conn.execute("COMMIT")
                 return record
+            if spec.phase is TrialPhase.FINAL_HOLDOUT:
+                _bind_holdout_trial_tx(conn, spec=spec, now=now)
             conn.execute(
                 """
                 INSERT INTO research_trials(
@@ -314,6 +325,8 @@ class SQLiteTrialLedger:
             if row is None:
                 raise TrialGovernanceError("result cannot be recorded before preregistration")
             existing = _trial_record_from_row(row)
+            if existing.spec.phase is TrialPhase.FINAL_HOLDOUT:
+                _require_consumed_holdout_permit_tx(conn, existing.spec)
             if existing.status.terminal:
                 if existing.result_hash != result_hash:
                     raise TrialConflict(f"terminal trial result conflict: {trial_id}")
@@ -412,6 +425,73 @@ class SQLiteTrialLedger:
                 f"unterminated={accounting.unterminated_trial_ids}"
             )
         return accounting
+
+
+def _bind_holdout_trial_tx(
+    conn: sqlite3.Connection, *, spec: TrialSpec, now: datetime
+) -> None:
+    permit_id = spec.holdout_authorization_id
+    existing_permit = conn.execute(
+        "SELECT trial_id FROM research_holdout_trial_bindings WHERE permit_id = ?",
+        (permit_id,),
+    ).fetchone()
+    if existing_permit is not None and existing_permit["trial_id"] != spec.trial_id:
+        raise TrialGovernanceError(
+            f"HOLDOUT permit already bound to another trial: {permit_id}"
+        )
+    existing_trial = conn.execute(
+        "SELECT permit_id FROM research_holdout_trial_bindings WHERE trial_id = ?",
+        (spec.trial_id,),
+    ).fetchone()
+    if existing_trial is not None and existing_trial["permit_id"] != permit_id:
+        raise TrialGovernanceError(
+            f"HOLDOUT trial already bound to another permit: {spec.trial_id}"
+        )
+    if existing_permit is None and existing_trial is None:
+        conn.execute(
+            """
+            INSERT INTO research_holdout_trial_bindings(permit_id, trial_id, bound_at)
+            VALUES (?, ?, ?)
+            """,
+            (permit_id, spec.trial_id, now.isoformat()),
+        )
+
+
+def _require_consumed_holdout_permit_tx(
+    conn: sqlite3.Connection, spec: TrialSpec
+) -> None:
+    binding = conn.execute(
+        """
+        SELECT permit_id FROM research_holdout_trial_bindings
+        WHERE trial_id = ?
+        """,
+        (spec.trial_id,),
+    ).fetchone()
+    if binding is None or binding["permit_id"] != spec.holdout_authorization_id:
+        raise TrialGovernanceError(
+            "FINAL_HOLDOUT trial has no matching durable permit binding"
+        )
+    table = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='holdout_permits'"
+    ).fetchone()
+    if table is None:
+        raise TrialGovernanceError(
+            "HOLDOUT permit registry is not initialized/consumed"
+        )
+    permit = conn.execute(
+        """
+        SELECT purpose, used_at FROM holdout_permits WHERE permit_id = ?
+        """,
+        (spec.holdout_authorization_id,),
+    ).fetchone()
+    if (
+        permit is None
+        or permit["purpose"] != "final_validation"
+        or not str(permit["used_at"]).strip()
+    ):
+        raise TrialGovernanceError(
+            "FINAL_HOLDOUT result requires a consumed final_validation permit"
+        )
 
 
 def _campaign_payload(spec: CampaignSpec) -> dict[str, object]:

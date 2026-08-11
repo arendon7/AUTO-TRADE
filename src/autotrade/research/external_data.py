@@ -9,8 +9,9 @@ from pathlib import Path
 import re
 from typing import Mapping, Protocol
 from urllib.parse import urlencode, urlsplit
-from urllib.request import Request, urlopen
+from urllib.request import HTTPRedirectHandler, Request, build_opener
 from urllib.error import HTTPError, URLError
+import socket
 
 from .market import Bar, InstrumentMetadata, MarketDataset
 
@@ -78,12 +79,25 @@ class PublicDataPolicy:
         self.validate(ReadOnlyRequest(method="GET", url=url, timeout_seconds=1.0))
 
 
+class _PolicyRedirectHandler(HTTPRedirectHandler):
+    def __init__(self, policy: PublicDataPolicy) -> None:
+        super().__init__()
+        self._policy = policy
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        # Validate the redirect target BEFORE urllib performs the redirected
+        # network request. Cross-host/path redirects therefore fail closed.
+        self._policy.validate_final_url(newurl)
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
 class UrllibReadOnlyTransport:
     def __init__(self, *, policy: PublicDataPolicy, max_response_bytes: int = 10_000_000) -> None:
         if max_response_bytes <= 0:
             raise ValueError("max_response_bytes must be > 0")
         self._policy = policy
         self._max_response_bytes = max_response_bytes
+        self._opener = build_opener(_PolicyRedirectHandler(policy))
 
     def send(self, request: ReadOnlyRequest) -> HttpResponse:
         self._policy.validate(request)
@@ -93,7 +107,7 @@ class UrllibReadOnlyTransport:
             headers={"Accept": "application/json", "User-Agent": "AUTO-TRADE-R3/1"},
         )
         try:
-            with urlopen(raw_request, timeout=request.timeout_seconds) as response:  # noqa: S310
+            with self._opener.open(raw_request, timeout=request.timeout_seconds) as response:  # noqa: S310
                 final_url = response.geturl()
                 self._policy.validate_final_url(final_url)
                 body = response.read(self._max_response_bytes + 1)
@@ -109,7 +123,7 @@ class UrllibReadOnlyTransport:
             raise ExternalDataUnavailable(f"public-data HTTP error: {exc.code}") from exc
         except URLError as exc:
             raise ExternalDataUnavailable("public-data network request failed") from exc
-        except TimeoutError as exc:
+        except (TimeoutError, socket.timeout) as exc:
             raise ExternalDataUnavailable("public-data request timed out") from exc
 
 
@@ -349,6 +363,11 @@ class BinanceSpotHistoricalProvider:
                 raise ExternalDataUnavailable(
                     f"public-data response status is {response.status_code}"
                 )
+            content_type = response.headers.get("content-type", "").lower()
+            if not content_type.startswith("application/json"):
+                raise ExternalDataIntegrityError(
+                    "public-data response content-type is not application/json"
+                )
             rows = _decode_binance_rows(response.body)
             _validate_page_rows(
                 rows=rows,
@@ -557,7 +576,16 @@ def _manifest_from_dict(raw: object) -> ExternalDatasetManifest:
 
 def _epoch_ms(value: datetime) -> int:
     _require_aware(value, "timestamp")
-    return int(value.astimezone(timezone.utc).timestamp() * 1000)
+    normalized = value.astimezone(timezone.utc)
+    if normalized.microsecond % 1000:
+        raise ValueError("timestamp must have exact millisecond precision")
+    epoch = datetime(1970, 1, 1, tzinfo=timezone.utc)
+    delta = normalized - epoch
+    return (
+        delta.days * 86_400_000
+        + delta.seconds * 1_000
+        + delta.microseconds // 1_000
+    )
 
 
 def _require_aware(value: datetime, name: str) -> None:
