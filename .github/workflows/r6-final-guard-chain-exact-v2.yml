@@ -1,0 +1,225 @@
+name: R6 Final Guard Chain Exact V2
+
+on:
+  push:
+    branches:
+      - reconstruction/r6-external-paper-protection
+    paths:
+      - .github/workflows/r6-final-guard-chain-exact-v2.yml
+
+permissions:
+  contents: write
+
+jobs:
+  harden:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: reconstruction/r6-external-paper-protection
+          fetch-depth: 0
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Apply exact production and test hardening
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          # --- final guard ---
+          path = Path('src/autotrade/brokers/alpaca_paper_final_guard.py')
+          text = path.read_text(encoding='utf-8')
+          patches = [
+              (
+                  '''    submission_control_hash: str\n    observed_at: datetime\n    attestation_hash: str\n''',
+                  '''    submission_control_hash: str\n    previous_attestation_hash: str | None\n    observed_at: datetime\n    attestation_hash: str\n''',
+              ),
+              (
+                  '''        if self.submission_event_sequence <= 0:\n            raise ValueError("submission_event_sequence must be > 0")\n        _require_aware(self.observed_at, "observed_at")\n''',
+                  '''        if self.submission_event_sequence <= 0:\n            raise ValueError("submission_event_sequence must be > 0")\n        if self.phase is PaperFinalWritePhase.PRE_CONSUME:\n            if self.previous_attestation_hash is not None:\n                raise ValueError("PRE_CONSUME cannot have previous_attestation_hash")\n        else:\n            if self.previous_attestation_hash is None or not _HASH_RE.fullmatch(\n                self.previous_attestation_hash\n            ):\n                raise ValueError("PRE_IO requires previous_attestation_hash")\n        _require_aware(self.observed_at, "observed_at")\n''',
+              ),
+              (
+                  '''        phase: PaperFinalWritePhase,\n        expected_attempt_id: str | None = None,\n    ) -> PaperFinalWriteAttestation:\n''',
+                  '''        phase: PaperFinalWritePhase,\n        expected_attempt_id: str | None = None,\n        previous_attestation: PaperFinalWriteAttestation | None = None,\n    ) -> PaperFinalWriteAttestation:\n''',
+              ),
+              (
+                  '''        if phase is PaperFinalWritePhase.PRE_CONSUME:\n            if expected_attempt_id is not None:\n                reasons.append("PRE_CONSUME must not carry expected_attempt_id")\n''',
+                  '''        if phase is PaperFinalWritePhase.PRE_CONSUME:\n            if expected_attempt_id is not None:\n                reasons.append("PRE_CONSUME must not carry expected_attempt_id")\n            if previous_attestation is not None:\n                reasons.append("PRE_CONSUME must not carry previous_attestation")\n''',
+              ),
+              (
+                  '''        else:\n            if not expected_attempt_id:\n                reasons.append("PRE_IO requires expected_attempt_id")\n            if submission.status is not PaperSubmissionStatus.UNKNOWN:\n''',
+                  '''        else:\n            if not expected_attempt_id:\n                reasons.append("PRE_IO requires expected_attempt_id")\n            if previous_attestation is None:\n                reasons.append("PRE_IO requires the actual PRE_CONSUME attestation")\n            else:\n                if previous_attestation.phase is not PaperFinalWritePhase.PRE_CONSUME:\n                    reasons.append("PRE_IO predecessor must be PRE_CONSUME")\n                if previous_attestation.approval_hash != approval.approval_hash:\n                    reasons.append("PRE_IO predecessor approval hash mismatch")\n                if previous_attestation.order_id != approval.order_id:\n                    reasons.append("PRE_IO predecessor order_id mismatch")\n                if previous_attestation.client_order_id != approval.client_order_id:\n                    reasons.append("PRE_IO predecessor client_order_id mismatch")\n                if previous_attestation.binding_hash != binding.fingerprint:\n                    reasons.append("PRE_IO predecessor binding hash mismatch")\n                if previous_attestation.risk_decision_id != approval.risk_decision_id:\n                    reasons.append("PRE_IO predecessor risk_decision_id mismatch")\n                if previous_attestation.observed_at > observed_at:\n                    reasons.append("PRE_IO observation cannot precede PRE_CONSUME")\n                if previous_attestation.safety_state_version != safety.version:\n                    reasons.append("Safety state version changed between PRE_CONSUME and PRE_IO")\n                if previous_attestation.portfolio_version != versioned_portfolio.version:\n                    reasons.append("Portfolio State version changed between PRE_CONSUME and PRE_IO")\n                if previous_attestation.strategy_health_fingerprint != health.strategy_state_fingerprint:\n                    reasons.append("strategy Health evidence changed between PRE_CONSUME and PRE_IO")\n                if previous_attestation.portfolio_health_fingerprint != health.portfolio_state_fingerprint:\n                    reasons.append("portfolio Health evidence changed between PRE_CONSUME and PRE_IO")\n            if submission.status is not PaperSubmissionStatus.UNKNOWN:\n''',
+              ),
+              (
+                  '''            "submission_head_hash": submission.event_head_hash,\n            "submission_status": submission.status.value,\n        }\n''',
+                  '''            "submission_head_hash": submission.event_head_hash,\n            "submission_status": submission.status.value,\n            "previous_attestation_hash": (\n                previous_attestation.attestation_hash\n                if previous_attestation is not None\n                else None\n            ),\n        }\n''',
+              ),
+              (
+                  '''            submission_head_hash=submission.event_head_hash,\n            submission_control_hash=submission.control_hash,\n            observed_at=observed_at,\n''',
+                  '''            submission_head_hash=submission.event_head_hash,\n            submission_control_hash=submission.control_hash,\n            previous_attestation_hash=(\n                previous_attestation.attestation_hash\n                if previous_attestation is not None\n                else None\n            ),\n            observed_at=observed_at,\n''',
+              ),
+          ]
+          for old, new in patches:
+              if old not in text:
+                  raise SystemExit(f'final guard anchor missing: {old[:100]!r}')
+              text = text.replace(old, new, 1)
+          path.write_text(text, encoding='utf-8')
+
+          # --- writer: move PRE_IO after request validation, bind to PRE_CONSUME ---
+          path = Path('src/autotrade/brokers/alpaca_paper_writer.py')
+          text = path.read_text(encoding='utf-8')
+          old_pre_io = '''        try:\n            pre_io_guard = final_guard.authorize(\n                approval=approval,\n                expected_bracket=expected_bracket,\n                submission_registry=submission_registry,\n                now=now,\n                phase=PaperFinalWritePhase.PRE_IO,\n                expected_attempt_id=attempt_id,\n            )\n        except PaperFinalWriteBlocked as exc:\n            # UNKNOWN is intentionally retained. No POST occurred; only reconciliation\n            # may resolve whether any external order exists.\n            raise PaperWriterBlocked(f"final PRE_IO guard rejected: {exc}") from exc\n\n'''
+          if old_pre_io not in text:
+              raise SystemExit('writer PRE_IO anchor missing')
+          text = text.replace(old_pre_io, '', 1)
+          old_write = '''        _validate_write_request(request)\n\n        # Exactly one transport invocation. There is intentionally no retry loop.\n        response = self._transport.write(request)\n'''
+          new_write = '''        _validate_write_request(request)\n\n        try:\n            pre_io_guard = final_guard.authorize(\n                approval=approval,\n                expected_bracket=expected_bracket,\n                submission_registry=submission_registry,\n                now=now,\n                phase=PaperFinalWritePhase.PRE_IO,\n                expected_attempt_id=attempt_id,\n                previous_attestation=pre_consume_guard,\n            )\n        except PaperFinalWriteBlocked as exc:\n            # UNKNOWN is intentionally retained. No POST occurred; only reconciliation\n            # may resolve whether any external order exists.\n            raise PaperWriterBlocked(f"final PRE_IO guard rejected: {exc}") from exc\n\n        # Exactly one transport invocation. There is intentionally no retry loop.\n        response = self._transport.write(request)\n'''
+          if old_write not in text:
+              raise SystemExit('writer transport anchor missing')
+          text = text.replace(old_write, new_write, 1)
+          path.write_text(text, encoding='utf-8')
+
+          # --- permanent authority checker ---
+          path = Path('scripts/check_r6_authority.py')
+          text = path.read_text(encoding='utf-8')
+          old = '''        if "final_guard: PaperFinalWriteGuard" not in text:\n            errors.append("writer: authoritative PaperFinalWriteGuard parameter is required")\n'''
+          new = old + '''        if "previous_attestation=pre_consume_guard" not in text:\n            errors.append("writer: PRE_IO must be chained to actual PRE_CONSUME attestation")\n        request_validation = text.find("_validate_write_request(request)")\n        if not 0 <= request_validation < pre_io < transport_write:\n            errors.append(\n                "writer: PRE_IO must occur after request validation and immediately before transport write"\n            )\n'''
+          if old not in text:
+              raise SystemExit('R6 authority final guard anchor missing')
+          text = text.replace(old, new, 1)
+          path.write_text(text, encoding='utf-8')
+
+          # --- existing guard tests: make PRE_IO explicitly carry predecessor ---
+          path = Path('tests/test_r6_final_write_guard.py')
+          text = path.read_text(encoding='utf-8')
+          old_helper = '''def authorize(values, *, phase=PaperFinalWritePhase.PRE_CONSUME, attempt_id=None):\n    current_order, expected, registry, binding, approval, orders, safety, portfolio, guard = values\n    return guard.authorize(\n        approval=approval,\n        expected_bracket=expected,\n        submission_registry=registry,\n        now=NOW + timedelta(seconds=1),\n        phase=phase,\n        expected_attempt_id=attempt_id,\n    )\n'''
+          new_helper = '''def authorize(\n    values,\n    *,\n    phase=PaperFinalWritePhase.PRE_CONSUME,\n    attempt_id=None,\n    previous_attestation=None,\n):\n    current_order, expected, registry, binding, approval, orders, safety, portfolio, guard = values\n    return guard.authorize(\n        approval=approval,\n        expected_bracket=expected,\n        submission_registry=registry,\n        now=NOW + timedelta(seconds=1),\n        phase=phase,\n        expected_attempt_id=attempt_id,\n        previous_attestation=previous_attestation,\n    )\n'''
+          if old_helper not in text:
+              raise SystemExit('guard test authorize helper anchor missing')
+          text = text.replace(old_helper, new_helper, 1)
+
+          old_test = '''def test_pre_io_requires_same_durable_attempt_identity(tmp_path):\n    values = setup(tmp_path)\n    registry = values[2]\n    registry.mark_submit_attempt_unknown(\n        order_id=values[0].order_id,\n        attempt_id="expected-attempt",\n        now=NOW + timedelta(milliseconds=100),\n    )\n    attested = authorize(\n        values,\n        phase=PaperFinalWritePhase.PRE_IO,\n        attempt_id="expected-attempt",\n    )\n    assert attested.submission_status.value == "UNKNOWN"\n    with pytest.raises(PaperFinalWriteBlocked, match="attempt_id"):\n        authorize(\n            values,\n            phase=PaperFinalWritePhase.PRE_IO,\n            attempt_id="different-attempt",\n        )\n'''
+          new_test = '''def test_pre_io_requires_same_durable_attempt_identity(tmp_path):\n    values = setup(tmp_path)\n    predecessor = authorize(values)\n    registry = values[2]\n    registry.mark_submit_attempt_unknown(\n        order_id=values[0].order_id,\n        attempt_id="expected-attempt",\n        now=NOW + timedelta(milliseconds=100),\n    )\n    attested = authorize(\n        values,\n        phase=PaperFinalWritePhase.PRE_IO,\n        attempt_id="expected-attempt",\n        previous_attestation=predecessor,\n    )\n    assert attested.submission_status.value == "UNKNOWN"\n    assert attested.previous_attestation_hash == predecessor.attestation_hash\n    with pytest.raises(PaperFinalWriteBlocked, match="attempt_id"):\n        authorize(\n            values,\n            phase=PaperFinalWritePhase.PRE_IO,\n            attempt_id="different-attempt",\n            previous_attestation=predecessor,\n        )\n'''
+          if old_test not in text:
+              raise SystemExit('existing PRE_IO guard test anchor missing')
+          text = text.replace(old_test, new_test, 1)
+          path.write_text(text, encoding='utf-8')
+          PY
+      - name: Add phase-chain adversarial tests
+        run: |
+          cat > tests/test_r6_final_guard_phase_chain.py <<'PY'
+          from __future__ import annotations
+
+          from dataclasses import replace
+          from datetime import timedelta
+
+          import pytest
+
+          from autotrade.brokers.alpaca_paper_final_guard import (
+              PaperFinalWriteBlocked,
+              PaperFinalWritePhase,
+          )
+          from test_r6_final_write_guard import NOW, authorize, setup
+
+
+          def mark_unknown(values, attempt_id: str) -> None:
+              values[2].mark_submit_attempt_unknown(
+                  order_id=values[0].order_id,
+                  attempt_id=attempt_id,
+                  now=NOW + timedelta(milliseconds=100),
+              )
+
+
+          def test_pre_io_without_actual_preconsume_attestation_is_blocked(tmp_path) -> None:
+              values = setup(tmp_path)
+              mark_unknown(values, "missing-predecessor")
+              with pytest.raises(PaperFinalWriteBlocked, match="actual PRE_CONSUME"):
+                  authorize(
+                      values,
+                      phase=PaperFinalWritePhase.PRE_IO,
+                      attempt_id="missing-predecessor",
+                  )
+
+
+          def test_intervening_kill_then_reset_still_blocks_by_safety_version(tmp_path) -> None:
+              values = setup(tmp_path)
+              predecessor = authorize(values)
+              mark_unknown(values, "safety-version-attempt")
+              values[6].activate(
+                  reason="intervening-kill",
+                  now=NOW + timedelta(milliseconds=200),
+              )
+              values[6].reset(now=NOW + timedelta(milliseconds=300))
+              with pytest.raises(PaperFinalWriteBlocked, match="Safety state version changed"):
+                  authorize(
+                      values,
+                      phase=PaperFinalWritePhase.PRE_IO,
+                      attempt_id="safety-version-attempt",
+                      previous_attestation=predecessor,
+                  )
+
+
+          def test_intervening_portfolio_version_blocks_even_if_state_remains_safe(tmp_path) -> None:
+              values = setup(tmp_path)
+              predecessor = authorize(values)
+              mark_unknown(values, "portfolio-version-attempt")
+              current = values[7].get()
+              updated = replace(current.snapshot, snapshot_id="guard-portfolio-002")
+              assert values[7].compare_and_set(
+                  expected_version=current.version,
+                  snapshot=updated,
+                  now=NOW + timedelta(milliseconds=200),
+              ) is not None
+              with pytest.raises(PaperFinalWriteBlocked, match="Portfolio State version changed"):
+                  authorize(
+                      values,
+                      phase=PaperFinalWritePhase.PRE_IO,
+                      attempt_id="portfolio-version-attempt",
+                      previous_attestation=predecessor,
+                  )
+
+
+          def test_pre_io_hash_is_cryptographically_linked_to_preconsume(tmp_path) -> None:
+              values = setup(tmp_path)
+              predecessor = authorize(values)
+              mark_unknown(values, "linked-attempt")
+              successor = authorize(
+                  values,
+                  phase=PaperFinalWritePhase.PRE_IO,
+                  attempt_id="linked-attempt",
+                  previous_attestation=predecessor,
+              )
+              assert successor.previous_attestation_hash == predecessor.attestation_hash
+              assert successor.attestation_hash != predecessor.attestation_hash
+          PY
+      - name: Commit hardening before tests
+        run: |
+          git config user.name arendon7
+          git config user.email 102555888+arendon7@users.noreply.github.com
+          git add src/autotrade/brokers/alpaca_paper_final_guard.py \
+                  src/autotrade/brokers/alpaca_paper_writer.py \
+                  scripts/check_r6_authority.py \
+                  tests/test_r6_final_write_guard.py \
+                  tests/test_r6_final_guard_phase_chain.py
+          git commit -m "fix(r6): cryptographically chain just-in-time PAPER write guards"
+          git push origin HEAD:reconstruction/r6-external-paper-protection
+      - name: Focused and full certification
+        run: |
+          python -m pip install -e '.[dev]'
+          pytest -q tests/test_r6_final_write_guard.py tests/test_r6_final_guard_phase_chain.py tests/test_r6_paper_writer.py tests/test_r6_authority_checker.py
+          python scripts/check_r6_authority.py
+          python -m compileall -q src tests scripts
+          pytest --cov=autotrade --cov-report=term-missing
+          python scripts/check_contract_registry.py
+          python scripts/check_research_authority.py
+          python scripts/check_r5_authority.py
+          python scripts/check_r6_authority.py
+          python scripts/check_debt_register.py
+          python scripts/check_knowledge_contract.py
+      - name: Remove all temporary chain helpers after success
+        run: |
+          git rm .github/workflows/r6-final-guard-chain.yml \
+                 .github/workflows/r6-final-guard-chain-fix.yml \
+                 .github/workflows/r6-final-guard-chain-exact-v2.yml
+          git commit -m "chore(r6): remove final guard chain helpers"
+          git push origin HEAD:reconstruction/r6-external-paper-protection
