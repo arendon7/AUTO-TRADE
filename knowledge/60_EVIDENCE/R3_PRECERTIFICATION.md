@@ -19,6 +19,15 @@ This note exists to record the evidence boundary before final R3 certification. 
 - read-only Research Control Center over immutable evidence;
 - machine-readable Debt Register CI gate.
 
+## Compatibility repairs awaiting CI certification
+
+- R3 public-data code now consumes the certified R1 `InstrumentMetadata`, `Bar` and `MarketDataset` contracts rather than maintaining a parallel representation.
+- `ORDER_BROKER_RESULT` replay identity now treats reconciliation observation time and the legacy `recovered` marker as non-semantic while preserving strict payload conflict detection.
+- stale risk-limit fixtures were rebuilt as internally consistent portfolio snapshots; strict portfolio-integrity validation was not weakened.
+- a dedicated restart/replay regression test requires a terminal broker snapshot reobserved later to remain ledger-idempotent.
+
+These repairs are **candidate fixes only** until the complete CI suite passes.
+
 ## Certification blockers
 
 R3 stays DRAFT until all of the following are true:
