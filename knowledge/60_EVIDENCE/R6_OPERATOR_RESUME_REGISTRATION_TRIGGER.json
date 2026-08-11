@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "track": "R6",
+  "debt_ids": ["TD-R6-011", "TD-R6-012"],
+  "purpose": "Register newly discovered P1 gaps before implementing the integrated external PAPER canary path.",
+  "external_paper_order_sent": false,
+  "live_trading": "BLOCKED"
+}
