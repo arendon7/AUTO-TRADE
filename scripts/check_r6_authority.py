@@ -7,15 +7,18 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 BROKER_DIR = ROOT / "src/autotrade/brokers"
 R6_PREFIX = "alpaca_paper_"
-CURRENT_PHASE = "PAPER_SINGLE_SHOT_AND_GET_RECONCILIATION"
+CURRENT_PHASE = "PAPER_SINGLE_SHOT_GET_RECONCILIATION_AND_TRADE_UPDATES_CONTROL_STREAM"
 
 PAPER_HOST = "paper-api.alpaca.markets"
 LIVE_HOST = "api.alpaca.markets"
+PAPER_TRADE_UPDATES_URL = "wss://paper-api.alpaca.markets/stream"
+LIVE_TRADE_UPDATES_URL = "wss://api.alpaca.markets/stream"
 ATTESTATION_FILE = "alpaca_paper_gateway.py"
 RECONCILIATION_FILE = "alpaca_paper_reconciliation_gateway.py"
 WRITER_FILE = "alpaca_paper_writer.py"
+TRADE_UPDATES_FILE = "alpaca_paper_trade_updates_transport.py"
 APPROVED_NETWORK_FILES = frozenset(
-    {ATTESTATION_FILE, RECONCILIATION_FILE, WRITER_FILE}
+    {ATTESTATION_FILE, RECONCILIATION_FILE, WRITER_FILE, TRADE_UPDATES_FILE}
 )
 
 FORBIDDEN_IMPORT_PREFIXES = (
@@ -77,6 +80,7 @@ def _scan(path: Path) -> list[str]:
     tree = ast.parse(source, filename=str(rel))
     network_allowed = path.name in APPROVED_NETWORK_FILES
     writer_calls: list[ast.Call] = []
+    control_sends: list[ast.Call] = []
 
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
@@ -106,10 +110,21 @@ def _scan(path: Path) -> list[str]:
                     )
         elif isinstance(node, ast.Call):
             name = _call_name(node.func)
-            if name in FORBIDDEN_EXTERNAL_CALLS:
+            is_exact_control_send = (
+                path.name == TRADE_UPDATES_FILE
+                and name == "send"
+                and _is_named_socket_send(node)
+            )
+            if name in FORBIDDEN_EXTERNAL_CALLS and not is_exact_control_send:
                 errors.append(
                     f"{rel}:{node.lineno}: unaudited external write call {name} is forbidden"
                 )
+            if is_exact_control_send:
+                control_sends.append(node)
+                if _inside_loop(tree, node):
+                    errors.append(
+                        f"{rel}:{node.lineno}: trade_updates control send cannot execute inside a loop"
+                    )
             if name == "write" and _is_transport_write(node):
                 if path.name != WRITER_FILE:
                     errors.append(
@@ -127,9 +142,14 @@ def _scan(path: Path) -> list[str]:
                     f"{rel}:{node.lineno}: LIVE Trading API host literal is forbidden"
                 )
             if node.value.startswith("wss://"):
-                errors.append(
-                    f"{rel}:{node.lineno}: websocket endpoint authority is not certified in this R6 phase"
+                allowed_wss_literal = (
+                    path.name == TRADE_UPDATES_FILE
+                    and node.value in {PAPER_TRADE_UPDATES_URL, LIVE_TRADE_UPDATES_URL}
                 )
+                if not allowed_wss_literal:
+                    errors.append(
+                        f"{rel}:{node.lineno}: websocket endpoint authority is forbidden outside exact PAPER trade_updates module"
+                    )
             if node.value.startswith("https://") and not network_allowed:
                 errors.append(
                     f"{rel}:{node.lineno}: endpoint literal forbidden outside approved R6 network modules"
@@ -138,6 +158,10 @@ def _scan(path: Path) -> list[str]:
     if path.name == WRITER_FILE and len(writer_calls) > 1:
         errors.append(
             f"{rel}: audited PAPER writer may contain exactly one transport write call"
+        )
+    if path.name == TRADE_UPDATES_FILE and len(control_sends) != 2:
+        errors.append(
+            f"{rel}: PAPER trade_updates transport must contain exactly two socket control sends"
         )
     return errors
 
@@ -209,6 +233,38 @@ def _validate_network_roles() -> list[str]:
                 "writer: PRE_IO must occur after request validation and immediately before transport write"
             )
 
+    trade_updates = BROKER_DIR / TRADE_UPDATES_FILE
+    if trade_updates.is_file():
+        text = trade_updates.read_text(encoding="utf-8")
+        if f'ALPACA_PAPER_TRADE_UPDATES_URL = "{PAPER_TRADE_UPDATES_URL}"' not in text:
+            errors.append("trade_updates: exact PAPER WSS endpoint constant is missing")
+        if f'ALPACA_LIVE_TRADE_UPDATES_URL = "{LIVE_TRADE_UPDATES_URL}"' not in text:
+            errors.append("trade_updates: explicit LIVE WSS deny constant is missing")
+        if text.count(f'"{LIVE_TRADE_UPDATES_URL}"') != 1:
+            errors.append("trade_updates: LIVE WSS literal must appear exactly once as deny constant")
+        if "enabled: bool = False" not in text:
+            errors.append("trade_updates: disabled-by-default config contract is missing")
+        if text.count("socket.send(") != 2:
+            errors.append("trade_updates: exactly two internal socket control sends are required")
+        if '"action": "auth"' not in text or '"action": "listen"' not in text:
+            errors.append("trade_updates: exact auth/listen control actions are missing")
+        if '"streams": [_TRADE_UPDATES_STREAM]' not in text:
+            errors.append("trade_updates: listen surface must be trade_updates-only")
+        if "proxy=None" not in text:
+            errors.append("trade_updates: environment proxy bypass is missing")
+        if "compression=None" not in text:
+            errors.append("trade_updates: websocket compression must be disabled")
+        if "def reconnect" in text:
+            errors.append("trade_updates: reconnect surface is forbidden in R6")
+        session_start = text.find("class PaperTradeUpdatesSession:")
+        transport_start = text.find("class AlpacaPaperTradeUpdatesTransport:")
+        if not 0 <= session_start < transport_start:
+            errors.append("trade_updates: receive-only session class is missing")
+        else:
+            session_text = text[session_start:transport_start]
+            if "def send(" in session_text or "def subscribe(" in session_text:
+                errors.append("trade_updates: post-handshake session exposes forbidden send/subscribe")
+
     return errors
 
 
@@ -253,6 +309,16 @@ def _is_transport_write(node: ast.Call) -> bool:
         and func.attr == "write"
         and isinstance(func.value, ast.Attribute)
         and func.value.attr == "_transport"
+    )
+
+
+def _is_named_socket_send(node: ast.Call) -> bool:
+    func = node.func
+    return (
+        isinstance(func, ast.Attribute)
+        and func.attr == "send"
+        and isinstance(func.value, ast.Name)
+        and func.value.id == "socket"
     )
 
 
