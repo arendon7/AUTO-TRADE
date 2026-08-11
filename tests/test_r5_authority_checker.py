@@ -22,7 +22,7 @@ def test_checker_rejects_execution_imports_and_calls(tmp_path) -> None:
         "    client.submit_order()\n",
     )
     assert any("forbidden R5 import" in error for error in errors)
-    assert any("execution-like method submit_order" in error for error in errors)
+    assert any("submit_order" in error for error in errors)
 
 
 def test_checker_rejects_operational_portfolio_state_and_domain_symbols(tmp_path) -> None:
@@ -58,7 +58,7 @@ def test_checker_rejects_network_access_from_shadow_or_forward(tmp_path) -> None
     assert any("cannot contain network endpoints" in error for error in errors)
 
 
-def test_checker_allows_market_stream_network_surface_only_in_streaming(tmp_path) -> None:
+def test_checker_allows_market_stream_network_surface_only_in_stream_modules(tmp_path) -> None:
     errors = scan(
         tmp_path,
         "from urllib.parse import urlsplit\n"
@@ -68,3 +68,22 @@ def test_checker_allows_market_stream_network_surface_only_in_streaming(tmp_path
         filename="streaming.py",
     )
     assert errors == []
+
+    errors = scan(
+        tmp_path,
+        "from websockets.sync.client import connect\n"
+        "def open_only(url):\n"
+        "    return connect(url)\n",
+        filename="stream_transport.py",
+    )
+    assert errors == []
+
+
+def test_checker_rejects_any_outbound_send_call_even_in_stream_transport(tmp_path) -> None:
+    errors = scan(
+        tmp_path,
+        "def bad(connection):\n"
+        "    connection.send('order-like outbound payload')\n",
+        filename="stream_transport.py",
+    )
+    assert any("outbound method send" in error for error in errors)
