@@ -269,7 +269,7 @@ def test_runtime_detects_core_safety_drift_before_human_consumption(tmp_path) ->
         workspace=workspace,
         writer=enabled_writer(transport),
     )
-    with pytest.raises(Exception, match="core provenance"):
+    with pytest.raises(Exception, match="durable kill switch is engaged"):
         runtime.execute_once(
             credentials=credentials(),
             now=NOW + timedelta(seconds=1),
