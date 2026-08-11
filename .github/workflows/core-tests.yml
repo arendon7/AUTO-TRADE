@@ -68,6 +68,9 @@ jobs:
       - name: R6 read-only core provenance boundary
         run: python scripts/check_r6_core_provenance_boundary.py
 
+      - name: R6 preparation core-binding boundary
+        run: python scripts/check_r6_preparation_core_binding.py
+
       - name: R6 unsupported-product boundary
         run: python scripts/check_r6_product_boundary.py
 
