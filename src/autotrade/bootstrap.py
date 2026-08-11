@@ -14,9 +14,9 @@ from .persistence import (
     SQLiteOrderStore,
     SQLiteReservationStore,
     SQLiteRuntime,
-    SQLiteSafetyStateStore,
 )
 from .reconciliation import ReconciliationEngine, ReconciliationResult
+from .risk_state import SQLiteR2SafetyStateStore, SQLiteRiskTelemetryStore
 from .safety import CapitalSafetyKernel, SafetyLimits
 
 
@@ -30,6 +30,7 @@ class DurablePaperCore:
     portfolio_store: SQLiteFillAwarePortfolioStore
     fill_store: SQLiteFillStore
     reservation_store: SQLiteReservationStore
+    risk_telemetry: SQLiteRiskTelemetryStore
     pipeline: DurableTradingPipeline
     reconciliation: ReconciliationEngine
     startup_reconciliation: ReconciliationResult
@@ -46,7 +47,13 @@ def build_durable_paper_core(
     ledger = SQLiteEventLedger(runtime)
     portfolio_store = SQLiteFillAwarePortfolioStore(runtime)
     portfolio_store.initialize(initial_portfolio, now=now)
-    safety_state_store = SQLiteSafetyStateStore(runtime)
+    safety_state_store = SQLiteR2SafetyStateStore(runtime)
+    risk_telemetry = SQLiteRiskTelemetryStore(
+        runtime,
+        max_daily_loss=limits.max_daily_loss,
+        max_drawdown=limits.max_drawdown,
+    )
+    risk_telemetry.initialize(equity=initial_portfolio.equity, now=now)
     reservation_store = SQLiteReservationStore(runtime)
     order_store = SQLiteOrderStore(runtime)
     fill_store = SQLiteFillStore(runtime)
@@ -64,6 +71,7 @@ def build_durable_paper_core(
         oms=oms,
         portfolio_store=portfolio_store,
         reservation_store=reservation_store,
+        risk_telemetry_store=risk_telemetry,
     )
     reconciliation = ReconciliationEngine(
         broker=broker,
@@ -73,8 +81,6 @@ def build_durable_paper_core(
         ledger=ledger,
     )
 
-    # Every process start is fail-closed until durable local state and broker
-    # evidence agree. Future external adapters must preserve this contract.
     portfolio_store.set_reconciliation_status(
         reconciliation_ok=False,
         broker_state_known=False,
@@ -91,6 +97,7 @@ def build_durable_paper_core(
         portfolio_store=portfolio_store,
         fill_store=fill_store,
         reservation_store=reservation_store,
+        risk_telemetry=risk_telemetry,
         pipeline=pipeline,
         reconciliation=reconciliation,
         startup_reconciliation=startup_reconciliation,
