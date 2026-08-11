@@ -37,6 +37,6 @@ jobs:
       - name: R6 unsupported-product boundary
         run: python scripts/check_r6_product_boundary.py
       - name: Operational lifecycle functional tests
-        run: pytest -q tests/test_r6_operational_prepare.py tests/test_r6_operational_evidence.py
+        run: pytest -q tests/test_r6_operational_prepare.py tests/test_r6_preparation_snapshot.py tests/test_r6_operational_evidence.py
       - name: Adversarial checker tests
         run: pytest -q tests/test_r6_authority_checker.py tests/test_r6_live_deny_boundary.py tests/test_r6_oms_handoff_boundary.py tests/test_r6_canary_coordinator_boundary.py tests/test_r6_operator_decision_boundary.py tests/test_r6_execution_bridge_boundary.py tests/test_r6_writer_human_gate_boundary.py tests/test_r6_operational_lifecycle_boundary.py tests/test_r6_unsupported_products_boundary.py
