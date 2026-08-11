@@ -1,5 +1,6 @@
 {
   "clean_tree_commit_before_evidence_anchor": "dd593e8dc4b09c2b6a14ed164adb3823c3f60237",
+  "closure_commit": "b215e1caeb3d1b7bd088ad15b7b463c45a2d4b0a",
   "controls": [
     "PRE_CONSUME re-reads authoritative OMS order, Safety kill/circuit, Portfolio reconciliation/broker-known state, Health and tamper-verified global PAPER submission registry.",
     "Permit consumption is followed by durable UNKNOWN before any external I/O.",
@@ -35,7 +36,7 @@
     "tests_passed": 803
   },
   "live_trading": "BLOCKED",
-  "next_gate": "Post-closure exact-head CI must remain green; TD-R6-001..008 remain OPEN.",
+  "next_gate": "Official Core Safety + Knowledge Contract + R6 Authority must PASS on the exact closure-anchor head before continuing R6 qualification work; TD-R6-001..008 remain OPEN.",
   "non_claims": [
     "This evidence does not qualify external PAPER execution.",
     "This evidence does not demonstrate profitability.",
@@ -50,6 +51,6 @@
   },
   "purpose": "Just-in-time deterministic Safety/OMS/Portfolio/Health recheck around the only audited external PAPER write boundary.",
   "schema_version": 1,
-  "status": "CLOSED_AFTER_OFFICIAL_CLEAN_HEAD_CI",
+  "status": "CLOSED_PENDING_POST_CLOSURE_EXACT_HEAD_CI",
   "track": "R6"
 }
