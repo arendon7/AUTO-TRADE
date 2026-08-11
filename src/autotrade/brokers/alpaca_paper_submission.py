@@ -291,6 +291,15 @@ class SQLitePaperSubmissionRegistry:
         finally:
             conn.close()
 
+    def get_binding(self, order_id: str) -> PaperSubmissionBinding:
+        _validate_id(order_id, "order_id")
+        conn = self._runtime.connect()
+        try:
+            binding, _, _ = self._verify_locked(conn, order_id)
+            return binding
+        finally:
+            conn.close()
+
     def get_by_client_order_id(self, client_order_id: str) -> PaperSubmissionState:
         _validate_client_order_id(client_order_id)
         conn = self._runtime.connect()
