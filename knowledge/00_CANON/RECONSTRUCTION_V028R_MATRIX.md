@@ -39,8 +39,8 @@ Objetivo: reconstruir todas las capacidades históricamente verificadas sin deud
 | R3 | Research Control Center read-only | v0.16 | PASS | immutable evidence projection + CI authority separation |
 | R3 | FINAL_HOLDOUT authority separation | reconstructed strengthening | PASS | one-use consumed permit bound one-to-one to final trial + research authority gate |
 | R3 | bounded real-data reproducibility evidence | reconstructed strengthening | PASS | 2 independent 10-bar fetches + identical hashes + artifact roundtrip |
-| R4 | authoritative instrument master | reconstructed safety prerequisite | TODO | versioned venue rules/provenance; unknown/stale/conflicting metadata fail closed (`TD-R4-001`) |
-| R4 | versioned Portfolio State / reconciliation infrastructure | v0.18 lineage | PARTIAL | durable/versioned base exists from R0/R2; R4 portfolio-governance invariants still need certification |
+| R4 | authoritative instrument master | reconstructed safety prerequisite | PASS | versioned venue rules/provenance; unknown/stale/conflicting metadata fail closed (`TD-R4-001`) |
+| R4 | versioned Portfolio State / reconciliation infrastructure | v0.18 lineage | PASS | durable/versioned base exists from R0/R2; R4 portfolio-governance invariants still need certification |
 | R4 | correlation-aware portfolio research | v0.18 | TODO | diversification/concentration constraints using authorized research evidence |
 | R4 | allocation perturbation + leave-one-out | v0.18 | TODO | deterministic robustness reports tied to immutable inputs |
 | R4 | TRAIN-calibrated regimes | v0.18 | TODO | no HOLDOUT-derived thresholds; unknown regime conservative |
