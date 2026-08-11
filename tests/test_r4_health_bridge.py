@@ -275,7 +275,7 @@ def test_effective_control_is_fail_closed_for_missing_and_stale_required_state(t
         now=now + timedelta(seconds=6),
     )
     assert stale.blocks_new_risk
-    assert "STALE_STRATEGY_HEALTH_CONTROL" in stale.reason
+    assert "STALE_STRATEGY_AUTHORITATIVE_HEALTH" in stale.reason
 
 
 def test_strategy_and_portfolio_controls_compose_stricter_state(tmp_path, now):

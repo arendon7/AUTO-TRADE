@@ -570,8 +570,15 @@ class SQLiteHealthBridgeStore:
             else None
         )
 
-        strategy_mode, strategy_multiplier, strategy_reason = self._effective_entity(
+        (
+            strategy_mode,
+            strategy_multiplier,
+            strategy_reason,
+            strategy_evidence_fingerprint,
+        ) = self._effective_entity(
             strategy,
+            entity_id=strategy_id,
+            entity_kind=HealthEntityKind.STRATEGY,
             required=self._policy.require_strategy_state,
             label="STRATEGY",
             now=now,
@@ -580,9 +587,17 @@ class SQLiteHealthBridgeStore:
             portfolio_mode = HealthRiskMode.NO_NEW_RISK
             portfolio_multiplier = _ZERO
             portfolio_reason = "MISSING_PORTFOLIO_HEALTH_ID"
+            portfolio_evidence_fingerprint = ""
         else:
-            portfolio_mode, portfolio_multiplier, portfolio_reason = self._effective_entity(
+            (
+                portfolio_mode,
+                portfolio_multiplier,
+                portfolio_reason,
+                portfolio_evidence_fingerprint,
+            ) = self._effective_entity(
                 portfolio,
+                entity_id=portfolio_entity_id,
+                entity_kind=HealthEntityKind.PORTFOLIO,
                 required=self._policy.require_portfolio_state,
                 label="PORTFOLIO",
                 now=now,
@@ -598,43 +613,163 @@ class SQLiteHealthBridgeStore:
             strategy_multiplier=strategy_multiplier,
             portfolio_multiplier=portfolio_multiplier,
             reason=reason,
-            strategy_state_fingerprint=strategy.fingerprint if strategy is not None else "",
-            portfolio_state_fingerprint=portfolio.fingerprint if portfolio is not None else "",
+            strategy_state_fingerprint=strategy_evidence_fingerprint,
+            portfolio_state_fingerprint=portfolio_evidence_fingerprint,
         )
 
     def _effective_entity(
         self,
         state: HealthBridgeState | None,
         *,
+        entity_id: str,
+        entity_kind: HealthEntityKind,
         required: bool,
         label: str,
         now: datetime,
-    ) -> tuple[HealthRiskMode, Decimal, str]:
-        if state is None:
+    ) -> tuple[HealthRiskMode, Decimal, str, str]:
+        authoritative = (
+            self._read_authoritative_optional(entity_id, entity_kind)
+            if entity_id
+            else None
+        )
+
+        if state is None and authoritative is None:
             if required:
-                return HealthRiskMode.NO_NEW_RISK, _ZERO, f"MISSING_{label}_HEALTH_CONTROL"
-            return HealthRiskMode.NORMAL, _ONE, ""
+                return (
+                    HealthRiskMode.NO_NEW_RISK,
+                    _ZERO,
+                    f"MISSING_{label}_HEALTH_CONTROL",
+                    "",
+                )
+            return HealthRiskMode.NORMAL, _ONE, "", ""
+
+        if authoritative is not None:
+            if authoritative.updated_at > now:
+                return (
+                    HealthRiskMode.NO_NEW_RISK,
+                    _ZERO,
+                    f"FUTURE_{label}_AUTHORITATIVE_HEALTH",
+                    authoritative.fingerprint,
+                )
+            if now - authoritative.updated_at > timedelta(
+                seconds=self._policy.max_state_age_seconds
+            ):
+                return (
+                    HealthRiskMode.NO_NEW_RISK,
+                    _ZERO,
+                    f"STALE_{label}_AUTHORITATIVE_HEALTH",
+                    authoritative.fingerprint,
+                )
+
+        if state is None:
+            assert authoritative is not None
+            authoritative_mode, authoritative_multiplier = self._mapped_control(
+                authoritative.state
+            )
+            if required:
+                return (
+                    HealthRiskMode.NO_NEW_RISK,
+                    _ZERO,
+                    f"MISSING_{label}_HEALTH_BRIDGE",
+                    authoritative.fingerprint,
+                )
+            return (
+                authoritative_mode,
+                authoritative_multiplier,
+                f"{label}_AUTHORITATIVE_{authoritative_mode.value}",
+                authoritative.fingerprint,
+            )
+
         if state.updated_at > now:
-            return HealthRiskMode.NO_NEW_RISK, _ZERO, f"FUTURE_{label}_HEALTH_CONTROL"
+            return (
+                HealthRiskMode.NO_NEW_RISK,
+                _ZERO,
+                f"FUTURE_{label}_HEALTH_CONTROL",
+                state.fingerprint,
+            )
         if now - state.updated_at > timedelta(seconds=self._policy.max_state_age_seconds):
-            return HealthRiskMode.NO_NEW_RISK, _ZERO, f"STALE_{label}_HEALTH_CONTROL"
-        return state.mode, state.risk_multiplier, f"{label}_{state.mode.value}"
+            return (
+                HealthRiskMode.NO_NEW_RISK,
+                _ZERO,
+                f"STALE_{label}_HEALTH_CONTROL",
+                state.fingerprint,
+            )
+
+        if authoritative is None:
+            return (
+                HealthRiskMode.NO_NEW_RISK,
+                _ZERO,
+                f"MISSING_{label}_AUTHORITATIVE_HEALTH",
+                state.fingerprint,
+            )
+
+        self._assert_binding(state, authoritative)
+        if authoritative.version < state.health_state_version:
+            raise HealthBridgeConflict("authoritative health state version moved backward")
+        if (
+            authoritative.version == state.health_state_version
+            and authoritative.fingerprint != state.health_state_fingerprint
+        ):
+            raise HealthBridgeConflict("authoritative health state version identity conflict")
+
+        authoritative_mode, authoritative_multiplier = self._mapped_control(
+            authoritative.state
+        )
+        effective_mode = _stricter(state.mode, authoritative_mode)
+        effective_multiplier = min(state.risk_multiplier, authoritative_multiplier)
+        evidence_fingerprint = _hash(
+            {
+                "bridge_state_fingerprint": state.fingerprint,
+                "authoritative_health_fingerprint": authoritative.fingerprint,
+            }
+        )
+
+        if (
+            authoritative.version > state.health_state_version
+            and _SEVERITY[authoritative_mode] > _SEVERITY[state.mode]
+        ):
+            reason = f"{label}_UNSYNCED_WORSENING_{authoritative_mode.value}"
+        elif (
+            authoritative.version > state.health_state_version
+            and _SEVERITY[authoritative_mode] < _SEVERITY[state.mode]
+        ):
+            reason = f"{label}_RECOVERY_PENDING_{state.mode.value}"
+        elif authoritative.version > state.health_state_version:
+            reason = f"{label}_AUTHORITATIVE_NEWER_{effective_mode.value}"
+        else:
+            reason = f"{label}_{effective_mode.value}"
+        return effective_mode, effective_multiplier, reason, evidence_fingerprint
+
+    def _read_authoritative_optional(
+        self,
+        entity_id: str,
+        entity_kind: HealthEntityKind,
+    ) -> HealthControlState | None:
+        _identity(entity_id, "entity_id")
+        if not isinstance(entity_kind, HealthEntityKind):
+            raise ValueError("entity_kind must be HealthEntityKind")
+        try:
+            health = self._health_reader.get(entity_id, entity_kind)
+        except Exception as exc:
+            raise HealthBridgeConflict("authoritative health read failed") from exc
+        if health is None:
+            return None
+        if not isinstance(health, HealthControlState):
+            raise HealthBridgeConflict("health reader returned invalid state type")
+        if health.entity_id != entity_id or health.entity_kind is not entity_kind:
+            raise HealthBridgeConflict("health reader returned mismatched entity identity")
+        return health
 
     def _authoritative_health(
         self,
         entity_id: str,
         entity_kind: HealthEntityKind,
     ) -> HealthControlState:
-        _identity(entity_id, "entity_id")
-        if not isinstance(entity_kind, HealthEntityKind):
-            raise ValueError("entity_kind must be HealthEntityKind")
-        health = self._health_reader.get(entity_id, entity_kind)
+        health = self._read_authoritative_optional(entity_id, entity_kind)
         if health is None:
-            raise HealthBridgeEvidenceMissing(f"missing authoritative health state: {entity_kind.value}:{entity_id}")
-        if not isinstance(health, HealthControlState):
-            raise HealthBridgeConflict("health reader returned invalid state type")
-        if health.entity_id != entity_id or health.entity_kind is not entity_kind:
-            raise HealthBridgeConflict("health reader returned mismatched entity identity")
+            raise HealthBridgeEvidenceMissing(
+                f"missing authoritative health state: {entity_kind.value}:{entity_id}"
+            )
         return health
 
     def _mapped_control(self, state: HealthState) -> tuple[HealthRiskMode, Decimal]:
