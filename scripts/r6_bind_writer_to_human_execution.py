@@ -121,7 +121,15 @@ def patch_writer_tests() -> None:
     )
     text = replace_once(
         text,
+        "    oms = OrderManagementSystem(\n"
+        "        broker=NeverCalledBroker(),\n"
+        "        ledger=InMemoryEventLedger(),\n"
+        "        order_store=order_store,\n"
         "        safety_state_store=safety_store,\n",
+        "    oms = OrderManagementSystem(\n"
+        "        broker=NeverCalledBroker(),\n"
+        "        ledger=InMemoryEventLedger(),\n"
+        "        order_store=order_store,\n"
         "        safety_state_store=oms_safety_store,\n",
         "writer stack OMS stable Safety",
     )
