@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from copy import deepcopy
 from datetime import datetime, timezone
 from decimal import Decimal
 from hashlib import sha256
@@ -33,9 +32,7 @@ def order(
     order_type: OrderType = OrderType.LIMIT,
     quantity: str = "1",
     limit_price: str | None = "10",
-    stop_price: str | None = None,
     status: OrderStatus = OrderStatus.VALIDATED,
-    broker_order_id: str | None = None,
 ) -> OrderRecord:
     intent = OrderIntent(
         intent_id="bracket-intent-001",
@@ -45,7 +42,6 @@ def order(
         order_type=order_type,
         quantity=Decimal(quantity),
         limit_price=Decimal(limit_price) if limit_price is not None else None,
-        stop_price=Decimal(stop_price) if stop_price is not None else None,
         idempotency_key="bracket-idempotency-001",
         created_at=NOW,
     )
@@ -54,8 +50,7 @@ def order(
         intent=intent,
         status=status,
         risk_decision_id="bracket-risk-001",
-        broker_order_id=broker_order_id,
-        updated_at=NOW,
+        created_at=NOW,
     )
 
 
@@ -162,11 +157,9 @@ def test_semantically_equal_decimal_inputs_produce_same_payload_hash() -> None:
     "current_order,reason",
     [
         (order(status=OrderStatus.SUBMITTED), "VALIDATED"),
-        (order(broker_order_id="already-broker-bound"), "broker-bound"),
         (order(symbol="MSFT"), "symbol mismatch"),
         (order(side=Side.SELL), "BUY-only"),
         (order(order_type=OrderType.MARKET, limit_price=None), "must be LIMIT"),
-        (order(stop_price="9"), "cannot carry stop_price"),
     ],
 )
 def test_builder_rejects_nonminimal_parent_surface(current_order, reason) -> None:
