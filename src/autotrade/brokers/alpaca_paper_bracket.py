@@ -107,8 +107,6 @@ class AlpacaEquityBracketBuilder:
     ) -> AlpacaEquityBracketRequest:
         if order.status is not OrderStatus.VALIDATED:
             raise PaperBracketRejected("bracket parent requires VALIDATED OMS order")
-        if order.broker_order_id is not None:
-            raise PaperBracketRejected("bracket parent is already broker-bound")
         intent = order.intent
         if intent.symbol != venue_rules.symbol:
             raise PaperBracketRejected("Instrument Master symbol mismatch")
@@ -116,8 +114,6 @@ class AlpacaEquityBracketBuilder:
             raise PaperBracketRejected("R6 first bracket canary is BUY-only")
         if intent.order_type is not OrderType.LIMIT or intent.limit_price is None:
             raise PaperBracketRejected("R6 first bracket parent must be LIMIT")
-        if intent.stop_price is not None:
-            raise PaperBracketRejected("bracket parent intent cannot carry stop_price")
         if not _finite_positive(intent.quantity):
             raise PaperBracketRejected("parent quantity must be finite and positive")
         if not _finite_positive(intent.limit_price):
