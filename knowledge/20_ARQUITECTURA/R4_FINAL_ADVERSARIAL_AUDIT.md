@@ -1,83 +1,82 @@
 # R4 FINAL ADVERSARIAL AUDIT
 
-Estado: **FINAL GATE PENDING — NO CERTIFICAR / NO MERGE AÚN**
+Estado: **FINAL SCAN CLEAN — TRACK CERTIFICATION PENDING / NO MERGE AÚN**
 
 Branch: `reconstruction/r4-portfolio-health`
 Base: R3 post-merge certificado `c585a84b5197076b210723bb70980b828e4e3026`
-Último head técnico antes de esta nota: `fb6c5f252819b0aaff66588f4008c6509791afff`
+Head inmediatamente anterior a esta nota: `1df2435950239e7dc0ab25b4d0ff0fcbed9e07e6`
 
-## Regla de cierre
-R4 solo puede certificarse cuando:
-1. no exista P0/P1/P2 OPEN de R4 en `debt_register.json`;
-2. todas las filas R4 requeridas de la matriz estén `PASS`;
-3. Core Safety y Knowledge Contract estén verdes sobre el mismo head de cierre;
-4. cobertura total se mantenga >=85%;
-5. Research/Advisory Authority Boundary esté verde;
-6. no queden one-shot workflows/helpers R4 temporales;
-7. LIVE/PAPER externo permanezcan sin nueva autoridad.
+## Condiciones del scan final
+Verificadas antes de este commit humano:
+1. **Cero P0/P1/P2 OPEN con `track=R4`** en `knowledge/00_CANON/debt_register.json`.
+2. Todas las capacidades requeridas R4 están `PASS` en `RECONSTRUCTION_V028R_MATRIX.md`:
+   - authoritative Instrument Master;
+   - versioned Portfolio State / reconciliation infrastructure;
+   - correlation-aware portfolio research;
+   - allocation perturbation + leave-one-out;
+   - TRAIN-calibrated regimes;
+   - Strategy/Portfolio Health & Drift;
+   - Defensive Health Bridge;
+   - deterministic Portfolio Manager / sizing + cross-strategy budgets.
+3. No queda ningún workflow temporal `r4-*` bajo `.github/workflows/`.
+4. No queda ningún helper temporal `r4_*` bajo `scripts/`.
+5. Los workflows `r2-*` aún presentes son heredados del árbol base y no son temporales creados por R4.
+6. La búsqueda de `paper-api.alpaca.markets`, `api.alpaca.markets`, `submit_order`, `api_key`, `secret_key` y autoridad LIVE externa no encontró nuevas rutas de ejecución R4.
+7. `TD-OPS-001` Graphify permanece OPEN P3/OPS y no es deuda bloqueante del track R4.
+8. PR #11 sigue DRAFT; R4 todavía no está en `certified_tracks`.
 
-## Fronteras atacadas
+## Fronteras adversariales cerradas
 - Instrument Master -> Portfolio Manager: stale/halted/unknown/conflicting rules, tick/step/min/max y no-upsizing.
-- Dependence -> sizing: universe identity, strategy/cluster/portfolio budgets y exact Decimal normalization.
-- Robustness -> sizing: base, post-Health y post-venue recomputation; serialized evidence no es autoautoridad.
-- Health -> Defensive Bridge: baseline/policy binding, entity namespace, stale/future/missing evidence, monotone worsening.
-- Defensive Bridge -> Safety: NO_NEW_RISK / REDUCED solo puede mantener o reducir capacidad; true risk reduction permanece posible.
+- Dependence -> sizing: universo exacto, estrategia/cluster/portfolio budgets y normalización Decimal exacta.
+- Robustness -> sizing: recomputación base, post-Health y post-venue; evidencia serializada no es autoautoridad.
+- Health -> Defensive Bridge: baseline/policy binding, namespaces STRATEGY/PORTFOLIO, stale/future/missing evidence y worsening monotónico.
+- Defensive Bridge -> Safety: REDUCED/NO_NEW_RISK solo mantiene o reduce capacidad; exits realmente risk-reducing permanecen posibles bajo Safety.
 - Safety -> OMS: `safety_state.version` invalida approvals anteriores y OMS revalida Health al submit.
-- Portfolio Manager authority: CI prohíbe OMS/broker/engine/OrderIntent/RiskDecision y llamadas de ejecución.
-- Recovery durability: idempotency, current authoritative overlay y tamper-evident ACK history.
+- Portfolio Manager authority: CI prohíbe OMS/broker/engine, `OrderIntent`/`RiskDecision` y llamadas de ejecución.
+- Recovery durability: `recovery_id` retry-safe, overlay Health autoritativo y ACK history tamper-evident.
 
-## Hallazgos tardíos registrados antes de reparar
-### TD-R4-012 — recovery acknowledgement idempotency — CLOSED con evidencia
-Hallazgo: un retry del mismo acknowledgement podía ejecutar dos relajaciones consecutivas.
-Repair certificado:
-- `recovery_id` requerido en Health y Defensive Bridge;
-- request fingerprint durable ligado a actor + evidencia;
-- same-request replay = no-op;
-- conflicting ID reuse = fail closed;
-- duplicate bridge replay no vuelve a incrementar `safety_state.version` ni crea un segundo recovery ledger event.
+## Hallazgos tardíos cerrados con evidencia
+### TD-R4-012 — recovery acknowledgement idempotency — CLOSED
+- `recovery_id` requerido en Health y Defensive Bridge.
+- same request replay = no-op; conflicting reuse = fail closed.
+- retry no relaja dos niveles ni vuelve a incrementar `safety_state.version`/ledger.
+- Certificado: `knowledge/60_EVIDENCE/R4_RECOVERY_IDEMPOTENCY_CERTIFICATION.json`.
 
-Certificado: `knowledge/60_EVIDENCE/R4_RECOVERY_IDEMPOTENCY_CERTIFICATION.json`.
-
-### TD-R4-013 — authoritative unsynced Health overlay — CLOSED con evidencia
-Hallazgo: un Health state autoritativo podía empeorar antes de que el job de sync actualizara la proyección del bridge.
-Repair certificado:
+### TD-R4-013 — authoritative unsynced Health overlay — CLOSED
 - cada `effective_control()` contrasta bridge + Health autoritativo actual;
-- missing/stale/future/backward/conflicting authoritative Health falla cerrado;
-- un Health más estricto y más nuevo se aplica inmediatamente aunque aún no se haya sincronizado;
-- una recuperación más nueva nunca relaja por lectura: conserva el bridge más estricto hasta recovery/sync explícito;
-- Safety y OMS heredan el overlay porque ambos consultan `effective_control()`.
+- worsening más nuevo endurece inmediatamente aun sin sync;
+- recovery más nuevo no relaja por lectura;
+- Safety y OMS heredan el overlay.
+- Certificado: `knowledge/60_EVIDENCE/R4_AUTHORITATIVE_HEALTH_OVERLAY_CERTIFICATION.json`.
 
-Certificado: `knowledge/60_EVIDENCE/R4_AUTHORITATIVE_HEALTH_OVERLAY_CERTIFICATION.json`.
+### TD-R4-014 — Health recovery ACK tamper-evidence — CLOSED
+- `health_recovery_acks_v3`: `ack_seq`, `previous_ack_hash`, `ack_hash`;
+- `recovery_ack_head` forma parte del fingerprint/hash de `HealthControlState`;
+- `get()`, assessment y recovery verifican la cadena completa;
+- delete/mutation/gap/reorder/head mismatch fallan cerrados;
+- ACK HEALTHY versiona evidencia aunque no cambie severidad;
+- evidencia pre-chain existente exige migración/rebaseline explícito.
+- Certificado: `knowledge/60_EVIDENCE/R4_HEALTH_ACK_CHAIN_CERTIFICATION.json`.
 
-### TD-R4-014 — Health recovery ACK tamper-evidence — P1 OPEN hasta este CI final
-Hallazgo: `recovery_id` era durable e idempotente, pero su fila ACK no estaba anclada al hash de `HealthControlState`. La desaparición/corrupción de esa fila podía degradar la protección de replay bajo el mismo modelo de corrupción durable que ya auditamos en Portfolio State/Fills.
+## Último CI completo anterior al cierre documental 014
+Head `5297610d2ed460755c24c13663516c0a05d261e3`:
+- **480 tests PASS**;
+- **86.58% coverage**;
+- Contract Registry: 10 PASS;
+- Research/Advisory Authority: PASS;
+- Debt Register: PASS;
+- Knowledge Contract: PASS.
 
-Repair aplicado en el árbol técnico:
-- cadena `health_recovery_acks_v3` con `ack_seq`, `previous_ack_hash` y `ack_hash`;
-- `recovery_ack_head` forma parte del fingerprint/hash durable de `HealthControlState`;
-- `get()`, `apply_assessment()` y `acknowledge_recovery()` verifican la cadena completa antes de continuar;
-- eliminación, mutación, gap/reorder y mismatch de head fallan cerrados;
-- un ACK HEALTHY que no cambia severidad sí versiona evidencia para anclar su `recovery_id`;
-- estado/ACK pre-chain con evidencia existente no se migra silenciosamente: exige migración/rebaseline explícito.
-
-Pruebas: `tests/test_r4_health_ack_chain_integrity.py` + regresiones Health/Bridge/overlay/idempotency.
-
-## Última evidencia verde anterior
-Head `32584b277febb5680038c9c6e06379f99e648cdb`:
-- 472 tests PASS;
-- 86.42% coverage;
-- Contract Registry 10 PASS;
-- Research/Advisory Authority PASS;
-- Debt Register PASS;
-- Knowledge Contract PASS.
-
-Ese head certificó 012/013, pero es anterior al repair 014 y por tanto **no** basta para certificar R4.
+Ese CI certificó el repair técnico TD-R4-014. El presente commit humano incluye además su cierre documental y el scan final limpio, por lo que **requiere su propio CI completo antes de crear `R4_CERTIFICATION.json`**.
 
 ## Estado de capital
-- External PAPER authority: **NO añadida por R4**.
+- External PAPER authority añadida por R4: **NONE**.
 - LIVE authority: **NONE / BLOCKED**.
 - Portfolio Manager: advisory capacity only.
 - Health automation: reduce/block only.
 
 ## Próximo gate
-Ejecutar CI completo sobre el head humano que contiene esta nota y el ACK-chain. Si falla, `TD-R4-014` permanece OPEN. Si queda verde: emitir certificado 014, cerrar la deuda, comprobar cero P0/P1/P2 R4 abiertos + todas las filas R4 PASS + ausencia de helpers temporales, y recién entonces generar `R4_CERTIFICATION.json`.
+1. Ejecutar Core Safety + Knowledge Contract sobre este head humano.
+2. Si ambos quedan verdes y cobertura >=85%, crear `knowledge/60_EVIDENCE/R4_CERTIFICATION.json` ligado a este SHA exacto.
+3. Solo después añadir `R4` a `certified_tracks`, sincronizar canon hacia R5 y volver a ejecutar un último CI de branch.
+4. Solo con ese último CI verde: sacar PR #11 de DRAFT, merge por squash y recertificar el SHA exacto de `main` antes de crear/abrir R5.
