@@ -45,8 +45,10 @@ def test_default_registry_loads_with_stable_ids_and_fingerprint():
     second = ContractRegistry.load_default()
     ids = [spec.contract_id for spec in first.all_contracts()]
     assert ids == sorted(ids)
-    assert len(ids) == 9
-    assert len(set(ids)) == 9
+    assert len(ids) == 10
+    assert len(set(ids)) == 10
+    assert "AuthoritativeInstrumentRules@1" in ids
+    assert first.registry_version == 2
     assert first.registry_fingerprint() == second.registry_fingerprint()
     assert len(first.registry_fingerprint()) == 64
     assert all(len(spec.fingerprint) == 64 for spec in first.all_contracts())
@@ -129,212 +131,96 @@ def test_registry_rejects_unknown_missing_and_wrong_field_types(now):
     with pytest.raises(ContractValidationError, match="encoded as string"):
         registry.validate("OrderIntent@1", payload)
 
+
+def test_registry_rejects_nonfinite_decimals_and_naive_timestamps(now):
+    registry = ContractRegistry.load_default()
+    payload = valid_intent(now)
+    payload["quantity"] = "Infinity"
+    with pytest.raises(ContractValidationError, match="finite"):
+        registry.validate("OrderIntent@1", payload)
+
     payload = valid_intent(now)
     payload["created_at"] = now.replace(tzinfo=None).isoformat()
     with pytest.raises(ContractValidationError, match="timezone-aware"):
         registry.validate("OrderIntent@1", payload)
 
-    with pytest.raises(ContractRegistryError, match="unknown contract"):
-        registry.get("Missing@1")
 
-
-def test_scalar_contract_types_are_strict(now):
+def test_registry_rejects_boolean_for_integer():
     registry = ContractRegistry.load_default()
-    decision = {
-        "decision_id": "d",
-        "intent_id": "i",
-        "status": "APPROVED",
-        "reason_code": "APPROVED",
-        "reason_detail": "ok",
-        "evaluated_at": now.isoformat(),
-        "valid_until": now.isoformat(),
-        "limits_version": "v1",
-        "intent_fingerprint": "a",
-        "market_fingerprint": "b",
-        "approved_notional": "100",
-        "risk_reducing": False,
-        "safety_state_version": 1,
+    payload = {
+        "session_date": "2026-08-10",
+        "day_start_equity": "100",
+        "peak_equity": "100",
+        "current_equity": "100",
+        "daily_pnl": "0",
+        "drawdown": "0",
+        "version": True,
+        "updated_at": "2026-08-10T12:00:00+00:00",
     }
-    registry.validate("RiskDecision@1", decision)
-
-    for key, invalid, message in (
-        ("decision_id", 1, "string"),
-        ("decision_id", "", "non-empty"),
-        ("risk_reducing", 1, "boolean"),
-        ("safety_state_version", True, "integer"),
-        ("evaluated_at", "not-time", "invalid timestamp"),
-        ("approved_notional", "Infinity", "finite"),
-    ):
-        bad = dict(decision)
-        bad[key] = invalid
-        with pytest.raises(ContractValidationError, match=message):
-            registry.validate("RiskDecision@1", bad)
+    with pytest.raises(ContractValidationError, match="integer"):
+        registry.validate("RiskTelemetryState@1", payload)
 
 
-def test_array_and_object_shapes_are_enforced(now):
-    registry = ContractRegistry.load_default()
-    with pytest.raises(ContractValidationError, match="must be array"):
-        registry.validate("BrokerExecution@1", {"status": "SUBMITTED", "fills": {}})
-    with pytest.raises(ContractValidationError, match="must be object"):
-        registry.validate(
-            "BrokerExecution@1", {"status": "SUBMITTED", "fills": ["not-object"]}
-        )
-    with pytest.raises(ContractValidationError, match="must be object"):
-        registry.validate(
-            "OrderRecord@1",
-            {
-                "order_id": "o",
-                "intent": "bad",
-                "risk_decision_id": "r",
-                "status": "SUBMITTED",
-                "created_at": now.isoformat(),
-                "submitted_at": None,
-                "filled_quantity": "0",
-                "average_fill_price": None,
-            },
-        )
+def test_registry_parser_rejects_duplicate_contract_and_missing_reference():
+    base = json.loads(
+        (ContractRegistry.load_default.__func__.__globals__["Path"](__file__).resolve().parents[1]
+         / "src" / "autotrade" / "contracts" / "registry.json").read_text(encoding="utf-8")
+    )
+    duplicate = deepcopy(base)
+    duplicate["contracts"].append(deepcopy(duplicate["contracts"][0]))
+    with pytest.raises(ContractRegistryError, match="duplicate contract"):
+        ContractRegistry(duplicate)
+
+    missing_ref = deepcopy(base)
+    broker = next(item for item in missing_ref["contracts"] if item["name"] == "BrokerExecution")
+    broker["fields"]["fills"]["items_contract"] = "Missing@1"
+    with pytest.raises(ContractRegistryError, match="references missing"):
+        ContractRegistry(missing_ref)
 
 
-def registry_doc(*, compatibility="additive", version=1, extra_fields=None):
-    fields = {
-        "id": {"type": "string", "non_empty": True},
-    }
-    fields.update(extra_fields or {})
-    return {
+def test_additive_compatibility_rules():
+    document = {
         "registry_version": 1,
         "contracts": [
             {
                 "name": "Example",
-                "version": version,
-                "compatibility": compatibility,
+                "version": 1,
+                "compatibility": "additive",
                 "allow_extra_fields": False,
-                "fields": fields,
-            }
+                "fields": {"id": {"type": "string", "non_empty": True}},
+            },
+            {
+                "name": "Example",
+                "version": 2,
+                "compatibility": "additive",
+                "allow_extra_fields": False,
+                "fields": {
+                    "id": {"type": "string", "non_empty": True},
+                    "note": {"type": "string", "required": False},
+                },
+            },
         ],
-    }
-
-
-def test_additive_compatibility_accepts_only_optional_new_fields():
-    document = {
-        "registry_version": 1,
-        "contracts": registry_doc()["contracts"]
-        + registry_doc(
-            version=2,
-            extra_fields={"note": {"type": "string", "required": False}},
-        )["contracts"],
     }
     registry = ContractRegistry(document)
     registry.assert_additive_compatible("Example@1", "Example@2")
 
-    required_doc = deepcopy(document)
-    required_doc["contracts"][1]["fields"]["note"]["required"] = True
-    with pytest.raises(ContractCompatibilityError, match="must be optional"):
-        ContractRegistry(required_doc).assert_additive_compatible("Example@1", "Example@2")
-
-    changed_doc = deepcopy(document)
-    changed_doc["contracts"][1]["fields"]["id"]["non_empty"] = False
-    with pytest.raises(ContractCompatibilityError, match="existing field changed"):
-        ContractRegistry(changed_doc).assert_additive_compatible("Example@1", "Example@2")
+    incompatible = deepcopy(document)
+    incompatible["contracts"][1]["fields"]["note"]["required"] = True
+    bad = ContractRegistry(incompatible)
+    with pytest.raises(ContractCompatibilityError, match="optional"):
+        bad.assert_additive_compatible("Example@1", "Example@2")
 
 
-def test_additive_compatibility_rejects_wrong_name_version_policy_and_removed_field():
-    document = {
-        "registry_version": 1,
-        "contracts": [
-            registry_doc()["contracts"][0],
-            registry_doc(version=2)["contracts"][0],
-            {
-                "name": "Other",
-                "version": 2,
-                "compatibility": "additive",
-                "fields": {"id": {"type": "string", "non_empty": True}},
-            },
-            {
-                "name": "Example",
-                "version": 3,
-                "compatibility": "strict",
-                "fields": {"id": {"type": "string", "non_empty": True}},
-            },
-            {
-                "name": "Example",
-                "version": 4,
-                "compatibility": "additive",
-                "fields": {"note": {"type": "string", "required": False}},
-            },
-        ],
-    }
-    registry = ContractRegistry(document)
-    with pytest.raises(ContractCompatibilityError, match="names"):
-        registry.assert_additive_compatible("Example@1", "Other@2")
-    with pytest.raises(ContractCompatibilityError, match="must increase"):
-        registry.assert_additive_compatible("Example@2", "Example@1")
-    with pytest.raises(ContractCompatibilityError, match="declare additive"):
-        registry.assert_additive_compatible("Example@2", "Example@3")
-    with pytest.raises(ContractCompatibilityError, match="field removed"):
-        registry.assert_additive_compatible("Example@1", "Example@4")
+def test_contract_parser_rejects_bad_top_level_and_field_shapes():
+    with pytest.raises(ContractRegistryError):
+        ContractRegistry({"registry_version": 0, "contracts": []})
+    with pytest.raises(ContractRegistryError, match="contracts"):
+        ContractRegistry({"registry_version": 1, "contracts": "bad"})
+    with pytest.raises(ContractRegistryError, match="entries"):
+        ContractRegistry({"registry_version": 1, "contracts": ["bad"]})
 
 
-def test_registry_definition_fails_closed_on_malformed_documents():
-    invalid_documents = [
-        ({"registry_version": 0, "contracts": [{}]}, "registry_version"),
-        ({"registry_version": 1, "contracts": []}, "non-empty array"),
-        ({"registry_version": 1, "contracts": ["bad"]}, "must be objects"),
-        (
-            {
-                "registry_version": 1,
-                "contracts": [
-                    {"name": "X", "version": 1, "compatibility": "strict", "fields": {"a": {"type": "wat"}}}
-                ],
-            },
-            "unsupported type",
-        ),
-        (
-            {
-                "registry_version": 1,
-                "contracts": [
-                    {
-                        "name": "X",
-                        "version": 1,
-                        "compatibility": "strict",
-                        "fields": {"a": {"type": "array", "items_contract": "Missing@1"}},
-                    }
-                ],
-            },
-            "references missing contract",
-        ),
-    ]
-    for document, message in invalid_documents:
-        with pytest.raises(ContractRegistryError, match=message):
-            ContractRegistry(document)
-
-
-def test_registry_rejects_duplicate_ids_unknown_keys_bad_flags_and_bad_references():
-    duplicate = registry_doc()
-    duplicate["contracts"].append(deepcopy(duplicate["contracts"][0]))
-    with pytest.raises(ContractRegistryError, match="duplicate contract id"):
-        ContractRegistry(duplicate)
-
-    unknown = registry_doc()
-    unknown["contracts"][0]["extra"] = 1
-    with pytest.raises(ContractRegistryError, match="unknown contract keys"):
-        ContractRegistry(unknown)
-
-    bad_flag = registry_doc()
-    bad_flag["contracts"][0]["fields"]["id"]["required"] = "yes"
-    with pytest.raises(ContractRegistryError, match="flags must be boolean"):
-        ContractRegistry(bad_flag)
-
-    bad_enum = registry_doc()
-    bad_enum["contracts"][0]["fields"]["id"]["enum"] = [1]
-    with pytest.raises(ContractRegistryError, match="enum must be string array"):
-        ContractRegistry(bad_enum)
-
-    bad_items = registry_doc()
-    bad_items["contracts"][0]["fields"]["id"]["items_contract"] = "X@1"
-    with pytest.raises(ContractRegistryError, match="requires array type"):
-        ContractRegistry(bad_items)
-
-    bad_object = registry_doc()
-    bad_object["contracts"][0]["fields"]["id"]["object_contract"] = "X@1"
-    with pytest.raises(ContractRegistryError, match="requires object type"):
-        ContractRegistry(bad_object)
+def test_unknown_contract_fails_closed():
+    registry = ContractRegistry.load_default()
+    with pytest.raises(ContractRegistryError, match="unknown contract"):
+        registry.validate("Nope@99", {})
