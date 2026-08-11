@@ -466,13 +466,15 @@
       "area": "Health recovery acknowledgement tamper-evidence",
       "evidence": [
         "src/autotrade/research/health.py",
-        "tests/test_r4_recovery_ack_idempotency.py"
+        "tests/test_r4_health_ack_chain_integrity.py",
+        "tests/test_r4_recovery_ack_idempotency.py",
+        "knowledge/60_EVIDENCE/R4_HEALTH_ACK_CHAIN_CERTIFICATION.json"
       ],
       "id": "TD-R4-014",
-      "next_action": "Anchor the complete Health recovery-acknowledgement history into the hash-protected HealthControlState using a deterministic append-only acknowledgement chain/digest. Deletion, mutation or reordering of ACK rows must fail closed before recovery, and the same recovery_id must remain replay-safe after durable tamper attempts.",
-      "resolution": "",
+      "next_action": "",
+      "resolution": "Health recovery acknowledgements are now an append-only per-entity hash chain whose head is included in the hash-protected HealthControlState. Reads, assessments and recoveries verify the complete chain; deletion, mutation, sequence/reorder, previous-hash and head mismatches fail closed. HEALTHY no-op acknowledgements still version durable evidence.",
       "severity": "P1",
-      "status": "OPEN",
+      "status": "CLOSED",
       "track": "R4"
     }
   ],
