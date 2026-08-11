@@ -23,6 +23,8 @@ Slices cerrados con evidencia:
 - `TD-R4-004` — régimen TRAIN/DEVELOPMENT-only; HOLDOUT solo evaluación congelada.
 - `TD-R4-005` — Strategy/Portfolio Health & Drift durable.
 - `TD-R4-006` — Defensive Health Bridge durable, reduce/block-only, integrado con Safety/OMS.
+- `TD-R4-007` — Portfolio Manager determinista, acotado y advisory-only; sin autoridad OMS/broker.
+- `TD-R4-011` — normalización Decimal exacta de robustez; `sum(weights)==1` preservado para ratios periódicos.
 - `TD-R4-008` — auditoría de invariantes de Portfolio State.
 - `TD-R4-009` — integridad durable de fills en lectura/replay.
 - `TD-R4-010` — compromiso hash + validación semántica durable de Portfolio State.
@@ -32,18 +34,15 @@ Evidencia conjunta para `TD-R4-002..005`: **412 tests PASS / 86.79% coverage**, 
 ## Deuda abierta
 | ID | Sev | Track | Área | Condición de cierre |
 |---|---|---|---|---|
-| `TD-R4-007` | P1 | R4 | Portfolio Manager / sizing | sizing determinista y acotado bajo budgets de estrategia/cluster/portfolio; output sin autoridad de broker/OMS |
-| `TD-R4-011` | P1 | R4 | Allocation robustness Decimal normalization | normalized weights must sum exactly to 1 even for repeating Decimal ratios; preserve exact-sum invariant rather than weakening it |
 | `TD-OPS-001` | P3 | OPS | Graphify | generar graph semántico/deep real en runtime soportado y vincularlo a `SOURCE_SHA`; nunca fabricar artefactos |
 
 Graphify P3/OPS no es una deuda P0/P1/P2 del track R4, pero permanece explícitamente abierta.
 
 ## Próximo orden
-1. `TD-R4-007` deterministic bounded sizing.
-2. auditoría adversarial R4 completa.
-3. cerrar cualquier deuda nueva encontrada.
-4. sincronizar canon y certificar PR #11.
-5. merge solo con CI verde y recertificar el SHA exacto de `main` antes de R5.
+1. auditoría adversarial R4 completa.
+2. cerrar cualquier deuda nueva encontrada.
+3. sincronizar canon y certificar PR #11.
+4. merge solo con CI verde y recertificar el SHA exacto de `main` antes de R5.
 
 ## Capital
 **LIVE TRADING: BLOQUEADO.**

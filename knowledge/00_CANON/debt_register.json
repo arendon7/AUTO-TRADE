@@ -350,12 +350,19 @@
     },
     {
       "area": "Portfolio Manager / sizing",
-      "evidence": [],
+      "evidence": [
+        "src/autotrade/portfolio_manager.py",
+        "scripts/check_research_authority.py",
+        "tests/test_r4_portfolio_manager.py",
+        "tests/test_r4_portfolio_manager_binding.py",
+        "tests/test_r4_portfolio_manager_authority_gate.py",
+        "knowledge/60_EVIDENCE/R4_PORTFOLIO_MANAGER_CERTIFICATION.json"
+      ],
       "id": "TD-R4-007",
-      "next_action": "Implement deterministic bounded candidate sizing/weights with strategy, correlated-cluster and portfolio budgets. Output remains advisory/control-plane input and cannot submit broker orders or bypass Capital Safety Kernel/OMS.",
-      "resolution": "",
+      "next_action": "",
+      "resolution": "Deterministic Portfolio Manager emits advisory bounded capacity only. It recomputes base/post-Health/post-venue diversification and robustness, binds strategy identity to Health identity, requires fresh authoritative instrument rules and quotes, rounds quantity down, never upsizes to venue minima, and is protected by a permanent CI authority boundary forbidding OMS/broker/execution creep.",
       "severity": "P1",
-      "status": "OPEN",
+      "status": "CLOSED",
       "track": "R4"
     },
     {
@@ -413,13 +420,15 @@
       "area": "Allocation robustness exact Decimal normalization",
       "evidence": [
         "src/autotrade/research/allocation_robustness.py",
-        "tests/test_r4_portfolio_manager.py"
+        "tests/test_r4_allocation_exact_normalization.py",
+        "tests/test_r4_allocation_robustness.py",
+        "knowledge/60_EVIDENCE/R4_EXACT_NORMALIZATION_CERTIFICATION.json"
       ],
       "id": "TD-R4-011",
-      "next_action": "Replace independently rounded normalized weights with deterministic exact-sum normalization (last canonical component is the remainder to 1), apply it to baseline and leave-one-out scenarios, and add repeating-decimal regression tests before re-closing robustness.",
-      "resolution": "",
+      "next_action": "",
+      "resolution": "Allocation robustness now preserves exact Decimal sum(weights)==1 for repeating ratios using deterministic canonical remainder normalization across baseline, leave-one-out and perturbation scenarios; the invariant was preserved rather than replaced with a tolerance.",
       "severity": "P1",
-      "status": "OPEN",
+      "status": "CLOSED",
       "track": "R4"
     }
   ],
