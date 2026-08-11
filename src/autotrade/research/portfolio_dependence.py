@@ -177,9 +177,15 @@ class DependenceEvidence:
         if self.spec_fingerprint != expected_spec_fingerprint:
             raise ValueError("dependence spec fingerprint mismatch")
 
-        if not self.strategy_fingerprints:
-            raise ValueError("strategy_fingerprints cannot be empty")
+        if len(self.strategy_fingerprints) < 2:
+            raise InsufficientDependenceEvidence(
+                "dependence evidence requires at least two strategies"
+            )
         keys = tuple(key for key, _ in self.strategy_fingerprints)
+        for key in keys:
+            _canonical_identity(key, "strategy key")
+            if "@" not in key or key.startswith("@") or key.endswith("@"):
+                raise ValueError("strategy key must be strategy_id@strategy_version")
         if keys != tuple(sorted(keys)) or len(set(keys)) != len(keys):
             raise ValueError("strategy_fingerprints must use unique canonical sorted keys")
         if any(not _SHA256_RE.fullmatch(value) for _, value in self.strategy_fingerprints):
