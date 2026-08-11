@@ -276,8 +276,19 @@ class AlpacaPaperSingleShotWriter:
             raise PaperWriterBlocked("verified OMS external handoff order mismatch")
 
         permit = permit_registry.get(approval.approval_hash)
-        if permit.status is not PaperCanaryPermitStatus.ISSUED:
-            raise PaperWriterBlocked("canary permit must be ISSUED before writer starts")
+        if permit.status is PaperCanaryPermitStatus.CONSUMED:
+            # The only resumable consumed-permit state is PREPARED + zero submit
+            # attempts + the exact same attempt_id. By construction the writer
+            # persists UNKNOWN before it can construct/execute the POST, so a
+            # PREPARED submission proves no external write could have happened.
+            if permit.attempt_id != attempt_id:
+                raise PaperWriterBlocked(
+                    "canary permit is consumed by another attempt; reconciliation/manual recovery only"
+                )
+            if permit.consumed_at is None:
+                raise PaperWriterBlocked("consumed canary permit is missing consumed_at")
+        elif permit.status is not PaperCanaryPermitStatus.ISSUED:
+            raise PaperWriterBlocked("canary permit state is not resumable")
         if (
             permit.order_id != binding.order_id
             or permit.client_order_id != binding.client_order_id

@@ -1,9 +1,0 @@
-{
-  "schema_version": 1,
-  "track": "R6",
-  "debt_id": "TD-R6-012",
-  "purpose": "Retry one-shot implementation after aligning same-attempt resume tests to the durable submission-event contract.",
-  "attempt": 2,
-  "external_paper_order_sent": false,
-  "live_trading": "BLOCKED"
-}

@@ -594,22 +594,23 @@ def test_changed_bracket_or_approval_blocks_before_permit_consumption_or_io(tmp_
     assert values["permit_registry"].get(values["approval"].approval_hash).status is PaperCanaryPermitStatus.ISSUED
 
 
-def test_preconsumed_permit_with_prepared_submission_is_fail_closed_and_does_not_resume_post(tmp_path) -> None:
+def test_preconsumed_permit_by_different_attempt_is_fail_closed_and_does_not_resume_post(tmp_path) -> None:
     values = stack(tmp_path)
     values["permit_registry"].consume(
         approval=values["approval"],
-        attempt_id="writer-attempt-001",
+        attempt_id="writer-attempt-other",
         now=NOW + timedelta(milliseconds=500),
     )
     transport = FakeWriteTransport(response=success_response(values["expected"]))
 
-    with pytest.raises(PaperWriterBlocked, match="ISSUED"):
-        submit(writer(transport), values)
+    with pytest.raises(PaperWriterBlocked, match="another attempt"):
+        submit(writer(transport), values, attempt_id="writer-attempt-001")
 
     assert transport.requests == []
     assert values["submission_registry"].get(values["binding"].order_id).status is PaperSubmissionStatus.PREPARED
     permit = values["permit_registry"].get(values["approval"].approval_hash)
     assert permit.status is PaperCanaryPermitStatus.CONSUMED
+    assert permit.attempt_id == "writer-attempt-other"
 
 
 def test_writer_has_no_retry_cancel_replace_or_self_ack_surface(tmp_path) -> None:

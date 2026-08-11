@@ -1,17 +1,5 @@
 from __future__ import annotations
 
-from pathlib import Path
-
-ROOT = Path(__file__).resolve().parents[1]
-WRITER = ROOT / "src/autotrade/brokers/alpaca_paper_writer.py"
-TEST = ROOT / "tests/test_r6_writer_same_attempt_resume.py"
-
-OLD = '''        permit = permit_registry.get(approval.approval_hash)\n        if permit.status is not PaperCanaryPermitStatus.ISSUED:\n            raise PaperWriterBlocked("canary permit must be ISSUED before writer starts")\n        if (\n            permit.order_id != binding.order_id\n            or permit.client_order_id != binding.client_order_id\n            or permit.binding_hash != binding.fingerprint\n        ):\n            raise PaperWriterBlocked("durable canary permit does not match frozen submission")\n'''
-
-NEW = '''        permit = permit_registry.get(approval.approval_hash)\n        if permit.status is PaperCanaryPermitStatus.CONSUMED:\n            # The only resumable consumed-permit state is PREPARED + zero submit\n            # attempts + the exact same attempt_id. By construction the writer\n            # persists UNKNOWN before it can construct/execute the POST, so a\n            # PREPARED submission proves no external write could have happened.\n            if permit.attempt_id != attempt_id:\n                raise PaperWriterBlocked(\n                    "canary permit is consumed by another attempt; reconciliation/manual recovery only"\n                )\n            if permit.consumed_at is None:\n                raise PaperWriterBlocked("consumed canary permit is missing consumed_at")\n        elif permit.status is not PaperCanaryPermitStatus.ISSUED:\n            raise PaperWriterBlocked("canary permit state is not resumable")\n        if (\n            permit.order_id != binding.order_id\n            or permit.client_order_id != binding.client_order_id\n            or permit.binding_hash != binding.fingerprint\n        ):\n            raise PaperWriterBlocked("durable canary permit does not match frozen submission")\n'''
-
-TEST_CONTENT = r'''from __future__ import annotations
-
 from datetime import timedelta
 
 import pytest
@@ -84,7 +72,10 @@ def test_same_attempt_can_resume_only_from_prepared_consumed_before_unknown(tmp_
     state_after = values["submission_registry"].get(values["binding"].order_id)
     assert state_after.status is PaperSubmissionStatus.UNKNOWN
     assert state_after.attempt_count == 1
-    assert state_after.attempt_id == attempt_id
+    events = values["submission_registry"].events(values["binding"].order_id)
+    unknown_events = [event for event in events if event.event_type.value == "SUBMIT_ATTEMPT_UNKNOWN"]
+    assert len(unknown_events) == 1
+    assert unknown_events[0].payload["attempt_id"] == attempt_id
 
 
 def test_different_attempt_cannot_resume_consumed_prepared_permit(tmp_path) -> None:
@@ -149,20 +140,3 @@ def test_unknown_is_never_resume_write_even_for_same_consumed_attempt(tmp_path) 
             now=NOW + timedelta(seconds=2),
         )
     assert transport.requests == []
-'''
-
-
-def main() -> int:
-    text = WRITER.read_text(encoding="utf-8")
-    if text.count(OLD) != 1:
-        raise SystemExit(f"writer permit anchor count={text.count(OLD)}")
-    WRITER.write_text(text.replace(OLD, NEW, 1), encoding="utf-8")
-    if TEST.exists():
-        raise SystemExit("same-attempt resume test file already exists")
-    TEST.write_text(TEST_CONTENT, encoding="utf-8")
-    print("TD-R6-012 same-attempt resume patch applied")
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
