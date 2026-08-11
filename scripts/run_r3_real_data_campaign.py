@@ -46,12 +46,11 @@ def main() -> int:
     instrument = InstrumentMetadata(
         symbol="BTCUSDT",
         venue="BINANCE_SPOT",
-        asset_class="CRYPTO",
         quote_currency="USDT",
         # Research serialization resolution only; this R3 campaign does not
         # certify exchange trading filters or execution precision.
-        price_increment=Decimal("0.00000001"),
-        quantity_increment=Decimal("0.00000001"),
+        price_tick=Decimal("0.00000001"),
+        quantity_step=Decimal("0.00000001"),
     )
     start = datetime(2026, 1, 1, 0, 0, tzinfo=timezone.utc)
     request = BinanceKlineRange(

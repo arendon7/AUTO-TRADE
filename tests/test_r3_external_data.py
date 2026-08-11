@@ -37,10 +37,9 @@ def instrument():
     return InstrumentMetadata(
         symbol="BTCUSDT",
         venue="BINANCE_SPOT",
-        asset_class="CRYPTO",
         quote_currency="USDT",
-        price_increment=Decimal("0.01"),
-        quantity_increment=Decimal("0.00001"),
+        price_tick=Decimal("0.01"),
+        quantity_step=Decimal("0.00001"),
     )
 
 
@@ -158,8 +157,8 @@ def test_valid_fetch_builds_exact_canonical_dataset_and_manifest():
     assert artifact.manifest.pages == 1
     assert len(artifact.manifest.source_payload_sha256) == 64
     assert artifact.manifest.dataset_hash == artifact.dataset.dataset_hash
-    assert artifact.dataset.provenance == artifact.manifest.provenance
-    assert artifact.dataset.detect_gaps() == ()
+    assert artifact.dataset.source == artifact.manifest.provenance
+    assert artifact.dataset.gap_indexes() == ()
     assert [bar.close for bar in artifact.dataset.bars] == [
         Decimal("100"),
         Decimal("101"),

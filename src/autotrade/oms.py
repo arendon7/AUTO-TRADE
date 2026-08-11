@@ -431,7 +431,6 @@ class OrderManagementSystem:
                     "average_fill_price": (
                         str(final.average_fill_price) if final.average_fill_price is not None else ""
                     ),
-                    "recovered": str(recovered).lower(),
                 },
             )
         )
@@ -442,11 +441,25 @@ class OrderManagementSystem:
         except DuplicateLedgerEvent:
             for existing in self._ledger.all_events():
                 if existing.event_id == event.event_id:
-                    if (
-                        existing.event_type != event.event_type
-                        or existing.occurred_at != event.occurred_at
-                        or dict(existing.payload) != dict(event.payload)
-                    ):
+                    if existing.event_type != event.event_type:
+                        raise BrokerStateConflict(
+                            f"ledger event identity conflict: {event.event_id}"
+                        )
+                    existing_payload = dict(existing.payload)
+                    new_payload = dict(event.payload)
+                    if event.event_type == "ORDER_BROKER_RESULT":
+                        # Snapshot identity is encoded by event_id/status/fills.
+                        # Reconciliation time and the legacy `recovered` marker
+                        # describe observation context, not broker-state identity.
+                        existing_payload.pop("recovered", None)
+                        new_payload.pop("recovered", None)
+                        conflict = existing_payload != new_payload
+                    else:
+                        conflict = (
+                            existing.occurred_at != event.occurred_at
+                            or existing_payload != new_payload
+                        )
+                    if conflict:
                         raise BrokerStateConflict(
                             f"ledger event identity conflict: {event.event_id}"
                         )

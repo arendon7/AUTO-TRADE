@@ -236,10 +236,9 @@ class ExternalDatasetArtifact:
             "instrument": {
                 "symbol": self.dataset.instrument.symbol,
                 "venue": self.dataset.instrument.venue,
-                "asset_class": self.dataset.instrument.asset_class,
                 "quote_currency": self.dataset.instrument.quote_currency,
-                "price_increment": str(self.dataset.instrument.price_increment),
-                "quantity_increment": str(self.dataset.instrument.quantity_increment),
+                "price_tick": str(self.dataset.instrument.price_tick),
+                "quantity_step": str(self.dataset.instrument.quantity_step),
             },
             "rows": [list(row) for row in self.canonical_rows],
         }
@@ -263,10 +262,9 @@ class ExternalDatasetArtifact:
             instrument = InstrumentMetadata(
                 symbol=instrument_data["symbol"],
                 venue=instrument_data["venue"],
-                asset_class=instrument_data["asset_class"],
                 quote_currency=instrument_data["quote_currency"],
-                price_increment=Decimal(instrument_data["price_increment"]),
-                quantity_increment=Decimal(instrument_data["quantity_increment"]),
+                price_tick=Decimal(instrument_data["price_tick"]),
+                quantity_step=Decimal(instrument_data["quantity_step"]),
             )
         except (KeyError, InvalidOperation, ValueError, TypeError) as exc:
             raise ExternalDataIntegrityError("artifact instrument is invalid") from exc
@@ -277,13 +275,14 @@ class ExternalDatasetArtifact:
         payload_hash = _rows_sha256(rows)
         if payload_hash != manifest.source_payload_sha256:
             raise ExternalDataIntegrityError("source payload checksum mismatch")
-        bars = tuple(_bar_from_canonical_row(row, manifest.interval) for row in rows)
+        bars = tuple(
+            _bar_from_canonical_row(row, manifest.interval, instrument.symbol) for row in rows
+        )
         try:
             dataset = MarketDataset(
                 instrument=instrument,
-                timeframe=manifest.interval,
                 bars=bars,
-                provenance=manifest.provenance,
+                source=manifest.provenance,
             )
         except ValueError as exc:
             raise ExternalDataIntegrityError("artifact dataset is invalid") from exc
@@ -388,17 +387,19 @@ class BinanceSpotHistoricalProvider:
             f"{self.provider_id}:{self.provider_version}:"
             f"sha256={source_hash}:range={start_ms}-{end_ms}:interval={request.interval}"
         )
-        bars = tuple(_bar_from_canonical_row(row, request.interval) for row in rows_tuple)
+        bars = tuple(
+            _bar_from_canonical_row(row, request.interval, request.instrument.symbol)
+            for row in rows_tuple
+        )
         _validate_exact_coverage(
             bars=bars, interval=request.interval, start=request.start, end=request.end
         )
         dataset = MarketDataset(
             instrument=request.instrument,
-            timeframe=request.interval,
             bars=bars,
-            provenance=provenance,
+            source=provenance,
         )
-        if dataset.detect_gaps():
+        if dataset.gap_indexes():
             raise ExternalDataIntegrityError("external dataset contains gaps")
         manifest = ExternalDatasetManifest(
             provider_id=self.provider_id,
@@ -521,19 +522,25 @@ def _validate_exact_coverage(
         raise ExternalDataIntegrityError("dataset does not contain expected bar count")
     for index, bar in enumerate(bars):
         expected_ms = _epoch_ms(start) + index * interval_ms
-        if _epoch_ms(bar.timestamp) != expected_ms:
+        if _epoch_ms(bar.started_at) != expected_ms:
             raise ExternalDataIntegrityError("dataset timestamp coverage mismatch")
 
 
-def _bar_from_canonical_row(row: tuple[object, ...], interval: str) -> Bar:
+def _bar_from_canonical_row(
+    row: tuple[object, ...], interval: str, symbol: str
+) -> Bar:
+    interval_ms = FIXED_INTERVAL_MS[interval]
+    if interval_ms % 1000:
+        raise ExternalDataIntegrityError("bar interval is not whole-second compatible")
     return Bar(
-        timestamp=datetime.fromtimestamp(int(row[0]) / 1000, tz=timezone.utc),
+        symbol=symbol,
+        started_at=datetime.fromtimestamp(int(row[0]) / 1000, tz=timezone.utc),
+        timeframe_seconds=interval_ms // 1000,
         open=Decimal(str(row[1])),
         high=Decimal(str(row[2])),
         low=Decimal(str(row[3])),
         close=Decimal(str(row[4])),
         volume=Decimal(str(row[5])),
-        timeframe=interval,
     )
 
 

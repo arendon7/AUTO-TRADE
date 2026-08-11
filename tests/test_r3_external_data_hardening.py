@@ -25,10 +25,9 @@ def instrument():
     return InstrumentMetadata(
         symbol="BTCUSDT",
         venue="BINANCE_SPOT",
-        asset_class="CRYPTO",
         quote_currency="USDT",
-        price_increment=Decimal("0.01"),
-        quantity_increment=Decimal("0.00001"),
+        price_tick=Decimal("0.01"),
+        quantity_step=Decimal("0.00001"),
     )
 
 
