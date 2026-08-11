@@ -212,6 +212,76 @@ class PaperOperationalWorkspace:
         _write_json_idempotent(self.bracket_attestation_path, payload)
         return self.bracket_attestation_path
 
+    def write_qualification_report_payload(self, payload: Mapping[str, object]) -> Path:
+        if not isinstance(payload, Mapping):
+            raise TypeError("qualification payload must be a mapping")
+        document = dict(payload)
+        if document.get("capital_authority") != "NONE":
+            raise PaperOperationalIntegrityError("qualification cannot grant capital authority")
+        if document.get("external_paper_qualified") is not True:
+            raise PaperOperationalIntegrityError("qualification status must be true")
+        if document.get("live_trading") != "BLOCKED":
+            raise PaperOperationalIntegrityError("qualification cannot unblock LIVE")
+        if document.get("profitability_claim") is not False:
+            raise PaperOperationalIntegrityError("qualification cannot claim profitability")
+        report_hash = document.get("report_hash")
+        if not isinstance(report_hash, str) or not _HASH_RE.fullmatch(report_hash):
+            raise PaperOperationalIntegrityError("qualification report hash is invalid")
+        _write_json_idempotent(self.qualification_report_path, document)
+        return self.qualification_report_path
+
+    def write_evidence_manifest(
+        self,
+        *,
+        order_id: str,
+        client_order_id: str,
+        report_hash: str,
+        submission_event_head_hash: str,
+        trade_update_scope_hash: str,
+        trade_update_head_hash: str,
+    ) -> Path:
+        for label, value in (
+            ("report_hash", report_hash),
+            ("submission_event_head_hash", submission_event_head_hash),
+            ("trade_update_scope_hash", trade_update_scope_hash),
+            ("trade_update_head_hash", trade_update_head_hash),
+        ):
+            if not isinstance(value, str) or not _HASH_RE.fullmatch(value):
+                raise PaperOperationalIntegrityError(f"{label} is invalid")
+        required = (
+            self.manifest_path,
+            self.expected_bracket_path,
+            self.bracket_attestation_path,
+            self.qualification_report_path,
+        )
+        if any(not path.is_file() or path.is_symlink() for path in required):
+            raise PaperOperationalIntegrityError(
+                "cannot finalize evidence manifest with missing or symlinked artifacts"
+            )
+        manifest = {
+            "schema_version": 1,
+            "environment": "PAPER",
+            "order_id": order_id,
+            "client_order_id": client_order_id,
+            "report_hash": report_hash,
+            "submission_event_head_hash": submission_event_head_hash,
+            "trade_update_scope_hash": trade_update_scope_hash,
+            "trade_update_head_hash": trade_update_head_hash,
+            "files": {
+                "manifest.json": _file_sha256(self.manifest_path),
+                "expected_bracket.json": _file_sha256(self.expected_bracket_path),
+                "bracket_attestation.json": _file_sha256(self.bracket_attestation_path),
+                "qualification_report.json": _file_sha256(self.qualification_report_path),
+            },
+            "capital_authority": "NONE",
+            "external_paper_evidence_complete": True,
+            "external_order_submitted": True,
+            "profitability_claim": False,
+            "live_trading": "BLOCKED",
+        }
+        _write_json_idempotent(self.evidence_manifest_path, manifest)
+        return self.evidence_manifest_path
+
 
 def account_attestation_payload(attestation: AlpacaPaperAccountAttestation) -> dict[str, object]:
     return {
