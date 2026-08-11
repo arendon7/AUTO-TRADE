@@ -1,0 +1,56 @@
+{
+  "track": "R3",
+  "reconstruction_target": "v0.28R",
+  "certification_state": "BRANCH_CERTIFIED_FOR_MERGE",
+  "branch": "reconstruction/r3-real-data-governance",
+  "certification_basis_commit": "74ca661eeda57ec17e501ba3bf99d1fe0eb7a34a",
+  "certified_at_utc": "2026-08-11T02:25:09Z",
+  "ci": {
+    "compile": "PASS",
+    "tests_passed": 272,
+    "coverage_percent": 87.56,
+    "coverage_gate_percent": 85.0,
+    "contract_registry": "PASS",
+    "contract_registry_sha256": "1f25fecbdc6a15251ecbf8123e037c8f4268ef2382e2419c03ffa78be50917dd",
+    "research_authority_boundary": "PASS",
+    "debt_register_contract": "PASS",
+    "knowledge_contract": "PASS"
+  },
+  "certified_capabilities": [
+    "deny-by-default bounded read-only public market-data boundary",
+    "canonical external data intake with exact coverage and immutable hashes",
+    "durable frozen campaign and preregistered Trial Ledger",
+    "FINAL_HOLDOUT one-use permit binding and research authority separation",
+    "complete-family multiple-testing evidence with fail-closed PBO/Deflated-Sharpe prerequisites",
+    "deterministic Strategy Tournament over the complete DEVELOPMENT universe without HOLDOUT inputs",
+    "read-only Research Control Center",
+    "bounded reproducible real-data intake campaign"
+  ],
+  "bounded_real_data_campaign": {
+    "evidence_commit": "7a7d71dbb26b65848295608565dc90e8737d17eb",
+    "campaign_id": "r3-binance-btcusdt-1m-20260101-10bars",
+    "symbol": "BTCUSDT",
+    "interval": "1m",
+    "bars": 10,
+    "independent_fetches_equal": true,
+    "artifact_roundtrip_verified": true,
+    "source_payload_sha256": "4bebe7cba7379cce8ac55916433997c333e9e845651333f320a10eba36d84a6d",
+    "dataset_hash": "652ead045ba8bfe92c60aabc32e64913f0b397d9226ed8ac9158d9aa35b5d9a0",
+    "manifest_fingerprint": "4240f9558b4e409c8433b8123dae79a06cb984ecd4e7f3f89d50e757b877ce79",
+    "api_keys_used": false,
+    "trading_endpoints_used": false,
+    "execution_authority": "NONE"
+  },
+  "open_debt_outside_r3": [
+    "TD-OPS-001",
+    "TD-R4-001"
+  ],
+  "explicit_non_claims": [
+    "The bounded real-data campaign is intake/reproducibility evidence, not profitability evidence.",
+    "R3 research serialization price_tick/quantity_step values are not authoritative exchange trading filters.",
+    "R3 does not authorize PAPER trading, external broker order submission, LIVE trading or capital promotion.",
+    "Graphify semantic/deep artifacts have not been generated in this runtime."
+  ],
+  "capital_state": "LIVE_TRADING_BLOCKED",
+  "next_track": "R4"
+}
