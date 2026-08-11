@@ -1,0 +1,45 @@
+name: R6 PAPER Safety Debt Registration
+
+on:
+  push:
+    branches:
+      - reconstruction/r6-external-paper-protection
+    paths:
+      - .github/workflows/r6-register-debt-one-shot.yml
+
+permissions:
+  contents: write
+
+jobs:
+  register:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: reconstruction/r6-external-paper-protection
+          fetch-depth: 0
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Register R6 debt and activate canonical track
+        run: python scripts/r6_register_debt.py
+      - name: Validate debt and knowledge contracts
+        run: |
+          python scripts/check_debt_register.py
+          python scripts/check_knowledge_contract.py
+      - name: Commit canonical R6 activation and self-clean
+        run: |
+          git config user.name "arendon7"
+          git config user.email "102555888+arendon7@users.noreply.github.com"
+          git add knowledge/00_CANON/debt_register.json \
+                  knowledge/00_CANON/DEBT_REGISTER.md \
+                  knowledge/00_CANON/RECONSTRUCTION_V028R_MATRIX.md \
+                  knowledge/00_CANON/ESTADO_ACTUAL.md \
+                  knowledge/00_CANON/TAREA_ACTIVA.md \
+                  knowledge/00_CANON/CONTEXTO_RAPIDO.md \
+                  knowledge/40_HANDOFF/HANDOFF_ACTUAL.md
+          git rm -f scripts/r6_register_debt.py
+          git rm -f .github/workflows/r6-register-debt-one-shot.yml
+          test -z "$(git ls-files '.github/workflows/r6-register-debt-one-shot.yml')"
+          git commit -m "docs(r6): register PAPER safety debt and activate R6"
+          git push origin HEAD:reconstruction/r6-external-paper-protection
