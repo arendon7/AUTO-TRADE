@@ -13,10 +13,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
@@ -31,6 +31,12 @@ jobs:
 
       - name: Machine-readable contract registry
         run: python scripts/check_contract_registry.py
+
+      - name: Research authority boundary
+        run: python scripts/check_research_authority.py
+
+      - name: Debt register contract
+        run: python scripts/check_debt_register.py
 
       - name: Canonical knowledge contract
         run: python scripts/check_knowledge_contract.py
