@@ -26,7 +26,7 @@ jobs:
       - name: Compile
         run: python -m compileall -q src tests scripts
       - name: Focused provenance tests
-        run: pytest -q tests/test_r6_core_provenance.py tests/test_r6_core_provenance_boundary.py tests/test_health_bridge.py
+        run: pytest -q tests/test_r6_core_provenance.py tests/test_r6_core_provenance_boundary.py
       - name: Full suite and machine coverage floor
         run: |
           pytest --cov=autotrade --cov-report=term-missing --cov-report=json:coverage.json
