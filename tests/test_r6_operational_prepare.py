@@ -26,9 +26,9 @@ from autotrade.brokers.alpaca_paper_preparation_snapshot import read_preparation
 from autotrade.brokers.alpaca_paper_submission import SQLitePaperSubmissionRegistry
 from autotrade.domain import PortfolioSnapshot
 from autotrade.health_bridge import SQLiteHealthBridgeStore
-from autotrade.ledger import SQLiteEventLedger
 from autotrade.oms import OrderManagementSystem
 from autotrade.persistence import (
+    SQLiteEventLedger,
     SQLiteOrderStore,
     SQLitePortfolioStore,
     SQLiteRuntime,
