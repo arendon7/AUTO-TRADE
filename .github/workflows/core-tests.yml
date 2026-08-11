@@ -74,6 +74,9 @@ jobs:
       - name: R6 operational execution boundary
         run: python scripts/check_r6_operational_execution_boundary.py
 
+      - name: R6 read-only readiness boundary
+        run: python scripts/check_r6_readiness_boundary.py
+
       - name: R6 unsupported-product boundary
         run: python scripts/check_r6_product_boundary.py
 
