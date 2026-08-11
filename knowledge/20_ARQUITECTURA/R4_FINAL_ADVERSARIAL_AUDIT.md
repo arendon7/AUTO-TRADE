@@ -1,6 +1,6 @@
 # R4 FINAL ADVERSARIAL AUDIT
 
-Estado: **FINAL SCAN CLEAN — TRACK CERTIFICATION PENDING / NO MERGE AÚN**
+Estado: **BRANCH CERTIFIED — PR #11 INTEGRATION PENDING / NO MERGE SIN FINAL CI**
 
 Branch: `reconstruction/r4-portfolio-health`
 Base: R3 post-merge certificado `c585a84b5197076b210723bb70980b828e4e3026`
@@ -80,3 +80,9 @@ Ese CI certificó el repair técnico TD-R4-014. El presente commit humano incluy
 2. Si ambos quedan verdes y cobertura >=85%, crear `knowledge/60_EVIDENCE/R4_CERTIFICATION.json` ligado a este SHA exacto.
 3. Solo después añadir `R4` a `certified_tracks`, sincronizar canon hacia R5 y volver a ejecutar un último CI de branch.
 4. Solo con ese último CI verde: sacar PR #11 de DRAFT, merge por squash y recertificar el SHA exacto de `main` antes de crear/abrir R5.
+
+## Track certification
+Certification basis: `350efd43ac133c95a1997b4a821a2e0bab4afaf2`.
+Artifact: `knowledge/60_EVIDENCE/R4_CERTIFICATION.json`.
+All R4 P0/P1/P2 debt is CLOSED and all required R4 matrix rows are PASS.
+Canonical closure now transitions the next target to R5, but R5 implementation remains blocked until PR #11 is merged and the exact `main` SHA is green.

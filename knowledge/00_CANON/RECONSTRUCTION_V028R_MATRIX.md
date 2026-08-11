@@ -1,7 +1,7 @@
 # v0.28R CAPABILITY EQUIVALENCE MATRIX
 
 Fecha: 2026-08-10
-Estado: ACTIVE — **R0–R3 certified; R4 next**
+Estado: ACTIVE — **R0–R4 certified; R5 next**
 Objetivo: reconstruir todas las capacidades históricamente verificadas sin deuda oculta y sin declarar equivalencia por número de versión.
 
 ## Status legend
@@ -79,17 +79,22 @@ Bounded real-data campaign hashes:
 
 This campaign is reproducibility/intake evidence, **not profitability proof**.
 
-## Active target — R4
-R4 closes portfolio/regime/health governance before R5 shadow/forward monitoring:
-1. authoritative instrument master;
-2. audit/reuse existing versioned portfolio state and certify R4 invariants;
-3. correlation-aware diversification/concentration research;
-4. allocation perturbation + leave-one-out;
-5. TRAIN-only regime calibration;
-6. Strategy/Portfolio Health & Drift;
-7. reduce/block-only Defensive Health Bridge;
-8. deterministic sizing + cross-strategy budgets;
-9. keep PAPER/LIVE fail-closed.
+### R4
+Branch certification basis: `350efd43ac133c95a1997b4a821a2e0bab4afaf2`.
+Final branch evidence before canonical closure: **480 tests PASS / 86.58% coverage**, Contract Registry 10 PASS, Research/Advisory Authority PASS, Debt Register PASS, Knowledge Contract PASS.
+Certification artifact: `knowledge/60_EVIDENCE/R4_CERTIFICATION.json`.
+
+R4 adds no external PAPER/LIVE authority; Portfolio Manager remains advisory-only and the Defensive Health Bridge can only maintain/reduce/block risk.
+
+## Active target — R5
+R5 reconstruye read-only streaming/shadow/forward evidence sin habilitar capital externo:
+1. closed-kline read-only stream, disabled by default y host fijo;
+2. duplicate idempotency + gap fail-closed, sin silent imputation;
+3. unexpected socket termination -> DEGRADED, sin reconnect que oculte gaps;
+4. synchronized portfolio shadow con pesos/timestamps congelados;
+5. forward evidence post-activation separado de HOLDOUT;
+6. registrar deuda R5 antes de implementar cualquier gap descubierto;
+7. mantener external PAPER/LIVE bloqueado.
 
 ## Debt policy
 A track cannot be PASS with known P0/P1/P2 defects assigned to that track, skipped negative tests, reduced coverage, untracked mismatches, hidden critical TODOs or temporary broker/network bypasses. `knowledge/00_CANON/debt_register.json` is the machine-readable authority; this matrix is the capability view.
