@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from datetime import datetime
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from hashlib import sha256
 import json
 import sqlite3
@@ -10,7 +10,12 @@ from threading import RLock
 from typing import Protocol
 
 from .domain import Fill, OrderRecord, PortfolioSnapshot, Side
-from .persistence import SQLitePortfolioStore, SQLiteRuntime, _portfolio_from_json, _portfolio_to_json
+from .persistence import (
+    SQLitePortfolioStore,
+    SQLiteRuntime,
+    _portfolio_for_storage,
+    _portfolio_from_storage,
+)
 from .state import PortfolioNotInitialized, VersionedPortfolioSnapshot
 
 
@@ -80,10 +85,15 @@ class SQLiteFillStore:
         try:
             conn.execute("BEGIN IMMEDIATE")
             row = conn.execute(
-                "SELECT fill_hash FROM order_fills WHERE fill_id = ?", (fill.fill_id,)
+                """
+                SELECT fill_id, order_id, fill_json, fill_hash, occurred_at
+                FROM order_fills WHERE fill_id = ?
+                """,
+                (fill.fill_id,),
             ).fetchone()
             if row is not None:
-                if row["fill_hash"] != fingerprint:
+                existing = _fill_from_storage(row)
+                if fill_fingerprint(existing) != fingerprint:
                     conn.execute("ROLLBACK")
                     raise FillIntegrityConflict(fill.fill_id)
                 conn.execute("COMMIT")
@@ -109,12 +119,16 @@ class SQLiteFillStore:
         try:
             rows = conn.execute(
                 """
-                SELECT fill_json FROM order_fills
+                SELECT fill_id, order_id, fill_json, fill_hash, occurred_at
+                FROM order_fills
                 WHERE order_id = ? ORDER BY occurred_at, fill_id
                 """,
                 (order_id,),
             ).fetchall()
-            return tuple(_fill_from_json(row["fill_json"]) for row in rows)
+            fills = tuple(_fill_from_storage(row) for row in rows)
+            if any(fill.order_id != order_id for fill in fills):
+                raise FillIntegrityConflict("stored fill order identity mismatch")
+            return fills
         finally:
             conn.close()
 
@@ -164,14 +178,16 @@ class SQLiteFillAwarePortfolioStore(SQLitePortfolioStore):
         try:
             conn.execute("BEGIN IMMEDIATE")
             row = conn.execute(
-                "SELECT version, snapshot_json FROM portfolio_state WHERE singleton_id = 1"
+                "SELECT version, snapshot_json, snapshot_hash FROM portfolio_state WHERE singleton_id = 1"
             ).fetchone()
             if row is None:
                 conn.execute("ROLLBACK")
                 raise PortfolioNotInitialized("portfolio state is not initialized")
 
             version = int(row["version"])
-            snapshot = _portfolio_from_json(row["snapshot_json"])
+            snapshot = _portfolio_from_storage(
+                snapshot_json=row["snapshot_json"], snapshot_hash=row["snapshot_hash"]
+            )
 
             # Foundation could only mark whole orders applied. Since its durable
             # paper broker never generated partial fills, treating such legacy
@@ -214,13 +230,14 @@ class SQLiteFillAwarePortfolioStore(SQLitePortfolioStore):
                 conn.execute("COMMIT")
                 return VersionedPortfolioSnapshot(version=version, snapshot=snapshot)
 
+            snapshot_json, snapshot_hash = _portfolio_for_storage(snapshot)
             conn.execute(
                 """
                 UPDATE portfolio_state
-                SET version = ?, snapshot_json = ?, updated_at = ?
+                SET version = ?, snapshot_json = ?, snapshot_hash = ?, updated_at = ?
                 WHERE singleton_id = 1
                 """,
-                (version + 1, _portfolio_to_json(snapshot), now.isoformat()),
+                (version + 1, snapshot_json, snapshot_hash, now.isoformat()),
             )
             conn.execute("COMMIT")
             return VersionedPortfolioSnapshot(version=version + 1, snapshot=snapshot)
@@ -319,3 +336,33 @@ def _fill_from_json(raw: str) -> Fill:
         price=Decimal(data["price"]),
         occurred_at=datetime.fromisoformat(data["occurred_at"]),
     )
+
+
+def _fill_from_storage(row) -> Fill:
+    expected_hash = row["fill_hash"]
+    if (
+        not isinstance(expected_hash, str)
+        or len(expected_hash) != 64
+        or any(char not in "0123456789abcdef" for char in expected_hash)
+    ):
+        raise FillIntegrityConflict("stored fill hash is invalid")
+    try:
+        fill = _fill_from_json(row["fill_json"])
+        _validate_fill_shape(fill)
+    except (
+        json.JSONDecodeError,
+        KeyError,
+        TypeError,
+        ValueError,
+        InvalidOperation,
+    ) as exc:
+        raise FillIntegrityConflict("stored fill payload is invalid") from exc
+    if fill.fill_id != row["fill_id"]:
+        raise FillIntegrityConflict("stored fill_id column mismatch")
+    if fill.order_id != row["order_id"]:
+        raise FillIntegrityConflict("stored order_id column mismatch")
+    if fill.occurred_at.isoformat() != row["occurred_at"]:
+        raise FillIntegrityConflict("stored occurred_at column mismatch")
+    if fill_fingerprint(fill) != expected_hash:
+        raise FillIntegrityConflict("stored fill hash mismatch")
+    return fill

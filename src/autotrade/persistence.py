@@ -11,6 +11,7 @@ from typing import Iterable
 
 from .domain import OrderIntent, OrderRecord, OrderStatus, OrderType, PortfolioSnapshot, Side
 from .ledger import DuplicateLedgerEvent, LedgerEvent
+from .portfolio_integrity import PortfolioIntegrityError, validate_portfolio_snapshot
 from .state import (
     PortfolioNotInitialized,
     ReservationConflict,
@@ -78,6 +79,7 @@ class SQLiteRuntime:
                     singleton_id INTEGER PRIMARY KEY CHECK(singleton_id = 1),
                     version INTEGER NOT NULL CHECK(version > 0),
                     snapshot_json TEXT NOT NULL,
+                    snapshot_hash TEXT,
                     updated_at TEXT NOT NULL
                 );
 
@@ -119,6 +121,7 @@ class SQLiteRuntime:
                 INSERT OR IGNORE INTO reservation_meta(singleton_id, generation) VALUES (1, 0);
                 """
             )
+            _ensure_portfolio_state_integrity_schema(conn)
         finally:
             conn.close()
 
@@ -309,26 +312,29 @@ class SQLitePortfolioStore:
         self._runtime = runtime
 
     def initialize(self, snapshot: PortfolioSnapshot, *, now: datetime) -> VersionedPortfolioSnapshot:
+        snapshot_json, snapshot_hash = _portfolio_for_storage(snapshot)
         conn = self._runtime.connect()
         try:
             conn.execute("BEGIN IMMEDIATE")
             row = conn.execute(
-                "SELECT version, snapshot_json FROM portfolio_state WHERE singleton_id = 1"
+                "SELECT version, snapshot_json, snapshot_hash FROM portfolio_state WHERE singleton_id = 1"
             ).fetchone()
             if row is None:
                 conn.execute(
                     """
-                    INSERT INTO portfolio_state(singleton_id, version, snapshot_json, updated_at)
-                    VALUES (1, 1, ?, ?)
+                    INSERT INTO portfolio_state(
+                        singleton_id, version, snapshot_json, snapshot_hash, updated_at
+                    ) VALUES (1, 1, ?, ?, ?)
                     """,
-                    (_portfolio_to_json(snapshot), now.isoformat()),
+                    (snapshot_json, snapshot_hash, now.isoformat()),
                 )
                 conn.execute("COMMIT")
                 return VersionedPortfolioSnapshot(version=1, snapshot=snapshot)
-            conn.execute("COMMIT")
-            return VersionedPortfolioSnapshot(
-                version=int(row["version"]), snapshot=_portfolio_from_json(row["snapshot_json"])
+            current = _portfolio_from_storage(
+                snapshot_json=row["snapshot_json"], snapshot_hash=row["snapshot_hash"]
             )
+            conn.execute("COMMIT")
+            return VersionedPortfolioSnapshot(version=int(row["version"]), snapshot=current)
         except Exception:
             if conn.in_transaction:
                 conn.execute("ROLLBACK")
@@ -340,12 +346,15 @@ class SQLitePortfolioStore:
         conn = self._runtime.connect()
         try:
             row = conn.execute(
-                "SELECT version, snapshot_json FROM portfolio_state WHERE singleton_id = 1"
+                "SELECT version, snapshot_json, snapshot_hash FROM portfolio_state WHERE singleton_id = 1"
             ).fetchone()
             if row is None:
                 raise PortfolioNotInitialized("portfolio state is not initialized")
             return VersionedPortfolioSnapshot(
-                version=int(row["version"]), snapshot=_portfolio_from_json(row["snapshot_json"])
+                version=int(row["version"]),
+                snapshot=_portfolio_from_storage(
+                    snapshot_json=row["snapshot_json"], snapshot_hash=row["snapshot_hash"]
+                ),
             )
         finally:
             conn.close()
@@ -357,16 +366,26 @@ class SQLitePortfolioStore:
         snapshot: PortfolioSnapshot,
         now: datetime,
     ) -> VersionedPortfolioSnapshot | None:
+        snapshot_json, snapshot_hash = _portfolio_for_storage(snapshot)
         conn = self._runtime.connect()
         try:
             conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                "SELECT version, snapshot_json, snapshot_hash FROM portfolio_state WHERE singleton_id = 1"
+            ).fetchone()
+            if row is None or int(row["version"]) != expected_version:
+                conn.execute("ROLLBACK")
+                return None
+            _portfolio_from_storage(
+                snapshot_json=row["snapshot_json"], snapshot_hash=row["snapshot_hash"]
+            )
             cursor = conn.execute(
                 """
                 UPDATE portfolio_state
-                SET version = version + 1, snapshot_json = ?, updated_at = ?
+                SET version = version + 1, snapshot_json = ?, snapshot_hash = ?, updated_at = ?
                 WHERE singleton_id = 1 AND version = ?
                 """,
-                (_portfolio_to_json(snapshot), now.isoformat(), expected_version),
+                (snapshot_json, snapshot_hash, now.isoformat(), expected_version),
             )
             if cursor.rowcount != 1:
                 conn.execute("ROLLBACK")
@@ -387,16 +406,20 @@ class SQLitePortfolioStore:
         broker_state_known: bool,
         now: datetime,
     ) -> VersionedPortfolioSnapshot:
+        if not isinstance(reconciliation_ok, bool) or not isinstance(broker_state_known, bool):
+            raise PortfolioIntegrityError("reconciliation status flags must be boolean")
         conn = self._runtime.connect()
         try:
             conn.execute("BEGIN IMMEDIATE")
             row = conn.execute(
-                "SELECT version, snapshot_json FROM portfolio_state WHERE singleton_id = 1"
+                "SELECT version, snapshot_json, snapshot_hash FROM portfolio_state WHERE singleton_id = 1"
             ).fetchone()
             if row is None:
                 conn.execute("ROLLBACK")
                 raise PortfolioNotInitialized("portfolio state is not initialized")
-            current = _portfolio_from_json(row["snapshot_json"])
+            current = _portfolio_from_storage(
+                snapshot_json=row["snapshot_json"], snapshot_hash=row["snapshot_hash"]
+            )
             version = int(row["version"])
             if (
                 current.reconciliation_ok == reconciliation_ok
@@ -409,13 +432,14 @@ class SQLitePortfolioStore:
                 reconciliation_ok=reconciliation_ok,
                 broker_state_known=broker_state_known,
             )
+            snapshot_json, snapshot_hash = _portfolio_for_storage(updated)
             conn.execute(
                 """
                 UPDATE portfolio_state
-                SET version = ?, snapshot_json = ?, updated_at = ?
+                SET version = ?, snapshot_json = ?, snapshot_hash = ?, updated_at = ?
                 WHERE singleton_id = 1
                 """,
-                (version + 1, _portfolio_to_json(updated), now.isoformat()),
+                (version + 1, snapshot_json, snapshot_hash, now.isoformat()),
             )
             conn.execute("COMMIT")
             return VersionedPortfolioSnapshot(version=version + 1, snapshot=updated)
@@ -431,13 +455,15 @@ class SQLitePortfolioStore:
         try:
             conn.execute("BEGIN IMMEDIATE")
             row = conn.execute(
-                "SELECT version, snapshot_json FROM portfolio_state WHERE singleton_id = 1"
+                "SELECT version, snapshot_json, snapshot_hash FROM portfolio_state WHERE singleton_id = 1"
             ).fetchone()
             if row is None:
                 conn.execute("ROLLBACK")
                 raise PortfolioNotInitialized("portfolio state is not initialized")
             version = int(row["version"])
-            current = _portfolio_from_json(row["snapshot_json"])
+            current = _portfolio_from_storage(
+                snapshot_json=row["snapshot_json"], snapshot_hash=row["snapshot_hash"]
+            )
             already_applied = conn.execute(
                 "SELECT 1 FROM portfolio_applied_orders WHERE order_id = ?", (order.order_id,)
             ).fetchone()
@@ -446,13 +472,14 @@ class SQLitePortfolioStore:
                 return VersionedPortfolioSnapshot(version=version, snapshot=current)
 
             updated = apply_fill_to_portfolio(current, order)
+            snapshot_json, snapshot_hash = _portfolio_for_storage(updated)
             conn.execute(
                 """
                 UPDATE portfolio_state
-                SET version = ?, snapshot_json = ?, updated_at = ?
+                SET version = ?, snapshot_json = ?, snapshot_hash = ?, updated_at = ?
                 WHERE singleton_id = 1
                 """,
-                (version + 1, _portfolio_to_json(updated), now.isoformat()),
+                (version + 1, snapshot_json, snapshot_hash, now.isoformat()),
             )
             conn.execute(
                 "INSERT INTO portfolio_applied_orders(order_id, applied_at) VALUES (?, ?)",
@@ -582,11 +609,18 @@ class SQLiteReservationStore:
                 ).fetchone()["generation"]
             )
             portfolio_row = conn.execute(
-                "SELECT version FROM portfolio_state WHERE singleton_id = 1"
+                """
+                SELECT version, snapshot_json, snapshot_hash
+                FROM portfolio_state WHERE singleton_id = 1
+                """
             ).fetchone()
             if portfolio_row is None:
                 conn.execute("ROLLBACK")
                 raise PortfolioNotInitialized("portfolio state is not initialized")
+            _portfolio_from_storage(
+                snapshot_json=portfolio_row["snapshot_json"],
+                snapshot_hash=portfolio_row["snapshot_hash"],
+            )
             portfolio_version = int(portfolio_row["version"])
             if generation != expected_generation or portfolio_version != expected_portfolio_version:
                 conn.execute("ROLLBACK")
@@ -754,27 +788,118 @@ def _portfolio_to_json(snapshot: PortfolioSnapshot) -> str:
         "reconciliation_ok": snapshot.reconciliation_ok,
         "broker_state_known": snapshot.broker_state_known,
     }
-    return json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    return json.dumps(payload, sort_keys=True, separators=(",", ":"), allow_nan=False)
 
 
 def _portfolio_from_json(raw: str) -> PortfolioSnapshot:
     data = json.loads(raw)
-    return PortfolioSnapshot(
+    if not isinstance(data, dict):
+        raise ValueError("portfolio payload must be object")
+    expected = {
+        "snapshot_id",
+        "equity",
+        "gross_exposure",
+        "net_exposure",
+        "daily_pnl",
+        "drawdown",
+        "open_orders",
+        "signed_position_notional_by_symbol",
+        "strategy_gross_exposure",
+        "strategy_signed_position_notional_by_symbol",
+        "reconciliation_ok",
+        "broker_state_known",
+    }
+    if set(data) != expected:
+        raise ValueError("portfolio payload fields mismatch")
+    if isinstance(data["open_orders"], bool) or not isinstance(data["open_orders"], int):
+        raise ValueError("portfolio open_orders must be integer")
+    if not isinstance(data["reconciliation_ok"], bool):
+        raise ValueError("portfolio reconciliation_ok must be boolean")
+    if not isinstance(data["broker_state_known"], bool):
+        raise ValueError("portfolio broker_state_known must be boolean")
+    if not isinstance(data["strategy_signed_position_notional_by_symbol"], dict):
+        raise ValueError("portfolio strategy position maps must be object")
+    snapshot = PortfolioSnapshot(
         snapshot_id=data["snapshot_id"],
         equity=Decimal(data["equity"]),
         gross_exposure=Decimal(data["gross_exposure"]),
         net_exposure=Decimal(data["net_exposure"]),
         daily_pnl=Decimal(data["daily_pnl"]),
         drawdown=Decimal(data["drawdown"]),
-        open_orders=int(data["open_orders"]),
+        open_orders=data["open_orders"],
         signed_position_notional_by_symbol=_parse_decimal_map(data["signed_position_notional_by_symbol"]),
         strategy_gross_exposure=_parse_decimal_map(data["strategy_gross_exposure"]),
         strategy_signed_position_notional_by_symbol={
             strategy: _parse_decimal_map(values)
             for strategy, values in data["strategy_signed_position_notional_by_symbol"].items()
         },
-        reconciliation_ok=bool(data["reconciliation_ok"]),
-        broker_state_known=bool(data["broker_state_known"]),
+        reconciliation_ok=data["reconciliation_ok"],
+        broker_state_known=data["broker_state_known"],
+    )
+    validate_portfolio_snapshot(snapshot)
+    return snapshot
+
+
+def _portfolio_hash(snapshot_json: str) -> str:
+    return sha256(snapshot_json.encode("utf-8")).hexdigest()
+
+
+def _valid_sha256(value: object) -> bool:
+    return (
+        isinstance(value, str)
+        and len(value) == 64
+        and all(char in "0123456789abcdef" for char in value)
+    )
+
+
+def _portfolio_for_storage(snapshot: PortfolioSnapshot) -> tuple[str, str]:
+    validate_portfolio_snapshot(snapshot)
+    snapshot_json = _portfolio_to_json(snapshot)
+    return snapshot_json, _portfolio_hash(snapshot_json)
+
+
+def _portfolio_from_storage(*, snapshot_json: object, snapshot_hash: object) -> PortfolioSnapshot:
+    if not isinstance(snapshot_json, str):
+        raise PortfolioIntegrityError("stored portfolio payload is invalid")
+    if not _valid_sha256(snapshot_hash):
+        raise PortfolioIntegrityError("stored portfolio hash is invalid")
+    if _portfolio_hash(snapshot_json) != snapshot_hash:
+        raise PortfolioIntegrityError("stored portfolio hash mismatch")
+    try:
+        return _portfolio_from_json(snapshot_json)
+    except PortfolioIntegrityError:
+        raise
+    except (json.JSONDecodeError, KeyError, TypeError, ValueError, ArithmeticError) as exc:
+        raise PortfolioIntegrityError("stored portfolio payload is invalid") from exc
+
+
+def _ensure_portfolio_state_integrity_schema(conn: sqlite3.Connection) -> None:
+    columns = {row["name"] for row in conn.execute("PRAGMA table_info(portfolio_state)").fetchall()}
+    if "snapshot_hash" not in columns:
+        conn.execute("ALTER TABLE portfolio_state ADD COLUMN snapshot_hash TEXT")
+    row = conn.execute(
+        "SELECT snapshot_json, snapshot_hash FROM portfolio_state WHERE singleton_id = 1"
+    ).fetchone()
+    if row is None:
+        return
+    if row["snapshot_hash"] is None:
+        # Legacy migration is conservative: semantically parse/validate before
+        # blessing the existing bytes with their first independent commitment.
+        try:
+            snapshot = _portfolio_from_json(row["snapshot_json"])
+            validate_portfolio_snapshot(snapshot)
+        except Exception as exc:
+            raise PortfolioIntegrityError(
+                "legacy portfolio state cannot be integrity-migrated"
+            ) from exc
+        snapshot_hash = _portfolio_hash(row["snapshot_json"])
+        conn.execute(
+            "UPDATE portfolio_state SET snapshot_hash = ? WHERE singleton_id = 1",
+            (snapshot_hash,),
+        )
+        return
+    _portfolio_from_storage(
+        snapshot_json=row["snapshot_json"], snapshot_hash=row["snapshot_hash"]
     )
 
 
@@ -783,8 +908,15 @@ def _decimal_map(values: Iterable[tuple[str, Decimal]] | dict[str, Decimal]) -> 
     return {key: str(value) for key, value in items}
 
 
-def _parse_decimal_map(values: dict[str, str]) -> dict[str, Decimal]:
-    return {key: Decimal(value) for key, value in values.items()}
+def _parse_decimal_map(values: object) -> dict[str, Decimal]:
+    if not isinstance(values, dict):
+        raise ValueError("portfolio decimal map must be object")
+    parsed: dict[str, Decimal] = {}
+    for key, value in values.items():
+        if not isinstance(key, str) or not isinstance(value, str):
+            raise ValueError("portfolio decimal map entries must be string:string")
+        parsed[key] = Decimal(value)
+    return parsed
 
 
 def _reservation_from_row(row: sqlite3.Row) -> RiskReservation:
