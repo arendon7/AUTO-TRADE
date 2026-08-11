@@ -36,6 +36,7 @@ Evidencia conjunta para `TD-R4-002..005`: **412 tests PASS / 86.79% coverage**, 
 ## Deuda abierta
 | ID | Sev | Track | Área | Condición de cierre |
 |---|---|---|---|---|
+| `TD-R4-014` | P1 | R4 | Health recovery ACK integrity | anchor complete recovery ACK history into hash-protected Health state so deletion/mutation/reordering cannot re-enable a replayed recovery |
 | `TD-OPS-001` | P3 | OPS | Graphify | generar graph semántico/deep real en runtime soportado y vincularlo a `SOURCE_SHA`; nunca fabricar artefactos |
 
 Graphify P3/OPS no es una deuda P0/P1/P2 del track R4, pero permanece explícitamente abierta.

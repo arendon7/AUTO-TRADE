@@ -44,7 +44,7 @@ Objetivo: reconstruir todas las capacidades históricamente verificadas sin deud
 | R4 | correlation-aware portfolio research | v0.18 | PASS | common-panel dependence + anti-forgery clusters + exact strategy/cluster/portfolio budgets (`TD-R4-002`) |
 | R4 | allocation perturbation + leave-one-out | v0.18 | PASS | deterministic exact-sum Decimal normalization + complete recomputable perturbation/leave-one-out gate (`TD-R4-003`,`TD-R4-011`) |
 | R4 | TRAIN-calibrated regimes | v0.18 | PASS | TRAIN/DEVELOPMENT-only calibration + frozen HOLDOUT evaluation + UNKNOWN on stale/missing evidence (`TD-R4-004`) |
-| R4 | Strategy/Portfolio Health & Drift | v0.19 | PASS | baseline/policy-bound durable health + monotone worsening + retry-safe explicit fresh-evidence recovery (`TD-R4-005`,`TD-R4-012`) |
+| R4 | Strategy/Portfolio Health & Drift | v0.19 | PARTIAL | health/drift + retry-safe recovery remain certified; tamper-evident ACK-history anchoring is open as `TD-R4-014` |
 | R4 | Defensive Health Bridge | v0.20 | PASS | reduce/block-only bridge + retry-safe recovery + authoritative unsynced-worsening overlay + Safety/OMS rechecks (`TD-R4-006`,`TD-R4-012`,`TD-R4-013`) |
 | R4 | deterministic Portfolio Manager / sizing + cross-strategy budgets | reconstructed strengthening | PASS | advisory-only sizing + base/Health/venue budget+robustness recomputation + authoritative metadata + CI authority gate (`TD-R4-007`) |
 | R5 | closed-kline read-only stream | v0.22 | TODO | disabled default + fixed host + stream state |

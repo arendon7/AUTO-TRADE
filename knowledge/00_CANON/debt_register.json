@@ -461,6 +461,19 @@
       "severity": "P1",
       "status": "CLOSED",
       "track": "R4"
+    },
+    {
+      "area": "Health recovery acknowledgement tamper-evidence",
+      "evidence": [
+        "src/autotrade/research/health.py",
+        "tests/test_r4_recovery_ack_idempotency.py"
+      ],
+      "id": "TD-R4-014",
+      "next_action": "Anchor the complete Health recovery-acknowledgement history into the hash-protected HealthControlState using a deterministic append-only acknowledgement chain/digest. Deletion, mutation or reordering of ACK rows must fail closed before recovery, and the same recovery_id must remain replay-safe after durable tamper attempts.",
+      "resolution": "",
+      "severity": "P1",
+      "status": "OPEN",
+      "track": "R4"
     }
   ],
   "registry_version": 1
