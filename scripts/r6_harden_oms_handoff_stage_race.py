@@ -61,7 +61,7 @@ def main() -> int:
         "        # PRE_CONSUME performs the third. Flip only at PRE_IO so this fixture\n"
         "        # continues to prove the post-permit, pre-network race.\n"
         "        if self.calls <= 3:\n"
-        "            return SafetyControlState(version=1, updated_at=NOW)\n",
+        "            return SafetyControlState(version=0, updated_at=NOW)\n",
         "writer PRE_IO race fixture",
     )
     WRITER_TEST.write_text(writer_test, encoding="utf-8")
