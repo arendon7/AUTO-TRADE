@@ -10,11 +10,10 @@ import re
 import sqlite3
 from typing import Mapping
 
-from autotrade.oms import ExternalSubmissionHandoff
 from autotrade.persistence import SQLiteRuntime
 
 from .alpaca_paper_bracket import AlpacaEquityBracketRequest
-from .alpaca_paper_canary import PaperCanaryApproval
+from .alpaca_paper_canary_coordinator import PreparedPaperCanaryPackage
 from .alpaca_paper_gateway import AlpacaPaperAccountAttestation
 from .alpaca_paper_submission import PaperSubmissionBinding
 
@@ -62,7 +61,7 @@ class PaperOperatorDecisionContext:
     binding_hash: str
     bracket_payload_hash: str
     canary_approval_hash: str
-    oms_handoff_hash: str
+    prepared_package_hash: str
     notional: Decimal
     attempt_id: str
     preparation_hash: str
@@ -76,7 +75,7 @@ class PaperOperatorDecisionContext:
         _validate_hash(self.binding_hash, "binding_hash")
         _validate_hash(self.bracket_payload_hash, "bracket_payload_hash")
         _validate_hash(self.canary_approval_hash, "canary_approval_hash")
-        _validate_hash(self.oms_handoff_hash, "oms_handoff_hash")
+        _validate_hash(self.prepared_package_hash, "prepared_package_hash")
         _validate_id(self.attempt_id, "attempt_id")
         if not self.notional.is_finite() or self.notional <= 0:
             raise ValueError("operator decision notional must be finite and positive")
@@ -85,72 +84,41 @@ class PaperOperatorDecisionContext:
             raise ValueError("operator decision preparation_hash mismatch")
 
     @classmethod
-    def from_evidence(
+    def from_prepared_package(
         cls,
-        *,
-        account_attestation: AlpacaPaperAccountAttestation,
-        expected_bracket: AlpacaEquityBracketRequest,
-        approval: PaperCanaryApproval,
-        binding: PaperSubmissionBinding,
-        external_handoff: ExternalSubmissionHandoff,
-        attempt_id: str,
+        package: PreparedPaperCanaryPackage,
     ) -> "PaperOperatorDecisionContext":
-        _validate_id(attempt_id, "attempt_id")
-        if account_attestation.status != "ACTIVE" or account_attestation.currency != "USD":
-            raise ValueError("operator decision requires ACTIVE USD PAPER account attestation")
-        account_fp = account_attestation.fingerprint
-        if expected_bracket.order_id != binding.order_id:
-            raise ValueError("operator context bracket/binding order_id mismatch")
-        if expected_bracket.client_order_id != binding.client_order_id:
-            raise ValueError("operator context bracket/binding client_order_id mismatch")
-        if expected_bracket.payload_hash != binding.order_payload_hash:
-            raise ValueError("operator context bracket/binding payload hash mismatch")
-        if binding.account_attestation_fingerprint != account_fp:
-            raise ValueError("operator context binding/account mismatch")
-        if approval.order_id != binding.order_id:
-            raise ValueError("operator context approval order_id mismatch")
-        if approval.client_order_id != binding.client_order_id:
-            raise ValueError("operator context approval client_order_id mismatch")
-        if approval.binding_hash != binding.fingerprint:
-            raise ValueError("operator context approval binding mismatch")
-        if approval.account_attestation_fingerprint != account_fp:
-            raise ValueError("operator context approval account mismatch")
-        if approval.risk_decision_id != binding.risk_decision_id:
-            raise ValueError("operator context approval risk decision mismatch")
-        if external_handoff.order_id != binding.order_id:
-            raise ValueError("operator context OMS handoff order mismatch")
-        if external_handoff.intent_fingerprint != binding.intent_fingerprint:
-            raise ValueError("operator context OMS handoff intent mismatch")
-        if external_handoff.risk_decision_id != binding.risk_decision_id:
-            raise ValueError("operator context OMS handoff risk decision mismatch")
-        if external_handoff.handoff_id != approval.approval_hash:
-            raise ValueError("operator context OMS handoff/canary approval mismatch")
-        if not approval.issued_at <= external_handoff.authorized_at < approval.expires_at:
-            raise ValueError("operator context OMS handoff outside canary approval window")
-
+        if not isinstance(package, PreparedPaperCanaryPackage):
+            raise TypeError("prepared PAPER canary package is required")
+        if package.network_write_authorized is not False:
+            raise ValueError("operator decision requires a non-authorizing prepared package")
+        if package.next_action != "OPERATOR_DECISION_REQUIRED":
+            raise ValueError("prepared package does not require operator decision")
+        if package.order_status != "VALIDATED":
+            raise ValueError("operator decision requires prepared VALIDATED OMS state")
         raw = {
             "environment": "PAPER",
-            "account_attestation_fingerprint": account_fp,
-            "order_id": binding.order_id,
-            "client_order_id": binding.client_order_id,
-            "binding_hash": binding.fingerprint,
-            "bracket_payload_hash": expected_bracket.payload_hash,
-            "canary_approval_hash": approval.approval_hash,
-            "oms_handoff_hash": external_handoff.handoff_hash,
-            "notional": str(approval.notional),
-            "attempt_id": attempt_id,
+            "account_attestation_fingerprint": package.account_attestation_fingerprint,
+            "order_id": package.order_id,
+            "client_order_id": package.client_order_id,
+            "binding_hash": package.submission_binding_hash,
+            "bracket_payload_hash": package.bracket_payload_hash,
+            "canary_approval_hash": package.canary_approval_hash,
+            "prepared_package_hash": package.package_hash,
+            "notional": str(package.notional),
+            "attempt_id": package.attempt_id,
         }
         return cls(
             environment="PAPER",
-            account_attestation_fingerprint=account_fp,
-            order_id=binding.order_id,
-            client_order_id=binding.client_order_id,
-            binding_hash=binding.fingerprint,
-            bracket_payload_hash=expected_bracket.payload_hash,
-            canary_approval_hash=approval.approval_hash,
-            oms_handoff_hash=external_handoff.handoff_hash,
-            notional=approval.notional,
-            attempt_id=attempt_id,
+            account_attestation_fingerprint=package.account_attestation_fingerprint,
+            order_id=package.order_id,
+            client_order_id=package.client_order_id,
+            binding_hash=package.submission_binding_hash,
+            bracket_payload_hash=package.bracket_payload_hash,
+            canary_approval_hash=package.canary_approval_hash,
+            prepared_package_hash=package.package_hash,
+            notional=package.notional,
+            attempt_id=package.attempt_id,
             preparation_hash=_hash_json(raw),
         )
 
@@ -169,7 +137,7 @@ class PaperOperatorDecisionContext:
             "binding_hash",
             "bracket_payload_hash",
             "canary_approval_hash",
-            "oms_handoff_hash",
+            "prepared_package_hash",
             "notional",
             "attempt_id",
             "preparation_hash",
@@ -184,7 +152,7 @@ class PaperOperatorDecisionContext:
             binding_hash=_required_str(payload, "binding_hash"),
             bracket_payload_hash=_required_str(payload, "bracket_payload_hash"),
             canary_approval_hash=_required_str(payload, "canary_approval_hash"),
-            oms_handoff_hash=_required_str(payload, "oms_handoff_hash"),
+            prepared_package_hash=_required_str(payload, "prepared_package_hash"),
             notional=_decimal(payload.get("notional"), "notional"),
             attempt_id=_required_str(payload, "attempt_id"),
             preparation_hash=_required_str(payload, "preparation_hash"),
@@ -525,7 +493,7 @@ def _context_payload_without_hash(context: PaperOperatorDecisionContext) -> dict
         "binding_hash": context.binding_hash,
         "bracket_payload_hash": context.bracket_payload_hash,
         "canary_approval_hash": context.canary_approval_hash,
-        "oms_handoff_hash": context.oms_handoff_hash,
+        "prepared_package_hash": context.prepared_package_hash,
         "notional": str(context.notional),
         "attempt_id": context.attempt_id,
     }

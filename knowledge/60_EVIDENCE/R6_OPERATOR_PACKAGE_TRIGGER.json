@@ -1,9 +1,0 @@
-{
-  "schema_version": 1,
-  "track": "R6",
-  "debt_id": "TD-R6-011",
-  "purpose": "Retry package-bound operator authorization after eliminating the residual pre-operator OMS handoff reference.",
-  "attempt": 2,
-  "external_paper_order_sent": false,
-  "live_trading": "BLOCKED"
-}

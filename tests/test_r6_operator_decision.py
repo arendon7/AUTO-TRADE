@@ -17,23 +17,17 @@ from autotrade.brokers.alpaca_paper_operator_decision import (
     operator_confirmation_challenge,
 )
 from autotrade.persistence import SQLiteRuntime
-from test_r6_paper_writer import NOW, stack
+from test_r6_paper_canary_coordinator import NOW, prepare, stack
 
 
-def evidence(tmp_path, *, attempt_id="writer-attempt-001"):
-    values = stack(tmp_path / "base")
-    context = PaperOperatorDecisionContext.from_evidence(
-        account_attestation=values["attestation"],
-        expected_bracket=values["expected"],
-        approval=values["approval"],
-        binding=values["binding"],
-        external_handoff=values["handoff"],
-        attempt_id=attempt_id,
-    )
+def evidence(tmp_path):
+    coordinator, _, _, submission, permit = stack(tmp_path / "base")
+    prepared = prepare(coordinator, submission, permit)
+    context = PaperOperatorDecisionContext.from_prepared_package(prepared.package)
     registry = SQLitePaperOperatorDecisionRegistry(
         SQLiteRuntime(tmp_path / "operator.sqlite")
     )
-    return values, context, registry
+    return prepared, context, registry
 
 
 def issue(registry, context, *, operator_id="operator:arendon7", issued_at=None):
@@ -47,34 +41,27 @@ def issue(registry, context, *, operator_id="operator:arendon7", issued_at=None)
 
 
 def test_context_binds_exact_prepared_canary_and_has_deterministic_challenge(tmp_path) -> None:
-    values, context, _ = evidence(tmp_path)
+    prepared, context, _ = evidence(tmp_path)
     assert context.environment == "PAPER"
-    assert context.order_id == values["binding"].order_id
-    assert context.client_order_id == values["binding"].client_order_id
-    assert context.binding_hash == values["binding"].fingerprint
-    assert context.bracket_payload_hash == values["expected"].payload_hash
-    assert context.canary_approval_hash == values["approval"].approval_hash
-    assert context.oms_handoff_hash == values["handoff"].handoff_hash
-    assert context.notional == values["approval"].notional
-    assert context.attempt_id == "writer-attempt-001"
+    assert context.order_id == prepared.binding.order_id
+    assert context.client_order_id == prepared.binding.client_order_id
+    assert context.binding_hash == prepared.binding.fingerprint
+    assert context.bracket_payload_hash == prepared.bracket.payload_hash
+    assert context.canary_approval_hash == prepared.approval.approval_hash
+    assert context.prepared_package_hash == prepared.package.package_hash
+    assert context.notional == prepared.approval.notional
+    assert context.attempt_id == prepared.package.attempt_id
     assert operator_confirmation_challenge(context) == f"APPROVE PAPER {context.preparation_hash[:12]}"
     assert PaperOperatorDecisionContext.from_dict(context.to_dict()) == context
 
 
-def test_context_cross_evidence_mismatch_fails_closed(tmp_path) -> None:
-    values, _, _ = evidence(tmp_path)
-    wrong_binding = replace(
-        values["binding"],
-        account_attestation_fingerprint="f" * 64,
-    )
-    with pytest.raises(ValueError, match="binding/account"):
-        PaperOperatorDecisionContext.from_evidence(
-            account_attestation=values["attestation"],
-            expected_bracket=values["expected"],
-            approval=values["approval"],
-            binding=wrong_binding,
-            external_handoff=values["handoff"],
-            attempt_id="writer-attempt-001",
+def test_context_package_hash_tamper_fails_closed(tmp_path) -> None:
+    _, context, _ = evidence(tmp_path)
+    with pytest.raises(ValueError, match="preparation_hash mismatch"):
+        replace(
+            context,
+            prepared_package_hash="f" * 64,
+            preparation_hash="0" * 64,
         )
 
 
@@ -166,7 +153,7 @@ def test_event_mutation_tail_deletion_and_control_tamper_fail_closed(tmp_path) -
         registry.get(context.preparation_hash)
 
     # Fresh registry for independent anchored-tail deletion check.
-    _, context2, registry2 = evidence(tmp_path / "tail", attempt_id="writer-attempt-002")
+    _, context2, registry2 = evidence(tmp_path / "tail")
     issue(registry2, context2)
     db2 = tmp_path / "tail" / "operator.sqlite"
     conn = sqlite3.connect(db2)
@@ -176,7 +163,7 @@ def test_event_mutation_tail_deletion_and_control_tamper_fail_closed(tmp_path) -
     with pytest.raises(PaperOperatorDecisionIntegrityError, match="count"):
         registry2.get(context2.preparation_hash)
 
-    _, context3, registry3 = evidence(tmp_path / "control", attempt_id="writer-attempt-003")
+    _, context3, registry3 = evidence(tmp_path / "control")
     issue(registry3, context3)
     db3 = tmp_path / "control" / "operator.sqlite"
     conn = sqlite3.connect(db3)
