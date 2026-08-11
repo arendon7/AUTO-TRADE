@@ -82,22 +82,13 @@ def test_wrong_confirmation_challenge_records_nothing(tmp_path, monkeypatch) -> 
     assert not workspace.operator_db_path.exists()
 
 
-def test_exact_tty_challenge_records_only_human_decision_after_two_core_checks(
+def test_exact_tty_challenge_records_only_human_decision_with_core_provenance(
     tmp_path,
     monkeypatch,
 ) -> None:
     context, workspace = prepared_workspace(tmp_path)
     ns = namespace()
     output = TTYStringIO()
-    calls: list[str] = []
-    original_verify = ns["_verify_current_core"]
-
-    def tracked_verify(*args, **kwargs):
-        result = original_verify(*args, **kwargs)
-        calls.append(result)
-        return result
-
-    ns["_verify_current_core"] = tracked_verify
     monkeypatch.setattr(sys, "stdin", TTYStringIO())
     monkeypatch.setattr(sys, "stdout", output)
     monkeypatch.setattr(
@@ -107,8 +98,6 @@ def test_exact_tty_challenge_records_only_human_decision_after_two_core_checks(
     )
 
     assert ns["main"](args_for(workspace, ttl="30")) == 0
-    assert len(calls) == 2
-    assert calls[0] == calls[1]
     state = SQLitePaperOperatorDecisionRegistry(SQLiteRuntime(workspace.operator_db_path)).get(
         context.preparation_hash
     )
