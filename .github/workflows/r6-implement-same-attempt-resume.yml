@@ -20,7 +20,9 @@ jobs:
         with:
           python-version: "3.12"
       - name: Apply TD-R6-012 patch
-        run: python scripts/r6_implement_same_attempt_resume.py
+        run: |
+          python scripts/r6_implement_same_attempt_resume.py
+          python scripts/r6_fix_same_attempt_resume_tests.py
       - name: Install
         run: python -m pip install -e '.[dev]'
       - name: Focused certification
@@ -47,7 +49,7 @@ jobs:
         run: |
           git config user.name arendon7
           git config user.email 102555888+arendon7@users.noreply.github.com
-          git rm -f scripts/r6_implement_same_attempt_resume.py knowledge/60_EVIDENCE/R6_SAME_ATTEMPT_RESUME_TRIGGER.json
-          git add src/autotrade/brokers/alpaca_paper_writer.py tests/test_r6_writer_same_attempt_resume.py
+          git rm -f scripts/r6_implement_same_attempt_resume.py scripts/r6_fix_same_attempt_resume_tests.py knowledge/60_EVIDENCE/R6_SAME_ATTEMPT_RESUME_TRIGGER.json
+          git add src/autotrade/brokers/alpaca_paper_writer.py tests/test_r6_writer_same_attempt_resume.py tests/test_r6_paper_writer.py
           git commit -m "fix(r6): make consumed-permit same-attempt restart safe"
           git push origin HEAD:reconstruction/r6-external-paper-protection
