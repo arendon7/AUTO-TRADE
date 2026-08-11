@@ -187,7 +187,11 @@ def test_health_ack_recorded_while_healthy_cannot_be_replayed_after_future_degra
         confirmed_by="risk-officer",
         now=t + timedelta(seconds=1),
     )
-    assert no_op == state
+    # HEALTHY acknowledgement is severity-neutral but must version durable
+    # evidence so its recovery_id is anchored into the tamper-evident ACK chain.
+    assert no_op.state is HealthState.HEALTHY
+    assert no_op.version == state.version + 1
+    assert no_op.recovery_ack_head != "GENESIS"
 
     bad_window = _window(now, healthy=False, source="later-bad")
     bad_assessment = assess_health(

@@ -271,6 +271,7 @@ class HealthControlState:
     policy_fingerprint: str
     last_assessment_fingerprint: str
     updated_at: datetime
+    recovery_ack_head: str = "GENESIS"
 
     def __post_init__(self) -> None:
         _identity(self.entity_id, "entity_id")
@@ -290,6 +291,8 @@ class HealthControlState:
         _hash_value(self.policy_fingerprint, "policy_fingerprint")
         if self.last_assessment_fingerprint:
             _hash_value(self.last_assessment_fingerprint, "last_assessment_fingerprint")
+        if self.recovery_ack_head != "GENESIS":
+            _hash_value(self.recovery_ack_head, "recovery_ack_head")
         if not _aware(self.updated_at):
             raise ValueError("health state updated_at must be timezone-aware")
 
@@ -310,6 +313,7 @@ class HealthControlState:
                 "policy_fingerprint": self.policy_fingerprint,
                 "last_assessment_fingerprint": self.last_assessment_fingerprint,
                 "updated_at": self.updated_at.isoformat(),
+                "recovery_ack_head": self.recovery_ack_head,
             }
         )
 
@@ -418,6 +422,7 @@ class SQLiteHealthStateStore:
                     policy_fingerprint TEXT NOT NULL,
                     last_assessment_fingerprint TEXT NOT NULL,
                     updated_at TEXT NOT NULL,
+                    recovery_ack_head TEXT NOT NULL DEFAULT 'GENESIS',
                     state_hash TEXT NOT NULL,
                     PRIMARY KEY(entity_kind, entity_id)
                 );
@@ -437,6 +442,19 @@ class SQLiteHealthStateStore:
                     applied_at TEXT NOT NULL,
                     PRIMARY KEY(entity_kind, entity_id, recovery_id)
                 );
+                CREATE TABLE IF NOT EXISTS health_recovery_acks_v3 (
+                    entity_kind TEXT NOT NULL,
+                    entity_id TEXT NOT NULL,
+                    ack_seq INTEGER NOT NULL CHECK(ack_seq > 0),
+                    recovery_id TEXT NOT NULL,
+                    request_fingerprint TEXT NOT NULL,
+                    confirmed_by TEXT NOT NULL,
+                    applied_at TEXT NOT NULL,
+                    previous_ack_hash TEXT NOT NULL,
+                    ack_hash TEXT NOT NULL,
+                    PRIMARY KEY(entity_kind, entity_id, recovery_id),
+                    UNIQUE(entity_kind, entity_id, ack_seq)
+                );
                 CREATE TABLE IF NOT EXISTS health_transitions_v2 (
                     transition_fingerprint TEXT PRIMARY KEY,
                     entity_kind TEXT NOT NULL,
@@ -452,6 +470,30 @@ class SQLiteHealthStateStore:
                 );
                 """
             )
+            state_columns = {
+                row["name"] for row in conn.execute("PRAGMA table_info(health_state_v2)").fetchall()
+            }
+            if "recovery_ack_head" not in state_columns:
+                state_count = int(conn.execute("SELECT COUNT(*) FROM health_state_v2").fetchone()[0])
+                if state_count:
+                    raise HealthStateConflict(
+                        "pre-ACK-chain health state requires explicit migration/rebaseline"
+                    )
+                conn.execute(
+                    "ALTER TABLE health_state_v2 ADD COLUMN recovery_ack_head TEXT NOT NULL DEFAULT 'GENESIS'"
+                )
+
+            legacy_ack_count = int(
+                conn.execute("SELECT COUNT(*) FROM health_recovery_acks_v2").fetchone()[0]
+            )
+            v3_ack_count = int(
+                conn.execute("SELECT COUNT(*) FROM health_recovery_acks_v3").fetchone()[0]
+            )
+            if legacy_ack_count and not v3_ack_count:
+                raise HealthStateConflict(
+                    "pre-chain recovery acknowledgements require explicit migration/rebaseline"
+                )
+
             legacy = conn.execute(
                 "SELECT name FROM sqlite_master WHERE type='table' AND name='health_state'"
             ).fetchone()
@@ -480,9 +522,13 @@ class SQLiteHealthStateStore:
                 "SELECT * FROM health_state_v2 WHERE entity_kind=? AND entity_id=?",
                 (entity_kind.value, entity_id),
             ).fetchone()
+            if row is None:
+                return None
+            state = _state_from_row(row)
+            self._verify_recovery_ack_chain(conn, state)
+            return state
         finally:
             conn.close()
-        return None if row is None else _state_from_row(row)
 
     def apply_assessment(
         self,
@@ -513,6 +559,7 @@ class SQLiteHealthStateStore:
                 current = None
             else:
                 current = _state_from_row(row)
+                self._verify_recovery_ack_chain(conn, current)
                 self._assert_binding(
                     current,
                     baseline_fingerprint=assessment.baseline_fingerprint,
@@ -570,6 +617,7 @@ class SQLiteHealthStateStore:
                 policy_fingerprint=assessment.policy_fingerprint,
                 last_assessment_fingerprint=assessment.fingerprint,
                 updated_at=now,
+                recovery_ack_head=(current.recovery_ack_head if current is not None else "GENESIS"),
             )
             self._upsert_state(conn, updated)
             conn.execute(
@@ -646,6 +694,7 @@ class SQLiteHealthStateStore:
                 conn.rollback()
                 raise HealthRecoveryRejected("no health state exists for entity")
             current = _state_from_row(row)
+            self._verify_recovery_ack_chain(conn, current)
             self._assert_binding(
                 current,
                 baseline_fingerprint=baseline.fingerprint,
@@ -654,7 +703,7 @@ class SQLiteHealthStateStore:
 
             ack = conn.execute(
                 """
-                SELECT request_fingerprint FROM health_recovery_acks_v2
+                SELECT request_fingerprint FROM health_recovery_acks_v3
                 WHERE entity_kind=? AND entity_id=? AND recovery_id=?
                 """,
                 (baseline.entity_kind.value, baseline.entity_id, recovery_id),
@@ -672,28 +721,43 @@ class SQLiteHealthStateStore:
                 raise HealthRecoveryRejected("RETIRED state cannot be recovered automatically")
 
             if current.state is HealthState.HEALTHY:
-                conn.execute(
-                    """
-                    INSERT INTO health_recovery_acks_v2(
-                        entity_kind,entity_id,recovery_id,request_fingerprint,confirmed_by,applied_at
-                    ) VALUES(?,?,?,?,?,?)
-                    """,
-                    (
-                        current.entity_kind.value,
-                        current.entity_id,
-                        recovery_id,
-                        request_fingerprint,
-                        confirmed_by,
-                        now.isoformat(),
-                    ),
+                ack_seq, ack_hash = self._append_recovery_ack(
+                    conn,
+                    current=current,
+                    recovery_id=recovery_id,
+                    request_fingerprint=request_fingerprint,
+                    confirmed_by=confirmed_by,
+                    now=now,
                 )
+                updated = HealthControlState(
+                    entity_id=current.entity_id,
+                    entity_kind=current.entity_kind,
+                    state=current.state,
+                    version=current.version + 1,
+                    distinct_quarantine_count=current.distinct_quarantine_count,
+                    baseline_fingerprint=current.baseline_fingerprint,
+                    policy_fingerprint=current.policy_fingerprint,
+                    last_assessment_fingerprint=current.last_assessment_fingerprint,
+                    updated_at=now,
+                    recovery_ack_head=ack_hash,
+                )
+                self._upsert_state(conn, updated)
+                self._verify_recovery_ack_chain(conn, updated)
                 conn.commit()
-                return current
+                return updated
 
             target = (
                 HealthState.HEALTHY
                 if current.state is HealthState.DEGRADED
                 else HealthState.DEGRADED
+            )
+            ack_seq, ack_hash = self._append_recovery_ack(
+                conn,
+                current=current,
+                recovery_id=recovery_id,
+                request_fingerprint=request_fingerprint,
+                confirmed_by=confirmed_by,
+                now=now,
             )
             updated = HealthControlState(
                 entity_id=current.entity_id,
@@ -705,23 +769,10 @@ class SQLiteHealthStateStore:
                 policy_fingerprint=current.policy_fingerprint,
                 last_assessment_fingerprint=assessment.fingerprint,
                 updated_at=now,
+                recovery_ack_head=ack_hash,
             )
             self._upsert_state(conn, updated)
-            conn.execute(
-                """
-                INSERT INTO health_recovery_acks_v2(
-                    entity_kind,entity_id,recovery_id,request_fingerprint,confirmed_by,applied_at
-                ) VALUES(?,?,?,?,?,?)
-                """,
-                (
-                    current.entity_kind.value,
-                    current.entity_id,
-                    recovery_id,
-                    request_fingerprint,
-                    confirmed_by,
-                    now.isoformat(),
-                ),
-            )
+            self._verify_recovery_ack_chain(conn, updated)
             self._append_transition(
                 conn,
                 entity_kind=current.entity_kind,
@@ -744,6 +795,113 @@ class SQLiteHealthStateStore:
         finally:
             conn.close()
 
+    def _append_recovery_ack(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        current: HealthControlState,
+        recovery_id: str,
+        request_fingerprint: str,
+        confirmed_by: str,
+        now: datetime,
+    ) -> tuple[int, str]:
+        row = conn.execute(
+            """
+            SELECT COALESCE(MAX(ack_seq), 0) AS max_seq
+            FROM health_recovery_acks_v3
+            WHERE entity_kind=? AND entity_id=?
+            """,
+            (current.entity_kind.value, current.entity_id),
+        ).fetchone()
+        ack_seq = int(row["max_seq"]) + 1
+        previous_ack_hash = current.recovery_ack_head
+        ack_hash = _hash(
+            {
+                "entity_kind": current.entity_kind.value,
+                "entity_id": current.entity_id,
+                "ack_seq": ack_seq,
+                "recovery_id": recovery_id,
+                "request_fingerprint": request_fingerprint,
+                "confirmed_by": confirmed_by,
+                "applied_at": now.isoformat(),
+                "previous_ack_hash": previous_ack_hash,
+            }
+        )
+        conn.execute(
+            """
+            INSERT INTO health_recovery_acks_v3(
+                entity_kind,entity_id,ack_seq,recovery_id,request_fingerprint,
+                confirmed_by,applied_at,previous_ack_hash,ack_hash
+            ) VALUES(?,?,?,?,?,?,?,?,?)
+            """,
+            (
+                current.entity_kind.value,
+                current.entity_id,
+                ack_seq,
+                recovery_id,
+                request_fingerprint,
+                confirmed_by,
+                now.isoformat(),
+                previous_ack_hash,
+                ack_hash,
+            ),
+        )
+        return ack_seq, ack_hash
+
+    def _verify_recovery_ack_chain(
+        self,
+        conn: sqlite3.Connection,
+        state: HealthControlState,
+    ) -> None:
+        rows = conn.execute(
+            """
+            SELECT ack_seq,recovery_id,request_fingerprint,confirmed_by,
+                   applied_at,previous_ack_hash,ack_hash
+            FROM health_recovery_acks_v3
+            WHERE entity_kind=? AND entity_id=?
+            ORDER BY ack_seq ASC
+            """,
+            (state.entity_kind.value, state.entity_id),
+        ).fetchall()
+        running = "GENESIS"
+        expected_seq = 1
+        for row in rows:
+            try:
+                ack_seq = int(row["ack_seq"])
+                recovery_id = str(row["recovery_id"])
+                request_fingerprint = str(row["request_fingerprint"])
+                confirmed_by = str(row["confirmed_by"])
+                applied_at = str(row["applied_at"])
+                previous_ack_hash = str(row["previous_ack_hash"])
+                ack_hash = str(row["ack_hash"])
+            except (KeyError, TypeError, ValueError) as exc:
+                raise HealthStateConflict("recovery ACK chain row is malformed") from exc
+            if ack_seq != expected_seq:
+                raise HealthStateConflict("recovery ACK chain sequence gap/reorder detected")
+            _identity(recovery_id, "recovery_id")
+            _identity(confirmed_by, "confirmed_by")
+            _hash_value(request_fingerprint, "request_fingerprint")
+            if previous_ack_hash != running:
+                raise HealthStateConflict("recovery ACK chain previous hash mismatch")
+            expected_hash = _hash(
+                {
+                    "entity_kind": state.entity_kind.value,
+                    "entity_id": state.entity_id,
+                    "ack_seq": ack_seq,
+                    "recovery_id": recovery_id,
+                    "request_fingerprint": request_fingerprint,
+                    "confirmed_by": confirmed_by,
+                    "applied_at": applied_at,
+                    "previous_ack_hash": previous_ack_hash,
+                }
+            )
+            if ack_hash != expected_hash:
+                raise HealthStateConflict("recovery ACK chain hash mismatch")
+            running = ack_hash
+            expected_seq += 1
+        if running != state.recovery_ack_head:
+            raise HealthStateConflict("recovery ACK chain head does not match Health state")
+
     def _assert_binding(
         self,
         current: HealthControlState,
@@ -762,8 +920,8 @@ class SQLiteHealthStateStore:
             INSERT INTO health_state_v2(
                 entity_kind, entity_id, state, version, distinct_quarantine_count,
                 baseline_fingerprint, policy_fingerprint, last_assessment_fingerprint,
-                updated_at, state_hash
-            ) VALUES(?,?,?,?,?,?,?,?,?,?)
+                updated_at, recovery_ack_head, state_hash
+            ) VALUES(?,?,?,?,?,?,?,?,?,?,?)
             ON CONFLICT(entity_kind,entity_id) DO UPDATE SET
                 state=excluded.state,
                 version=excluded.version,
@@ -772,6 +930,7 @@ class SQLiteHealthStateStore:
                 policy_fingerprint=excluded.policy_fingerprint,
                 last_assessment_fingerprint=excluded.last_assessment_fingerprint,
                 updated_at=excluded.updated_at,
+                recovery_ack_head=excluded.recovery_ack_head,
                 state_hash=excluded.state_hash
             """,
             (
@@ -784,6 +943,7 @@ class SQLiteHealthStateStore:
                 state.policy_fingerprint,
                 state.last_assessment_fingerprint,
                 state.updated_at.isoformat(),
+                state.recovery_ack_head,
                 state.fingerprint,
             ),
         )
@@ -852,6 +1012,7 @@ def _state_from_row(row) -> HealthControlState:
             policy_fingerprint=row["policy_fingerprint"],
             last_assessment_fingerprint=row["last_assessment_fingerprint"],
             updated_at=datetime.fromisoformat(row["updated_at"]),
+            recovery_ack_head=row["recovery_ack_head"],
         )
     except (KeyError, TypeError, ValueError) as exc:
         raise HealthStateConflict("stored health state is malformed") from exc
