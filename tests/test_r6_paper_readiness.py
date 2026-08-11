@@ -30,7 +30,7 @@ def test_readiness_reports_account_preflight_required_without_network(tmp_path) 
     assert report.execution_authorized is False
     assert report.capital_authority == "NONE"
     assert report.profitability_claim is False
-    assert report.live_trading == "BLOCKED"
+    assert report.production_status == "BLOCKED"
     assert broker.calls == 0
 
 
