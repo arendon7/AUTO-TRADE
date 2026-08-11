@@ -656,12 +656,21 @@
     },
     {
       "area": "Just-in-time deterministic Safety/OMS recheck before external PAPER write",
-      "evidence": [],
+      "evidence": [
+        "src/autotrade/brokers/alpaca_paper_final_guard.py",
+        "src/autotrade/brokers/alpaca_paper_writer.py",
+        "src/autotrade/brokers/alpaca_paper_submission.py",
+        "scripts/check_r6_authority.py",
+        "tests/test_r6_final_write_guard.py",
+        "tests/test_r6_final_guard_phase_chain.py",
+        "tests/test_r6_paper_writer.py",
+        "knowledge/60_EVIDENCE/R6_FINAL_WRITE_GUARD_EVIDENCE.json"
+      ],
       "id": "TD-R6-009",
       "next_action": "Add an authoritative final-write guard that re-reads the current OMS order plus durable Safety/circuit, reconciliation/UNKNOWN and Health state immediately before permit consumption and POST. Approval TTL alone is insufficient: any intervening worsening must block the write fail-closed.",
-      "resolution": "",
+      "resolution": "Implemented no-network authoritative final-write guard with PRE_CONSUME and PRE_IO re-reads of OMS, Safety/circuit, Portfolio reconciliation/broker-known state, Health and tamper-verified global submission state. PRE_IO is cryptographically chained to PRE_CONSUME, blocks intervening Safety/Portfolio version changes, occurs after request validation and immediately before the single audited PAPER transport write. Intervening worsening performs zero I/O and retains consumed permit + durable UNKNOWN for reconciliation only. Official pre-closure clean-head CI: Core 31506151261, Knowledge 31506151276, R6 Authority 31506151231.",
       "severity": "P1",
-      "status": "OPEN",
+      "status": "CLOSED",
       "track": "R6"
     }
   ],
