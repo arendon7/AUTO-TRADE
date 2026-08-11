@@ -15,8 +15,6 @@ replace_once(
     '''        portfolio = (\n            self.get(portfolio_entity_id, HealthEntityKind.PORTFOLIO)\n            if portfolio_entity_id\n            else None\n        )\n\n        strategy_mode, strategy_multiplier, strategy_reason = self._effective_entity(\n''',
     "bridge portfolio lookup",
 )
-# Replace only the portfolio-control call so a required portfolio identity cannot
-# disappear by passing an empty id.
 replace_once(
     bridge,
     '''        portfolio_mode, portfolio_multiplier, portfolio_reason = self._effective_entity(\n            portfolio,\n            required=self._policy.require_portfolio_state and bool(portfolio_entity_id),\n            label="PORTFOLIO",\n            now=now,\n        )\n''',
@@ -103,7 +101,7 @@ replace_once(
 )
 replace_once(
     bootstrap,
-    '''        safety=safety,\n        oms=oms,\n''',
-    '''        safety=safety,\n        health_state_store=health_state_store,\n        health_bridge=health_bridge,\n        oms=oms,\n''',
-    "bootstrap return fields",
+    '''    return DurablePaperCore(\n        runtime=runtime,\n        ledger=ledger,\n        broker=broker,\n        safety=safety,\n        oms=oms,\n''',
+    '''    return DurablePaperCore(\n        runtime=runtime,\n        ledger=ledger,\n        broker=broker,\n        safety=safety,\n        health_state_store=health_state_store,\n        health_bridge=health_bridge,\n        oms=oms,\n''',
+    "bootstrap durable core return fields",
 )
