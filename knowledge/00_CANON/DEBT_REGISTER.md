@@ -2,45 +2,76 @@
 
 Fecha: 2026-08-10
 Estado: ACTIVE
-Regla: ningún track puede cerrarse con P0/P1 conocido. Toda deuda real debe tener ID y condición de cierre.
+
+## Authority
+The machine-readable authority is:
+`knowledge/00_CANON/debt_register.json`.
+
+This Markdown file is the human-readable operational view. If both ever disagree, the JSON register + CI gate wins and the Markdown must be repaired.
+
+## Regla
+No track can be certified with a known open P0/P1/P2 assigned to that track. Newly discovered debt must be registered before milestone closure; severity cannot be downgraded merely to satisfy a release.
 
 ## Severidad
-- `P0`: riesgo inmediato de pérdida/ejecución no controlada o corrupción crítica.
-- `P1`: viola un invariant requerido del track activo o bloquea una promoción segura.
-- `P2`: maintainability/reliability gap importante pero no rompe el invariant certificado actual.
-- `P3`: mejora menor/tooling/documentación.
+- `P0`: immediate uncontrolled-loss/execution/corruption risk.
+- `P1`: violates a required invariant or blocks safe progression.
+- `P2`: important reliability/maintainability gap that must close before the owning track certifies.
+- `P3`: lower-risk tooling/documentation improvement that may remain open when explicitly outside the certified invariant.
 
-## Open debt
+## Certified tracks
+- **R0 — PASS**
+- **R1 — PASS**
+- **R2 — PASS**
+- **R3 — PASS on certified branch; pending PR #10 integration + post-merge `main` recertification**
 
-| ID | Sev | Area | Debt | Why it is debt | Close condition | Target |
-|---|---|---|---|---|---|---|
-| TD-R2-001 | P1 | OMS | partial-fill/cancel/replace lifecycle incompleto | execution lifecycle actual no cubre todavía todos los estados históricos requeridos | durable state machine + idempotency + reconciliation + crash/chaos tests | R2 |
-| TD-R2-002 | P1 | Contracts | no existe aún registry completo de contratos machine-readable/versionados | cambios de mensajes/estado no tienen compatibility gate equivalente al histórico | schema registry + version rules + CI compatibility validation | R2 |
-| TD-R2-003 | P1 | Risk | matriz completa order/position/strategy/portfolio exposure necesita recertificación conjunta | controles existen parcialmente pero no están certificados como conjunto R2 | policy matrix + boundary/race/restart tests | R2 |
-| TD-R2-004 | P1 | Risk state | daily loss/drawdown/circuit durable semantics incompletas como track | riesgo temporal necesita persistencia y recovery explícitos | durable counters/state + restart/time-boundary/rollback tests | R2 |
-| TD-R2-005 | P2 | Coverage | `persistence.py` y `reconciliation.py` tenían hotspots alrededor de 74% en CI R1 | control-plane crítico merece evidencia más profunda que el mínimo global | elevar cobertura relevante y cubrir failure branches de R2; no perseguir líneas sin valor | R2 |
-| TD-OPS-001 | P3 | Graphify | `graphify-out/` aún no ha sido generado para el árbol actual | falta mapa estructural ejecutado, aunque canon/Git/tests siguen disponibles | deep graph generado en asistente compatible + `SOURCE_SHA` válido | opportunistic/R2 |
-| TD-CI-001 | P3 | CI | GitHub Actions emite advertencia de Node 20 deprecated para actions actuales | no rompe CI hoy, pero es maintenance debt | actualizar actions a versiones compatibles y certificar workflows | R2/maintenance |
+All R3 P0/P1/P2 items `TD-R3-001..008` are CLOSED with concrete code/test/evidence paths in `debt_register.json`.
 
-## Planned capability gaps — NOT classified as technical debt yet
-R3–R6 aparecen como `TODO` en la matriz porque son trabajo futuro deliberadamente secuenciado, no deuda escondida del track ya certificado. Se convierten en deuda únicamente si su track se declara PASS sin implementarlos.
+## Current open debt
 
-## Closed debt
+| ID | Sev | Track | Area | Current debt | Close condition |
+|---|---|---|---|---|---|
+| `TD-OPS-001` | P3 | OPS | Graphify | semantic/deep Graphify output has not been generated for the current tree | run real deep graph in supported runtime and bind it to valid `SOURCE_SHA`; never fabricate graph artifacts |
+| `TD-R4-001` | P1 | R4 | Instrument metadata | no authoritative versioned instrument master yet for venue tick/step/min-max quantity/notional/trading status | implement provenance/version/fingerprint-bound instrument master + fail-closed stale/conflict rules + tests before later PAPER/execution use |
 
-| ID | Closed in | Evidence |
+`TD-R4-001` is deliberately open because R4 has **not** been certified. It is a blocker for R4 completion, not hidden debt of R3.
+
+## R3 debt closure summary
+
+| IDs | Status | Evidence class |
 |---|---|---|
-| TD-R1-DSL | R1 / `ed1c068...` | safe declarative Strategy DSL + injection/boundary tests |
-| TD-R1-BOOTSTRAP | R1 / `ed1c068...` | reproducible moving-block bootstrap, 100% module coverage at certification |
-| TD-R1-ADEQUACY | R1 / `ed1c068...` | SampleAdequacyPolicy + negative boundaries |
-| TD-R1-VALIDATION | R1 / `ed1c068...` | durable append-only validation evidence + conflict tests |
-| TD-R1-LATENCY | R1 / `ed1c068...` | explicit bar-delay latency assumption documented and no-same-bar invariant tested |
+| `TD-R3-001` | CLOSED | deny-by-default public-data boundary + adversarial network tests |
+| `TD-R3-002` | CLOSED | canonical external-data intake + immutable campaign/artifact hashes |
+| `TD-R3-003` | CLOSED | frozen campaign + preregistration/terminal Trial Ledger |
+| `TD-R3-004` | CLOSED | one-use HOLDOUT permit binding + CI research-authority boundary |
+| `TD-R3-005` | CLOSED | complete-family Holm + conditional PBO/Deflated Sharpe evidence |
+| `TD-R3-006` | CLOSED | bounded two-fetch real-data reproducibility campaign |
+| `TD-R3-007` | CLOSED | read-only Research Control Center |
+| `TD-R3-008` | CLOSED | deterministic Strategy Tournament, complete DEVELOPMENT universe, no HOLDOUT/cherry-picking |
 
-## Track closing rule
-Before any track is marked `PASS`:
-1. search this table for P0/P1 assigned to that track;
-2. close them with code/evidence or keep the track non-PASS;
-3. record newly discovered debt before merge;
-4. never downgrade severity merely to satisfy a milestone.
+Latest R3 closure evidence: **272 tests PASS / 87.56% coverage**, Contract Registry PASS, Research Authority PASS, Debt Register PASS, Knowledge Contract PASS.
+
+## R4 capability gaps
+R4 work is now explicit, not hidden:
+- authoritative instrument master (`TD-R4-001`);
+- correlation-aware portfolio research;
+- allocation perturbation + leave-one-out robustness;
+- TRAIN-only regime calibration;
+- Strategy/Portfolio Health & Drift;
+- reduce/block-only Defensive Health Bridge;
+- deterministic bounded Portfolio Manager/sizing + cross-strategy budgets.
+
+Additional R4 debt IDs must be created immediately if implementation uncovers an invariant gap not already represented above.
+
+## Track closing procedure
+Before marking any track PASS:
+1. query `debt_register.json` for P0/P1/P2 owned by the track;
+2. close each item with concrete code/test/evidence paths;
+3. run `scripts/check_debt_register.py` in CI;
+4. verify capability matrix rows independently — closing debt does not automatically prove capability equivalence;
+5. synchronize ESTADO/TAREA/MATRIX/HANDOFF;
+6. merge only with green CI;
+7. recertify the merge SHA on `main` before starting the next track.
 
 ## Capital
 **LIVE TRADING: BLOQUEADO.**
+No debt status or research certification grants PAPER/LIVE execution authority.
