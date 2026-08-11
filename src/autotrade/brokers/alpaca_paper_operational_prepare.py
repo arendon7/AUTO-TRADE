@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
+from hashlib import sha256
+import json
 from pathlib import Path
 
 from autotrade.domain import MarketSnapshot, OrderIntent, RiskDecision
@@ -13,10 +15,17 @@ from .alpaca_paper_canary_coordinator import (
     PaperCanaryPreparationResult,
 )
 from .alpaca_paper_canary_permit import SQLitePaperCanaryPermitRegistry
+from .alpaca_paper_core_provenance import (
+    PaperCoreProvenance,
+    PaperOperationalCoreProvenanceReader,
+)
 from .alpaca_paper_gateway import AlpacaPaperAccountAttestation
 from .alpaca_paper_operational import (
     PaperOperationalIntegrityError,
     PaperOperationalWorkspace,
+    _read_json_object,
+    _write_json_idempotent,
+    expected_bracket_payload,
     read_expected_bracket,
     read_prepared_package,
 )
@@ -27,6 +36,9 @@ from .alpaca_paper_preparation_snapshot import (
 from .alpaca_paper_submission import SQLitePaperSubmissionRegistry
 
 
+_CORE_PROVENANCE_FILENAME = "core_provenance.json"
+
+
 @dataclass(frozen=True, slots=True)
 class PaperOperationalPreparation:
     result: PaperCanaryPreparationResult
@@ -34,6 +46,7 @@ class PaperOperationalPreparation:
     prepared_package_path: Path
     expected_bracket_path: Path
     preparation_snapshot_path: Path
+    core_provenance_path: Path
     operator_context_path: Path
     manifest_path: Path
 
@@ -47,19 +60,22 @@ class PaperOperationalPreparation:
             self.prepared_package_path,
             self.expected_bracket_path,
             self.preparation_snapshot_path,
+            self.core_provenance_path,
             self.operator_context_path,
             self.manifest_path,
         ):
-            if not isinstance(path, Path) or not path.is_file():
-                raise ValueError("operational preparation artifacts must exist")
+            if not isinstance(path, Path) or not path.is_file() or path.is_symlink():
+                raise ValueError("operational preparation artifacts must be regular files")
 
 
 class PaperOperationalCanaryPreparer:
     """Persist one exact offline canary package without execution authority.
 
-    The supplied coordinator already owns authoritative OMS/Safety/Health
-    dependencies. This service does not construct alternate control state, has
-    no writer/transport surface, and deliberately stops before human approval.
+    The supplied coordinator must be backed by the exact durable ``core.sqlite3``
+    in the operational workspace. The service first persists only non-authorizing
+    package/snapshot evidence, verifies OMS/Safety/Portfolio/Health provenance
+    read-only, commits a tamper-evident provenance artifact, and only then emits
+    the operator context/manifest. It has no writer or transport surface.
     """
 
     def __init__(
@@ -114,9 +130,17 @@ class PaperOperationalCanaryPreparer:
             health_allows_new_exposure=health_allows_new_exposure,
             prior_canary_submissions=prior_canary_submissions,
         )
-        package_path, context_path, manifest_path = self._workspace.write_prepared_canary(
-            result.package,
-            result.bracket,
+
+        # Stage only evidence that cannot authorize execution. In particular,
+        # operator_context.json and manifest.json do not exist until the exact
+        # workspace core.sqlite3 has passed read-only provenance verification.
+        _write_json_idempotent(
+            self._workspace.prepared_package_path,
+            result.package.canonical_payload(),
+        )
+        _write_json_idempotent(
+            self._workspace.expected_bracket_path,
+            expected_bracket_payload(result.bracket),
         )
         snapshot_path = write_preparation_snapshot(
             self._workspace,
@@ -125,7 +149,8 @@ class PaperOperationalCanaryPreparer:
             market=market,
             approval=result.approval,
         )
-        persisted = read_prepared_package(package_path)
+
+        persisted = read_prepared_package(self._workspace.prepared_package_path)
         persisted_bracket = read_expected_bracket(self._workspace.expected_bracket_path)
         snapshot_decision, snapshot_market, snapshot_approval = read_preparation_snapshot(
             self._workspace,
@@ -147,12 +172,87 @@ class PaperOperationalCanaryPreparer:
             raise PaperOperationalIntegrityError(
                 "persisted preparation snapshot differs from coordinator inputs"
             )
+
+        provenance = PaperOperationalCoreProvenanceReader(self._workspace).verify(now=now)
+        core_provenance_path = self._workspace.root / _CORE_PROVENANCE_FILENAME
+        provenance_document = _core_provenance_document(
+            result=result,
+            provenance=provenance,
+        )
+        _write_json_idempotent(core_provenance_path, provenance_document)
+        if _read_json_object(core_provenance_path) != provenance_document:
+            raise PaperOperationalIntegrityError(
+                "persisted core provenance differs from verified durable state"
+            )
+
+        package_path, context_path, manifest_path = self._workspace.write_prepared_canary(
+            result.package,
+            result.bracket,
+        )
         return PaperOperationalPreparation(
             result=result,
             account_attestation_path=account_path,
             prepared_package_path=package_path,
             expected_bracket_path=self._workspace.expected_bracket_path,
             preparation_snapshot_path=snapshot_path,
+            core_provenance_path=core_provenance_path,
             operator_context_path=context_path,
             manifest_path=manifest_path,
         )
+
+
+def _core_provenance_document(
+    *,
+    result: PaperCanaryPreparationResult,
+    provenance: PaperCoreProvenance,
+) -> dict[str, object]:
+    package = result.package
+    if provenance.order_id != package.order_id:
+        raise PaperOperationalIntegrityError("core provenance order does not match prepared package")
+    if provenance.intent_fingerprint != package.intent_fingerprint:
+        raise PaperOperationalIntegrityError("core provenance intent does not match prepared package")
+    if provenance.risk_decision_fingerprint != package.risk_decision_fingerprint:
+        raise PaperOperationalIntegrityError(
+            "core provenance RiskDecision does not match prepared package"
+        )
+    if provenance.safety_version != package.risk_decision_safety_state_version:
+        raise PaperOperationalIntegrityError("core provenance Safety version mismatch")
+
+    core_payload = {
+        "core_db_sha256": provenance.core_db_sha256,
+        "health_bridge_fingerprint": provenance.health_bridge_fingerprint,
+        "health_bridge_version": provenance.health_bridge_version,
+        "intent_fingerprint": provenance.intent_fingerprint,
+        "order_id": provenance.order_id,
+        "order_record_fingerprint": provenance.order_record_fingerprint,
+        "order_status": provenance.order_status,
+        "portfolio_snapshot_hash": provenance.portfolio_snapshot_hash,
+        "portfolio_version": provenance.portfolio_version,
+        "provenance_hash": provenance.provenance_hash,
+        "risk_decision_fingerprint": provenance.risk_decision_fingerprint,
+        "safety_observed_fingerprint": provenance.safety_observed_fingerprint,
+        "safety_version": provenance.safety_version,
+        "strategy_health_fingerprint": provenance.strategy_health_fingerprint,
+        "strategy_health_version": provenance.strategy_health_version,
+        "strategy_id": provenance.strategy_id,
+        "verified_at": provenance.verified_at.isoformat(),
+    }
+    body: dict[str, object] = {
+        "schema_version": 1,
+        "environment": "PAPER",
+        "attempt_id": package.attempt_id,
+        "package_hash": package.package_hash,
+        "order_id": package.order_id,
+        "core_provenance": core_payload,
+        "network_write_authorized": False,
+        "external_order_submitted": False,
+        "live_trading": "BLOCKED",
+    }
+    canonical = json.dumps(
+        body,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+        ensure_ascii=True,
+    ).encode("utf-8")
+    return {**body, "document_hash": sha256(canonical).hexdigest()}
