@@ -7,6 +7,7 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 PREFLIGHT = ROOT / "scripts/r6_external_paper_preflight.py"
 OPERATIONAL = ROOT / "src/autotrade/brokers/alpaca_paper_operational.py"
+PREPARER = ROOT / "src/autotrade/brokers/alpaca_paper_operational_prepare.py"
 CORE = ROOT / ".github/workflows/core-tests.yml"
 R6 = ROOT / ".github/workflows/r6-authority.yml"
 SELF_COMMAND = "python scripts/check_r6_operational_lifecycle_boundary.py"
@@ -29,6 +30,15 @@ FORBIDDEN_PREFLIGHT_CALLS = {
     "connect",
     "record_operator_approval",
 }
+FORBIDDEN_PREPARER_IMPORTS = (
+    "alpaca_paper_writer",
+    "alpaca_paper_execution_bridge",
+    "alpaca_paper_reconciliation_gateway",
+    "alpaca_paper_trade_updates_transport",
+    "openai",
+    "anthropic",
+    "autotrade.research",
+)
 REQUIRED_PREFLIGHT = (
     'KEY_ENV = "APCA_API_KEY_ID"',
     'SECRET_ENV = "APCA_API_SECRET_KEY"',
@@ -55,6 +65,16 @@ REQUIRED_OPERATIONAL = (
     '"exact PAPER account attestation must be persisted before canary package"',
     '"prepared package account attestation does not match workspace evidence"',
 )
+REQUIRED_PREPARER = (
+    "class PaperOperationalCanaryPreparer:",
+    "coordinator: PaperCanaryCoordinator",
+    "self._workspace.write_account_attestation(account_attestation)",
+    "result = self._coordinator.prepare(",
+    "self._workspace.write_prepared_canary(",
+    "persisted = read_prepared_package(package_path)",
+    '"operational preparation cannot authorize network write"',
+    '"operational preparation must stop at operator decision"',
+)
 
 
 def main() -> int:
@@ -66,7 +86,7 @@ def main() -> int:
         for anchor in REQUIRED_PREFLIGHT:
             if anchor not in source:
                 errors.append(f"preflight safety anchor missing: {anchor}")
-        errors.extend(_scan_preflight(source, PREFLIGHT))
+        errors.extend(_scan_no_execution_surface(source, PREFLIGHT, "preflight", FORBIDDEN_PREFLIGHT_IMPORTS))
         if source.count("gateway.attest_account(") != 1:
             errors.append("preflight must contain exactly one account-attestation call")
         for forbidden in ("/v2/orders", "api.alpaca.markets", "--secret", "--key-id"):
@@ -90,6 +110,17 @@ def main() -> int:
                 errors.append(f"operational workspace contains forbidden surface: {forbidden}")
         errors.extend(_scan_operational_workspace(source, OPERATIONAL))
 
+    if not PREPARER.is_file():
+        errors.append("R6 operational canary preparer missing")
+    else:
+        source = PREPARER.read_text(encoding="utf-8")
+        for anchor in REQUIRED_PREPARER:
+            if anchor not in source:
+                errors.append(f"operational preparer anchor missing: {anchor}")
+        errors.extend(_scan_no_execution_surface(source, PREPARER, "preparer", FORBIDDEN_PREPARER_IMPORTS))
+        if source.count("self._coordinator.prepare(") != 1:
+            errors.append("operational preparer must call coordinator.prepare exactly once")
+
     for workflow, label in ((CORE, "Core Safety"), (R6, "R6 Authority")):
         if not workflow.is_file() or SELF_COMMAND not in workflow.read_text(encoding="utf-8"):
             errors.append(f"{label}: operational lifecycle checker is not wired into CI")
@@ -102,12 +133,17 @@ def main() -> int:
         return 1
     print(
         "AUTO-TRADE R6 operational lifecycle boundary: PASS "
-        "(sanitized durable workspace; GET-only preflight; no execution/write authority)"
+        "(sanitized durable workspace; GET-only preflight; offline preparer; no execution/write authority)"
     )
     return 0
 
 
-def _scan_preflight(source: str, path: Path) -> list[str]:
+def _scan_no_execution_surface(
+    source: str,
+    path: Path,
+    label: str,
+    forbidden_imports: tuple[str, ...],
+) -> list[str]:
     errors: list[str] = []
     try:
         tree = ast.parse(source, filename=str(path))
@@ -127,13 +163,19 @@ def _scan_preflight(source: str, path: Path) -> list[str]:
         else:
             modules = []
         for module in modules:
-            if any(fragment in module for fragment in FORBIDDEN_PREFLIGHT_IMPORTS):
-                errors.append(f"{rel}:{node.lineno}: forbidden preflight import {module}")
+            if any(fragment in module for fragment in forbidden_imports):
+                errors.append(f"{rel}:{node.lineno}: forbidden {label} import {module}")
         if isinstance(node, ast.Call):
             call = _call_name(node.func)
             if call in FORBIDDEN_PREFLIGHT_CALLS:
-                errors.append(f"{rel}:{node.lineno}: forbidden preflight call {call}")
+                errors.append(f"{rel}:{node.lineno}: forbidden {label} call {call}")
     return errors
+
+
+def _scan_preflight(source: str, path: Path) -> list[str]:
+    return _scan_no_execution_surface(
+        source, path, "preflight", FORBIDDEN_PREFLIGHT_IMPORTS
+    )
 
 
 def _scan_operational_workspace(source: str, path: Path) -> list[str]:
