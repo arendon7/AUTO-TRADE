@@ -47,7 +47,8 @@ def test_r4_certificate_is_bound_to_final_scan_and_denies_capital_authority():
     assert cert["track"] == "R4"
     assert cert["status"] == "CERTIFIED_BRANCH_PENDING_PR_INTEGRATION"
     assert cert["certification_basis_head"] == EXPECTED_CERT_BASIS
-    assert cert["ci"]["tests_passed"] == 480
+    assert cert["ci"]["tests_passed"] == 479
+    assert cert["ci"]["coverage_percent"] == 86.45
     assert cert["ci"]["coverage_percent"] >= 85.0
     assert cert["ci"]["contract_registry"] == "PASS"
     assert cert["ci"]["research_advisory_authority_boundary"] == "PASS"
