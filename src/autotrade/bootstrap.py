@@ -8,6 +8,7 @@ from .brokers.durable_paper import DurablePaperBroker
 from .domain import PortfolioSnapshot
 from .engine import DurableTradingPipeline
 from .execution_state import SQLiteFillAwarePortfolioStore, SQLiteFillStore
+from .health_bridge import HealthBridgePolicy, SQLiteHealthBridgeStore
 from .oms import OrderManagementSystem
 from .persistence import (
     SQLiteEventLedger,
@@ -16,6 +17,7 @@ from .persistence import (
     SQLiteRuntime,
 )
 from .reconciliation import ReconciliationEngine, ReconciliationResult
+from .research.health import SQLiteHealthStateStore
 from .risk_state import SQLiteR2SafetyStateStore, SQLiteRiskTelemetryStore
 from .safety import CapitalSafetyKernel, SafetyLimits
 
@@ -26,6 +28,8 @@ class DurablePaperCore:
     ledger: SQLiteEventLedger
     broker: DurablePaperBroker
     safety: CapitalSafetyKernel
+    health_state_store: SQLiteHealthStateStore | None
+    health_bridge: SQLiteHealthBridgeStore | None
     oms: OrderManagementSystem
     portfolio_store: SQLiteFillAwarePortfolioStore
     fill_store: SQLiteFillStore
@@ -42,12 +46,26 @@ def build_durable_paper_core(
     limits: SafetyLimits,
     initial_portfolio: PortfolioSnapshot,
     now: datetime,
+    enable_health_bridge: bool = False,
+    health_bridge_policy: HealthBridgePolicy | None = None,
+    portfolio_health_entity_id: str = "",
 ) -> DurablePaperCore:
     runtime = SQLiteRuntime(db_path)
     ledger = SQLiteEventLedger(runtime)
     portfolio_store = SQLiteFillAwarePortfolioStore(runtime)
     portfolio_store.initialize(initial_portfolio, now=now)
     safety_state_store = SQLiteR2SafetyStateStore(runtime)
+    health_state_store: SQLiteHealthStateStore | None = None
+    health_bridge: SQLiteHealthBridgeStore | None = None
+    if enable_health_bridge:
+        health_state_store = SQLiteHealthStateStore(runtime.path)
+        health_bridge = SQLiteHealthBridgeStore(
+            runtime,
+            health_reader=health_state_store,
+            policy=health_bridge_policy,
+        )
+    elif portfolio_health_entity_id:
+        raise ValueError("portfolio_health_entity_id requires enable_health_bridge=True")
     risk_telemetry = SQLiteRiskTelemetryStore(
         runtime,
         max_daily_loss=limits.max_daily_loss,
@@ -58,13 +76,21 @@ def build_durable_paper_core(
     order_store = SQLiteOrderStore(runtime)
     fill_store = SQLiteFillStore(runtime)
     broker = DurablePaperBroker(runtime)
-    safety = CapitalSafetyKernel(limits, ledger, state_store=safety_state_store)
+    safety = CapitalSafetyKernel(
+        limits,
+        ledger,
+        state_store=safety_state_store,
+        health_bridge=health_bridge,
+        portfolio_health_entity_id=portfolio_health_entity_id,
+    )
     oms = OrderManagementSystem(
         broker=broker,
         ledger=ledger,
         order_store=order_store,
         safety_state_store=safety_state_store,
         fill_store=fill_store,
+        health_bridge=health_bridge,
+        portfolio_health_entity_id=portfolio_health_entity_id,
     )
     pipeline = DurableTradingPipeline(
         safety=safety,
@@ -93,6 +119,8 @@ def build_durable_paper_core(
         ledger=ledger,
         broker=broker,
         safety=safety,
+        health_state_store=health_state_store,
+        health_bridge=health_bridge,
         oms=oms,
         portfolio_store=portfolio_store,
         fill_store=fill_store,

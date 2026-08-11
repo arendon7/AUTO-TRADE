@@ -523,12 +523,17 @@ class SQLiteHealthBridgeStore:
             label="STRATEGY",
             now=now,
         )
-        portfolio_mode, portfolio_multiplier, portfolio_reason = self._effective_entity(
-            portfolio,
-            required=self._policy.require_portfolio_state and bool(portfolio_entity_id),
-            label="PORTFOLIO",
-            now=now,
-        )
+        if self._policy.require_portfolio_state and not portfolio_entity_id:
+            portfolio_mode = HealthRiskMode.NO_NEW_RISK
+            portfolio_multiplier = _ZERO
+            portfolio_reason = "MISSING_PORTFOLIO_HEALTH_ID"
+        else:
+            portfolio_mode, portfolio_multiplier, portfolio_reason = self._effective_entity(
+                portfolio,
+                required=self._policy.require_portfolio_state,
+                label="PORTFOLIO",
+                now=now,
+            )
         effective_mode = _stricter(strategy_mode, portfolio_mode)
         order_multiplier = min(strategy_multiplier, portfolio_multiplier)
         reason = ";".join(

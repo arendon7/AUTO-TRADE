@@ -16,6 +16,7 @@ from .domain import (
     intent_fingerprint,
     market_fingerprint,
 )
+from .health_bridge import HealthBridgeControlProvider, HealthBridgeError
 from .ledger import EventLedger, LedgerEvent
 from .portfolio_integrity import portfolio_snapshot_error
 from .state import InMemorySafetyStateStore, SafetyStateStore
@@ -79,10 +80,21 @@ class CapitalSafetyKernel:
         limits: SafetyLimits,
         ledger: EventLedger,
         state_store: SafetyStateStore | None = None,
+        health_bridge: HealthBridgeControlProvider | None = None,
+        portfolio_health_entity_id: str = "",
     ) -> None:
+        if portfolio_health_entity_id and (
+            portfolio_health_entity_id != portfolio_health_entity_id.strip()
+            or not portfolio_health_entity_id
+        ):
+            raise ValueError("portfolio_health_entity_id must be canonical text")
+        if health_bridge is None and portfolio_health_entity_id:
+            raise ValueError("portfolio_health_entity_id requires health_bridge")
         self._limits = limits
         self._ledger = ledger
         self._state_store = state_store or InMemorySafetyStateStore()
+        self._health_bridge = health_bridge
+        self._portfolio_health_entity_id = portfolio_health_entity_id
         self._lock = RLock()
 
     @property
@@ -289,6 +301,52 @@ class CapitalSafetyKernel:
         projected_strategy_gross = current_strategy_gross - abs(current_strategy_position) + abs(projected_strategy_position)
         projected_gross = portfolio.gross_exposure - abs(current_position) + abs(projected_position)
         projected_net = portfolio.net_exposure + signed_order_notional
+
+        if self._health_bridge is not None:
+            try:
+                health_control = self._health_bridge.effective_control(
+                    strategy_id=intent.strategy_id,
+                    portfolio_entity_id=self._portfolio_health_entity_id,
+                    now=now,
+                )
+            except HealthBridgeError as exc:
+                return reject(
+                    "HEALTH_CONTROL_UNAVAILABLE",
+                    str(exc),
+                    risk_reducing=risk_reducing,
+                )
+            if health_control.blocks_new_risk and not risk_reducing:
+                return reject(
+                    "HEALTH_NO_NEW_RISK",
+                    health_control.reason,
+                    risk_reducing=risk_reducing,
+                )
+            if not risk_reducing:
+                health_order_limit = self._limits.max_order_notional * health_control.order_multiplier
+                if order_notional > health_order_limit:
+                    return reject(
+                        "HEALTH_MAX_ORDER_NOTIONAL",
+                        f"{order_notional}>{health_order_limit}:{health_control.reason}",
+                        risk_reducing=False,
+                    )
+                health_strategy_limit = (
+                    self._limits.max_strategy_gross_exposure * health_control.strategy_multiplier
+                )
+                if projected_strategy_gross > health_strategy_limit:
+                    return reject(
+                        "HEALTH_MAX_STRATEGY_GROSS",
+                        f"{projected_strategy_gross}>{health_strategy_limit}:{health_control.reason}",
+                        risk_reducing=False,
+                    )
+                health_portfolio_limit = (
+                    self._limits.max_portfolio_gross_exposure * health_control.portfolio_multiplier
+                )
+                if projected_gross > health_portfolio_limit:
+                    return reject(
+                        "HEALTH_MAX_PORTFOLIO_GROSS",
+                        f"{projected_gross}>{health_portfolio_limit}:{health_control.reason}",
+                        risk_reducing=False,
+                    )
 
         if control_state.kill_switch_active and not risk_reducing:
             return reject("KILL_SWITCH_ACTIVE", control_state.kill_switch_reason, risk_reducing=risk_reducing)

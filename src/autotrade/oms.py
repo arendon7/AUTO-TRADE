@@ -20,6 +20,7 @@ from .domain import (
     market_fingerprint,
 )
 from .execution_state import FillIntegrityConflict, FillStore, InMemoryFillStore, fill_fingerprint
+from .health_bridge import HealthBridgeControlProvider, HealthBridgeError
 from .ledger import DuplicateLedgerEvent, EventLedger, LedgerEvent
 from .state import InMemoryOrderStore, OrderStore, SafetyStateStore
 
@@ -57,12 +58,23 @@ class OrderManagementSystem:
         order_store: OrderStore | None = None,
         safety_state_store: SafetyStateStore | None = None,
         fill_store: FillStore | None = None,
+        health_bridge: HealthBridgeControlProvider | None = None,
+        portfolio_health_entity_id: str = "",
     ) -> None:
+        if portfolio_health_entity_id and (
+            portfolio_health_entity_id != portfolio_health_entity_id.strip()
+            or not portfolio_health_entity_id
+        ):
+            raise ValueError("portfolio_health_entity_id must be canonical text")
+        if health_bridge is None and portfolio_health_entity_id:
+            raise ValueError("portfolio_health_entity_id requires health_bridge")
         self._broker = broker
         self._ledger = ledger
         self._orders = order_store or InMemoryOrderStore()
         self._safety_state_store = safety_state_store
         self._fills = fill_store or InMemoryFillStore()
+        self._health_bridge = health_bridge
+        self._portfolio_health_entity_id = portfolio_health_entity_id
 
     def submit(
         self,
@@ -380,6 +392,21 @@ class OrderManagementSystem:
             current = self._safety_state_store.get()
             if current.version != decision.safety_state_version:
                 raise OrderRejectedByControlPlane("safety state changed after risk approval")
+        if self._health_bridge is not None:
+            try:
+                health_control = self._health_bridge.effective_control(
+                    strategy_id=intent.strategy_id,
+                    portfolio_entity_id=self._portfolio_health_entity_id,
+                    now=now,
+                )
+            except HealthBridgeError as exc:
+                raise OrderRejectedByControlPlane(
+                    "health control unavailable after risk approval"
+                ) from exc
+            if health_control.blocks_new_risk and not decision.risk_reducing:
+                raise OrderRejectedByControlPlane(
+                    "health control blocks new risk after risk approval"
+                )
 
     def _record_execution(
         self,
