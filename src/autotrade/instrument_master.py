@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from enum import StrEnum
 from hashlib import sha256
 import json
@@ -83,6 +83,8 @@ class AuthoritativeInstrumentRules:
         ):
             if not isinstance(value, str) or not value.strip():
                 raise ValueError(f"{name} is required")
+            if value != value.strip():
+                raise ValueError(f"{name} must not contain surrounding whitespace")
         if isinstance(self.version, bool) or not isinstance(self.version, int) or self.version <= 0:
             raise ValueError("version must be integer > 0")
         if not isinstance(self.trading_status, InstrumentTradingStatus):
@@ -111,6 +113,12 @@ class AuthoritativeInstrumentRules:
         ):
             if value is not None and not _positive_decimal(value):
                 raise ValueError(f"{name} must be None or finite and > 0")
+        for name, value in (
+            ("min_quantity", self.min_quantity),
+            ("max_quantity", self.max_quantity),
+        ):
+            if value is not None and value % self.quantity_step != 0:
+                raise ValueError(f"{name} must align to quantity_step")
         if (
             self.min_quantity is not None
             and self.max_quantity is not None
@@ -130,7 +138,8 @@ class AuthoritativeInstrumentRules:
 
     @property
     def fingerprint(self) -> str:
-        return sha256(_canonical_json(self.to_payload(include_fingerprint=False)).encode("utf-8")).hexdigest()
+        raw = _canonical_json(self.to_payload(include_fingerprint=False)).encode("utf-8")
+        return sha256(raw).hexdigest()
 
     def to_payload(self, *, include_fingerprint: bool = True) -> dict[str, object]:
         payload: dict[str, object] = {
@@ -158,6 +167,8 @@ class AuthoritativeInstrumentRules:
 
     @classmethod
     def from_payload(cls, payload: dict[str, object]) -> "AuthoritativeInstrumentRules":
+        if not isinstance(payload, dict):
+            raise ValueError("instrument-rule payload must be an object")
         expected = {
             "venue",
             "symbol",
@@ -238,8 +249,8 @@ class SQLiteInstrumentMaster:
     """Append-only authoritative instrument-rule registry.
 
     Versions are contiguous per (venue, symbol). Publishing an existing version
-    with different content fails closed. Each row stores canonical payload plus
-    its deterministic fingerprint so restart/replay cannot reinterpret rules.
+    with different content fails closed. Every read cross-checks the canonical
+    payload fingerprint against the separately persisted fingerprint column.
     """
 
     def __init__(self, runtime: SQLiteRuntime) -> None:
@@ -298,7 +309,10 @@ class SQLiteInstrumentMaster:
                 (rules.venue, rules.symbol, rules.version),
             ).fetchone()
             if existing is not None:
-                if existing["fingerprint"] != rules.fingerprint or existing["payload_json"] != payload_json:
+                if (
+                    existing["fingerprint"] != rules.fingerprint
+                    or existing["payload_json"] != payload_json
+                ):
                     conn.execute("ROLLBACK")
                     raise InstrumentRuleConflict(
                         f"version identity conflict for {rules.instrument_key} v{rules.version}"
@@ -308,7 +322,7 @@ class SQLiteInstrumentMaster:
 
             latest = conn.execute(
                 """
-                SELECT version, payload_json
+                SELECT version, fingerprint, payload_json
                 FROM instrument_master
                 WHERE venue = ? AND symbol = ?
                 ORDER BY version DESC
@@ -327,8 +341,9 @@ class SQLiteInstrumentMaster:
                     raise InstrumentRuleConflict(
                         f"instrument-rule version must advance exactly by one from {latest_version}"
                     )
-                previous = AuthoritativeInstrumentRules.from_payload(
-                    json.loads(latest["payload_json"])
+                previous = _rules_from_storage(
+                    fingerprint=latest["fingerprint"],
+                    payload_json=latest["payload_json"],
                 )
                 if rules.observed_at < previous.observed_at:
                     conn.execute("ROLLBACK")
@@ -362,12 +377,18 @@ class SQLiteInstrumentMaster:
         finally:
             conn.close()
 
-    def get_version(self, *, venue: str, symbol: str, version: int) -> AuthoritativeInstrumentRules:
+    def get_version(
+        self,
+        *,
+        venue: str,
+        symbol: str,
+        version: int,
+    ) -> AuthoritativeInstrumentRules:
         conn = self._runtime.connect()
         try:
             row = conn.execute(
                 """
-                SELECT payload_json
+                SELECT fingerprint, payload_json
                 FROM instrument_master
                 WHERE venue = ? AND symbol = ? AND version = ?
                 """,
@@ -377,14 +398,17 @@ class SQLiteInstrumentMaster:
             conn.close()
         if row is None:
             raise InstrumentRuleNotFound(f"no instrument rules for {venue}:{symbol} v{version}")
-        return AuthoritativeInstrumentRules.from_payload(json.loads(row["payload_json"]))
+        return _rules_from_storage(
+            fingerprint=row["fingerprint"],
+            payload_json=row["payload_json"],
+        )
 
     def latest(self, *, venue: str, symbol: str) -> AuthoritativeInstrumentRules:
         conn = self._runtime.connect()
         try:
             row = conn.execute(
                 """
-                SELECT payload_json
+                SELECT fingerprint, payload_json
                 FROM instrument_master
                 WHERE venue = ? AND symbol = ?
                 ORDER BY version DESC
@@ -396,7 +420,10 @@ class SQLiteInstrumentMaster:
             conn.close()
         if row is None:
             raise InstrumentRuleNotFound(f"no instrument rules for {venue}:{symbol}")
-        return AuthoritativeInstrumentRules.from_payload(json.loads(row["payload_json"]))
+        return _rules_from_storage(
+            fingerprint=row["fingerprint"],
+            payload_json=row["payload_json"],
+        )
 
     def require_current(
         self,
@@ -427,7 +454,12 @@ class SQLiteInstrumentMaster:
         now: datetime,
         max_age: timedelta,
     ) -> AuthoritativeInstrumentRules:
-        rules = self.require_current(venue=venue, symbol=symbol, now=now, max_age=max_age)
+        rules = self.require_current(
+            venue=venue,
+            symbol=symbol,
+            now=now,
+            max_age=max_age,
+        )
         if rules.trading_status is not InstrumentTradingStatus.TRADING:
             raise InstrumentNotTradable(
                 f"{rules.instrument_key} status is {rules.trading_status.value}"
@@ -439,7 +471,7 @@ class SQLiteInstrumentMaster:
         try:
             rows = conn.execute(
                 """
-                SELECT payload_json
+                SELECT fingerprint, payload_json
                 FROM instrument_master
                 WHERE venue = ? AND symbol = ?
                 ORDER BY version
@@ -449,9 +481,31 @@ class SQLiteInstrumentMaster:
         finally:
             conn.close()
         return tuple(
-            AuthoritativeInstrumentRules.from_payload(json.loads(row["payload_json"]))
+            _rules_from_storage(
+                fingerprint=row["fingerprint"],
+                payload_json=row["payload_json"],
+            )
             for row in rows
         )
+
+
+def _rules_from_storage(*, fingerprint: object, payload_json: object) -> AuthoritativeInstrumentRules:
+    if not isinstance(fingerprint, str) or not _SHA256_RE.fullmatch(fingerprint):
+        raise InstrumentRuleConflict("stored instrument-rule fingerprint is invalid")
+    if not isinstance(payload_json, str):
+        raise InstrumentRuleConflict("stored instrument-rule payload is invalid")
+    try:
+        payload = json.loads(payload_json)
+        if not isinstance(payload, dict):
+            raise ValueError("payload is not an object")
+        record = AuthoritativeInstrumentRules.from_payload(payload)
+    except InstrumentRuleConflict:
+        raise
+    except (json.JSONDecodeError, InvalidOperation, TypeError, ValueError) as exc:
+        raise InstrumentRuleConflict("stored instrument-rule payload is invalid") from exc
+    if record.fingerprint != fingerprint:
+        raise InstrumentRuleConflict("stored instrument-rule fingerprint mismatch")
+    return record
 
 
 def _positive_decimal(value: object) -> bool:
@@ -481,7 +535,10 @@ def _integer(value: object) -> int:
 def _decimal(value: object) -> Decimal:
     if not isinstance(value, str):
         raise ValueError("decimal must be encoded as string")
-    return Decimal(value)
+    try:
+        return Decimal(value)
+    except InvalidOperation as exc:
+        raise ValueError("invalid decimal") from exc
 
 
 def _nullable_decimal(value: object) -> Decimal | None:
@@ -491,7 +548,10 @@ def _nullable_decimal(value: object) -> Decimal | None:
 def _timestamp(value: object) -> datetime:
     if not isinstance(value, str):
         raise ValueError("timestamp must be encoded as string")
-    parsed = datetime.fromisoformat(value)
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError as exc:
+        raise ValueError("invalid timestamp") from exc
     if not _aware(parsed):
         raise ValueError("timestamp must be timezone-aware")
     return parsed
