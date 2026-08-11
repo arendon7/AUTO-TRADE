@@ -653,6 +653,16 @@
       "severity": "P1",
       "status": "OPEN",
       "track": "R6"
+    },
+    {
+      "area": "Just-in-time deterministic Safety/OMS recheck before external PAPER write",
+      "evidence": [],
+      "id": "TD-R6-009",
+      "next_action": "Add an authoritative final-write guard that re-reads the current OMS order plus durable Safety/circuit, reconciliation/UNKNOWN and Health state immediately before permit consumption and POST. Approval TTL alone is insufficient: any intervening worsening must block the write fail-closed.",
+      "resolution": "",
+      "severity": "P1",
+      "status": "OPEN",
+      "track": "R6"
     }
   ],
   "registry_version": 1

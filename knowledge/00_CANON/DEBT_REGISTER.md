@@ -30,8 +30,9 @@ Post-merge R5: Core Safety `31466198629` PASS, Knowledge Contract `31466198624` 
 | `TD-R6-006` | P1 | PAPER trade_updates evidence | PAPER-only authenticated bounded stream + order correlation + ordering/terminality/disconnect fail-closed |
 | `TD-R6-007` | P1 | unsupported products | unknown/unsupported products/classes/TIF fail closed; crypto bracket protection explicitly unsupported |
 | `TD-R6-008` | P1 | permanent PAPER-only authority boundary | CI prevents LIVE host, Safety/OMS bypass, AI authorization and PAPER→LIVE authority creep |
+| `TD-R6-009` | P1 | final write Safety/OMS recheck | authoritative just-in-time re-read immediately before permit consumption/POST; any intervening worsening blocks |
 
-R6 P0/P1/P2 OPEN: **8**. R6 cannot certify until all close with evidence.
+R6 P0/P1/P2 OPEN: **9**. R6 cannot certify until all close with evidence.
 
 ## Deuda no bloqueante fuera de R6
 | ID | Sev | Track | Área |
