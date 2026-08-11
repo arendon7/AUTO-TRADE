@@ -53,7 +53,7 @@ permit = permit_registry.get(approval.approval_hash)
 phase=PaperFinalWritePhase.PRE_CONSUME
 permit_registry.consume(
 submission_registry.mark_submit_attempt_unknown(
-request = _build_request(
+request = AlpacaPaperWriteRequest(
 phase=PaperFinalWritePhase.PRE_IO
 '''
     errors = validate(bad)
