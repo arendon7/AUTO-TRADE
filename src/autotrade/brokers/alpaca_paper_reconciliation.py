@@ -74,16 +74,12 @@ class AlpacaPaperBracketReconciler:
             raise PaperReconciliationBlocked(
                 "PAPER reconciliation reads are allowed only for UNKNOWN submission state"
             )
-        if expected_bracket.order_id != order_id:
-            raise PaperReconciliationConflict("expected bracket order_id mismatch")
-        if expected_bracket.client_order_id != binding.client_order_id:
-            raise PaperReconciliationConflict("expected bracket client_order_id mismatch")
-        if expected_bracket.payload_hash != binding.order_payload_hash:
-            raise PaperReconciliationConflict("expected bracket payload hash mismatch")
-        if binding.account_attestation_fingerprint != account_attestation.fingerprint:
-            raise PaperReconciliationConflict(
-                "current account attestation does not match frozen submission binding"
-            )
+        self._validate_binding(
+            order_id=order_id,
+            binding=binding,
+            expected_bracket=expected_bracket,
+            account_attestation=account_attestation,
+        )
 
         lookup = self._lookup_gateway.lookup_by_client_order_id(
             credentials=credentials,
@@ -111,15 +107,10 @@ class AlpacaPaperBracketReconciler:
             account_attestation=account_attestation,
             broker_order_id=lookup.broker_order_id,
         )
-        if not detail.found or detail.body is None or detail.broker_order_id is None:
-            raise PaperReconciliationConflict("nested broker order evidence is incomplete")
-        if detail.client_order_id != binding.client_order_id:
-            raise PaperReconciliationConflict("nested broker client_order_id mismatch")
-
-        bracket_attestation = self._validator.validate(
-            response_body=detail.body,
-            request_id=detail.request_id,
-            expected=expected_bracket,
+        bracket_attestation = self._validate_nested_detail(
+            detail=detail,
+            expected_bracket=expected_bracket,
+            expected_client_order_id=binding.client_order_id,
         )
         if bracket_attestation.parent_order_id != lookup.broker_order_id:
             raise PaperReconciliationConflict(
@@ -143,4 +134,92 @@ class AlpacaPaperBracketReconciler:
             lookup_request_id=lookup.request_id,
             detail_request_id=detail.request_id,
             bracket_attestation=bracket_attestation,
+        )
+
+    def recover_acknowledged_attestation(
+        self,
+        *,
+        registry: SQLitePaperSubmissionRegistry,
+        order_id: str,
+        credentials: AlpacaPaperCredentials,
+        account_attestation: AlpacaPaperAccountAttestation,
+        expected_bracket: AlpacaEquityBracketRequest,
+    ) -> AlpacaNestedBracketAttestation:
+        """Rehydrate child-leg evidence after ACK persistence but artifact crash.
+
+        This path is GET-only and never changes submission state. It exists so
+        a crash after durable ACKNOWLEDGED but before local artifact persistence
+        cannot force a blind POST, state rollback, or in-memory reconstruction.
+        """
+
+        state = registry.get(order_id)
+        binding = registry.get_binding(order_id)
+        if state.status is not PaperSubmissionStatus.ACKNOWLEDGED:
+            raise PaperReconciliationBlocked(
+                "acknowledged bracket recovery requires ACKNOWLEDGED submission state"
+            )
+        self._validate_binding(
+            order_id=order_id,
+            binding=binding,
+            expected_bracket=expected_bracket,
+            account_attestation=account_attestation,
+        )
+        if not state.broker_order_id or not state.broker_client_order_id:
+            raise PaperReconciliationConflict(
+                "ACKNOWLEDGED submission lacks durable broker identity"
+            )
+        detail = self._lookup_gateway.get_nested_order(
+            credentials=credentials,
+            account_attestation=account_attestation,
+            broker_order_id=state.broker_order_id,
+        )
+        bracket_attestation = self._validate_nested_detail(
+            detail=detail,
+            expected_bracket=expected_bracket,
+            expected_client_order_id=binding.client_order_id,
+        )
+        if bracket_attestation.parent_order_id != state.broker_order_id:
+            raise PaperReconciliationConflict(
+                "recovered bracket parent does not match durable ACKNOWLEDGED identity"
+            )
+        if bracket_attestation.client_order_id != state.broker_client_order_id:
+            raise PaperReconciliationConflict(
+                "recovered bracket client_order_id does not match durable ACKNOWLEDGED identity"
+            )
+        return bracket_attestation
+
+    @staticmethod
+    def _validate_binding(
+        *,
+        order_id: str,
+        binding,
+        expected_bracket: AlpacaEquityBracketRequest,
+        account_attestation: AlpacaPaperAccountAttestation,
+    ) -> None:
+        if expected_bracket.order_id != order_id:
+            raise PaperReconciliationConflict("expected bracket order_id mismatch")
+        if expected_bracket.client_order_id != binding.client_order_id:
+            raise PaperReconciliationConflict("expected bracket client_order_id mismatch")
+        if expected_bracket.payload_hash != binding.order_payload_hash:
+            raise PaperReconciliationConflict("expected bracket payload hash mismatch")
+        if binding.account_attestation_fingerprint != account_attestation.fingerprint:
+            raise PaperReconciliationConflict(
+                "current account attestation does not match frozen submission binding"
+            )
+
+    def _validate_nested_detail(
+        self,
+        *,
+        detail,
+        expected_bracket: AlpacaEquityBracketRequest,
+        expected_client_order_id: str,
+    ) -> AlpacaNestedBracketAttestation:
+        if not detail.found or detail.body is None or detail.broker_order_id is None:
+            raise PaperReconciliationConflict("nested broker order evidence is incomplete")
+        if detail.client_order_id != expected_client_order_id:
+            raise PaperReconciliationConflict("nested broker client_order_id mismatch")
+        return self._validator.validate(
+            response_body=detail.body,
+            request_id=detail.request_id,
+            expected=expected_bracket,
         )
