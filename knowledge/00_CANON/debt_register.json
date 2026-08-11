@@ -149,73 +149,106 @@
     },
     {
       "area": "External market-data boundary",
-      "evidence": [],
+      "evidence": [
+        "src/autotrade/research/external_data.py",
+        "tests/test_r3_external_data.py",
+        "tests/test_r3_external_data_hardening.py",
+        "scripts/check_research_authority.py"
+      ],
       "id": "TD-R3-001",
-      "next_action": "Implement deny-by-default public market-data provider with GET-only transport, exact HTTPS host allowlist, bounded timeouts/requests and rejection of trading/private endpoints before network I/O.",
-      "resolution": "",
+      "resolution": "Deny-by-default GET-only HTTPS exact-host/path public-data boundary is bounded by timeout, response size and range, validates redirect targets before redirected I/O, and exposes no private/trading endpoint authority.",
       "severity": "P1",
-      "status": "OPEN",
+      "status": "CLOSED",
       "track": "R3"
     },
     {
       "area": "Canonical external-data intake",
-      "evidence": [],
+      "evidence": [
+        "src/autotrade/research/external_data.py",
+        "tests/test_r3_external_data.py",
+        "tests/test_r3_external_data_hardening.py",
+        "knowledge/60_EVIDENCE/R3_REAL_DATA_BTCUSDT_1M_20260101.json",
+        "knowledge/60_EVIDENCE/R3_REAL_DATA_CAMPAIGN.json"
+      ],
       "id": "TD-R3-002",
-      "next_action": "Validate Binance kline payloads into canonical MarketDataset with exact time coverage, ordering, duplicates, gaps, symbol/timeframe binding, provenance and response/dataset checksums; incomplete or ambiguous input must fail closed.",
-      "resolution": "",
+      "resolution": "External klines are converted into the certified R1 MarketDataset contract with exact half-open coverage, no silent imputation, source/dataset/manifest hashes, tamper detection and verified artifact roundtrip.",
       "severity": "P1",
-      "status": "OPEN",
+      "status": "CLOSED",
       "track": "R3"
     },
     {
       "area": "Trial Ledger / preregistration",
-      "evidence": [],
+      "evidence": [
+        "src/autotrade/research/trials.py",
+        "tests/test_r3_trial_ledger.py"
+      ],
       "id": "TD-R3-003",
-      "next_action": "Add durable immutable preregistration and trial-result accounting so no evaluated trial can enter promotion evidence unless registered before execution and every registered trial receives terminal accounting.",
-      "resolution": "",
+      "resolution": "Durable frozen campaign universes require preregistration before evaluation and immutable terminal accounting for every registered trial.",
       "severity": "P1",
-      "status": "OPEN",
+      "status": "CLOSED",
       "track": "R3"
     },
     {
       "area": "HOLDOUT governance / authority separation",
-      "evidence": [],
+      "evidence": [
+        "src/autotrade/research/trials.py",
+        "tests/test_r3_holdout_governance.py",
+        "scripts/check_research_authority.py",
+        ".github/workflows/core-tests.yml"
+      ],
       "id": "TD-R3-004",
-      "next_action": "Bind trial phases to train/development/final-holdout governance, require one-use final-validation authorization for HOLDOUT and prove research/reporting code cannot create executable OrderIntent authorization.",
-      "resolution": "",
+      "resolution": "FINAL_HOLDOUT trials require one-use consumed final_validation permits bound one-to-one to a trial; CI statically forbids research imports/symbols that would create execution authority.",
       "severity": "P1",
-      "status": "OPEN",
+      "status": "CLOSED",
       "track": "R3"
     },
     {
       "area": "Multiple-testing governance",
-      "evidence": [],
+      "evidence": [
+        "src/autotrade/research/multiple_testing.py",
+        "tests/test_r3_multiple_testing.py"
+      ],
       "id": "TD-R3-005",
-      "next_action": "Implement complete trial-universe accounting plus deterministic multiple-testing evidence; compute PBO/Deflated Sharpe only when explicit statistical preconditions are met and fail closed when trials/evidence are omitted.",
-      "resolution": "",
+      "resolution": "Holm evidence is computed over the complete frozen trial family; PBO/CSCV and Deflated Sharpe require explicit statistical preconditions and fail closed when the trial universe/evidence is incomplete.",
       "severity": "P1",
-      "status": "OPEN",
+      "status": "CLOSED",
       "track": "R3"
     },
     {
       "area": "Bounded real-data campaign",
-      "evidence": [],
+      "evidence": [
+        "scripts/run_r3_real_data_campaign.py",
+        "knowledge/60_EVIDENCE/R3_REAL_DATA_BTCUSDT_1M_20260101.json",
+        "knowledge/60_EVIDENCE/R3_REAL_DATA_CAMPAIGN.json"
+      ],
       "id": "TD-R3-006",
-      "next_action": "Run a small opt-in read-only real-data campaign with frozen manifest/checksums and reproducible outputs to validate the intake/research pipeline without treating the result as profitability proof.",
-      "resolution": "",
+      "resolution": "An explicit opt-in 10-bar BTCUSDT public-data campaign performed two independent read-only fetches with equal source/dataset/manifest hashes and verified artifact roundtrip; no API keys, trading endpoints or execution authority were used. This is intake/reproducibility evidence, not profitability evidence.",
       "severity": "P2",
-      "status": "OPEN",
+      "status": "CLOSED",
       "track": "R3"
     },
     {
       "area": "Research Control Center",
-      "evidence": [],
+      "evidence": [
+        "src/autotrade/research/control_center.py",
+        "tests/test_r3_control_center.py",
+        "scripts/check_research_authority.py"
+      ],
       "id": "TD-R3-007",
-      "next_action": "Add a read-only research reporting/control-center surface over immutable registries with no OMS/broker dependency or capital authority.",
-      "resolution": "",
+      "resolution": "Research Control Center is a read-only projection over immutable research evidence and remains outside OMS/broker/capital authority by construction and CI policy.",
       "severity": "P2",
-      "status": "OPEN",
+      "status": "CLOSED",
       "track": "R3"
+    },
+    {
+      "area": "Authoritative instrument metadata",
+      "evidence": [],
+      "id": "TD-R4-001",
+      "next_action": "Introduce a versioned authoritative instrument master for tick size, quantity step, min/max quantity/notional and symbol trading status before any PAPER/execution path relies on instrument filters. R3 research serialization precision must never be treated as broker/exchange rule evidence.",
+      "resolution": "",
+      "severity": "P1",
+      "status": "OPEN",
+      "track": "R4"
     }
   ],
   "registry_version": 1
