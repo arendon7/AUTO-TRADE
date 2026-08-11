@@ -310,7 +310,18 @@ def test_unacknowledged_submission_is_not_qualified(tmp_path) -> None:
 def test_binding_payload_or_client_identity_mismatch_is_rejected(tmp_path) -> None:
     values = setup_evidence(tmp_path)
     _, expected, attested, registry, ledger = values
-    wrong_payload = replace(expected, payload_hash=h("different-payload"))
+
+    wrong_payload_data = dict(expected.canonical_payload)
+    wrong_payload_data["qty"] = "2"
+    wrong_payload_json = json.dumps(
+        wrong_payload_data, sort_keys=True, separators=(",", ":"), allow_nan=False
+    )
+    wrong_payload = replace(
+        expected,
+        canonical_payload=wrong_payload_data,
+        payload_json=wrong_payload_json,
+        payload_hash=sha256(wrong_payload_json.encode()).hexdigest(),
+    )
     with pytest.raises(PaperQualificationRejected, match="payload hash"):
         AlpacaPaperQualificationEvaluator().qualify(
             expected_bracket=wrong_payload,
@@ -319,7 +330,19 @@ def test_binding_payload_or_client_identity_mismatch_is_rejected(tmp_path) -> No
             trade_update_ledger=ledger,
             evaluated_at=T0 + timedelta(seconds=5),
         )
-    wrong_client = replace(expected, client_order_id="different-client")
+
+    wrong_client_data = dict(expected.canonical_payload)
+    wrong_client_data["client_order_id"] = "different-client"
+    wrong_client_json = json.dumps(
+        wrong_client_data, sort_keys=True, separators=(",", ":"), allow_nan=False
+    )
+    wrong_client = replace(
+        expected,
+        client_order_id="different-client",
+        canonical_payload=wrong_client_data,
+        payload_json=wrong_client_json,
+        payload_hash=sha256(wrong_client_json.encode()).hexdigest(),
+    )
     with pytest.raises(PaperQualificationRejected, match="client_order_id"):
         AlpacaPaperQualificationEvaluator().qualify(
             expected_bracket=wrong_client,
