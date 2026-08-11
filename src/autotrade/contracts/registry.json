@@ -71,11 +71,11 @@
       "allow_extra_fields": false,
       "fields": {
         "order_id": {"type": "string", "non_empty": true},
-        "intent": {"type": "object"},
+        "intent": {"type": "object", "object_contract": "OrderIntent@1"},
         "risk_decision_id": {"type": "string", "non_empty": true},
         "status": {"type": "string", "enum": ["VALIDATED", "SUBMITTING", "SUBMITTED", "PARTIALLY_FILLED", "CANCEL_PENDING", "REPLACE_PENDING", "FILLED", "CANCELLED", "REJECTED", "EXPIRED", "UNKNOWN"]},
         "created_at": {"type": "timestamp"},
-        "submitted_at": {"type": "string", "required": false},
+        "submitted_at": {"type": "nullable_timestamp"},
         "filled_quantity": {"type": "decimal"},
         "average_fill_price": {"type": "nullable_decimal"}
       }
@@ -109,7 +109,7 @@
         "circuit_active": {"type": "boolean"},
         "circuit_reason": {"type": "string"},
         "version": {"type": "integer"},
-        "updated_at": {"type": "string", "required": false}
+        "updated_at": {"type": "nullable_timestamp"}
       }
     },
     {
