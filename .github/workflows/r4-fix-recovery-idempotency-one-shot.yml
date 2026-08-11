@@ -1,0 +1,49 @@
+name: R4 Recovery Acknowledgement Idempotency Repair
+
+on:
+  push:
+    branches:
+      - reconstruction/r4-portfolio-health
+    paths:
+      - .github/workflows/r4-fix-recovery-idempotency-one-shot.yml
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: reconstruction/r4-portfolio-health
+          fetch-depth: 0
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Apply recovery idempotency repair
+        run: python scripts/r4_fix_recovery_idempotency.py
+      - name: Targeted recovery and bridge regression suite
+        run: |
+          python -m pip install -e '.[dev]'
+          python -m compileall -q src tests scripts
+          pytest -q \
+            tests/test_r4_recovery_ack_idempotency.py \
+            tests/test_r4_health_drift.py \
+            tests/test_r4_health_binding_integrity.py \
+            tests/test_r4_health_bridge.py \
+            tests/test_r4_health_bridge_integration.py
+      - name: Commit repair and self-clean
+        run: |
+          git config user.name "arendon7"
+          git config user.email "102555888+arendon7@users.noreply.github.com"
+          git add \
+            src/autotrade/research/health.py \
+            src/autotrade/health_bridge.py \
+            tests/test_r4_health_drift.py \
+            tests/test_r4_health_binding_integrity.py \
+            tests/test_r4_health_bridge.py
+          git rm -f scripts/r4_fix_recovery_idempotency.py
+          git rm -f .github/workflows/r4-fix-recovery-idempotency-one-shot.yml
+          git commit -m "fix(r4): make health recovery acknowledgements retry-safe"
+          git push origin HEAD:reconstruction/r4-portfolio-health
