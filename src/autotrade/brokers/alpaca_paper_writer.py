@@ -20,6 +20,14 @@ from autotrade.oms import ExternalSubmissionHandoff, OrderManagementSystem
 
 from .alpaca_paper_bracket import AlpacaEquityBracketRequest
 from .alpaca_paper_canary import PaperCanaryApproval
+from .alpaca_paper_canary_coordinator import PreparedPaperCanaryPackage
+from .alpaca_paper_execution_bridge import PaperExecutionStageResult
+from .alpaca_paper_operator_decision import (
+    PaperOperatorDecision,
+    PaperOperatorDecisionContext,
+    PaperOperatorDecisionStatus,
+    SQLitePaperOperatorDecisionRegistry,
+)
 from .alpaca_paper_final_guard import (
     PaperFinalWriteBlocked,
     PaperFinalWriteGuard,
@@ -168,6 +176,8 @@ class PaperSubmitAttemptResult:
     reconciliation_required: bool
     pre_consume_guard_hash: str
     pre_io_guard_hash: str
+    prepared_package_hash: str
+    operator_decision_hash: str
 
 
 class AlpacaPaperSingleShotWriter:
@@ -204,6 +214,10 @@ class AlpacaPaperSingleShotWriter:
         account_attestation: AlpacaPaperAccountAttestation,
         expected_bracket: AlpacaEquityBracketRequest,
         approval: PaperCanaryApproval,
+        prepared_package: PreparedPaperCanaryPackage,
+        operator_decision: PaperOperatorDecision,
+        operator_registry: SQLitePaperOperatorDecisionRegistry,
+        execution_stage: PaperExecutionStageResult,
         permit_registry: SQLitePaperCanaryPermitRegistry,
         submission_registry: SQLitePaperSubmissionRegistry,
         oms: OrderManagementSystem,
@@ -237,6 +251,64 @@ class AlpacaPaperSingleShotWriter:
         if approval.client_order_id != expected_bracket.client_order_id:
             raise PaperWriterBlocked("canary approval client_order_id mismatch")
 
+        if not isinstance(prepared_package, PreparedPaperCanaryPackage):
+            raise PaperWriterBlocked("writer requires exact PreparedPaperCanaryPackage")
+        if not isinstance(operator_decision, PaperOperatorDecision):
+            raise PaperWriterBlocked("writer requires durable human operator decision")
+        if not isinstance(operator_registry, SQLitePaperOperatorDecisionRegistry):
+            raise PaperWriterBlocked("writer requires authoritative operator decision registry")
+        if not isinstance(execution_stage, PaperExecutionStageResult):
+            raise PaperWriterBlocked("writer requires certified execution bridge result")
+        if prepared_package.network_write_authorized is not False:
+            raise PaperWriterBlocked("prepared package cannot carry network authority")
+        if prepared_package.next_action != "OPERATOR_DECISION_REQUIRED":
+            raise PaperWriterBlocked("prepared package does not encode operator-decision gate")
+        if attempt_id != prepared_package.attempt_id:
+            raise PaperWriterBlocked("writer attempt_id does not match prepared package")
+        if now < prepared_package.prepared_at or now >= prepared_package.execution_deadline:
+            raise PaperWriterBlocked("prepared package execution deadline is not valid")
+        if prepared_package.order_id != expected_bracket.order_id:
+            raise PaperWriterBlocked("prepared package order_id mismatch")
+        if prepared_package.client_order_id != expected_bracket.client_order_id:
+            raise PaperWriterBlocked("prepared package client_order_id mismatch")
+        if prepared_package.bracket_payload_hash != expected_bracket.payload_hash:
+            raise PaperWriterBlocked("prepared package bracket payload hash mismatch")
+        if prepared_package.account_attestation_fingerprint != account_attestation.fingerprint:
+            raise PaperWriterBlocked("prepared package account attestation mismatch")
+        if prepared_package.canary_approval_hash != approval.approval_hash:
+            raise PaperWriterBlocked("prepared package canary approval mismatch")
+        if prepared_package.notional != approval.notional:
+            raise PaperWriterBlocked("prepared package canary notional mismatch")
+
+        expected_operator_context = PaperOperatorDecisionContext.from_prepared_package(
+            prepared_package
+        )
+        if operator_decision.context != expected_operator_context:
+            raise PaperWriterBlocked("operator decision does not match exact prepared package")
+        if not operator_decision.is_valid_at(now):
+            raise PaperWriterBlocked("human operator decision is expired or not yet valid")
+        try:
+            durable_operator = operator_registry.get(expected_operator_context.preparation_hash)
+        except Exception as exc:
+            raise PaperWriterBlocked("durable human operator decision verification failed") from exc
+        if durable_operator.decision != operator_decision:
+            raise PaperWriterBlocked("supplied human decision does not match durable evidence")
+        if durable_operator.status is not PaperOperatorDecisionStatus.CONSUMED:
+            raise PaperWriterBlocked("writer requires human decision already CONSUMED by execution bridge")
+        if durable_operator.consumed_attempt_id != attempt_id or durable_operator.consumed_at is None:
+            raise PaperWriterBlocked("human decision was not consumed by this exact attempt")
+
+        if execution_stage.package_hash != prepared_package.package_hash:
+            raise PaperWriterBlocked("execution bridge package hash mismatch")
+        if execution_stage.operator_decision_hash != operator_decision.decision_hash:
+            raise PaperWriterBlocked("execution bridge human decision hash mismatch")
+        if execution_stage.attempt_id != attempt_id:
+            raise PaperWriterBlocked("execution bridge attempt_id mismatch")
+        if execution_stage.handoff != external_handoff:
+            raise PaperWriterBlocked("execution bridge handoff mismatch")
+        if execution_stage.order.order_id != prepared_package.order_id:
+            raise PaperWriterBlocked("execution bridge order mismatch")
+
         state = submission_registry.get(expected_bracket.order_id)
         binding = submission_registry.get_binding(expected_bracket.order_id)
         if state.status is not PaperSubmissionStatus.PREPARED:
@@ -255,6 +327,12 @@ class AlpacaPaperSingleShotWriter:
             raise PaperWriterBlocked("canary approval is not bound to frozen submission")
         if approval.account_attestation_fingerprint != account_attestation.fingerprint:
             raise PaperWriterBlocked("canary approval account attestation mismatch")
+        if prepared_package.submission_binding_hash != binding.fingerprint:
+            raise PaperWriterBlocked("prepared package frozen submission binding mismatch")
+        if prepared_package.intent_fingerprint != binding.intent_fingerprint:
+            raise PaperWriterBlocked("prepared package intent fingerprint mismatch")
+        if prepared_package.risk_decision_id != binding.risk_decision_id:
+            raise PaperWriterBlocked("prepared package risk decision mismatch")
 
         if external_handoff.handoff_id != approval.approval_hash:
             raise PaperWriterBlocked("OMS external handoff is not bound to canary approval")
@@ -266,6 +344,14 @@ class AlpacaPaperSingleShotWriter:
             raise PaperWriterBlocked("OMS external handoff risk decision mismatch")
         if external_handoff.authorized_at < approval.issued_at or external_handoff.authorized_at >= approval.expires_at:
             raise PaperWriterBlocked("OMS external handoff is outside canary approval window")
+        if durable_operator.consumed_at > external_handoff.authorized_at:
+            raise PaperWriterBlocked("OMS handoff predates durable human decision consumption")
+        if external_handoff.safety_state_version != prepared_package.risk_decision_safety_state_version:
+            raise PaperWriterBlocked("OMS handoff Safety version differs from human-reviewed package")
+        if external_handoff.market_fingerprint != prepared_package.market_fingerprint:
+            raise PaperWriterBlocked("OMS handoff market differs from human-reviewed package")
+        if external_handoff.decision_valid_until != prepared_package.risk_decision_valid_until:
+            raise PaperWriterBlocked("OMS handoff expiry differs from human-reviewed package")
         if now > external_handoff.decision_valid_until:
             raise PaperWriterBlocked("OMS external handoff RiskDecision has expired")
         try:
@@ -295,6 +381,11 @@ class AlpacaPaperSingleShotWriter:
             or permit.binding_hash != binding.fingerprint
         ):
             raise PaperWriterBlocked("durable canary permit does not match frozen submission")
+        if (
+            prepared_package.permit_event_hash
+            != permit_registry.get_issued_event_hash(approval.approval_hash)
+        ):
+            raise PaperWriterBlocked("prepared package permit issuance evidence mismatch")
 
         try:
             pre_consume_guard = final_guard.authorize(
@@ -392,6 +483,8 @@ class AlpacaPaperSingleShotWriter:
             reconciliation_required=True,
             pre_consume_guard_hash=pre_consume_guard.attestation_hash,
             pre_io_guard_hash=pre_io_guard.attestation_hash,
+            prepared_package_hash=prepared_package.package_hash,
+            operator_decision_hash=operator_decision.decision_hash,
         )
 
 

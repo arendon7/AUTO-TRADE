@@ -16,6 +16,12 @@ from autotrade.brokers.alpaca_paper_canary import (
     PaperCanaryGate,
     PaperCanaryPolicy,
 )
+from autotrade.brokers.alpaca_paper_canary_coordinator import _build_package
+from autotrade.brokers.alpaca_paper_execution_bridge import PaperCanaryExecutionBridge
+from autotrade.brokers.alpaca_paper_operator_decision import (
+    PaperOperatorDecisionContext,
+    SQLitePaperOperatorDecisionRegistry,
+)
 from autotrade.brokers.alpaca_paper_canary_permit import (
     PaperCanaryPermitStatus,
     SQLitePaperCanaryPermitRegistry,
@@ -245,10 +251,10 @@ class FlipToKillSwitchStore:
 
     def get(self):
         self.calls += 1
-        # stage_external_submission performs two authoritative Safety reads;
-        # PRE_CONSUME performs the third. Flip only at PRE_IO so this fixture
-        # continues to prove the post-permit, pre-network race.
-        if self.calls <= 3:
+        # Execution Bridge uses a separate stable Safety store. This store
+        # belongs only to the final writer guard: PRE_CONSUME is call 1 and
+        # PRE_IO is call 2, where we deliberately flip fail-closed.
+        if self.calls == 1:
             return SafetyControlState(version=0, updated_at=NOW)
         return SafetyControlState(
             kill_switch_active=True,
@@ -258,7 +264,7 @@ class FlipToKillSwitchStore:
         )
 
 
-def stack(tmp_path, *, safety_store=None):
+def stack(tmp_path, *, safety_store=None, attempt_id="writer-attempt-001"):
     tmp_path.mkdir(parents=True, exist_ok=True)
     current_order = order()
     current_attestation = attestation()
@@ -302,27 +308,52 @@ def stack(tmp_path, *, safety_store=None):
     permit_registry = SQLitePaperCanaryPermitRegistry(
         SQLiteRuntime(tmp_path / "permit.sqlite")
     )
-    permit_registry.issue(approval)
+    permit = permit_registry.issue(approval)
 
     order_store = InMemoryOrderStore()
     order_store.create_if_absent(current_order)
-    safety_store = safety_store or InMemorySafetyStateStore()
+    oms_safety_store = InMemorySafetyStateStore()
+    final_guard_safety_store = safety_store or oms_safety_store
     health_bridge = HealthyBridge()
     oms = OrderManagementSystem(
         broker=NeverCalledBroker(),
         ledger=InMemoryEventLedger(),
         order_store=order_store,
-        safety_state_store=safety_store,
+        safety_state_store=oms_safety_store,
         health_bridge=health_bridge,
         portfolio_health_entity_id="portfolio-r6-canary",
     )
-    _, external_handoff = oms.stage_external_submission(
-        order_id=current_order.order_id,
-        handoff_id=approval.approval_hash,
-        decision=risk_decision(current_order),
+    current_decision = risk_decision(current_order)
+    prepared_package = _build_package(
+        order=current_order,
+        decision=current_decision,
+        binding=binding,
+        submission_state=submission_state,
+        bracket=expected,
+        approval=approval,
+        permit=permit,
+        attempt_id=attempt_id,
+        prepared_at=NOW,
+    )
+    operator_registry = SQLitePaperOperatorDecisionRegistry(
+        SQLiteRuntime(tmp_path / "operator.sqlite")
+    )
+    operator_context = PaperOperatorDecisionContext.from_prepared_package(prepared_package)
+    operator_decision = operator_registry.record_operator_approval(
+        context=operator_context,
+        operator_id="operator:writer-fixture",
+        issued_at=NOW + timedelta(milliseconds=50),
+        expires_at=NOW + timedelta(seconds=4),
+    ).decision
+    execution_stage = PaperCanaryExecutionBridge(oms=oms).stage_after_operator_decision(
+        package=prepared_package,
+        operator_decision=operator_decision,
+        operator_registry=operator_registry,
+        risk_decision=current_decision,
         market=market(),
         now=NOW + timedelta(milliseconds=100),
     )
+    external_handoff = execution_stage.handoff
     portfolio_store = InMemoryPortfolioStore()
     portfolio_store.initialize(
         PortfolioSnapshot(
@@ -343,7 +374,7 @@ def stack(tmp_path, *, safety_store=None):
     )
     final_guard = PaperFinalWriteGuard(
         order_store=order_store,
-        safety_state_store=safety_store,
+        safety_state_store=final_guard_safety_store,
         portfolio_store=portfolio_store,
         health_bridge=health_bridge,
         portfolio_health_entity_id="portfolio-r6-canary",
@@ -357,7 +388,11 @@ def stack(tmp_path, *, safety_store=None):
         "approval": approval,
         "permit_registry": permit_registry,
         "order_store": order_store,
-        "safety_store": safety_store,
+        "safety_store": final_guard_safety_store,
+        "prepared_package": prepared_package,
+        "operator_registry": operator_registry,
+        "operator_decision": operator_decision,
+        "execution_stage": execution_stage,
         "portfolio_store": portfolio_store,
         "oms": oms,
         "handoff": external_handoff,
@@ -372,12 +407,17 @@ def writer(transport: FakeWriteTransport, *, enabled: bool = True, base_url: str
     )
 
 
-def submit(instance, values, *, now=NOW + timedelta(seconds=1), attempt_id="writer-attempt-001"):
+def submit(instance, values, *, now=NOW + timedelta(seconds=1), attempt_id=None):
+    attempt_id = attempt_id or values["prepared_package"].attempt_id
     return instance.submit_once(
         credentials=credentials(),
         account_attestation=values["attestation"],
         expected_bracket=values["expected"],
         approval=values["approval"],
+        prepared_package=values["prepared_package"],
+        operator_decision=values["operator_decision"],
+        operator_registry=values["operator_registry"],
+        execution_stage=values["execution_stage"],
         permit_registry=values["permit_registry"],
         submission_registry=values["submission_registry"],
         oms=values["oms"],
@@ -636,7 +676,7 @@ def test_final_pre_io_recheck_blocks_changed_kill_switch_after_permit_consumptio
     with pytest.raises(PaperWriterBlocked, match="PRE_IO"):
         submit(writer(transport), values)
 
-    assert flipping.calls == 4
+    assert flipping.calls == 2
     assert transport.requests == []
     assert values["submission_registry"].get(values["binding"].order_id).status is PaperSubmissionStatus.UNKNOWN
     assert values["permit_registry"].get(values["approval"].approval_hash).status is PaperCanaryPermitStatus.CONSUMED
@@ -649,3 +689,5 @@ def test_success_result_binds_both_just_in_time_guard_hashes(tmp_path) -> None:
     assert len(result.pre_consume_guard_hash) == 64
     assert len(result.pre_io_guard_hash) == 64
     assert result.pre_consume_guard_hash != result.pre_io_guard_hash
+    assert result.prepared_package_hash == values["prepared_package"].package_hash
+    assert result.operator_decision_hash == values["operator_decision"].decision_hash

@@ -33,8 +33,8 @@ class CrashBeforeUnknownRegistry(SQLitePaperSubmissionRegistry):
         )
 
 
-def crashable_values(tmp_path):
-    values = stack(tmp_path)
+def crashable_values(tmp_path, *, attempt_id):
+    values = stack(tmp_path, attempt_id=attempt_id)
     original = values["submission_registry"]
     crashable = CrashBeforeUnknownRegistry(original._runtime)
     values["submission_registry"] = crashable
@@ -42,10 +42,10 @@ def crashable_values(tmp_path):
 
 
 def test_same_attempt_can_resume_only_from_prepared_consumed_before_unknown(tmp_path) -> None:
-    values = crashable_values(tmp_path)
+    attempt_id = "writer-attempt-resume-001"
+    values = crashable_values(tmp_path, attempt_id=attempt_id)
     transport = FakeWriteTransport(response=success_response(values["expected"]))
     instance = writer(transport)
-    attempt_id = "writer-attempt-resume-001"
 
     with pytest.raises(SystemExit, match="synthetic crash"):
         submit(instance, values, attempt_id=attempt_id)
@@ -79,14 +79,14 @@ def test_same_attempt_can_resume_only_from_prepared_consumed_before_unknown(tmp_
 
 
 def test_different_attempt_cannot_resume_consumed_prepared_permit(tmp_path) -> None:
-    values = crashable_values(tmp_path)
+    values = crashable_values(tmp_path, attempt_id="writer-attempt-original")
     transport = FakeWriteTransport(response=success_response(values["expected"]))
     instance = writer(transport)
 
     with pytest.raises(SystemExit):
         submit(instance, values, attempt_id="writer-attempt-original")
 
-    with pytest.raises(PaperWriterBlocked, match="another attempt"):
+    with pytest.raises(PaperWriterBlocked, match="prepared package|another attempt"):
         submit(
             instance,
             values,
@@ -98,10 +98,10 @@ def test_different_attempt_cannot_resume_consumed_prepared_permit(tmp_path) -> N
 
 
 def test_consumed_permit_does_not_override_approval_expiry(tmp_path) -> None:
-    values = crashable_values(tmp_path)
+    attempt_id = "writer-attempt-expired-resume"
+    values = crashable_values(tmp_path, attempt_id=attempt_id)
     transport = FakeWriteTransport(response=success_response(values["expected"]))
     instance = writer(transport)
-    attempt_id = "writer-attempt-expired-resume"
 
     with pytest.raises(SystemExit):
         submit(instance, values, attempt_id=attempt_id)
@@ -118,8 +118,8 @@ def test_consumed_permit_does_not_override_approval_expiry(tmp_path) -> None:
 
 
 def test_unknown_is_never_resume_write_even_for_same_consumed_attempt(tmp_path) -> None:
-    values = stack(tmp_path)
     attempt_id = "writer-attempt-unknown"
+    values = stack(tmp_path, attempt_id=attempt_id)
     values["permit_registry"].consume(
         approval=values["approval"],
         attempt_id=attempt_id,
