@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from decimal import Decimal
 from typing import Mapping
 
@@ -137,6 +138,29 @@ def validate_portfolio_snapshot(portfolio: PortfolioSnapshot) -> None:
     error = portfolio_snapshot_error(portfolio)
     if error is not None:
         raise PortfolioIntegrityError(error)
+
+
+def clone_portfolio_snapshot(portfolio: PortfolioSnapshot) -> PortfolioSnapshot:
+    """Return a semantically validated detached clone of all mutable mappings.
+
+    `PortfolioSnapshot` is a frozen dataclass, but its nested dictionaries are
+    still mutable Python objects. Stores must never retain or return aliases to
+    caller-owned mappings because that would allow exposure to change without a
+    version increment. Cloning is therefore part of the state trust boundary.
+    """
+
+    validate_portfolio_snapshot(portfolio)
+    cloned = replace(
+        portfolio,
+        signed_position_notional_by_symbol=dict(portfolio.signed_position_notional_by_symbol),
+        strategy_gross_exposure=dict(portfolio.strategy_gross_exposure),
+        strategy_signed_position_notional_by_symbol={
+            strategy: dict(values)
+            for strategy, values in portfolio.strategy_signed_position_notional_by_symbol.items()
+        },
+    )
+    validate_portfolio_snapshot(cloned)
+    return cloned
 
 
 def _finite_decimal(value: object) -> bool:
