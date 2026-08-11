@@ -27,7 +27,7 @@ jobs:
         run: python -m compileall -q src tests scripts
 
       - name: Tests with branch coverage
-        run: pytest --cov=autotrade --cov-report=term-missing
+        run: pytest --cov=autotrade --cov-report=term-missing --cov-fail-under=85
 
       - name: Machine-readable contract registry
         run: python scripts/check_contract_registry.py
