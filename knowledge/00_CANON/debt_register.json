@@ -693,12 +693,22 @@
     },
     {
       "area": "OMS-owned external PAPER handoff and durable SUBMITTING transition",
-      "evidence": [],
+      "evidence": [
+        "src/autotrade/oms.py",
+        "src/autotrade/brokers/alpaca_paper_writer.py",
+        "scripts/check_r6_oms_handoff_boundary.py",
+        "tests/test_r6_oms_external_handoff.py",
+        "tests/test_r6_oms_handoff_boundary.py",
+        "tests/test_r6_paper_writer.py",
+        ".github/workflows/core-tests.yml",
+        ".github/workflows/r6-authority.yml",
+        "knowledge/60_EVIDENCE/R6_OMS_EXTERNAL_HANDOFF_EVIDENCE.json"
+      ],
       "id": "TD-R6-010",
       "next_action": "Implement a deterministic OMS-owned staging boundary for the first external PAPER canary. It must revalidate the existing durable order/control-plane identity and transition exactly VALIDATED -> SUBMITTING without invoking the internal broker, while forbidding direct R6 OrderStore mutation or any Safety/OMS bypass. The staged order must then be consumed only by the certified canary/final-write path and remain restart/ambiguity safe.",
-      "resolution": "",
+      "resolution": "Implemented an OMS-owned, brokerless external PAPER staging path. validate_for_external_submission reuses the normal deterministic control plane and creates/replays only VALIDATED state; stage_external_submission revalidates the original RiskDecision/MarketSnapshot, exact Safety version and NORMAL Health, durably appends EXTERNAL_ORDER_HANDOFF_AUTHORIZED before transitioning VALIDATED->SUBMITTING, and is restart-safe across a crash between event append and status update. SUBMITTING without the durable handoff fails closed. The writer requires the durable handoff, binds it to the one-shot canary approval and frozen submission binding, verifies it through OMS, and requires PRE_CONSUME Safety version equality before the existing PRE_IO guard. Permanent CI forbids direct R6 OrderStore mutation, synthetic SUBMITTING state or handoff construction outside OMS. Official exact-head CI on dfc2424f7bc42552ad7fc0a4ffb1f03284f76dad: Core 31516722995, Knowledge 31516722976, R6 Authority 31516722971 PASS; 979 tests / 85.56% coverage.",
       "severity": "P1",
-      "status": "OPEN",
+      "status": "CLOSED",
       "track": "R6"
     }
   ],

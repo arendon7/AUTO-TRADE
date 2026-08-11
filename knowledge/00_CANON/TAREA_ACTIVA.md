@@ -15,7 +15,7 @@ Branch activa: `reconstruction/r6-external-paper-protection`.
 - `TD-R6-006` — PAPER trade_updates protection evidence.
 - `TD-R6-007` — unsupported products/protection modes fail closed.
 - `TD-R6-008` — permanent PAPER-only/LIVE-deny authority boundary.
-- `TD-R6-010` — OMS-owned external PAPER handoff; no direct OrderStore status mutation.
+- `TD-R6-010` — **CLOSED** — OMS-owned external PAPER handoff certified; no direct OrderStore status mutation.
 
 ## Orden de implementación
 1. PAPER gateway policy + account/environment attestation, **without submit path enabled**;
@@ -25,7 +25,7 @@ Branch activa: `reconstruction/r6-external-paper-protection`.
 5. PAPER trade_updates ingestion/correlation;
 6. qualification evidence store and reconciliation proofs;
 7. OMS-owned external PAPER handoff: durable `VALIDATED -> SUBMITTING` without internal-broker I/O or direct store mutation;
-8. bounded external PAPER evidence only after all prior gates, including `TD-R6-010`, are green;
+8. bounded external PAPER evidence only after all prior gates are green; `TD-R6-010` is certified CLOSED;
 9. adversarial certification + debt closure.
 
 ## Negative tests obligatorios para R6
