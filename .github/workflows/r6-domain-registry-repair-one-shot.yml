@@ -1,4 +1,4 @@
-name: R6 Canonical Domain Registry Repair
+name: R6 Verified Binding Read Repair
 
 on:
   push:
@@ -21,65 +21,30 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: '3.12'
-      - name: Apply exact R6 repair
+      - name: Add tamper-checked binding read
         run: |
           python - <<'PY'
           from pathlib import Path
 
-          replacements = {
-              'tests/test_r6_paper_canary_permit.py': [
-                  ('        stop_price=None,\n', ''),
-                  ('        broker_order_id=None,\n        updated_at=NOW - timedelta(seconds=1),\n', '        created_at=NOW - timedelta(seconds=1),\n'),
-              ],
-              'tests/test_r6_paper_reconciliation.py': [
-                  ('        stop_price=None,\n', ''),
-                  ('        broker_order_id=None,\n        updated_at=NOW - timedelta(seconds=1),\n', '        created_at=NOW - timedelta(seconds=1),\n'),
-              ],
-              'tests/test_r6_paper_writer.py': [
-                  ('        stop_price=None,\n', ''),
-                  ('        broker_order_id=None,\n        updated_at=NOW - timedelta(seconds=1),\n', '        created_at=NOW - timedelta(seconds=1),\n'),
-              ],
-              'tests/test_r6_paper_submission_ambiguity.py': [
-                  ('        stop_price=None,\n', ''),
-                  ('        broker_order_id=None,\n        updated_at=T0,\n', '        created_at=T0,\n'),
-                  ('OrderStatus.CREATED', 'OrderStatus.SUBMITTED'),
-              ],
-          }
-          for raw_path, pairs in replacements.items():
-              path = Path(raw_path)
-              text = path.read_text(encoding='utf-8')
-              for old, new in pairs:
-                  if old not in text:
-                      raise SystemExit(f'missing expected fixture pattern in {raw_path}: {old!r}')
-                  text = text.replace(old, new)
-              path.write_text(text, encoding='utf-8')
-
           path = Path('src/autotrade/brokers/alpaca_paper_submission.py')
           text = path.read_text(encoding='utf-8')
-          old = '''            if by_order is not None or by_client is not None:\n                if by_order is None or by_client is None:\n                    raise PaperSubmissionIntegrityError("submission binding indexes disagree")\n                existing = _binding_from_row(by_order)\n                if str(by_client["order_id"]) != existing.order_id:\n                    raise PaperSubmissionConflict(\n                        "client_order_id is already bound to another local order"\n                    )\n                if existing.fingerprint != binding.fingerprint:\n                    raise PaperSubmissionConflict(\n                        "order/client_order_id is already bound to different immutable data"\n                    )\n                _, state, _ = self._verify_locked(conn, binding.order_id)\n                conn.execute("COMMIT")\n                return state\n'''
-          new = '''            if by_order is None and by_client is not None:\n                raise PaperSubmissionConflict(\n                    "client_order_id is already bound to another local order"\n                )\n            if by_order is not None:\n                existing = _binding_from_row(by_order)\n                if existing.client_order_id != binding.client_order_id:\n                    raise PaperSubmissionConflict(\n                        "local order is already bound to a different client_order_id"\n                    )\n                if by_client is None or str(by_client["order_id"]) != existing.order_id:\n                    raise PaperSubmissionIntegrityError("submission binding indexes disagree")\n                if existing.fingerprint != binding.fingerprint:\n                    raise PaperSubmissionConflict(\n                        "order/client_order_id is already bound to different immutable data"\n                    )\n                _, state, _ = self._verify_locked(conn, binding.order_id)\n                conn.execute("COMMIT")\n                return state\n'''
-          if old not in text:
-              raise SystemExit('prepare classification block not found')
-          text = text.replace(old, new, 1)
+          if '    def get_binding(self, order_id: str) -> PaperSubmissionBinding:\n' not in text:
+              anchor = '''    def get_by_client_order_id(self, client_order_id: str) -> PaperSubmissionState:\n'''
+              method = '''    def get_binding(self, order_id: str) -> PaperSubmissionBinding:\n        _validate_id(order_id, "order_id")\n        conn = self._runtime.connect()\n        try:\n            binding, _, _ = self._verify_locked(conn, order_id)\n            return binding\n        finally:\n            conn.close()\n\n'''
+              if anchor not in text:
+                  raise SystemExit('get_by_client_order_id anchor not found')
+              text = text.replace(anchor, method + anchor, 1)
+              path.write_text(text, encoding='utf-8')
 
-          old = '''            if state.status is not PaperSubmissionStatus.PREPARED:\n                raise PaperSubmissionBlocked(\n                    f"external PAPER submit blocked from {state.status.value}; reconcile first"\n                )\n\n            event = _make_event(\n'''
-          new = '''            if now.astimezone(timezone.utc) < state.updated_at.astimezone(timezone.utc):\n                raise PaperSubmissionIntegrityError(\n                    "submission event time cannot move backwards"\n                )\n            if state.status is not PaperSubmissionStatus.PREPARED:\n                raise PaperSubmissionBlocked(\n                    f"external PAPER submit blocked from {state.status.value}; reconcile first"\n                )\n\n            event = _make_event(\n'''
-          if old not in text:
-              raise SystemExit('submit transition block not found')
-          text = text.replace(old, new, 1)
-          path.write_text(text, encoding='utf-8')
-
-          for path in Path('tests').glob('test_r6_*.py'):
-              t = path.read_text(encoding='utf-8')
-              if 'stop_price=None,' in t or 'OrderStatus.CREATED' in t:
-                  raise SystemExit(f'stale canonical-domain fixture remains in {path}')
+          test_path = Path('tests/test_r6_submission_binding_read.py')
+          test_path.write_text('''from __future__ import annotations\n\nfrom datetime import datetime, timezone\nfrom hashlib import sha256\nimport sqlite3\n\nimport pytest\n\nfrom autotrade.brokers.alpaca_paper_submission import (\n    PaperSubmissionBinding,\n    PaperSubmissionIntegrityError,\n    SQLitePaperSubmissionRegistry,\n)\nfrom autotrade.persistence import SQLiteRuntime\n\n\nNOW = datetime(2026, 8, 11, 14, 50, tzinfo=timezone.utc)\n\n\ndef h(value: str) -> str:\n    return sha256(value.encode()).hexdigest()\n\n\ndef binding() -> PaperSubmissionBinding:\n    return PaperSubmissionBinding(\n        order_id="binding-read-order-001",\n        client_order_id="autotrade-binding-read-001",\n        intent_id="binding-read-intent-001",\n        intent_fingerprint=h("intent"),\n        risk_decision_id="binding-read-risk-001",\n        account_attestation_fingerprint=h("account"),\n        order_payload_hash=h("payload"),\n        created_at=NOW,\n    )\n\n\ndef test_get_binding_is_durable_verified_read(tmp_path) -> None:\n    runtime = SQLiteRuntime(tmp_path / "binding-read.sqlite")\n    registry = SQLitePaperSubmissionRegistry(runtime)\n    frozen = binding()\n    registry.prepare(frozen)\n    assert registry.get_binding(frozen.order_id) == frozen\n    assert SQLitePaperSubmissionRegistry(runtime).get_binding(frozen.order_id) == frozen\n\n\ndef test_get_binding_detects_binding_tamper(tmp_path) -> None:\n    runtime = SQLiteRuntime(tmp_path / "binding-tamper.sqlite")\n    registry = SQLitePaperSubmissionRegistry(runtime)\n    frozen = binding()\n    registry.prepare(frozen)\n    with sqlite3.connect(runtime.path) as conn:\n        conn.execute(\n            "UPDATE alpaca_paper_submission_bindings SET binding_json=? WHERE order_id=?",\n            ('{}', frozen.order_id),\n        )\n        conn.commit()\n    with pytest.raises(PaperSubmissionIntegrityError):\n        registry.get_binding(frozen.order_id)\n''', encoding='utf-8')
           PY
       - name: Commit repair before certification
         run: |
           git config user.name arendon7
           git config user.email 102555888+arendon7@users.noreply.github.com
-          git add src/autotrade/brokers/alpaca_paper_submission.py tests/test_r6_paper_*.py
-          git commit -m "fix(r6): realign PAPER tests and submission registry"
+          git add src/autotrade/brokers/alpaca_paper_submission.py tests/test_r6_submission_binding_read.py
+          git commit -m "fix(r6): expose verified durable submission binding read"
           git push origin HEAD:reconstruction/r6-external-paper-protection
       - name: Certify repaired tree
         run: |
@@ -95,5 +60,5 @@ jobs:
       - name: Self-clean on success
         run: |
           git rm .github/workflows/r6-domain-registry-repair-one-shot.yml
-          git commit -m "chore(r6): remove domain registry repair one-shot"
+          git commit -m "chore(r6): remove verified binding repair one-shot"
           git push origin HEAD:reconstruction/r6-external-paper-protection
