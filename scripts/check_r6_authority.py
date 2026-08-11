@@ -7,11 +7,16 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 BROKER_DIR = ROOT / "src/autotrade/brokers"
 R6_PREFIX = "alpaca_paper_"
-CURRENT_PHASE = "ATTESTATION_AND_AMBIGUITY_ONLY"
+CURRENT_PHASE = "PAPER_SINGLE_SHOT_AND_GET_RECONCILIATION"
 
 PAPER_HOST = "paper-api.alpaca.markets"
 LIVE_HOST = "api.alpaca.markets"
-APPROVED_NETWORK_FILE = "alpaca_paper_gateway.py"
+ATTESTATION_FILE = "alpaca_paper_gateway.py"
+RECONCILIATION_FILE = "alpaca_paper_reconciliation_gateway.py"
+WRITER_FILE = "alpaca_paper_writer.py"
+APPROVED_NETWORK_FILES = frozenset(
+    {ATTESTATION_FILE, RECONCILIATION_FILE, WRITER_FILE}
+)
 
 FORBIDDEN_IMPORT_PREFIXES = (
     "openai",
@@ -28,7 +33,7 @@ NETWORK_ROOTS = {
     "websocket",
     "websockets",
 }
-FORBIDDEN_CALLS_PRE_SUBMIT = {
+FORBIDDEN_EXTERNAL_CALLS = {
     "post",
     "send",
     "submit",
@@ -47,9 +52,7 @@ FORBIDDEN_EXECUTION_SYMBOLS = {
 
 def main() -> int:
     files = sorted(
-        path
-        for path in BROKER_DIR.glob(f"{R6_PREFIX}*.py")
-        if path.is_file()
+        path for path in BROKER_DIR.glob(f"{R6_PREFIX}*.py") if path.is_file()
     )
     errors: list[str] = []
     if not files:
@@ -57,21 +60,7 @@ def main() -> int:
     for path in files:
         errors.extend(_scan(path))
 
-    gateway = BROKER_DIR / APPROVED_NETWORK_FILE
-    if gateway.is_file():
-        text = gateway.read_text(encoding="utf-8")
-        if f'ALPACA_PAPER_TRADING_HOST = "{PAPER_HOST}"' not in text:
-            errors.append("gateway: exact PAPER host constant is missing")
-        if f'ALPACA_LIVE_TRADING_HOST = "{LIVE_HOST}"' not in text:
-            errors.append("gateway: explicit LIVE deny constant is missing")
-        if "enabled: bool = False" not in text:
-            errors.append("gateway: disabled-by-default config contract is missing")
-        if text.count(LIVE_HOST) != 1:
-            errors.append(
-                "gateway: LIVE host literal must appear exactly once as the deny constant"
-            )
-    else:
-        errors.append("gateway: approved PAPER attestation module is missing")
+    errors.extend(_validate_network_roles())
 
     if errors:
         for error in errors:
@@ -86,24 +75,29 @@ def _scan(path: Path) -> list[str]:
     rel = path.relative_to(ROOT)
     source = path.read_text(encoding="utf-8")
     tree = ast.parse(source, filename=str(rel))
-    network_allowed = path.name == APPROVED_NETWORK_FILE
+    network_allowed = path.name in APPROVED_NETWORK_FILES
+    writer_calls: list[ast.Call] = []
 
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for alias in node.names:
                 if _forbidden_import(alias.name):
-                    errors.append(f"{rel}:{node.lineno}: forbidden authority import {alias.name}")
+                    errors.append(
+                        f"{rel}:{node.lineno}: forbidden authority import {alias.name}"
+                    )
                 if not network_allowed and _network_import(alias.name):
                     errors.append(
-                        f"{rel}:{node.lineno}: networking is forbidden outside {APPROVED_NETWORK_FILE}: {alias.name}"
+                        f"{rel}:{node.lineno}: networking is forbidden outside approved R6 network modules: {alias.name}"
                     )
         elif isinstance(node, ast.ImportFrom):
             module = node.module or ""
             if _forbidden_import(module):
-                errors.append(f"{rel}:{node.lineno}: forbidden authority import {module}")
+                errors.append(
+                    f"{rel}:{node.lineno}: forbidden authority import {module}"
+                )
             if not network_allowed and _network_import(module):
                 errors.append(
-                    f"{rel}:{node.lineno}: networking is forbidden outside {APPROVED_NETWORK_FILE}: {module}"
+                    f"{rel}:{node.lineno}: networking is forbidden outside approved R6 network modules: {module}"
                 )
             for alias in node.names:
                 if alias.name in FORBIDDEN_EXECUTION_SYMBOLS:
@@ -112,34 +106,108 @@ def _scan(path: Path) -> list[str]:
                     )
         elif isinstance(node, ast.Call):
             name = _call_name(node.func)
-            if name in FORBIDDEN_CALLS_PRE_SUBMIT:
+            if name in FORBIDDEN_EXTERNAL_CALLS:
                 errors.append(
-                    f"{rel}:{node.lineno}: external write call {name} forbidden in {CURRENT_PHASE}"
+                    f"{rel}:{node.lineno}: unaudited external write call {name} is forbidden"
                 )
-        elif isinstance(node, ast.Constant) and isinstance(node.value, str):
-            if node.value == LIVE_HOST:
-                if not (
-                    path.name == APPROVED_NETWORK_FILE
-                    and isinstance(getattr(node, "parent", None), ast.Assign)
-                ):
-                    # Parent links aren't installed; exact literal-count validation
-                    # below provides the structural gateway exception. Other files
-                    # remain unconditionally forbidden here.
-                    if path.name != APPROVED_NETWORK_FILE:
+            if name == "write" and _is_transport_write(node):
+                if path.name != WRITER_FILE:
+                    errors.append(
+                        f"{rel}:{node.lineno}: transport write is allowed only in {WRITER_FILE}"
+                    )
+                else:
+                    writer_calls.append(node)
+                    if _inside_loop(tree, node):
                         errors.append(
-                            f"{rel}:{node.lineno}: LIVE Trading API host literal is forbidden"
+                            f"{rel}:{node.lineno}: PAPER transport write cannot execute inside a loop"
                         )
-            if node.value.startswith("https://") or node.value.startswith("wss://"):
-                if path.name != APPROVED_NETWORK_FILE:
-                    errors.append(
-                        f"{rel}:{node.lineno}: endpoint literal forbidden outside approved gateway"
-                    )
-                elif LIVE_HOST in node.value:
-                    errors.append(
-                        f"{rel}:{node.lineno}: LIVE Trading API endpoint is forbidden"
-                    )
+        elif isinstance(node, ast.Constant) and isinstance(node.value, str):
+            if node.value == LIVE_HOST and path.name != ATTESTATION_FILE:
+                errors.append(
+                    f"{rel}:{node.lineno}: LIVE Trading API host literal is forbidden"
+                )
+            if node.value.startswith("wss://"):
+                errors.append(
+                    f"{rel}:{node.lineno}: websocket endpoint authority is not certified in this R6 phase"
+                )
+            if node.value.startswith("https://") and not network_allowed:
+                errors.append(
+                    f"{rel}:{node.lineno}: endpoint literal forbidden outside approved R6 network modules"
+                )
+
+    if path.name == WRITER_FILE and len(writer_calls) > 1:
+        errors.append(
+            f"{rel}: audited PAPER writer may contain exactly one transport write call"
+        )
+    return errors
+
+
+def _validate_network_roles() -> list[str]:
+    errors: list[str] = []
+    for filename in APPROVED_NETWORK_FILES:
+        if not (BROKER_DIR / filename).is_file():
+            errors.append(f"{filename}: approved R6 network module is missing")
+
+    gateway = BROKER_DIR / ATTESTATION_FILE
+    if gateway.is_file():
+        text = gateway.read_text(encoding="utf-8")
+        if f'ALPACA_PAPER_TRADING_HOST = "{PAPER_HOST}"' not in text:
+            errors.append("gateway: exact PAPER host constant is missing")
+        if f'ALPACA_LIVE_TRADING_HOST = "{LIVE_HOST}"' not in text:
+            errors.append("gateway: explicit LIVE deny constant is missing")
+        if text.count(f'"{LIVE_HOST}"') != 1:
+            errors.append(
+                "gateway: exact LIVE host literal must appear exactly once as the deny constant"
+            )
+        _require_disabled_get_surface(text, ATTESTATION_FILE, errors)
+        if "ALPACA_PAPER_ACCOUNT_PATH = \"/v2/account\"" not in text:
+            errors.append("gateway: exact /v2/account path constant is missing")
+
+    reconciliation = BROKER_DIR / RECONCILIATION_FILE
+    if reconciliation.is_file():
+        text = reconciliation.read_text(encoding="utf-8")
+        _require_disabled_get_surface(text, RECONCILIATION_FILE, errors)
+        if "/v2/orders:by_client_order_id" not in text:
+            errors.append("reconciliation gateway: client_order_id lookup path is missing")
+        if "nested=true" not in text:
+            errors.append("reconciliation gateway: nested bracket lookup is missing")
+        if 'method="POST"' in text or "method='POST'" in text:
+            errors.append("reconciliation gateway: POST authority is forbidden")
+
+    writer = BROKER_DIR / WRITER_FILE
+    if writer.is_file():
+        text = writer.read_text(encoding="utf-8")
+        if "enabled: bool = False" not in text:
+            errors.append("writer: disabled-by-default config contract is missing")
+        if 'method="POST"' not in text and "method='POST'" not in text:
+            errors.append("writer: exact POST construction is missing")
+        if text.count("self._transport.write(request)") != 1:
+            errors.append("writer: exactly one low-level transport write call is required")
+        if "ProxyHandler({})" not in text:
+            errors.append("writer: environment proxy bypass is missing")
+        if "_RejectRedirectHandler()" not in text:
+            errors.append("writer: redirect rejection is missing")
+        if "PaperSubmissionStatus.UNKNOWN" not in text:
+            errors.append("writer: durable UNKNOWN-before-write guard is missing")
+        if "PAPER_ORDER_PATH = \"/v2/orders\"" not in text:
+            errors.append("writer: exact /v2/orders path constant is missing")
 
     return errors
+
+
+def _require_disabled_get_surface(
+    text: str,
+    label: str,
+    errors: list[str],
+) -> None:
+    if "enabled: bool = False" not in text:
+        errors.append(f"{label}: disabled-by-default config contract is missing")
+    if 'method="GET"' not in text and "method='GET'" not in text:
+        errors.append(f"{label}: GET-only request construction is missing")
+    if "ProxyHandler({})" not in text:
+        errors.append(f"{label}: environment proxy bypass is missing")
+    if "_RejectRedirectHandler()" not in text:
+        errors.append(f"{label}: redirect rejection is missing")
 
 
 def _forbidden_import(module: str) -> bool:
@@ -159,6 +227,24 @@ def _call_name(func: ast.expr) -> str:
     if isinstance(func, ast.Attribute):
         return func.attr
     return ""
+
+
+def _is_transport_write(node: ast.Call) -> bool:
+    func = node.func
+    return (
+        isinstance(func, ast.Attribute)
+        and func.attr == "write"
+        and isinstance(func.value, ast.Attribute)
+        and func.value.attr == "_transport"
+    )
+
+
+def _inside_loop(tree: ast.AST, target: ast.AST) -> bool:
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.For, ast.AsyncFor, ast.While)):
+            if any(child is target for child in ast.walk(node)):
+                return True
+    return False
 
 
 if __name__ == "__main__":
