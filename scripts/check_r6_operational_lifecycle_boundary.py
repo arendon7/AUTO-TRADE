@@ -35,7 +35,7 @@ REQUIRED_PREFLIGHT = (
     '"--allow-paper-account-read"',
     "AlpacaPaperGatewayConfig(enabled=True)",
     "gateway.attest_account(",
-    "workspace.write_account_attestation(attestation)",
+    "operational.write_account_attestation(attestation)",
     '"network_method": "GET"',
     '"network_path": "/v2/account"',
     '"order_write_authorized": False',
@@ -49,8 +49,11 @@ REQUIRED_OPERATIONAL = (
     '"network_write_authorized": False',
     '"next_action": "OPERATOR_DECISION_REQUIRED"',
     '"credentials_persisted": False',
-    "os.fsync(handle.fileno())",
+    "os.fsync(sync_fd)",
     "path.chmod(0o600)",
+    "temp_path.write_bytes(raw)",
+    '"exact PAPER account attestation must be persisted before canary package"',
+    '"prepared package account attestation does not match workspace evidence"',
 )
 
 
@@ -85,6 +88,7 @@ def main() -> int:
         ):
             if forbidden in source:
                 errors.append(f"operational workspace contains forbidden surface: {forbidden}")
+        errors.extend(_scan_operational_workspace(source, OPERATIONAL))
 
     for workflow, label in ((CORE, "Core Safety"), (R6, "R6 Authority")):
         if not workflow.is_file() or SELF_COMMAND not in workflow.read_text(encoding="utf-8"):
@@ -129,6 +133,23 @@ def _scan_preflight(source: str, path: Path) -> list[str]:
             call = _call_name(node.func)
             if call in FORBIDDEN_PREFLIGHT_CALLS:
                 errors.append(f"{rel}:{node.lineno}: forbidden preflight call {call}")
+    return errors
+
+
+def _scan_operational_workspace(source: str, path: Path) -> list[str]:
+    errors: list[str] = []
+    try:
+        tree = ast.parse(source, filename=str(path))
+    except SyntaxError as exc:
+        return [f"{path}: syntax error: {exc}"]
+    rel = _relative(path)
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call):
+            call = _call_name(node.func)
+            if call in {"submit_once", "stage_external_submission", "record_operator_approval"}:
+                errors.append(f"{rel}:{node.lineno}: operational workspace cannot call {call}")
+            if call == "write":
+                errors.append(f"{rel}:{node.lineno}: operational workspace cannot own transport-style write authority")
     return errors
 
 
