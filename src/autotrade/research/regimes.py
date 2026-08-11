@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from decimal import Decimal, ROUND_CEILING
+from decimal import Decimal, InvalidOperation, ROUND_CEILING
 from enum import StrEnum
 from hashlib import sha256
 import json
@@ -427,16 +427,21 @@ class SQLiteRegimeModelRegistry:
                 conn.commit()
                 return model
             latest = conn.execute(
-                "SELECT version FROM regime_models WHERE model_id=? ORDER BY version DESC LIMIT 1",
+                "SELECT model_id,version,fingerprint,payload_json FROM regime_models WHERE model_id=? ORDER BY version DESC LIMIT 1",
                 (model.model_id,),
             ).fetchone()
             if latest is None:
                 if model.version != 1:
                     conn.rollback()
                     raise RegimeModelConflict("first regime model version must be 1")
-            elif model.version != int(latest["version"]) + 1:
-                conn.rollback()
-                raise RegimeModelConflict("regime model versions must advance exactly by one")
+            else:
+                previous = _model_from_storage(latest["fingerprint"], latest["payload_json"])
+                if previous.model_id != latest["model_id"] or previous.version != int(latest["version"]):
+                    conn.rollback()
+                    raise RegimeModelConflict("stored regime row identity mismatch")
+                if model.version != previous.version + 1:
+                    conn.rollback()
+                    raise RegimeModelConflict("regime model versions must advance exactly by one")
             conn.execute(
                 "INSERT INTO regime_models(model_id,version,fingerprint,payload_json,registered_at) VALUES(?,?,?,?,?)",
                 (model.model_id, model.version, model.fingerprint, payload_json, now.isoformat()),
@@ -454,14 +459,17 @@ class SQLiteRegimeModelRegistry:
         conn = self._connect()
         try:
             row = conn.execute(
-                "SELECT fingerprint,payload_json FROM regime_models WHERE model_id=? ORDER BY version DESC LIMIT 1",
+                "SELECT model_id,version,fingerprint,payload_json FROM regime_models WHERE model_id=? ORDER BY version DESC LIMIT 1",
                 (model_id,),
             ).fetchone()
         finally:
             conn.close()
         if row is None:
             raise KeyError(model_id)
-        return _model_from_storage(row["fingerprint"], row["payload_json"])
+        model = _model_from_storage(row["fingerprint"], row["payload_json"])
+        if model.model_id != row["model_id"] or model.version != int(row["version"]):
+            raise RegimeModelConflict("stored regime row identity mismatch")
+        return model
 
 
 def _classification(
@@ -564,7 +572,10 @@ def _integer(value: object) -> int:
 def _decimal(value: object) -> Decimal:
     if not isinstance(value, str):
         raise ValueError("decimal must be encoded as string")
-    return Decimal(value)
+    try:
+        return Decimal(value)
+    except InvalidOperation as exc:
+        raise ValueError("decimal string is invalid") from exc
 
 
 def _timestamp(value: object) -> datetime:

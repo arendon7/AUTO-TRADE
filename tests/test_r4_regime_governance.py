@@ -300,3 +300,78 @@ def test_classification_time_and_age_policy_are_strict(now):
         classify_regime(frozen, observation, now=now.replace(tzinfo=None), max_age=timedelta(seconds=1))
     with pytest.raises(ValueError, match="max_age"):
         classify_regime(frozen, observation, now=now, max_age=timedelta(0))
+
+
+def test_registry_refuses_append_when_previous_row_is_corrupt(tmp_path, now):
+    import sqlite3
+
+    path = tmp_path / "append-after-corrupt.db"
+    registry = SQLiteRegimeModelRegistry(path)
+    v1 = model(now)
+    registry.register(v1, now=now + timedelta(minutes=5))
+
+    conn = sqlite3.connect(path)
+    try:
+        conn.execute(
+            "UPDATE regime_models SET payload_json=? WHERE model_id=? AND version=1",
+            ("{not-json", v1.model_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    v2 = replace(v1, version=2, calibrated_at=now + timedelta(days=1))
+    with pytest.raises(RegimeModelConflict, match="stored regime payload is invalid"):
+        registry.register(v2, now=now + timedelta(days=1, minutes=1))
+
+    conn = sqlite3.connect(path)
+    try:
+        assert conn.execute("SELECT COUNT(*) FROM regime_models").fetchone()[0] == 1
+    finally:
+        conn.close()
+
+
+def test_registry_latest_rejects_row_version_identity_mismatch(tmp_path, now):
+    import sqlite3
+
+    path = tmp_path / "row-identity.db"
+    registry = SQLiteRegimeModelRegistry(path)
+    v1 = model(now)
+    registry.register(v1, now=now + timedelta(minutes=5))
+
+    conn = sqlite3.connect(path)
+    try:
+        conn.execute(
+            "UPDATE regime_models SET version=2 WHERE model_id=? AND version=1",
+            (v1.model_id,),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    with pytest.raises(RegimeModelConflict, match="stored regime row identity mismatch"):
+        registry.latest(v1.model_id)
+
+
+def test_registry_invalid_decimal_payload_is_fail_closed_conflict(tmp_path, now):
+    import sqlite3
+
+    path = tmp_path / "invalid-decimal.db"
+    registry = SQLiteRegimeModelRegistry(path)
+    v1 = model(now)
+    registry.register(v1, now=now + timedelta(minutes=5))
+
+    payload = v1.to_payload(include_fingerprint=False)
+    payload["low_threshold"] = "not-a-decimal"
+    conn = sqlite3.connect(path)
+    try:
+        conn.execute(
+            "UPDATE regime_models SET payload_json=? WHERE model_id=? AND version=1",
+            (json.dumps(payload, sort_keys=True, separators=(",", ":")), v1.model_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    with pytest.raises(RegimeModelConflict, match="stored regime payload is invalid"):
+        registry.latest(v1.model_id)
