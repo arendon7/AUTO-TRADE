@@ -224,6 +224,7 @@ class PortfolioSizingDecision:
     robustness_spec_fingerprint: str
     robustness_policy_fingerprint: str
     base_budget_fingerprint: str
+    base_robustness_fingerprint: str
     health_budget_fingerprint: str
     health_robustness_fingerprint: str
     final_budget_fingerprint: str
@@ -242,6 +243,7 @@ class PortfolioSizingDecision:
             ("robustness_spec_fingerprint", self.robustness_spec_fingerprint),
             ("robustness_policy_fingerprint", self.robustness_policy_fingerprint),
             ("base_budget_fingerprint", self.base_budget_fingerprint),
+            ("base_robustness_fingerprint", self.base_robustness_fingerprint),
             ("health_budget_fingerprint", self.health_budget_fingerprint),
             ("health_robustness_fingerprint", self.health_robustness_fingerprint),
             ("final_budget_fingerprint", self.final_budget_fingerprint),
@@ -273,6 +275,7 @@ class PortfolioSizingDecision:
             "robustness_spec_fingerprint": self.robustness_spec_fingerprint,
             "robustness_policy_fingerprint": self.robustness_policy_fingerprint,
             "base_budget_fingerprint": self.base_budget_fingerprint,
+            "base_robustness_fingerprint": self.base_robustness_fingerprint,
             "health_budget_fingerprint": self.health_budget_fingerprint,
             "health_robustness_fingerprint": self.health_robustness_fingerprint,
             "final_budget_fingerprint": self.final_budget_fingerprint,
@@ -338,7 +341,7 @@ class DeterministicPortfolioManager:
             diversification_policy,
             strategy_weights,
         )
-        self._require_robust(
+        base_robustness = self._require_robust(
             dependence=dependence,
             diversification_policy=diversification_policy,
             weights=dict(base_budget.strategy_weights),
@@ -526,6 +529,7 @@ class DeterministicPortfolioManager:
             robustness_spec_fingerprint=robustness_spec.fingerprint,
             robustness_policy_fingerprint=robustness_policy.fingerprint,
             base_budget_fingerprint=base_budget.fingerprint,
+            base_robustness_fingerprint=base_robustness.fingerprint,
             health_budget_fingerprint=health_budget.fingerprint,
             health_robustness_fingerprint=health_robustness.fingerprint,
             final_budget_fingerprint=final_budget.fingerprint,
@@ -550,6 +554,17 @@ class DeterministicPortfolioManager:
                 raise PortfolioSizingBlocked(
                     "DUPLICATE_CANDIDATE",
                     candidate.strategy_key,
+                )
+            strategy_id, separator, strategy_version = candidate.strategy_key.rpartition("@")
+            if not separator or not strategy_id or not strategy_version:
+                raise PortfolioSizingBlocked(
+                    "INVALID_STRATEGY_KEY",
+                    candidate.strategy_key,
+                )
+            if candidate.health_entity_id != strategy_id:
+                raise PortfolioSizingBlocked(
+                    "HEALTH_ENTITY_STRATEGY_MISMATCH",
+                    f"{candidate.health_entity_id}!={strategy_id}",
                 )
             by_key[candidate.strategy_key] = candidate
         expected = set(dependence.strategy_keys)
