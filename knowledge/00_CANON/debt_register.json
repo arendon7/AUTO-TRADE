@@ -38,10 +38,10 @@
       "area": "Risk policy",
       "evidence": [
         "tests/test_r2_risk_matrix.py",
-        "tests/test_r2_reservation_risk_matrix.py"
+        "tests/test_durable_state.py"
       ],
       "id": "TD-R2-003",
-      "resolution": "Exact-boundary/+epsilon capital-limit matrix and reservation-aware exposure tests certified.",
+      "resolution": "Exact-boundary/+epsilon capital-limit matrix plus durable reservation-capacity and cross-process reservation-race tests are certified.",
       "severity": "P1",
       "status": "CLOSED",
       "track": "R2"
@@ -61,11 +61,12 @@
     {
       "area": "Control-plane coverage",
       "evidence": [
-        "knowledge/60_EVIDENCE/R2_CERTIFICATION.json",
-        "knowledge/20_ARQUITECTURA/R2_FAILURE_PATH_REVIEW.md"
+        "knowledge/20_ARQUITECTURA/R2_FAILURE_PATH_REVIEW.md",
+        ".github/workflows/core-tests.yml",
+        "pyproject.toml"
       ],
       "id": "TD-R2-005",
-      "resolution": "Critical R2 failure paths have targeted adversarial tests; total branch coverage certified at 91.27% with an enforced 85% minimum.",
+      "resolution": "Critical R2 failure paths have targeted adversarial tests and the repository enforces branch coverage with an 85% minimum gate.",
       "severity": "P2",
       "status": "CLOSED",
       "track": "R2"
@@ -112,12 +113,12 @@
       "area": "Replace evidence",
       "evidence": [
         "tests/test_r2_replace_evidence.py",
-        "tests/test_r2_idempotent_events.py",
+        "tests/test_r2_replace.py",
         "src/autotrade/oms.py",
         "src/autotrade/engine.py"
       ],
       "id": "TD-R2-009",
-      "resolution": "ORDER_REPLACE_REQUESTED/REPLACE_PENDING is durable and retry-safe across crash between cancel and replacement submission.",
+      "resolution": "ORDER_REPLACE_REQUESTED/REPLACE_PENDING is durable and retry-safe across crash between cancel and replacement submission, with conflicting replacement identity failing closed.",
       "severity": "P2",
       "status": "CLOSED",
       "track": "R2"
