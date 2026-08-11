@@ -11,6 +11,7 @@ from autotrade.brokers.alpaca_paper_execution_bridge import (
     PaperExecutionBridgeBlocked,
 )
 from autotrade.brokers.alpaca_paper_operator_decision import (
+    PaperOperatorDecisionConflict,
     PaperOperatorDecisionContext,
     PaperOperatorDecisionStatus,
     SQLitePaperOperatorDecisionRegistry,
@@ -207,8 +208,8 @@ def test_missing_durable_operator_decision_blocks_before_consume_or_stage(tmp_pa
     assert broker.calls == 0
 
 
-def test_operator_decision_consumed_by_other_attempt_blocks_before_oms_stage(tmp_path) -> None:
-    prepared, bridge, _, operator_decision, broker, _ = prepared_stack(tmp_path)
+def test_operator_registry_blocks_cross_attempt_consume_before_execution_bridge(tmp_path) -> None:
+    prepared, _, _, operator_decision, broker, _ = prepared_stack(tmp_path)
     registry = SQLitePaperOperatorDecisionRegistry(SQLiteRuntime(tmp_path / "other-attempt-operator.sqlite"))
     issued = registry.record_operator_approval(
         context=operator_decision.context,
@@ -216,11 +217,12 @@ def test_operator_decision_consumed_by_other_attempt_blocks_before_oms_stage(tmp
         issued_at=operator_decision.issued_at,
         expires_at=operator_decision.expires_at,
     )
-    registry.consume(
-        decision=issued.decision,
-        attempt_id="bridge-attempt-consumed-elsewhere",
-        now=operator_decision.issued_at,
-    )
-    with pytest.raises(PaperExecutionBridgeBlocked, match="another attempt"):
-        stage(prepared, bridge, registry, issued.decision)
+    with pytest.raises(PaperOperatorDecisionConflict, match="another attempt"):
+        registry.consume(
+            decision=issued.decision,
+            attempt_id="bridge-attempt-consumed-elsewhere",
+            now=operator_decision.issued_at,
+        )
+    assert registry.get(issued.decision.context.preparation_hash).status is PaperOperatorDecisionStatus.ISSUED
+    assert prepared.package.attempt_id == operator_decision.context.attempt_id
     assert broker.calls == 0
