@@ -29,7 +29,7 @@ FORBIDDEN_RUNTIME_FRAGMENTS = (
 REQUIRED_RUNTIME = (
     "class PaperOperationalExecutionRuntime:",
     "submission_state.status is not PaperSubmissionStatus.PREPARED",
-    '"POST replay is forbidden, continue with reconciliation/evidence"',
+    "POST replay is forbidden, continue with reconciliation/evidence",
     "PaperOperationalCoreProvenanceReader(self._workspace).verify(",
     "verify_core_provenance_document(",
     "current_order.status is OrderStatus.SUBMITTING",
