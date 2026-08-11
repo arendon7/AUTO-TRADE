@@ -729,6 +729,34 @@ class SQLiteHealthBridgeStore:
 
 
 def _state_from_row(row: sqlite3.Row) -> HealthBridgeState:
+    stored_hash = row["state_hash"]
+    if not isinstance(stored_hash, str) or not _SHA256_RE.fullmatch(stored_hash):
+        raise HealthBridgeConflict("stored health bridge state hash is invalid")
+
+    # Verify the commitment over the raw persisted representation before
+    # semantic parsing. This distinguishes simple row tamper from a row whose
+    # attacker also recomputed the commitment; the latter is then rejected by
+    # HealthBridgeState semantic invariants below.
+    try:
+        raw_fingerprint = _hash(
+            {
+                "entity_id": str(row["entity_id"]),
+                "entity_kind": str(row["entity_kind"]),
+                "mode": str(row["mode"]),
+                "risk_multiplier": str(row["risk_multiplier"]),
+                "health_state_version": int(row["health_state_version"]),
+                "health_state_fingerprint": str(row["health_state_fingerprint"]),
+                "baseline_fingerprint": str(row["baseline_fingerprint"]),
+                "policy_fingerprint": str(row["policy_fingerprint"]),
+                "bridge_version": int(row["bridge_version"]),
+                "updated_at": str(row["updated_at"]),
+            }
+        )
+    except (TypeError, ValueError) as exc:
+        raise HealthBridgeConflict("stored health bridge state is invalid") from exc
+    if raw_fingerprint != stored_hash:
+        raise HealthBridgeConflict("stored health bridge state hash mismatch")
+
     try:
         state = HealthBridgeState(
             entity_id=str(row["entity_id"]),
@@ -744,11 +772,6 @@ def _state_from_row(row: sqlite3.Row) -> HealthBridgeState:
         )
     except (InvalidOperation, TypeError, ValueError) as exc:
         raise HealthBridgeConflict("stored health bridge state is invalid") from exc
-    stored_hash = row["state_hash"]
-    if not isinstance(stored_hash, str) or not _SHA256_RE.fullmatch(stored_hash):
-        raise HealthBridgeConflict("stored health bridge state hash is invalid")
-    if state.fingerprint != stored_hash:
-        raise HealthBridgeConflict("stored health bridge state hash mismatch")
     return state
 
 
