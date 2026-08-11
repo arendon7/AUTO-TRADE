@@ -332,12 +332,20 @@
     },
     {
       "area": "Defensive Health Bridge",
-      "evidence": [],
+      "evidence": [
+        "src/autotrade/health_bridge.py",
+        "src/autotrade/safety.py",
+        "src/autotrade/oms.py",
+        "src/autotrade/bootstrap.py",
+        "tests/test_r4_health_bridge.py",
+        "tests/test_r4_health_bridge_integration.py",
+        "knowledge/60_EVIDENCE/R4_DEFENSIVE_HEALTH_BRIDGE_CERTIFICATION.json"
+      ],
       "id": "TD-R4-006",
-      "next_action": "Implement a durable bridge whose automatic actions can only reduce/block/quarantine risk, with stricter-state-wins concurrency and explicit acknowledgement/fresh-evidence recovery; it must never increase exposure or bypass Safety Kernel/OMS.",
-      "resolution": "",
+      "next_action": "",
+      "resolution": "Durable Defensive Health Bridge reads authoritative health state and automatically maintains/tightens risk only. Strategy/portfolio stricter-state-wins, missing/stale fail-closed semantics, raw-row integrity, replay idempotency, safety-state version invalidation, submit-time OMS recheck and explicit fresh-evidence one-level recovery are certified. The bridge never increases exposure or bypasses Safety/OMS.",
       "severity": "P1",
-      "status": "OPEN",
+      "status": "CLOSED",
       "track": "R4"
     },
     {
