@@ -185,7 +185,6 @@ class ClosedKlineStream:
             url=self._subscription.url,
             timeout_seconds=self._subscription.timeout_seconds,
         )
-        # Policy is validated before the transport is allowed to perform I/O.
         self._policy.validate(request, expected_stream_name=self._subscription.stream_name)
         try:
             session = self._transport.open(request)
@@ -207,51 +206,50 @@ class ClosedKlineStream:
         if payload is None:
             self._degrade("stream terminated without a frame")
             raise StreamUnavailable("market stream terminated unexpectedly")
-        try:
-            return self.ingest(payload, received_at=received_at)
-        except StreamIntegrityError:
-            self._degrade("stream payload or continuity integrity failure")
-            raise
+        return self.ingest(payload, received_at=received_at)
 
     def ingest(self, payload: str | bytes, *, received_at: datetime) -> KlineObservation:
         _require_aware(received_at, "received_at")
-        raw = _decode_payload(payload)
-        event = _parse_json_object(raw)
-        kline = event.get("k")
-        if not isinstance(kline, Mapping):
-            raise StreamIntegrityError("kline payload is missing object field 'k'")
-        if event.get("e") != "kline":
-            raise StreamIntegrityError("unexpected stream event type")
-        if event.get("s") != self._subscription.instrument.symbol:
-            raise StreamIntegrityError("stream event symbol does not match subscription")
-        if kline.get("s") != self._subscription.instrument.symbol:
-            raise StreamIntegrityError("kline symbol does not match subscription")
-        if kline.get("i") != self._subscription.interval:
-            raise StreamIntegrityError("kline interval does not match subscription")
+        if self._state != StreamState.ACTIVE or self._session is None:
+            raise StreamUnavailable("direct ingest requires an ACTIVE validated stream session")
+        try:
+            raw = _decode_payload(payload)
+            event = _parse_json_object(raw)
+            kline = event.get("k")
+            if not isinstance(kline, Mapping):
+                raise StreamIntegrityError("kline payload is missing object field 'k'")
+            if event.get("e") != "kline":
+                raise StreamIntegrityError("unexpected stream event type")
+            if event.get("s") != self._subscription.instrument.symbol:
+                raise StreamIntegrityError("stream event symbol does not match subscription")
+            if kline.get("s") != self._subscription.instrument.symbol:
+                raise StreamIntegrityError("kline symbol does not match subscription")
+            if kline.get("i") != self._subscription.interval:
+                raise StreamIntegrityError("kline interval does not match subscription")
 
-        closed = kline.get("x")
-        if not isinstance(closed, bool):
-            raise StreamIntegrityError("kline closed flag must be boolean")
-        if not closed:
-            # Binance kline streams publish in-progress updates. R5 is closed-kline
-            # only: an open candle is intentionally non-authoritative and cannot
-            # advance cursor, evidence or risk state.
-            return KlineObservation(
-                state=self._state,
-                accepted=False,
-                duplicate=False,
-                ignored_open_kline=True,
-                bar=None,
-                bar_fingerprint=None,
+            closed = kline.get("x")
+            if not isinstance(closed, bool):
+                raise StreamIntegrityError("kline closed flag must be boolean")
+            if not closed:
+                return KlineObservation(
+                    state=self._state,
+                    accepted=False,
+                    duplicate=False,
+                    ignored_open_kline=True,
+                    bar=None,
+                    bar_fingerprint=None,
+                )
+
+            parsed = _parse_closed_kline(
+                event=event,
+                kline=kline,
+                subscription=self._subscription,
+                received_at=received_at,
             )
-
-        parsed = _parse_closed_kline(
-            event=event,
-            kline=kline,
-            subscription=self._subscription,
-            received_at=received_at,
-        )
-        return self._accept(parsed)
+            return self._accept(parsed)
+        except StreamIntegrityError:
+            self._degrade("stream payload or continuity integrity failure")
+            raise
 
     def close(self) -> None:
         session, self._session = self._session, None
@@ -379,7 +377,7 @@ def _decode_payload(payload: str | bytes) -> str:
 
 def _parse_json_object(raw: str) -> Mapping[str, object]:
     try:
-        value = json.loads(raw, parse_constant=lambda token: (_raise_json_constant(token)))
+        value = json.loads(raw, parse_constant=lambda token: _raise_json_constant(token))
     except (json.JSONDecodeError, ValueError) as exc:
         raise StreamIntegrityError("stream payload is not strict JSON") from exc
     if not isinstance(value, dict):
