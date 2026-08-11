@@ -15,27 +15,16 @@ from autotrade.health_bridge import (
     HealthRiskMode,
     _state_from_row as _health_bridge_state_from_row,
 )
-from autotrade.persistence import (
-    _order_from_json,
-    _order_to_json,
-    _portfolio_from_storage,
-)
-from autotrade.research.health import (
-    HealthEntityKind,
-    HealthState,
-    HealthStateConflict,
-    _state_from_row as _health_state_from_row,
-)
+from autotrade.persistence import _order_from_json, _order_to_json, _portfolio_from_storage
 from autotrade.state import SafetyControlState
 
-from .alpaca_paper_operational import (
-    PaperOperationalWorkspace,
-    read_prepared_package,
-)
+from .alpaca_paper_operational import PaperOperationalWorkspace, read_prepared_package
 from .alpaca_paper_preparation_snapshot import read_preparation_snapshot
 
 
 _HASH_RE = re.compile(r"^[0-9a-f]{64}$")
+_STRATEGY_KIND = "STRATEGY"
+_HEALTHY = "HEALTHY"
 
 
 class PaperCoreProvenanceError(RuntimeError):
@@ -48,6 +37,16 @@ class PaperCoreProvenanceMissing(PaperCoreProvenanceError):
 
 class PaperCoreProvenanceConflict(PaperCoreProvenanceError):
     pass
+
+
+@dataclass(frozen=True, slots=True)
+class _ObservedStrategyHealth:
+    entity_id: str
+    state: str
+    version: int
+    baseline_fingerprint: str
+    policy_fingerprint: str
+    fingerprint: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -123,13 +122,12 @@ class PaperCoreProvenance:
 
 
 class PaperOperationalCoreProvenanceReader:
-    """Verify the prepared PAPER package against one durable core DB, read-only.
+    """Verify one prepared PAPER package against one durable core DB read-only.
 
-    This class intentionally does not instantiate ``SQLiteRuntime`` or any
-    durable store because their constructors may initialize/migrate schema. It
-    opens the existing database with SQLite ``mode=ro`` and ``query_only``.
-    It has no OMS mutation, operator-decision, execution-bridge, permit, or
-    broker-network surface.
+    No durable store is instantiated here because store constructors may create
+    or migrate schema. The existing DB is opened with SQLite ``mode=ro`` and
+    ``query_only``. The reader has no execution, operator, permit or network
+    authority.
     """
 
     def __init__(self, workspace: PaperOperationalWorkspace) -> None:
@@ -141,10 +139,7 @@ class PaperOperationalCoreProvenanceReader:
         if not isinstance(now, datetime) or now.tzinfo is None or now.utcoffset() is None:
             raise ValueError("provenance verification time must be timezone-aware")
         package = read_prepared_package(self._workspace.prepared_package_path)
-        decision, market, approval = read_preparation_snapshot(
-            self._workspace,
-            package=package,
-        )
+        decision, market, approval = read_preparation_snapshot(self._workspace, package=package)
         del market, approval
         if risk_decision_fingerprint(decision) != package.risk_decision_fingerprint:
             raise PaperCoreProvenanceConflict(
@@ -321,26 +316,83 @@ class PaperOperationalCoreProvenanceReader:
         return version, stored_hash
 
     @staticmethod
-    def _read_strategy_health(conn: sqlite3.Connection, *, strategy_id: str):
+    def _read_strategy_health(
+        conn: sqlite3.Connection,
+        *,
+        strategy_id: str,
+    ) -> _ObservedStrategyHealth:
         row = conn.execute(
             "SELECT * FROM health_state_v2 WHERE entity_kind=? AND entity_id=?",
-            (HealthEntityKind.STRATEGY.value, strategy_id),
+            (_STRATEGY_KIND, strategy_id),
         ).fetchone()
         if row is None:
             raise PaperCoreProvenanceMissing("strategy Health state is missing")
-        try:
-            health = _health_state_from_row(row)
-        except HealthStateConflict as exc:
-            raise PaperCoreProvenanceConflict("strategy Health state integrity failed") from exc
-        if health.state is not HealthState.HEALTHY:
+        entity_kind = row["entity_kind"]
+        entity_id = row["entity_id"]
+        state = row["state"]
+        version = row["version"]
+        distinct_count = row["distinct_quarantine_count"]
+        baseline = row["baseline_fingerprint"]
+        policy = row["policy_fingerprint"]
+        assessment = row["last_assessment_fingerprint"]
+        updated_raw = row["updated_at"]
+        recovery_head = row["recovery_ack_head"]
+        state_hash = row["state_hash"]
+        if entity_kind != _STRATEGY_KIND or entity_id != strategy_id:
+            raise PaperCoreProvenanceConflict("strategy Health row identity mismatch")
+        if state != _HEALTHY:
             raise PaperCoreProvenanceConflict("strategy Health state is not HEALTHY")
-        return health
+        if isinstance(version, bool) or not isinstance(version, int) or version <= 0:
+            raise PaperCoreProvenanceConflict("strategy Health version is invalid")
+        if isinstance(distinct_count, bool) or not isinstance(distinct_count, int) or distinct_count < 0:
+            raise PaperCoreProvenanceConflict("strategy Health quarantine count is invalid")
+        for label, value in (
+            ("baseline", baseline),
+            ("policy", policy),
+            ("assessment", assessment),
+            ("state_hash", state_hash),
+        ):
+            if not isinstance(value, str) or not _HASH_RE.fullmatch(value):
+                raise PaperCoreProvenanceConflict(f"strategy Health {label} hash is invalid")
+        if not isinstance(updated_raw, str) or not isinstance(recovery_head, str) or not recovery_head:
+            raise PaperCoreProvenanceConflict("strategy Health timestamp/recovery evidence is invalid")
+        updated_at = datetime.fromisoformat(updated_raw)
+        if updated_at.tzinfo is None or updated_at.utcoffset() is None:
+            raise PaperCoreProvenanceConflict("strategy Health timestamp must be timezone-aware")
+        payload = {
+            "baseline_fingerprint": baseline,
+            "distinct_quarantine_count": distinct_count,
+            "entity_id": entity_id,
+            "entity_kind": entity_kind,
+            "last_assessment_fingerprint": assessment,
+            "policy_fingerprint": policy,
+            "recovery_ack_head": recovery_head,
+            "state": state,
+            "updated_at": updated_at.isoformat(),
+            "version": version,
+        }
+        calculated = _provenance_hash(payload)
+        if state_hash != calculated:
+            raise PaperCoreProvenanceConflict("strategy Health state integrity failed")
+        return _ObservedStrategyHealth(
+            entity_id=entity_id,
+            state=state,
+            version=version,
+            baseline_fingerprint=baseline,
+            policy_fingerprint=policy,
+            fingerprint=calculated,
+        )
 
     @staticmethod
-    def _read_strategy_bridge(conn: sqlite3.Connection, *, strategy_id: str, health):
+    def _read_strategy_bridge(
+        conn: sqlite3.Connection,
+        *,
+        strategy_id: str,
+        health: _ObservedStrategyHealth,
+    ):
         row = conn.execute(
             "SELECT * FROM health_bridge_state WHERE entity_kind=? AND entity_id=?",
-            (HealthEntityKind.STRATEGY.value, strategy_id),
+            (_STRATEGY_KIND, strategy_id),
         ).fetchone()
         if row is None:
             raise PaperCoreProvenanceMissing("strategy Health Bridge state is missing")
@@ -348,6 +400,8 @@ class PaperOperationalCoreProvenanceReader:
             bridge = _health_bridge_state_from_row(row)
         except HealthBridgeConflict as exc:
             raise PaperCoreProvenanceConflict("strategy Health Bridge integrity failed") from exc
+        if bridge.entity_kind.value != _STRATEGY_KIND or bridge.entity_id != strategy_id:
+            raise PaperCoreProvenanceConflict("strategy Health Bridge row identity mismatch")
         if bridge.mode is not HealthRiskMode.NORMAL or bridge.risk_multiplier != Decimal("1"):
             raise PaperCoreProvenanceConflict("strategy Health Bridge does not allow full new exposure")
         if bridge.health_state_version != health.version:
