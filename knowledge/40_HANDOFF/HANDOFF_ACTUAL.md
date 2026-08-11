@@ -1,6 +1,6 @@
 # HANDOFF ACTUAL — AUTO-TRADE
 
-Fecha: 2026-08-10
+Fecha: 2026-08-11
 Estado: **R4 branch certified; PR #11 integration pending**
 
 ## Base integrada conocida
@@ -11,7 +11,7 @@ Branch: `reconstruction/r4-portfolio-health`
 PR: #11
 Certification basis: `350efd43ac133c95a1997b4a821a2e0bab4afaf2`
 Evidence: `knowledge/60_EVIDENCE/R4_CERTIFICATION.json`
-Result: **480 tests PASS / 86.58% coverage**, 10 contracts, Research/Advisory Authority PASS, Debt Register PASS, Knowledge Contract PASS.
+Result: **479 tests PASS / 86.45% coverage**, 10 contracts, Research/Advisory Authority PASS, Debt Register PASS, Knowledge Contract PASS.
 
 Todos los P0/P1/P2 conocidos de R4 (`TD-R4-001..014`) están CLOSED. Todas las filas requeridas R4 de la capability matrix están PASS.
 
@@ -27,7 +27,7 @@ Todos los P0/P1/P2 conocidos de R4 (`TD-R4-001..014`) están CLOSED. Todas las f
 ## Próxima acción exacta
 1. correr CI final sobre el branch canónico de cierre;
 2. si verde, actualizar PR #11 y marcar ready;
-3. merge squash con expected head SHA;
+3. merge únicamente por decisión explícita y contra el expected head SHA;
 4. recertificar exact merge SHA en `main`;
 5. crear R5 únicamente desde ese `main` verde.
 
