@@ -6,7 +6,7 @@ from decimal import Decimal
 
 import pytest
 
-from autotrade.domain import MarketSnapshot, OrderType, PortfolioSnapshot, Side
+from autotrade.domain import MarketSnapshot, OrderType, Side
 from autotrade.ledger import InMemoryEventLedger
 from autotrade.safety import CapitalSafetyKernel
 
@@ -33,39 +33,43 @@ def evaluate(limits, intent, market, portfolio, now):
     )
 
 
-def portfolio(
+def single_strategy_portfolio(
     empty_portfolio,
     *,
+    strategy_id,
+    symbol="TEST-USD",
     equity="100000",
-    gross="0",
-    net="0",
     position="0",
-    strategy_position=None,
-    strategy_gross=None,
+    other_position="0",
     daily_pnl="0",
     drawdown="0",
 ):
-    pos = D(position)
-    strategy_pos = D(strategy_position if strategy_position is not None else position)
-    strategy_gross_value = D(
-        strategy_gross if strategy_gross is not None else abs(strategy_pos)
-    )
+    own = D(position)
+    other = D(other_position)
+    aggregate = {}
+    strategy_positions = {}
+    if own != 0:
+        aggregate[symbol] = own
+        strategy_positions.setdefault(strategy_id, {})[symbol] = own
+    if other != 0:
+        aggregate["OTHER-USD"] = other
+        strategy_positions.setdefault("other-strategy", {})["OTHER-USD"] = other
+    gross = sum((abs(value) for value in aggregate.values()), D("0"))
+    net = sum(aggregate.values(), D("0"))
+    strategy_gross = {
+        sid: sum((abs(value) for value in values.values()), D("0"))
+        for sid, values in strategy_positions.items()
+    }
     return replace(
         empty_portfolio,
         equity=D(equity),
-        gross_exposure=D(gross),
-        net_exposure=D(net),
+        gross_exposure=gross,
+        net_exposure=net,
         daily_pnl=D(daily_pnl),
         drawdown=D(drawdown),
-        signed_position_notional_by_symbol=(
-            {"TEST-USD": pos} if pos != 0 else {}
-        ),
-        strategy_gross_exposure=(
-            {"strategy-a": strategy_gross_value} if strategy_gross_value != 0 else {}
-        ),
-        strategy_signed_position_notional_by_symbol=(
-            {"strategy-a": {"TEST-USD": strategy_pos}} if strategy_pos != 0 else {}
-        ),
+        signed_position_notional_by_symbol=aggregate,
+        strategy_gross_exposure=strategy_gross,
+        strategy_signed_position_notional_by_symbol=strategy_positions,
     )
 
 
@@ -114,17 +118,14 @@ def test_market_age_exact_boundary_passes_then_stale_and_future_reject(
     assert evaluate(limits, market_buy_intent, future_market, empty_portfolio, now).reason_code == "MARKET_FROM_FUTURE"
 
 
-@pytest.mark.parametrize("field,value", [
-    ("bid", "0"),
-    ("ask", "-1"),
-    ("last", "NaN"),
-    ("last", "Infinity"),
-])
+@pytest.mark.parametrize(
+    "field,value",
+    [("bid", "0"), ("ask", "-1"), ("last", "NaN"), ("last", "Infinity")],
+)
 def test_invalid_market_prices_fail_closed(
     limits, now, empty_portfolio, market_buy_intent, field, value
 ):
-    market = flat_market(now)
-    market = replace(market, **{field: D(value)})
+    market = replace(flat_market(now), **{field: D(value)})
     assert evaluate(limits, market_buy_intent, market, empty_portfolio, now).reason_code == "INVALID_MARKET_PRICE"
 
 
@@ -148,10 +149,9 @@ def test_position_boundary_exact_passes_epsilon_rejects(
         max_net_exposure=D("200000"),
         max_leverage=D("10"),
     )
-    base = portfolio(
+    base = single_strategy_portfolio(
         empty_portfolio,
-        gross="15000",
-        net="15000",
+        strategy_id=market_buy_intent.strategy_id,
         position="15000",
     )
     market = flat_market(now)
@@ -172,12 +172,10 @@ def test_strategy_gross_boundary_exact_passes_epsilon_rejects(
         max_net_exposure=D("200000"),
         max_leverage=D("10"),
     )
-    base = portfolio(
+    base = single_strategy_portfolio(
         empty_portfolio,
-        gross="20000",
-        net="20000",
+        strategy_id=market_buy_intent.strategy_id,
         position="20000",
-        strategy_gross="20000",
     )
     market = flat_market(now)
     exact = replace(market_buy_intent, quantity=D("50"))
@@ -197,7 +195,11 @@ def test_portfolio_gross_boundary_exact_passes_epsilon_rejects(
         max_net_exposure=D("200000"),
         max_leverage=D("10"),
     )
-    base = replace(empty_portfolio, gross_exposure=D("40000"))
+    base = single_strategy_portfolio(
+        empty_portfolio,
+        strategy_id=market_buy_intent.strategy_id,
+        other_position="40000",
+    )
     market = flat_market(now)
     exact = replace(market_buy_intent, quantity=D("100"))
     over = replace(exact, intent_id="g-over", idempotency_key="g-over", quantity=D("100.0001"))
@@ -216,7 +218,11 @@ def test_net_exposure_boundary_exact_passes_epsilon_rejects(
         max_portfolio_gross_exposure=D("200000"),
         max_leverage=D("10"),
     )
-    base = replace(empty_portfolio, gross_exposure=D("20000"), net_exposure=D("20000"))
+    base = single_strategy_portfolio(
+        empty_portfolio,
+        strategy_id=market_buy_intent.strategy_id,
+        other_position="20000",
+    )
     market = flat_market(now)
     exact = replace(market_buy_intent, quantity=D("100"))
     over = replace(exact, intent_id="n-over", idempotency_key="n-over", quantity=D("100.0001"))
@@ -235,7 +241,12 @@ def test_leverage_boundary_exact_passes_epsilon_rejects(
         max_portfolio_gross_exposure=D("200000"),
         max_net_exposure=D("200000"),
     )
-    base = replace(empty_portfolio, equity=D("10000"), gross_exposure=D("10000"))
+    base = single_strategy_portfolio(
+        empty_portfolio,
+        strategy_id=market_buy_intent.strategy_id,
+        equity="10000",
+        other_position="10000",
+    )
     market = flat_market(now)
     exact = replace(market_buy_intent, quantity=D("100"))
     over = replace(exact, intent_id="l-over", idempotency_key="l-over", quantity=D("100.0001"))
@@ -259,10 +270,9 @@ def test_active_circuit_allows_strict_reduction_but_not_flip(
     ledger = InMemoryEventLedger()
     kernel = CapitalSafetyKernel(limits, ledger)
     kernel.activate_circuit(reason="risk breach", now=now)
-    base = portfolio(
+    base = single_strategy_portfolio(
         empty_portfolio,
-        gross="5000",
-        net="5000",
+        strategy_id=market_buy_intent.strategy_id,
         position="5000",
     )
     market = flat_market(now)
@@ -287,17 +297,21 @@ def test_active_circuit_allows_strict_reduction_but_not_flip(
     assert flip.risk_reducing is False
 
 
-def test_invalid_portfolio_numbers_and_internal_gross_inconsistency_fail_closed(
+def test_internally_inconsistent_portfolio_snapshot_fails_closed(
     limits, now, empty_portfolio, market_buy_intent
 ):
     market = flat_market(now)
     invalid_equity = replace(empty_portfolio, equity=D("NaN"))
     assert evaluate(limits, market_buy_intent, market, invalid_equity, now).reason_code == "INVALID_PORTFOLIO_SNAPSHOT"
 
-    inconsistent = portfolio(
+    inconsistent = replace(
         empty_portfolio,
-        gross="100",
-        net="500",
-        position="500",
+        gross_exposure=D("100"),
+        net_exposure=D("500"),
+        signed_position_notional_by_symbol={"TEST-USD": D("500")},
+        strategy_gross_exposure={market_buy_intent.strategy_id: D("500")},
+        strategy_signed_position_notional_by_symbol={
+            market_buy_intent.strategy_id: {"TEST-USD": D("500")}
+        },
     )
     assert evaluate(limits, market_buy_intent, market, inconsistent, now).reason_code == "INVALID_PORTFOLIO_SNAPSHOT"

@@ -65,14 +65,23 @@ class ReconciliationEngine:
         issues: list[ReconciliationIssue] = []
         recovered: list[str] = []
 
+        # R2 recovery rule: every order that has reached the broker is eligible
+        # for projection repair, including already-terminal local orders. This
+        # closes the crash window where OMS/fill evidence committed but the
+        # process died before portfolio projection/reservation release.
         for order in self._oms.all_orders():
-            if not order.status.broker_open:
+            if order.status is OrderStatus.VALIDATED:
                 continue
             execution = self._broker.get_execution(order.order_id)
             if execution is None:
+                code = (
+                    "UNRESOLVED_BROKER_OPEN_ORDER"
+                    if order.status.broker_open
+                    else "TERMINAL_ORDER_MISSING_AT_BROKER"
+                )
                 issues.append(
                     ReconciliationIssue(
-                        "UNRESOLVED_BROKER_OPEN_ORDER",
+                        code,
                         f"order {order.order_id} has no authoritative broker execution snapshot",
                     )
                 )
@@ -89,11 +98,14 @@ class ReconciliationEngine:
                     self._portfolio_store.apply_fills(final, fills, now=now)
                 reservation_status = _reservation_status_for_order(final)
                 try:
+                    before = self._reservations.get(final.intent.idempotency_key)
                     self._reservations.set_status(
                         idempotency_key=final.intent.idempotency_key,
                         status=reservation_status,
                         now=now,
                     )
+                    if before is not None and before.status is not reservation_status:
+                        recovered.append(final.order_id)
                 except KeyError:
                     issues.append(
                         ReconciliationIssue(
@@ -101,7 +113,10 @@ class ReconciliationEngine:
                             f"order {final.order_id} has no durable risk reservation",
                         )
                     )
-                recovered.append(final.order_id)
+                # A state transition, fill replay or projection repair is a
+                # meaningful recovery. Deduplication occurs at result build.
+                if final != order or fills:
+                    recovered.append(final.order_id)
             except (BrokerStateConflict, FillIntegrityConflict, ValueError) as exc:
                 issues.append(
                     ReconciliationIssue(

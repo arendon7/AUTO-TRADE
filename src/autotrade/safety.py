@@ -412,4 +412,52 @@ def _validate_portfolio(portfolio: PortfolioSnapshot) -> str | None:
         return "drawdown cannot be negative"
     if portfolio.open_orders < 0:
         return "open_orders cannot be negative"
+
+    zero = Decimal("0")
+    aggregate_positions = dict(portfolio.signed_position_notional_by_symbol)
+    for symbol, value in aggregate_positions.items():
+        if not symbol.strip():
+            return "position symbol is empty"
+        if not _finite(value):
+            return f"position {symbol} is not finite"
+    calculated_gross = sum((abs(value) for value in aggregate_positions.values()), start=zero)
+    calculated_net = sum(aggregate_positions.values(), start=zero)
+    if calculated_gross != portfolio.gross_exposure:
+        return (
+            "gross_exposure does not match position map: "
+            f"declared={portfolio.gross_exposure},calculated={calculated_gross}"
+        )
+    if calculated_net != portfolio.net_exposure:
+        return (
+            "net_exposure does not match position map: "
+            f"declared={portfolio.net_exposure},calculated={calculated_net}"
+        )
+
+    strategy_positions = portfolio.strategy_signed_position_notional_by_symbol
+    for strategy, values in strategy_positions.items():
+        if not strategy.strip():
+            return "strategy id is empty"
+        calculated = zero
+        for symbol, value in values.items():
+            if not symbol.strip():
+                return f"strategy {strategy} contains empty symbol"
+            if not _finite(value):
+                return f"strategy {strategy}/{symbol} position is not finite"
+            calculated += abs(value)
+        declared = portfolio.strategy_gross_exposure.get(strategy)
+        if declared is None:
+            return f"strategy {strategy} is missing gross exposure"
+        if not _finite(declared) or declared < 0:
+            return f"strategy {strategy} gross exposure is invalid"
+        if declared != calculated:
+            return (
+                f"strategy {strategy} gross exposure mismatch: "
+                f"declared={declared},calculated={calculated}"
+            )
+
+    for strategy, declared in portfolio.strategy_gross_exposure.items():
+        if not _finite(declared) or declared < 0:
+            return f"strategy {strategy} gross exposure is invalid"
+        if strategy not in strategy_positions and declared != 0:
+            return f"strategy {strategy} gross exposure has no position map"
     return None
