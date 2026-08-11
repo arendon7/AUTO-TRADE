@@ -16,6 +16,8 @@ Branch activa: `reconstruction/r6-external-paper-protection`.
 - `TD-R6-007` — unsupported products/protection modes fail closed.
 - `TD-R6-008` — permanent PAPER-only/LIVE-deny authority boundary.
 - `TD-R6-010` — **CLOSED** — OMS-owned external PAPER handoff certified; no direct OrderStore status mutation.
+- `TD-R6-011` — durable explicit human final PAPER execution decision; no AI/research/application-default authority.
+- `TD-R6-012` — crash-safe same-attempt resume after one-shot authorization consumption.
 
 ## Orden de implementación
 1. PAPER gateway policy + account/environment attestation, **without submit path enabled**;
@@ -25,8 +27,10 @@ Branch activa: `reconstruction/r6-external-paper-protection`.
 5. PAPER trade_updates ingestion/correlation;
 6. qualification evidence store and reconciliation proofs;
 7. OMS-owned external PAPER handoff: durable `VALIDATED -> SUBMITTING` without internal-broker I/O or direct store mutation;
-8. bounded external PAPER evidence only after all prior gates are green; `TD-R6-010` is certified CLOSED;
-9. adversarial certification + debt closure.
+8. integrated manual single-shot canary coordinator that stops before network I/O;
+9. durable explicit human execution decision + crash-safe same-attempt resume (`TD-R6-011/012`);
+10. bounded external PAPER evidence only after all prior gates are green and an explicit final operator decision exists;
+11. adversarial certification + debt closure.
 
 ## Negative tests obligatorios para R6
 - gateway disabled by default => zero network and zero order submission;
@@ -46,12 +50,14 @@ Branch activa: `reconstruction/r6-external-paper-protection`.
 - crypto/unknown product bracket, OCO or OTO => fail closed; R6 crypto remains simple-order only;
 - PAPER `trade_updates` wrong host/auth, malformed/binary decode failure, event gap/order mismatch/disconnect ambiguity => protection evidence FAIL;
 - no R6 source may contain/use LIVE trading host or convert PAPER qualification into LIVE authority;
+- missing/stale/mismatched/replayed operator decision, or decision not bound to exact bracket/submission/account/attempt => zero POST;
+- crash after same-attempt authorization consumption but before durable UNKNOWN => exact same-attempt resume only; different attempt or any UNKNOWN => reconciliation-only;
 - AI/research output is never an execution authorization; Safety + OMS remain mandatory deterministic authority.
 
 ## Restricciones
 - Coverage gate >=85% intacto.
 - No reduce/relax negative tests to close R6.
-- No external PAPER submit until gateway + ambiguity + canary + authority gates are implemented and green, and `TD-R6-010` proves the OMS-owned external handoff.
+- No external PAPER submit until gateway + ambiguity + canary + authority gates are green, `TD-R6-010` proves the OMS-owned handoff, and `TD-R6-011/012` prove explicit operator authority plus crash-safe one-shot semantics.
 - Any real PAPER test must be explicitly enabled, bounded and evidenced; no unbounded loops or broad market activity.
 - `TD-OPS-001` remains visible; never fabricate Graphify.
 - No profitability claim from paper simulation.

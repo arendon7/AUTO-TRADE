@@ -710,6 +710,26 @@
       "severity": "P1",
       "status": "CLOSED",
       "track": "R6"
+    },
+    {
+      "area": "Durable explicit human final PAPER execution decision",
+      "evidence": [],
+      "id": "TD-R6-011",
+      "next_action": "Add a tamper-evident, short-lived, one-shot operator decision bound to the exact prepared PAPER canary: operator identity/action, PAPER account attestation, order/client_order_id, submission binding, bracket payload hash, canary approval, notional, expiry and attempt identity. The external writer must require and consume this decision before any POST. AI/research/application defaults cannot mint or substitute operator authority; missing, stale, mismatched, replayed or non-PAPER decisions must produce zero network I/O.",
+      "resolution": "",
+      "severity": "P1",
+      "status": "OPEN",
+      "track": "R6"
+    },
+    {
+      "area": "Crash-safe same-attempt resume after one-shot authorization consumption",
+      "evidence": [],
+      "id": "TD-R6-012",
+      "next_action": "Align writer restart semantics with the durable one-shot permit/decision ledgers. If a crash occurs after the same attempt consumes authorization but before UNKNOWN is persisted, PREPARED + same-attempt CONSUMED may resume only through the exact frozen identities and fresh guards. Any UNKNOWN state, different attempt, conflicting evidence, or uncertainty about whether POST could have happened remains reconciliation-only and must never blind retry.",
+      "resolution": "",
+      "severity": "P1",
+      "status": "OPEN",
+      "track": "R6"
     }
   ],
   "registry_version": 1
