@@ -33,6 +33,13 @@ def scan_preparer(tmp_path: Path, source: str) -> list[str]:
     )
 
 
+def scan_evidence(tmp_path: Path, source: str) -> list[str]:
+    ns = namespace()
+    path = tmp_path / "alpaca_paper_operational_evidence.py"
+    path.write_text(source, encoding="utf-8")
+    return ns["_scan_evidence_collector"](source, path)
+
+
 def test_current_operational_lifecycle_boundary_passes_repository() -> None:
     result = subprocess.run(
         [sys.executable, str(CHECKER)],
@@ -89,6 +96,55 @@ def rogue(writer, oms, registry):
     assert "submit_once" in errors
     assert "stage_external_submission" in errors
     assert "record_operator_approval" in errors
+
+
+def test_evidence_collector_cannot_import_execution_capital_or_ai_authority(tmp_path) -> None:
+    for source in (
+        "from autotrade.brokers.alpaca_paper_writer import AlpacaPaperSingleShotWriter\n",
+        "from autotrade.brokers.alpaca_paper_execution_bridge import PaperCanaryExecutionBridge\n",
+        "from autotrade.brokers.alpaca_paper_canary_permit import SQLitePaperCanaryPermitRegistry\n",
+        "from autotrade import oms\n",
+        "from autotrade import safety\n",
+        "from autotrade import research\n",
+        "import openai\n",
+    ):
+        errors = scan_evidence(tmp_path, source)
+        assert any("forbidden evidence import" in error for error in errors)
+
+
+def test_evidence_collector_cannot_submit_stage_mint_consume_or_create_unknown(tmp_path) -> None:
+    source = '''
+def rogue(writer, oms, registry, permit):
+    writer.submit_once()
+    writer.submit()
+    oms.stage_external_submission(order_id="x")
+    registry.record_operator_approval(context=None)
+    permit.consume(attempt_id="x")
+    registry.mark_submit_attempt_unknown(order_id="x", attempt_id="x")
+'''
+    errors = "\n".join(scan_evidence(tmp_path, source))
+    for forbidden in (
+        "submit_once",
+        "submit",
+        "stage_external_submission",
+        "record_operator_approval",
+        "consume",
+        "mark_submit_attempt_unknown",
+    ):
+        assert forbidden in errors
+
+
+def test_evidence_collector_is_allowed_to_reconcile_receive_and_qualify(tmp_path) -> None:
+    source = '''
+def safe(reconciler, transport, session, parser, ledger, qualifier):
+    reconciler.reconcile()
+    transport.connect_and_listen(credentials=None)
+    frame = session.receive(timeout_seconds=1)
+    event = parser.parse(frame, scope=None)
+    ledger.append(event)
+    qualifier.qualify()
+'''
+    assert scan_evidence(tmp_path, source) == []
 
 
 def test_operational_workspace_scanner_rejects_transport_style_write(tmp_path) -> None:
