@@ -7,18 +7,14 @@ from enum import StrEnum
 from threading import RLock
 from typing import Protocol
 
-from .domain import OrderRecord, PortfolioSnapshot
+from .domain import Fill, OrderRecord, PortfolioSnapshot
 
 
 class OrderStore(Protocol):
     def get_by_idempotency_key(self, key: str) -> OrderRecord | None: ...
-
     def get_by_order_id(self, order_id: str) -> OrderRecord | None: ...
-
     def create_if_absent(self, order: OrderRecord) -> tuple[bool, OrderRecord]: ...
-
     def update(self, order: OrderRecord) -> None: ...
-
     def all_orders(self) -> tuple[OrderRecord, ...]: ...
 
 
@@ -72,9 +68,7 @@ class SafetyControlState:
 
 class SafetyStateStore(Protocol):
     def get(self) -> SafetyControlState: ...
-
     def activate(self, *, reason: str, now: datetime) -> SafetyControlState: ...
-
     def reset(self, *, now: datetime) -> SafetyControlState: ...
 
 
@@ -120,32 +114,25 @@ class PortfolioNotInitialized(RuntimeError):
 
 class PortfolioStore(Protocol):
     def initialize(self, snapshot: PortfolioSnapshot, *, now: datetime) -> VersionedPortfolioSnapshot: ...
-
     def get(self) -> VersionedPortfolioSnapshot: ...
-
     def compare_and_set(
-        self,
-        *,
-        expected_version: int,
-        snapshot: PortfolioSnapshot,
-        now: datetime,
+        self, *, expected_version: int, snapshot: PortfolioSnapshot, now: datetime
     ) -> VersionedPortfolioSnapshot | None: ...
-
     def set_reconciliation_status(
-        self,
-        *,
-        reconciliation_ok: bool,
-        broker_state_known: bool,
-        now: datetime,
+        self, *, reconciliation_ok: bool, broker_state_known: bool, now: datetime
     ) -> VersionedPortfolioSnapshot: ...
-
     def apply_order_result(self, order: OrderRecord, *, now: datetime) -> VersionedPortfolioSnapshot: ...
+    def apply_fills(
+        self, order: OrderRecord, fills: tuple[Fill, ...], *, now: datetime
+    ) -> VersionedPortfolioSnapshot: ...
 
 
 class InMemoryPortfolioStore:
     def __init__(self) -> None:
         self._current: VersionedPortfolioSnapshot | None = None
         self._applied_order_ids: set[str] = set()
+        self._applied_fill_ids: set[str] = set()
+        self._orders_with_fill_events: set[str] = set()
         self._lock = RLock()
 
     def initialize(self, snapshot: PortfolioSnapshot, *, now: datetime) -> VersionedPortfolioSnapshot:
@@ -200,14 +187,57 @@ class InMemoryPortfolioStore:
             return self._current
 
     def apply_order_result(self, order: OrderRecord, *, now: datetime) -> VersionedPortfolioSnapshot:
+        """Foundation compatibility path.
+
+        New R2 execution uses apply_fills. Mixing both paths for one order is
+        blocked to avoid double accounting.
+        """
         del now
         with self._lock:
             current = self.get()
-            if order.order_id in self._applied_order_ids or order.filled_quantity <= 0:
+            if (
+                order.order_id in self._applied_order_ids
+                or order.order_id in self._orders_with_fill_events
+                or order.filled_quantity <= 0
+            ):
                 return current
             updated = apply_fill_to_portfolio(current.snapshot, order)
             self._applied_order_ids.add(order.order_id)
             self._current = VersionedPortfolioSnapshot(version=current.version + 1, snapshot=updated)
+            return self._current
+
+    def apply_fills(
+        self,
+        order: OrderRecord,
+        fills: tuple[Fill, ...],
+        *,
+        now: datetime,
+    ) -> VersionedPortfolioSnapshot:
+        del now
+        with self._lock:
+            current = self.get()
+            if order.order_id in self._applied_order_ids:
+                return current
+            snapshot = current.snapshot
+            changed = False
+            batch_seen: set[str] = set()
+            for fill in sorted(fills, key=lambda value: (value.occurred_at, value.fill_id)):
+                _validate_fill_for_order(fill=fill, order=order)
+                if fill.fill_id in batch_seen or fill.fill_id in self._applied_fill_ids:
+                    continue
+                batch_seen.add(fill.fill_id)
+                incremental = replace(
+                    order,
+                    filled_quantity=fill.quantity,
+                    average_fill_price=fill.price,
+                )
+                snapshot = apply_fill_to_portfolio(snapshot, incremental)
+                self._applied_fill_ids.add(fill.fill_id)
+                self._orders_with_fill_events.add(order.order_id)
+                changed = True
+            if not changed:
+                return current
+            self._current = VersionedPortfolioSnapshot(version=current.version + 1, snapshot=snapshot)
             return self._current
 
 
@@ -248,7 +278,6 @@ class ReservationConflict(RuntimeError):
 
 class ReservationStore(Protocol):
     def active_view(self) -> ReservationView: ...
-
     def reserve(
         self,
         reservation: RiskReservation,
@@ -256,15 +285,9 @@ class ReservationStore(Protocol):
         expected_generation: int,
         expected_portfolio_version: int,
     ) -> RiskReservation: ...
-
     def set_status(
-        self,
-        *,
-        idempotency_key: str,
-        status: ReservationStatus,
-        now: datetime,
+        self, *, idempotency_key: str, status: ReservationStatus, now: datetime
     ) -> RiskReservation: ...
-
     def get(self, idempotency_key: str) -> RiskReservation | None: ...
 
 
@@ -277,7 +300,11 @@ class InMemoryReservationStore:
 
     def active_view(self) -> ReservationView:
         with self._lock:
-            active = tuple(r for r in self._by_key.values() if r.status is not ReservationStatus.RELEASED)
+            active = tuple(
+                reservation
+                for reservation in self._by_key.values()
+                if reservation.status is not ReservationStatus.RELEASED
+            )
             return ReservationView(generation=self._generation, reservations=active)
 
     def reserve(
@@ -320,6 +347,19 @@ class InMemoryReservationStore:
     def get(self, idempotency_key: str) -> RiskReservation | None:
         with self._lock:
             return self._by_key.get(idempotency_key)
+
+
+def _validate_fill_for_order(*, fill: Fill, order: OrderRecord) -> None:
+    if fill.order_id != order.order_id:
+        raise ValueError("fill order_id mismatch")
+    if fill.symbol != order.intent.symbol or fill.side is not order.intent.side:
+        raise ValueError("fill instrument/side mismatch")
+    if not fill.fill_id.strip():
+        raise ValueError("fill_id is required")
+    if not fill.quantity.is_finite() or fill.quantity <= 0:
+        raise ValueError("invalid fill quantity")
+    if not fill.price.is_finite() or fill.price <= 0:
+        raise ValueError("invalid fill price")
 
 
 def apply_fill_to_portfolio(snapshot: PortfolioSnapshot, order: OrderRecord) -> PortfolioSnapshot:
