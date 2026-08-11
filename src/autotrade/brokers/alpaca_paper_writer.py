@@ -283,20 +283,6 @@ class AlpacaPaperSingleShotWriter:
         if unknown.status is not PaperSubmissionStatus.UNKNOWN:
             raise PaperWriterBlocked("submission failed to persist UNKNOWN before PAPER POST")
 
-        try:
-            pre_io_guard = final_guard.authorize(
-                approval=approval,
-                expected_bracket=expected_bracket,
-                submission_registry=submission_registry,
-                now=now,
-                phase=PaperFinalWritePhase.PRE_IO,
-                expected_attempt_id=attempt_id,
-            )
-        except PaperFinalWriteBlocked as exc:
-            # UNKNOWN is intentionally retained. No POST occurred; only reconciliation
-            # may resolve whether any external order exists.
-            raise PaperWriterBlocked(f"final PRE_IO guard rejected: {exc}") from exc
-
         request = AlpacaPaperWriteRequest(
             method="POST",
             url=f"{self._config.base_url}{PAPER_ORDER_PATH}",
@@ -311,6 +297,21 @@ class AlpacaPaperSingleShotWriter:
             body=expected_bracket.payload_json.encode("utf-8"),
         )
         _validate_write_request(request)
+
+        try:
+            pre_io_guard = final_guard.authorize(
+                approval=approval,
+                expected_bracket=expected_bracket,
+                submission_registry=submission_registry,
+                now=now,
+                phase=PaperFinalWritePhase.PRE_IO,
+                expected_attempt_id=attempt_id,
+                previous_attestation=pre_consume_guard,
+            )
+        except PaperFinalWriteBlocked as exc:
+            # UNKNOWN is intentionally retained. No POST occurred; only reconciliation
+            # may resolve whether any external order exists.
+            raise PaperWriterBlocked(f"final PRE_IO guard rejected: {exc}") from exc
 
         # Exactly one transport invocation. There is intentionally no retry loop.
         response = self._transport.write(request)

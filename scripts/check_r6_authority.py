@@ -201,6 +201,13 @@ def _validate_network_roles() -> list[str]:
             )
         if "final_guard: PaperFinalWriteGuard" not in text:
             errors.append("writer: authoritative PaperFinalWriteGuard parameter is required")
+        if "previous_attestation=pre_consume_guard" not in text:
+            errors.append("writer: PRE_IO must be chained to actual PRE_CONSUME attestation")
+        request_validation = text.find("_validate_write_request(request)")
+        if not 0 <= request_validation < pre_io < transport_write:
+            errors.append(
+                "writer: PRE_IO must occur after request validation and immediately before transport write"
+            )
 
     return errors
 

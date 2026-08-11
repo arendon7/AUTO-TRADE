@@ -162,7 +162,13 @@ def setup(tmp_path, *, health_mode=HealthRiskMode.NORMAL):
     return current_order, expected, registry, binding, approval, orders, safety, portfolio, guard
 
 
-def authorize(values, *, phase=PaperFinalWritePhase.PRE_CONSUME, attempt_id=None):
+def authorize(
+    values,
+    *,
+    phase=PaperFinalWritePhase.PRE_CONSUME,
+    attempt_id=None,
+    previous_attestation=None,
+):
     current_order, expected, registry, binding, approval, orders, safety, portfolio, guard = values
     return guard.authorize(
         approval=approval,
@@ -171,6 +177,7 @@ def authorize(values, *, phase=PaperFinalWritePhase.PRE_CONSUME, attempt_id=None
         now=NOW + timedelta(seconds=1),
         phase=phase,
         expected_attempt_id=attempt_id,
+        previous_attestation=previous_attestation,
     )
 
 
@@ -257,6 +264,7 @@ def test_other_attempted_or_unknown_submission_exhausts_first_canary_budget(tmp_
 
 def test_pre_io_requires_same_durable_attempt_identity(tmp_path):
     values = setup(tmp_path)
+    predecessor = authorize(values)
     registry = values[2]
     registry.mark_submit_attempt_unknown(
         order_id=values[0].order_id,
@@ -267,13 +275,16 @@ def test_pre_io_requires_same_durable_attempt_identity(tmp_path):
         values,
         phase=PaperFinalWritePhase.PRE_IO,
         attempt_id="expected-attempt",
+        previous_attestation=predecessor,
     )
     assert attested.submission_status.value == "UNKNOWN"
+    assert attested.previous_attestation_hash == predecessor.attestation_hash
     with pytest.raises(PaperFinalWriteBlocked, match="attempt_id"):
         authorize(
             values,
             phase=PaperFinalWritePhase.PRE_IO,
             attempt_id="different-attempt",
+            previous_attestation=predecessor,
         )
 
 

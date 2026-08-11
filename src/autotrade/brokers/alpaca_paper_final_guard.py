@@ -66,6 +66,7 @@ class PaperFinalWriteAttestation:
     submission_event_sequence: int
     submission_head_hash: str
     submission_control_hash: str
+    previous_attestation_hash: str | None
     observed_at: datetime
     attestation_hash: str
 
@@ -88,6 +89,14 @@ class PaperFinalWriteAttestation:
             raise ValueError("portfolio_version must be > 0")
         if self.submission_event_sequence <= 0:
             raise ValueError("submission_event_sequence must be > 0")
+        if self.phase is PaperFinalWritePhase.PRE_CONSUME:
+            if self.previous_attestation_hash is not None:
+                raise ValueError("PRE_CONSUME cannot have previous_attestation_hash")
+        else:
+            if self.previous_attestation_hash is None or not _HASH_RE.fullmatch(
+                self.previous_attestation_hash
+            ):
+                raise ValueError("PRE_IO requires previous_attestation_hash")
         _require_aware(self.observed_at, "observed_at")
 
 
@@ -130,6 +139,7 @@ class PaperFinalWriteGuard:
         now: datetime,
         phase: PaperFinalWritePhase,
         expected_attempt_id: str | None = None,
+        previous_attestation: PaperFinalWriteAttestation | None = None,
     ) -> PaperFinalWriteAttestation:
         _require_aware(now, "now")
         if not isinstance(phase, PaperFinalWritePhase):
@@ -223,6 +233,8 @@ class PaperFinalWriteGuard:
         if phase is PaperFinalWritePhase.PRE_CONSUME:
             if expected_attempt_id is not None:
                 reasons.append("PRE_CONSUME must not carry expected_attempt_id")
+            if previous_attestation is not None:
+                reasons.append("PRE_CONSUME must not carry previous_attestation")
             if submission.status is not PaperSubmissionStatus.PREPARED:
                 reasons.append("PRE_CONSUME requires PREPARED submission state")
             if submission.attempt_count != 0:
@@ -232,6 +244,31 @@ class PaperFinalWriteGuard:
         else:
             if not expected_attempt_id:
                 reasons.append("PRE_IO requires expected_attempt_id")
+            if previous_attestation is None:
+                reasons.append("PRE_IO requires the actual PRE_CONSUME attestation")
+            else:
+                if previous_attestation.phase is not PaperFinalWritePhase.PRE_CONSUME:
+                    reasons.append("PRE_IO predecessor must be PRE_CONSUME")
+                if previous_attestation.approval_hash != approval.approval_hash:
+                    reasons.append("PRE_IO predecessor approval hash mismatch")
+                if previous_attestation.order_id != approval.order_id:
+                    reasons.append("PRE_IO predecessor order_id mismatch")
+                if previous_attestation.client_order_id != approval.client_order_id:
+                    reasons.append("PRE_IO predecessor client_order_id mismatch")
+                if previous_attestation.binding_hash != binding.fingerprint:
+                    reasons.append("PRE_IO predecessor binding hash mismatch")
+                if previous_attestation.risk_decision_id != approval.risk_decision_id:
+                    reasons.append("PRE_IO predecessor risk_decision_id mismatch")
+                if previous_attestation.observed_at > observed_at:
+                    reasons.append("PRE_IO observation cannot precede PRE_CONSUME")
+                if previous_attestation.safety_state_version != safety.version:
+                    reasons.append("Safety state version changed between PRE_CONSUME and PRE_IO")
+                if previous_attestation.portfolio_version != versioned_portfolio.version:
+                    reasons.append("Portfolio State version changed between PRE_CONSUME and PRE_IO")
+                if previous_attestation.strategy_health_fingerprint != health.strategy_state_fingerprint:
+                    reasons.append("strategy Health evidence changed between PRE_CONSUME and PRE_IO")
+                if previous_attestation.portfolio_health_fingerprint != health.portfolio_state_fingerprint:
+                    reasons.append("portfolio Health evidence changed between PRE_CONSUME and PRE_IO")
             if submission.status is not PaperSubmissionStatus.UNKNOWN:
                 reasons.append("PRE_IO requires durable UNKNOWN before network I/O")
             if submission.attempt_count != 1:
@@ -267,6 +304,11 @@ class PaperFinalWriteGuard:
             "submission_event_sequence": submission.event_sequence,
             "submission_head_hash": submission.event_head_hash,
             "submission_status": submission.status.value,
+            "previous_attestation_hash": (
+                previous_attestation.attestation_hash
+                if previous_attestation is not None
+                else None
+            ),
         }
         attestation_hash = sha256(
             json.dumps(payload, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
@@ -290,6 +332,11 @@ class PaperFinalWriteGuard:
             submission_event_sequence=submission.event_sequence,
             submission_head_hash=submission.event_head_hash,
             submission_control_hash=submission.control_hash,
+            previous_attestation_hash=(
+                previous_attestation.attestation_hash
+                if previous_attestation is not None
+                else None
+            ),
             observed_at=observed_at,
             attestation_hash=attestation_hash,
         )
