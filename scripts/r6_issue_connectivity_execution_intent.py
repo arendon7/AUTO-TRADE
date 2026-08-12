@@ -8,10 +8,10 @@ from pathlib import Path
 import sys
 
 from autotrade.brokers.alpaca_paper_operational import PaperOperationalWorkspace
-from autotrade.connectivity_execution_intent import (
-    ConnectivityExecutionIntentBridge,
-    ConnectivityExecutionIntentError,
-    connectivity_execution_intent_challenge,
+from autotrade.connectivity_operator_review import (
+    ConnectivityOperatorReviewError,
+    ConnectivityReviewedExecutionIntentBridge,
+    reviewed_execution_intent_challenge,
 )
 
 _WRITE_ENV = "R6_EXTERNAL_PAPER_WRITE"
@@ -24,8 +24,9 @@ MAX_TTL_SECONDS = 90
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
-            "Record the second explicit human intent for one bounded CONNECTIVITY_CANARY attempt. "
-            "This command is credential-free, performs no broker I/O, does not stage OMS and cannot POST."
+            "Record the second explicit human intent for one bounded CONNECTIVITY_CANARY attempt, "
+            "cryptographically bound to the frozen operator review receipt. This command is credential-free, "
+            "performs no broker I/O, does not stage OMS and cannot POST."
         )
     )
     parser.add_argument("--workspace", required=True, type=Path)
@@ -54,7 +55,8 @@ def _ttl(value: int) -> int:
     return value
 
 
-def _summary(context) -> str:
+def _summary(context, receipt) -> str:
+    body = receipt.body
     return "\n".join(
         (
             "R6 CONNECTIVITY_CANARY — SECOND HUMAN EXECUTION INTENT",
@@ -62,10 +64,18 @@ def _summary(context) -> str:
             "Purpose: CONNECTIVITY_CANARY (NOT strategy trading)",
             f"Order ID: {context.order_id}",
             f"Client order ID: {context.client_order_id}",
-            f"Notional: USD {context.notional}",
+            f"Review receipt: {receipt.receipt_hash}",
+            f"Symbol: {body['symbol']}",
+            f"Side / quantity / type: {body['side']} {body['quantity']} {body['order_type']}",
+            f"Parent LIMIT: USD {body['limit_price']}",
+            f"Take profit: USD {body['take_profit_price']}",
+            f"Stop loss: USD {body['stop_loss_price']}",
+            f"Notional: USD {body['notional']} (cap USD {body['effective_notional_cap']})",
+            f"Reviewed market bid/ask/last: {body['market_bid']} / {body['market_ask']} / {body['market_last']}",
+            f"Reviewed flat account: positions={body['flat_position_count']}, open_orders={body['flat_open_order_count']}",
             "Budget: at most ONE future external POST attempt, only if all later gates pass.",
             "This confirmation itself does NOT stage OMS and does NOT authorize POST.",
-            "After confirmation, inline Final Freshness (5 GETs + real Safety) is still mandatory.",
+            "Initial reviewed evidence may age; after confirmation, Final Freshness reacquires 5 GETs and real Safety.",
         )
     )
 
@@ -78,15 +88,15 @@ def main(argv: list[str] | None = None) -> int:
     if not sys.stdin.isatty() or not sys.stdout.isatty():
         raise SystemExit("execution intent requires an interactive TTY")
 
-    bridge = ConnectivityExecutionIntentBridge(workspace)
+    bridge = ConnectivityReviewedExecutionIntentBridge(workspace)
     first_checked_at = datetime.now(timezone.utc)
     try:
-        context = bridge.prepare_context(now=first_checked_at)
-    except (ConnectivityExecutionIntentError, TypeError, ValueError) as exc:
-        raise SystemExit(f"execution intent context is not eligible: {exc}") from exc
+        context, receipt = bridge.prepare(now=first_checked_at)
+    except (ConnectivityOperatorReviewError, TypeError, ValueError) as exc:
+        raise SystemExit(f"reviewed execution intent context is not eligible: {exc}") from exc
 
-    print(_summary(context))
-    challenge = connectivity_execution_intent_challenge(context)
+    print(_summary(context, receipt))
+    challenge = reviewed_execution_intent_challenge(context, receipt)
     print(f"Type exactly: {challenge}")
     if input("> ") != challenge:
         raise SystemExit("execution intent challenge did not match; no authority recorded")
@@ -94,14 +104,15 @@ def main(argv: list[str] | None = None) -> int:
     issued_at = datetime.now(timezone.utc)
     expires_at = issued_at + timedelta(seconds=ttl_seconds)
     try:
-        state = bridge.issue(
+        state, review_binding = bridge.issue(
             context=context,
+            receipt_hash=receipt.receipt_hash,
             operator_id=args.operator_id,
             issued_at=issued_at,
             expires_at=expires_at,
         )
-    except (ConnectivityExecutionIntentError, TypeError, ValueError) as exc:
-        raise SystemExit(f"execution intent was not recorded: {exc}") from exc
+    except (ConnectivityOperatorReviewError, TypeError, ValueError) as exc:
+        raise SystemExit(f"reviewed execution intent was not recorded: {exc}") from exc
 
     print(
         json.dumps(
@@ -109,6 +120,8 @@ def main(argv: list[str] | None = None) -> int:
                 "status": state.status.value,
                 "purpose": "CONNECTIVITY_CANARY",
                 "decision_hash": state.decision.decision_hash,
+                "operator_review_receipt_hash": receipt.receipt_hash,
+                "execution_review_binding_hash": review_binding.binding_hash,
                 "operator_id": state.decision.operator_id,
                 "issued_at": state.decision.issued_at.isoformat(),
                 "expires_at": state.decision.expires_at.isoformat(),
@@ -119,7 +132,7 @@ def main(argv: list[str] | None = None) -> int:
                 "external_order_submitted": False,
                 "capital_authority": "NONE",
                 "live_trading": "BLOCKED",
-                "next_action": "INLINE_FINAL_FRESHNESS_REQUIRED",
+                "next_action": "REVIEWED_BOUND_FINAL_FRESHNESS_REQUIRED",
             },
             sort_keys=True,
         )
