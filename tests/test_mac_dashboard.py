@@ -8,6 +8,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 MODULE_PATH = ROOT / "scripts/mac_dashboard.py"
+HTML_PATH = ROOT / "web/mac_dashboard.html"
 SPEC = importlib.util.spec_from_file_location("mac_dashboard_under_test", MODULE_PATH)
 assert SPEC is not None and SPEC.loader is not None
 dashboard = importlib.util.module_from_spec(SPEC)
@@ -102,3 +103,40 @@ def test_redaction_removes_credentials_from_captured_output() -> None:
 def test_dashboard_refuses_non_localhost_bind() -> None:
     with pytest.raises(dashboard.DashboardError, match="127.0.0.1"):
         dashboard._start_server("0.0.0.0", 0)
+
+
+def test_dashboard_guides_first_use_and_prevents_out_of_order_clicks() -> None:
+    html = HTML_PATH.read_text(encoding="utf-8")
+    for anchor in (
+        "Empieza aquí",
+        "Probar la app sin broker",
+        "Alpaca PAPER, sólo lectura",
+        "Strategy Lab",
+        "TradingView no es necesario para R6",
+        "friendlyError",
+        "account_attestation.json",
+        "connectivity_candidate.json",
+        "applyGuards",
+        "Completa primero el paso indicado como SIGUIENTE",
+        "PRUEBA LOCAL TERMINADA",
+    ):
+        assert anchor in html
+    assert 'const steps=["init_workspace","doctor","safety_rehearsal"]' in html
+    assert 'currentGate()' in html
+    assert 'c===gate' in html
+
+
+def test_dashboard_keeps_technical_diagnostics_secondary_and_safe() -> None:
+    html = HTML_PATH.read_text(encoding="utf-8")
+    assert "Actividad entendible" in html
+    assert "Diagnóstico técnico" in html
+    assert "fuera del dashboard" in html
+    assert "NO DISPONIBLE" in html
+    assert "Las credenciales no se guardan" in html
+    for forbidden in (
+        "localStorage",
+        "sessionStorage",
+        "r6_execute_paper_canary",
+        "r6_connectivity_bound_final_freshness",
+    ):
+        assert forbidden not in html
