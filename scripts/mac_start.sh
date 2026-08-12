@@ -25,6 +25,7 @@ Useful commands:
 
   bash scripts/mac_start.sh doctor
   bash scripts/mac_start.sh rehearsal
+  bash scripts/mac_start.sh init-workspace "$HOME/AUTO-TRADE-R6/workspace-001"
   bash scripts/mac_start.sh readiness <WORKSPACE>
 
 Read-only PAPER network steps, only after configuring PAPER credentials:
@@ -38,6 +39,11 @@ EOF
 case "${1:-}" in
   "")
     exec .venv/bin/python scripts/mac_safe_console.py doctor
+    ;;
+  init-workspace)
+    shift
+    [[ $# -eq 1 ]] || { echo "usage: bash scripts/mac_start.sh init-workspace <WORKSPACE>" >&2; exit 2; }
+    exec .venv/bin/python scripts/mac_safe_console.py init-workspace --workspace "$1"
     ;;
   doctor)
     shift
