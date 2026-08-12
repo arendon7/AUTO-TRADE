@@ -215,18 +215,15 @@ def test_readiness_routes_existing_qualification_to_review_only(tmp_path) -> Non
     assert report.execution_authorized is False
 
 
-def test_readiness_blocks_nonprepared_nonterminal_submission_state(tmp_path) -> None:
+def test_readiness_rejects_impossible_submission_status_fail_closed(tmp_path) -> None:
     preparer, workspace, _, submission, permit = build(tmp_path)
     run_prepare(preparer, submission, permit)
     set_submission(workspace, status="ABSENT", attempt_count=0)
 
-    report = PaperOperationalReadinessInspector(workspace.root).inspect(
-        now=NOW + timedelta(seconds=1)
-    )
-
-    assert report.phase is PaperReadinessPhase.BLOCKED_INCONSISTENT_STATE
-    assert report.next_action == "STOP_AND_INVESTIGATE_DURABLE_SUBMISSION_STATE"
-    assert report.execution_authorized is False
+    with pytest.raises(PaperReadinessIntegrityError, match="submission status/control fields are invalid"):
+        PaperOperationalReadinessInspector(workspace.root).inspect(
+            now=NOW + timedelta(seconds=1)
+        )
 
 
 def test_readiness_detects_same_attempt_staged_restart_without_authorizing_it(tmp_path) -> None:
