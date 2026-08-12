@@ -394,3 +394,7 @@ def _inside_loop(tree: ast.AST, target: ast.AST) -> bool:
             if any(child is target for child in ast.walk(node)):
                 return True
     return False
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
