@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta
 import json
 import sqlite3
 
@@ -81,7 +81,7 @@ def test_receipt_and_binding_dataclasses_fail_closed_on_invalid_construction(tmp
     with pytest.raises(ValueError, match="receipt hash mismatch"):
         ConnectivityOperatorReviewReceipt(body=valid.body, receipt_hash="f" * 64)
 
-    ws2, _, _, _, _, _, _, binding = reviewed_workspace(tmp_path / "binding")
+    _, _, _, _, _, _, _, binding = reviewed_workspace(tmp_path / "binding")
     assert binding.binding_hash
     with pytest.raises(ValueError, match="canonical identifier"):
         _binding_with(binding, operator_id="bad operator id")
@@ -129,22 +129,45 @@ def test_review_binding_store_detects_row_hash_mismatch_during_record(tmp_path) 
         store.record(binding)
 
 
-def test_receipt_builder_type_and_expiry_guards(tmp_path) -> None:
+def test_receipt_builder_type_and_expiry_guards(tmp_path, monkeypatch) -> None:
     with pytest.raises(TypeError, match="PaperOperationalWorkspace"):
         ConnectivityOperatorReviewReceiptBuilder(object())  # type: ignore[arg-type]
-    ws, _, _, _ = ready_workspace(tmp_path)
+    ws, _, operator_context, state = ready_workspace(tmp_path)
     with pytest.raises(ValueError, match="timezone-aware"):
         ConnectivityOperatorReviewReceiptBuilder(ws).build(
             now=(NOW + timedelta(seconds=20)).replace(tzinfo=None)
         )
+
+    expired_decision = replace(
+        state.decision,
+        expires_at=NOW + timedelta(seconds=20, milliseconds=250),
+    )
+    expired_state = replace(state, decision=expired_decision)
+
+    class FakeOperatorBridge:
+        def __init__(self, workspace):
+            self.workspace = workspace
+        def prepare_context(self, *, now):
+            return operator_context
+
+    monkeypatch.setattr(review, "ConnectivityOperatorBridge", FakeOperatorBridge)
+    monkeypatch.setattr(review, "_load_operator_state", lambda workspace: expired_state)
     with pytest.raises(ConnectivityOperatorReviewRejected, match="expired before review"):
         ConnectivityOperatorReviewReceiptBuilder(ws).build(
-            now=NOW + timedelta(seconds=50)
+            now=NOW + timedelta(seconds=20, milliseconds=500)
         )
 
 
-def test_receipt_builder_detects_rehashed_preparation_binding_tamper(tmp_path) -> None:
-    ws, _, _, _ = ready_workspace(tmp_path)
+def test_receipt_builder_detects_rehashed_preparation_binding_tamper(tmp_path, monkeypatch) -> None:
+    ws, _, operator_context, _ = ready_workspace(tmp_path)
+
+    class FakeOperatorBridge:
+        def __init__(self, workspace):
+            self.workspace = workspace
+        def prepare_context(self, *, now):
+            return operator_context
+
+    monkeypatch.setattr(review, "ConnectivityOperatorBridge", FakeOperatorBridge)
     path = ws.root / "connectivity_preparation.json"
     raw = json.loads(path.read_text(encoding="utf-8"))
     raw["standard_prepared_package"]["order_id"] = "other-order"
@@ -221,8 +244,6 @@ def test_reviewed_intent_bridge_and_challenge_type_guards(tmp_path) -> None:
 def test_verify_execution_review_binding_requires_canonical_artifact_and_registry(tmp_path) -> None:
     ws, _, _, _, _, _, _, _ = reviewed_workspace(tmp_path)
     artifact = ws.root / "connectivity_execution_review_binding.json"
-    db = ws.root / "connectivity_execution_review_binding.sqlite3"
-
     artifact.unlink()
     with pytest.raises(ConnectivityOperatorReviewRejected, match="binding artifact"):
         verify_execution_review_binding(ws)
@@ -244,7 +265,7 @@ def test_verify_execution_review_binding_requires_canonical_artifact_and_registr
 
 
 def test_verify_execution_review_binding_rejects_unsafe_top_level_and_registry_divergence(tmp_path) -> None:
-    ws, _, _, _, _, _, _, binding = reviewed_workspace(tmp_path)
+    ws, _, _, _, _, _, _, _ = reviewed_workspace(tmp_path)
     path = ws.root / "connectivity_execution_review_binding.json"
     raw = json.loads(path.read_text(encoding="utf-8"))
     raw["external_post_authorized"] = True
@@ -340,13 +361,13 @@ def test_verify_reviewed_final_freshness_type_missing_hash_and_body_tamper(tmp_p
 
 
 def test_strict_review_binding_payload_and_helper_parsers_fail_closed(tmp_path) -> None:
-    ws, _, _, _, _, _, _, binding = reviewed_workspace(tmp_path)
+    _, _, _, _, _, _, _, binding = reviewed_workspace(tmp_path)
     with pytest.raises(ConnectivityOperatorReviewConflict, match="payload is non-canonical"):
         review._review_binding_from_payload({"binding_hash": binding.binding_hash})
 
     invalid_payload = binding.payload()
     invalid_payload["operator_id"] = ""
-    with pytest.raises(ConnectivityOperatorReviewConflict, match="payload is invalid"):
+    with pytest.raises(ConnectivityOperatorReviewConflict, match="operator_id must be non-empty string"):
         review._review_binding_from_payload(invalid_payload)
 
     values = {
