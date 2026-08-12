@@ -1,0 +1,49 @@
+name: R6 Connectivity Preparation Boundary
+
+on:
+  push:
+    branches: ["reconstruction/**", "work/**", "feature/**"]
+    paths:
+      - "src/autotrade/brokers/alpaca_paper_connectivity_gate.py"
+      - "src/autotrade/connectivity_preparation_binding.py"
+      - "src/autotrade/brokers/alpaca_paper_connectivity_prepare.py"
+      - "scripts/r6_prepare_connectivity_candidate.py"
+      - "scripts/check_r6_connectivity_preparation_core_boundary.py"
+      - "tests/test_r6_connectivity_prepare.py"
+      - "tests/test_r6_connectivity_preparation_adversarial.py"
+      - "tests/test_r6_connectivity_prepare_edges.py"
+      - "tests/test_r6_prepare_connectivity_candidate_cli.py"
+      - ".github/workflows/r6-connectivity-preparation.yml"
+  pull_request:
+    paths:
+      - "src/autotrade/brokers/alpaca_paper_connectivity_gate.py"
+      - "src/autotrade/connectivity_preparation_binding.py"
+      - "src/autotrade/brokers/alpaca_paper_connectivity_prepare.py"
+      - "scripts/r6_prepare_connectivity_candidate.py"
+      - "scripts/check_r6_connectivity_preparation_core_boundary.py"
+      - "tests/test_r6_connectivity_prepare.py"
+      - "tests/test_r6_connectivity_preparation_adversarial.py"
+      - "tests/test_r6_connectivity_prepare_edges.py"
+      - "tests/test_r6_prepare_connectivity_candidate_cli.py"
+      - ".github/workflows/r6-connectivity-preparation.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  connectivity-preparation:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: python -m pip install -e '.[dev]'
+      - name: Compile
+        run: python -m compileall -q src tests scripts
+      - name: Connectivity preparation authority boundary
+        run: python scripts/check_r6_connectivity_preparation_core_boundary.py
+      - name: Connectivity preparation functional and adversarial tests
+        run: pytest -q tests/test_r6_connectivity_prepare.py tests/test_r6_connectivity_preparation_adversarial.py tests/test_r6_connectivity_prepare_edges.py tests/test_r6_prepare_connectivity_candidate_cli.py
