@@ -7,6 +7,7 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 LAUNCHER = ROOT / "AUTO_TRADE_MAC.command"
+FIRST_RUN = ROOT / "LEEME_PRIMERO_MAC.md"
 CORE = ROOT / ".github/workflows/core-tests.yml"
 R6 = ROOT / ".github/workflows/r6-authority.yml"
 MAC_CI = ROOT / ".github/workflows/mac-rehearsal-artifact.yml"
@@ -30,6 +31,21 @@ FORBIDDEN = (
 
 def main() -> int:
     errors: list[str] = []
+    if not FIRST_RUN.is_file():
+        errors.append("missing Mac first-run guide: LEEME_PRIMERO_MAC.md")
+    else:
+        guide = FIRST_RUN.read_text(encoding="utf-8")
+        for anchor in (
+            "AUTO_TRADE_MAC.command",
+            "Gatekeeper",
+            "CapitalSafetyKernel.evaluate",
+            "external_execution_authorized=false",
+            "External PAPER order enviado por el proyecto: **0**",
+            "LIVE trading: **BLOCKED**",
+        ):
+            if anchor not in guide:
+                errors.append(f"Mac first-run guide safety anchor missing: {anchor}")
+
     if not LAUNCHER.is_file():
         errors.append("missing root Finder launcher: AUTO_TRADE_MAC.command")
     else:
@@ -90,7 +106,7 @@ def main() -> int:
         return 1
     print(
         "AUTO-TRADE Mac Finder launcher boundary: PASS "
-        "(double-click entrypoint is broker-inert, write-disabled, local-Safety/flat-account aware and CI-packaged on macOS)"
+        "(double-click entrypoint + first-run guide are broker-inert, write-disabled, local-Safety/flat-account aware and CI-packaged on macOS)"
     )
     return 0
 
