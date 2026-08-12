@@ -6,10 +6,12 @@ from decimal import Decimal
 from hashlib import sha256
 import json
 import re
+from typing import Mapping
 
 from autotrade.connectivity_canary_authority import CONNECTIVITY_CANARY_STRATEGY_ID
 from autotrade.domain import (
     MarketSnapshot,
+    OrderRecord,
     OrderStatus,
     RiskDecision,
     RiskDecisionStatus,
@@ -103,22 +105,22 @@ class ConnectivitySubmissionHandoff:
         return self.authorized_at.astimezone(timezone.utc) <= instant < self.valid_until.astimezone(timezone.utc)
 
     def payload(self, *, include_hash: bool = True) -> dict[str, str]:
-        payload = {
-            "handoff_id": self.handoff_id,
-            "purpose": self.purpose,
-            "order_id": self.order_id,
-            "attempt_id": self.attempt_id,
-            "original_risk_decision_id": self.original_risk_decision_id,
-            "fresh_risk_decision_id": self.fresh_risk_decision_id,
-            "fresh_risk_decision_fingerprint": self.fresh_risk_decision_fingerprint,
-            "safety_state_version": str(self.safety_state_version),
-            "market_fingerprint": self.market_fingerprint,
-            "execution_freshness_binding_hash": self.execution_freshness_binding_hash,
-            "final_freshness_permit_hash": self.final_freshness_permit_hash,
-            "authorized_at": _iso(self.authorized_at),
-            "valid_until": _iso(self.valid_until),
-            "event_id": self.event_id,
-        }
+        payload = _handoff_payload_from_values(
+            handoff_id=self.handoff_id,
+            purpose=self.purpose,
+            order_id=self.order_id,
+            attempt_id=self.attempt_id,
+            original_risk_decision_id=self.original_risk_decision_id,
+            fresh_risk_decision_id=self.fresh_risk_decision_id,
+            fresh_risk_decision_fingerprint=self.fresh_risk_decision_fingerprint,
+            safety_state_version=self.safety_state_version,
+            market_fingerprint_value=self.market_fingerprint,
+            execution_freshness_binding_hash=self.execution_freshness_binding_hash,
+            final_freshness_permit_hash=self.final_freshness_permit_hash,
+            authorized_at=self.authorized_at,
+            valid_until=self.valid_until,
+            event_id=self.event_id,
+        )
         if include_hash:
             payload["handoff_hash"] = self.handoff_hash
         return payload
@@ -149,7 +151,7 @@ class ConnectivityOmsStager:
         market: MarketSnapshot,
         now: datetime,
         valid_until: datetime,
-    ) -> tuple[object, ConnectivitySubmissionHandoff]:
+    ) -> tuple[OrderRecord, ConnectivitySubmissionHandoff]:
         _validate_id(order_id, "order_id")
         _validate_id(attempt_id, "attempt_id")
         _validate_hash(execution_freshness_binding_hash, "execution_freshness_binding_hash")
@@ -161,7 +163,8 @@ class ConnectivityOmsStager:
         _require_aware(now, "now")
         _require_aware(valid_until, "valid_until")
         now_utc = now.astimezone(timezone.utc)
-        if valid_until.astimezone(timezone.utc) <= now_utc:
+        valid_until_utc = valid_until.astimezone(timezone.utc)
+        if valid_until_utc <= now_utc:
             raise ConnectivityOmsStageRejected("execution/freshness binding is expired")
 
         current = self._orders.get_by_order_id(order_id)
@@ -192,7 +195,7 @@ class ConnectivityOmsStager:
             raise ConnectivityOmsStageRejected("cannot stage before fresh RiskDecision evaluation")
         if now_utc >= decision.valid_until.astimezone(timezone.utc):
             raise ConnectivityOmsStageRejected("fresh RiskDecision expired before staging")
-        if valid_until.astimezone(timezone.utc) > decision.valid_until.astimezone(timezone.utc):
+        if valid_until_utc > decision.valid_until.astimezone(timezone.utc):
             raise ConnectivityOmsStageRejected("staging authority outlives fresh RiskDecision")
         notional = current.intent.quantity * current.intent.limit_price
         if decision.approved_notional != notional:
@@ -206,6 +209,31 @@ class ConnectivityOmsStager:
         if safety.circuit_active:
             raise ConnectivityOmsStageRejected("connectivity staging blocked by safety circuit")
 
+        event_id = f"connectivity-handoff:{order_id}:{attempt_id}"
+        existing = tuple(item for item in self._ledger.all_events() if item.event_id == event_id)
+        if len(existing) > 1:
+            raise ConnectivityOmsStageConflict("duplicate connectivity handoff ledger identity")
+        if existing:
+            if existing[0].event_type != _EVENT_TYPE:
+                raise ConnectivityOmsStageConflict("connectivity handoff ledger event type mismatch")
+            handoff = _handoff_from_payload(existing[0].payload)
+            self._verify_requested_replay(
+                handoff=handoff,
+                current=current,
+                attempt_id=attempt_id,
+                binding_hash=execution_freshness_binding_hash,
+                permit_hash=final_freshness_permit_hash,
+                decision=decision,
+                market_fingerprint_value=market_fp,
+            )
+            if not handoff.is_valid_at(now_utc):
+                raise ConnectivityOmsStageRejected("durable connectivity handoff expired before replay")
+            return current, handoff
+
+        if current.status is not OrderStatus.VALIDATED:
+            raise ConnectivityOmsStageConflict(
+                "SUBMITTING without durable connectivity handoff event is forbidden"
+            )
         handoff = _build_handoff(
             order_id=order_id,
             attempt_id=attempt_id,
@@ -215,50 +243,29 @@ class ConnectivityOmsStager:
             execution_freshness_binding_hash=execution_freshness_binding_hash,
             final_freshness_permit_hash=final_freshness_permit_hash,
             authorized_at=now_utc,
-            valid_until=valid_until.astimezone(timezone.utc),
+            valid_until=valid_until_utc,
         )
-        event = LedgerEvent(
-            event_id=handoff.event_id,
-            event_type=_EVENT_TYPE,
-            occurred_at=handoff.authorized_at,
-            payload=handoff.payload(),
-        )
-        existing = tuple(
-            item for item in self._ledger.all_events() if item.event_id == event.event_id
-        )
-        if len(existing) > 1:
-            raise ConnectivityOmsStageConflict("duplicate connectivity handoff ledger identity")
-        if existing:
-            if existing[0] != event:
-                raise ConnectivityOmsStageConflict("connectivity handoff ledger binding mismatch")
-        else:
-            if current.status is not OrderStatus.VALIDATED:
-                raise ConnectivityOmsStageConflict(
-                    "SUBMITTING without durable connectivity handoff event is forbidden"
+        try:
+            self._ledger.append(
+                LedgerEvent(
+                    event_id=handoff.event_id,
+                    event_type=_EVENT_TYPE,
+                    occurred_at=handoff.authorized_at,
+                    payload=handoff.payload(),
                 )
-            try:
-                self._ledger.append(event)
-            except DuplicateLedgerEvent as exc:
-                raise ConnectivityOmsStageConflict("connectivity handoff append raced") from exc
-
-        if current.status is OrderStatus.VALIDATED:
-            staged = replace(
-                current,
-                risk_decision_id=decision.decision_id,
-                status=OrderStatus.SUBMITTING,
-                submitted_at=handoff.authorized_at,
             )
-            self._orders.update(staged)
-        else:
-            if (
-                current.risk_decision_id != decision.decision_id
-                or current.submitted_at != handoff.authorized_at
-            ):
-                raise ConnectivityOmsStageConflict("existing SUBMITTING order does not match handoff")
-            staged = current
+        except DuplicateLedgerEvent as exc:
+            raise ConnectivityOmsStageConflict("connectivity handoff append raced") from exc
+        staged = replace(
+            current,
+            risk_decision_id=decision.decision_id,
+            status=OrderStatus.SUBMITTING,
+            submitted_at=handoff.authorized_at,
+        )
+        self._orders.update(staged)
         return staged, handoff
 
-    def verify_handoff(self, handoff: ConnectivitySubmissionHandoff):
+    def verify_handoff(self, handoff: ConnectivitySubmissionHandoff) -> OrderRecord:
         if not isinstance(handoff, ConnectivitySubmissionHandoff):
             raise TypeError("ConnectivitySubmissionHandoff is required")
         matches = tuple(
@@ -278,6 +285,35 @@ class ConnectivityOmsStager:
         if current.submitted_at != handoff.authorized_at:
             raise ConnectivityOmsStageConflict("connectivity OMS staging timestamp changed")
         return current
+
+    @staticmethod
+    def _verify_requested_replay(
+        *,
+        handoff: ConnectivitySubmissionHandoff,
+        current: OrderRecord,
+        attempt_id: str,
+        binding_hash: str,
+        permit_hash: str,
+        decision: RiskDecision,
+        market_fingerprint_value: str,
+    ) -> None:
+        if current.status is not OrderStatus.SUBMITTING:
+            raise ConnectivityOmsStageConflict("durable handoff exists but OMS is not SUBMITTING")
+        if (
+            handoff.order_id != current.order_id
+            or handoff.attempt_id != attempt_id
+            or handoff.execution_freshness_binding_hash != binding_hash
+            or handoff.final_freshness_permit_hash != permit_hash
+            or handoff.fresh_risk_decision_id != decision.decision_id
+            or handoff.fresh_risk_decision_fingerprint != risk_decision_fingerprint(decision)
+            or handoff.safety_state_version != decision.safety_state_version
+            or handoff.market_fingerprint != market_fingerprint_value
+        ):
+            raise ConnectivityOmsStageConflict("connectivity handoff replay binding mismatch")
+        if current.risk_decision_id != handoff.fresh_risk_decision_id:
+            raise ConnectivityOmsStageConflict("SUBMITTING fresh RiskDecision changed")
+        if current.submitted_at != handoff.authorized_at:
+            raise ConnectivityOmsStageConflict("SUBMITTING timestamp changed")
 
 
 def _build_handoff(
@@ -302,29 +338,114 @@ def _build_handoff(
         }
     )
     event_id = f"connectivity-handoff:{order_id}:{attempt_id}"
-    values = {
+    payload = _handoff_payload_from_values(
+        handoff_id=handoff_id,
+        purpose="CONNECTIVITY_CANARY",
+        order_id=order_id,
+        attempt_id=attempt_id,
+        original_risk_decision_id=original_risk_decision_id,
+        fresh_risk_decision_id=decision.decision_id,
+        fresh_risk_decision_fingerprint=risk_decision_fingerprint(decision),
+        safety_state_version=decision.safety_state_version,
+        market_fingerprint_value=market_fingerprint_value,
+        execution_freshness_binding_hash=execution_freshness_binding_hash,
+        final_freshness_permit_hash=final_freshness_permit_hash,
+        authorized_at=authorized_at,
+        valid_until=valid_until,
+        event_id=event_id,
+    )
+    return ConnectivitySubmissionHandoff(
+        handoff_id=handoff_id,
+        purpose="CONNECTIVITY_CANARY",
+        order_id=order_id,
+        attempt_id=attempt_id,
+        original_risk_decision_id=original_risk_decision_id,
+        fresh_risk_decision_id=decision.decision_id,
+        fresh_risk_decision_fingerprint=risk_decision_fingerprint(decision),
+        safety_state_version=decision.safety_state_version,
+        market_fingerprint=market_fingerprint_value,
+        execution_freshness_binding_hash=execution_freshness_binding_hash,
+        final_freshness_permit_hash=final_freshness_permit_hash,
+        authorized_at=authorized_at,
+        valid_until=valid_until,
+        event_id=event_id,
+        handoff_hash=_hash(payload),
+    )
+
+
+def _handoff_from_payload(raw: Mapping[str, str]) -> ConnectivitySubmissionHandoff:
+    expected = {
+        "handoff_id", "purpose", "order_id", "attempt_id", "original_risk_decision_id",
+        "fresh_risk_decision_id", "fresh_risk_decision_fingerprint", "safety_state_version",
+        "market_fingerprint", "execution_freshness_binding_hash", "final_freshness_permit_hash",
+        "authorized_at", "valid_until", "event_id", "handoff_hash",
+    }
+    if set(raw) != expected:
+        raise ConnectivityOmsStageConflict("connectivity handoff payload is non-canonical")
+    try:
+        return ConnectivitySubmissionHandoff(
+            handoff_id=str(raw["handoff_id"]),
+            purpose=str(raw["purpose"]),
+            order_id=str(raw["order_id"]),
+            attempt_id=str(raw["attempt_id"]),
+            original_risk_decision_id=str(raw["original_risk_decision_id"]),
+            fresh_risk_decision_id=str(raw["fresh_risk_decision_id"]),
+            fresh_risk_decision_fingerprint=str(raw["fresh_risk_decision_fingerprint"]),
+            safety_state_version=int(raw["safety_state_version"]),
+            market_fingerprint=str(raw["market_fingerprint"]),
+            execution_freshness_binding_hash=str(raw["execution_freshness_binding_hash"]),
+            final_freshness_permit_hash=str(raw["final_freshness_permit_hash"]),
+            authorized_at=_datetime(str(raw["authorized_at"]), "authorized_at"),
+            valid_until=_datetime(str(raw["valid_until"]), "valid_until"),
+            event_id=str(raw["event_id"]),
+            handoff_hash=str(raw["handoff_hash"]),
+        )
+    except (TypeError, ValueError, KeyError) as exc:
+        raise ConnectivityOmsStageConflict("invalid durable connectivity handoff") from exc
+
+
+def _handoff_payload_from_values(
+    *,
+    handoff_id: str,
+    purpose: str,
+    order_id: str,
+    attempt_id: str,
+    original_risk_decision_id: str,
+    fresh_risk_decision_id: str,
+    fresh_risk_decision_fingerprint: str,
+    safety_state_version: int,
+    market_fingerprint_value: str,
+    execution_freshness_binding_hash: str,
+    final_freshness_permit_hash: str,
+    authorized_at: datetime,
+    valid_until: datetime,
+    event_id: str,
+) -> dict[str, str]:
+    return {
         "handoff_id": handoff_id,
-        "purpose": "CONNECTIVITY_CANARY",
+        "purpose": purpose,
         "order_id": order_id,
         "attempt_id": attempt_id,
         "original_risk_decision_id": original_risk_decision_id,
-        "fresh_risk_decision_id": decision.decision_id,
-        "fresh_risk_decision_fingerprint": risk_decision_fingerprint(decision),
-        "safety_state_version": decision.safety_state_version,
+        "fresh_risk_decision_id": fresh_risk_decision_id,
+        "fresh_risk_decision_fingerprint": fresh_risk_decision_fingerprint,
+        "safety_state_version": str(safety_state_version),
         "market_fingerprint": market_fingerprint_value,
         "execution_freshness_binding_hash": execution_freshness_binding_hash,
         "final_freshness_permit_hash": final_freshness_permit_hash,
-        "authorized_at": authorized_at,
-        "valid_until": valid_until,
+        "authorized_at": _iso(authorized_at),
+        "valid_until": _iso(valid_until),
         "event_id": event_id,
     }
-    provisional = ConnectivitySubmissionHandoff(
-        **values,
-        handoff_hash="0" * 64,
-    )
-    # Build the immutable hash without recursively including itself.
-    handoff_hash = _hash(provisional.payload(include_hash=False))
-    return ConnectivitySubmissionHandoff(**values, handoff_hash=handoff_hash)
+
+
+def _datetime(value: str, label: str) -> datetime:
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError as exc:
+        raise ValueError(f"{label} is invalid datetime") from exc
+    _require_aware(parsed, label)
+    return parsed.astimezone(timezone.utc)
 
 
 def _validate_id(value: str, label: str) -> None:
