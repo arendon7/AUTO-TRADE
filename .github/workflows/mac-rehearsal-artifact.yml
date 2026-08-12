@@ -5,7 +5,12 @@ on:
     branches: ["reconstruction/**"]
     paths:
       - "AUTO_TRADE_MAC.command"
+      - "ABRIR_AUTO_TRADE.command"
+      - "INSTALAR_AUTO_TRADE.command"
+      - "VERIFICAR_PAQUETE.command"
       - "LEEME_PRIMERO_MAC.md"
+      - "LEEME_PRIMERO_FULL_MAC.md"
+      - "web/**"
       - "scripts/mac_*.sh"
       - "scripts/mac_*.py"
       - "scripts/check_mac_*.py"
@@ -19,7 +24,12 @@ on:
   pull_request:
     paths:
       - "AUTO_TRADE_MAC.command"
+      - "ABRIR_AUTO_TRADE.command"
+      - "INSTALAR_AUTO_TRADE.command"
+      - "VERIFICAR_PAQUETE.command"
       - "LEEME_PRIMERO_MAC.md"
+      - "LEEME_PRIMERO_FULL_MAC.md"
+      - "web/**"
       - "scripts/mac_*.sh"
       - "scripts/mac_*.py"
       - "scripts/check_mac_*.py"
@@ -52,6 +62,7 @@ jobs:
       - name: Restore executable entrypoints
         run: |
           chmod +x AUTO_TRADE_MAC.command
+          chmod +x ABRIR_AUTO_TRADE.command INSTALAR_AUTO_TRADE.command VERIFICAR_PAQUETE.command
           chmod +x scripts/mac_bootstrap.sh scripts/mac_rehearsal.sh scripts/mac_start.sh
 
       - name: Full safe Mac bootstrap rehearsal
@@ -60,13 +71,16 @@ jobs:
       - name: Finder launcher boundary
         run: .venv/bin/python scripts/check_mac_click_launcher_boundary.py
 
+      - name: Dashboard and FULL installer boundary
+        run: .venv/bin/python scripts/check_mac_dashboard_boundary.py
+
       - name: Pre-canary read-only status boundary
         run: .venv/bin/python scripts/check_r6_precanary_status_boundary.py
 
-      - name: Pre-canary and Mac safe-console tests
-        run: .venv/bin/pytest -q tests/test_r6_precanary_status.py tests/test_mac_safe_console.py tests/test_mac_click_launcher.py
+      - name: Mac operator UI tests
+        run: .venv/bin/pytest -q tests/test_r6_precanary_status.py tests/test_mac_safe_console.py tests/test_mac_click_launcher.py tests/test_mac_dashboard.py tests/test_mac_doctor_provenance.py
 
-      - name: Build clean Mac rehearsal package
+      - name: Build clean Mac source rehearsal package
         shell: bash
         run: |
           set -euo pipefail
@@ -87,42 +101,112 @@ jobs:
             --exclude '*.pyc' \
             --exclude '*.sqlite3' \
             --exclude '*.sqlite3-*'
-          chmod +x "$PKG/AUTO_TRADE_MAC.command"
+          chmod +x "$PKG/AUTO_TRADE_MAC.command" "$PKG/ABRIR_AUTO_TRADE.command" "$PKG/INSTALAR_AUTO_TRADE.command" "$PKG/VERIFICAR_PAQUETE.command"
           chmod +x "$PKG/scripts/mac_bootstrap.sh" "$PKG/scripts/mac_rehearsal.sh" "$PKG/scripts/mac_start.sh"
           cat > "$PKG/MAC_BUILD_INFO.txt" <<EOF
-          AUTO-TRADE R6 MAC REHEARSAL PACKAGE
+          AUTO-TRADE R6 MAC SOURCE REHEARSAL PACKAGE
           source_head=${SOURCE_SHA}
           branch=${GITHUB_HEAD_REF:-${GITHUB_REF_NAME}}
+          package_mode=SOURCE_BOOTSTRAP
           external_paper_write=DISABLED_BY_LAUNCHER
           live_trading=BLOCKED
           broker_credentials_in_package=NO
           external_order_submitted_by_build=NO
           EOF
           ditto -c -k --sequesterRsrc --keepParent "$PKG" "$ZIP"
-          (
-            cd dist
-            shasum -a 256 AUTO-TRADE-R6-MAC.zip > AUTO-TRADE-R6-MAC.zip.sha256
-          )
+          (cd dist && shasum -a 256 AUTO-TRADE-R6-MAC.zip > AUTO-TRADE-R6-MAC.zip.sha256)
 
-      - name: Verify final Mac package
+      - name: Build FULL OFFLINE Mac package
+        shell: bash
+        run: |
+          set -euo pipefail
+          SOURCE_SHA="$(git rev-parse HEAD)"
+          PKG="dist/AUTO-TRADE-R6-MAC-FULL"
+          ZIP="dist/AUTO-TRADE-R6-MAC-FULL.zip"
+          mkdir -p "$PKG"
+          rsync -a ./ "$PKG/" \
+            --exclude '.git' \
+            --exclude '.venv' \
+            --exclude '.env' \
+            --exclude 'dist' \
+            --exclude '.pytest_cache' \
+            --exclude '.coverage' \
+            --exclude 'coverage.json' \
+            --exclude '__pycache__' \
+            --exclude '*.pyc' \
+            --exclude '*.sqlite3' \
+            --exclude '*.sqlite3-*'
+          mkdir -p "$PKG/runtime/wheels"
+          /usr/bin/curl --fail --location --proto '=https' --tlsv1.2 \
+            'https://www.python.org/ftp/python/3.12.10/python-3.12.10-macos11.pkg' \
+            -o "$PKG/runtime/python-3.12.10-macos11.pkg"
+          /usr/sbin/pkgutil --check-signature "$PKG/runtime/python-3.12.10-macos11.pkg"
+          PY_BYTES="$(/usr/bin/stat -f%z "$PKG/runtime/python-3.12.10-macos11.pkg")"
+          [[ "$PY_BYTES" -ge 43000000 ]] || { echo "ERROR: Python runtime artifact too small: $PY_BYTES" >&2; exit 1; }
+          python -m pip download --disable-pip-version-check --no-deps --only-binary=:all: \
+            --dest "$PKG/runtime/wheels" 'websockets==16.1.1'
+          test -f "$PKG/runtime/wheels/websockets-16.1.1-py3-none-any.whl"
+          chmod +x "$PKG/AUTO_TRADE_MAC.command" "$PKG/ABRIR_AUTO_TRADE.command" "$PKG/INSTALAR_AUTO_TRADE.command" "$PKG/VERIFICAR_PAQUETE.command"
+          chmod +x "$PKG/scripts/mac_bootstrap.sh" "$PKG/scripts/mac_rehearsal.sh" "$PKG/scripts/mac_start.sh"
+          cat > "$PKG/MAC_BUILD_INFO.txt" <<EOF
+          AUTO-TRADE R6 MAC FULL OFFLINE PACKAGE
+          source_head=${SOURCE_SHA}
+          branch=${GITHUB_HEAD_REF:-${GITHUB_REF_NAME}}
+          package_mode=FULL_OFFLINE
+          architecture=arm64
+          python_runtime=3.12.10_universal2_included
+          websockets_runtime=16.1.1_wheel_included
+          external_paper_write=DISABLED_BY_LAUNCHER
+          live_trading=BLOCKED
+          broker_credentials_in_package=NO
+          external_order_submitted_by_build=NO
+          EOF
+          python - "$PKG" <<'PY'
+          from pathlib import Path
+          from hashlib import sha256
+          import sys
+          root = Path(sys.argv[1])
+          manifest = root / "PACKAGE_MANIFEST.sha256"
+          rows = []
+          for path in sorted(p for p in root.rglob("*") if p.is_file() and p != manifest):
+              digest = sha256(path.read_bytes()).hexdigest()
+              rows.append(f"{digest}  ./{path.relative_to(root).as_posix()}")
+          manifest.write_text("\n".join(rows) + "\n", encoding="utf-8")
+          PY
+          ditto -c -k --sequesterRsrc --keepParent "$PKG" "$ZIP"
+          (cd dist && shasum -a 256 AUTO-TRADE-R6-MAC-FULL.zip > AUTO-TRADE-R6-MAC-FULL.zip.sha256)
+
+      - name: Verify final Mac packages
         shell: bash
         run: |
           set -euo pipefail
           EXPECTED_SOURCE_SHA="$(git rev-parse HEAD)"
           cd dist
           shasum -a 256 -c AUTO-TRADE-R6-MAC.zip.sha256
-          unzip -l AUTO-TRADE-R6-MAC.zip | grep -q 'AUTO-TRADE-R6-MAC/LEEME_PRIMERO_MAC.md'
-          unzip -l AUTO-TRADE-R6-MAC.zip | grep -q 'AUTO-TRADE-R6-MAC/AUTO_TRADE_MAC.command'
-          unzip -l AUTO-TRADE-R6-MAC.zip | grep -q 'AUTO-TRADE-R6-MAC/MAC_BUILD_INFO.txt'
-          unzip -l AUTO-TRADE-R6-MAC.zip | grep -q 'AUTO-TRADE-R6-MAC/scripts/r6_precanary_status.py'
-          unzip -p AUTO-TRADE-R6-MAC.zip AUTO-TRADE-R6-MAC/MAC_BUILD_INFO.txt > /tmp/MAC_BUILD_INFO.txt
-          grep -Fq "source_head=${EXPECTED_SOURCE_SHA}" /tmp/MAC_BUILD_INFO.txt
-          if unzip -l AUTO-TRADE-R6-MAC.zip | grep -Eq '(^|/)(\.env|\.venv)(/|$)'; then
-            echo 'ERROR: package contains forbidden .env/.venv material' >&2
+          shasum -a 256 -c AUTO-TRADE-R6-MAC-FULL.zip.sha256
+          FULL_BYTES="$(/usr/bin/stat -f%z AUTO-TRADE-R6-MAC-FULL.zip)"
+          [[ "$FULL_BYTES" -ge 40000000 ]] || { echo "ERROR: FULL bundle is unexpectedly small: $FULL_BYTES" >&2; exit 1; }
+          for required in \
+            'AUTO-TRADE-R6-MAC-FULL/ABRIR_AUTO_TRADE.command' \
+            'AUTO-TRADE-R6-MAC-FULL/INSTALAR_AUTO_TRADE.command' \
+            'AUTO-TRADE-R6-MAC-FULL/VERIFICAR_PAQUETE.command' \
+            'AUTO-TRADE-R6-MAC-FULL/web/mac_dashboard.html' \
+            'AUTO-TRADE-R6-MAC-FULL/scripts/mac_dashboard.py' \
+            'AUTO-TRADE-R6-MAC-FULL/runtime/python-3.12.10-macos11.pkg' \
+            'AUTO-TRADE-R6-MAC-FULL/runtime/wheels/websockets-16.1.1-py3-none-any.whl' \
+            'AUTO-TRADE-R6-MAC-FULL/PACKAGE_MANIFEST.sha256' \
+            'AUTO-TRADE-R6-MAC-FULL/MAC_BUILD_INFO.txt'; do
+            unzip -l AUTO-TRADE-R6-MAC-FULL.zip | grep -Fq "$required"
+          done
+          unzip -p AUTO-TRADE-R6-MAC-FULL.zip AUTO-TRADE-R6-MAC-FULL/MAC_BUILD_INFO.txt > /tmp/MAC_FULL_BUILD_INFO.txt
+          grep -Fq "source_head=${EXPECTED_SOURCE_SHA}" /tmp/MAC_FULL_BUILD_INFO.txt
+          grep -Fq 'package_mode=FULL_OFFLINE' /tmp/MAC_FULL_BUILD_INFO.txt
+          if unzip -l AUTO-TRADE-R6-MAC-FULL.zip | grep -Eq '(^|/)(\.env|\.venv)(/|$)'; then
+            echo 'ERROR: FULL package contains forbidden .env/.venv material' >&2
             exit 1
           fi
-          unzip -p AUTO-TRADE-R6-MAC.zip AUTO-TRADE-R6-MAC/AUTO_TRADE_MAC.command > /tmp/AUTO_TRADE_MAC.command
-          grep -Fq 'pre-canary-status' /tmp/AUTO_TRADE_MAC.command
+          unzip -p AUTO-TRADE-R6-MAC-FULL.zip AUTO-TRADE-R6-MAC-FULL/ABRIR_AUTO_TRADE.command > /tmp/ABRIR_AUTO_TRADE.command
+          grep -Fq 'scripts/mac_dashboard.py' /tmp/ABRIR_AUTO_TRADE.command
           for forbidden in \
             'r6_execute_paper_canary.py' \
             'r6_connectivity_bound_final_freshness.py' \
@@ -130,18 +214,28 @@ jobs:
             'source .env' \
             'alpaca_paper_writer' \
             'stage_external_submission'; do
-            if grep -Fq -- "$forbidden" /tmp/AUTO_TRADE_MAC.command; then
-              echo "ERROR: Finder launcher contains forbidden execution surface: $forbidden" >&2
+            if grep -Fq -- "$forbidden" /tmp/ABRIR_AUTO_TRADE.command; then
+              echo "ERROR: dashboard opener contains forbidden execution surface: $forbidden" >&2
               exit 1
             fi
           done
 
-      - name: Upload Mac rehearsal artifact
+      - name: Upload Mac source rehearsal artifact
         uses: actions/upload-artifact@v4
         with:
           name: AUTO-TRADE-R6-MAC
           path: |
             dist/AUTO-TRADE-R6-MAC.zip
             dist/AUTO-TRADE-R6-MAC.zip.sha256
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload Mac FULL OFFLINE artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: AUTO-TRADE-R6-MAC-FULL
+          path: |
+            dist/AUTO-TRADE-R6-MAC-FULL.zip
+            dist/AUTO-TRADE-R6-MAC-FULL.zip.sha256
           if-no-files-found: error
           retention-days: 14
