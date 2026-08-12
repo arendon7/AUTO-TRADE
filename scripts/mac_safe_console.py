@@ -21,11 +21,17 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
             "Safe Mac operator console for AUTO-TRADE R6. This console exposes only "
-            "local diagnostics/rehearsal and explicit GET-only PAPER preflights. "
+            "local setup/diagnostics/rehearsal and explicit GET-only PAPER preflights. "
             "It has no order execution command."
         )
     )
     sub = parser.add_subparsers(dest="command", required=True)
+
+    workspace = sub.add_parser(
+        "init-workspace",
+        help="Create a private credential-free local PAPER workspace; no broker I/O.",
+    )
+    workspace.add_argument("--workspace", required=True, type=Path)
 
     doctor = sub.add_parser("doctor", help="Run local Mac Doctor; no broker I/O.")
     doctor.add_argument("--workspace", type=Path)
@@ -87,6 +93,16 @@ def main(argv: list[str] | None = None) -> int:
     except SafeConsoleError as exc:
         print(f"SAFE CONSOLE BLOCKED: {exc}", file=sys.stderr)
         return 2
+
+    if args.command == "init-workspace":
+        return _run(
+            [
+                str(PYTHON),
+                "scripts/mac_create_workspace.py",
+                "--workspace",
+                str(args.workspace),
+            ]
+        )
 
     if args.command == "doctor":
         command = [str(PYTHON), "scripts/mac_doctor.py"]
