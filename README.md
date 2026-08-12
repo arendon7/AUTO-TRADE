@@ -24,18 +24,27 @@ Mientras PR #14 siga DRAFT:
 git clone https://github.com/arendon7/AUTO-TRADE.git
 cd AUTO-TRADE
 git switch reconstruction/r6-external-paper-protection
-bash scripts/mac_bootstrap.sh
+bash scripts/mac_start.sh
 ```
 
-El bootstrap crea `.venv`, instala el proyecto, ejecuta boundaries y rehearsal local, **no lee credenciales Alpaca, no llama al broker y fuerza `R6_EXTERNAL_PAPER_WRITE=DISABLED`**.
+`mac_start.sh` es el punto de entrada recomendado. Si `.venv` no existe, ejecuta primero el bootstrap seguro; después abre el Mac Doctor. El launcher **no contiene ninguna opción de ejecución de órdenes** y fuerza `R6_EXTERNAL_PAPER_WRITE=DISABLED`.
 
-Después de la primera instalación, para repetir el ensayo offline sin reinstalar:
+Comandos seguros principales:
 
 ```bash
-bash scripts/mac_rehearsal.sh
+bash scripts/mac_start.sh doctor
+bash scripts/mac_start.sh rehearsal
+bash scripts/mac_start.sh readiness "$HOME/AUTO-TRADE-R6/workspace-001"
 ```
 
-Ese rehearsal vuelve a ejecutar doctor, boundaries y pruebas R6 con las credenciales removidas del proceso y el write gate deshabilitado. No llama al broker.
+Cuando ya hayas configurado credenciales Alpaca PAPER, los únicos pasos de red disponibles desde el Safe Start son GET-only y requieren una acción explícita:
+
+```bash
+bash scripts/mac_start.sh account-preflight "$HOME/AUTO-TRADE-R6/workspace-001" '<ALPACA_PAPER_ACCOUNT_ID>'
+bash scripts/mac_start.sh market-preflight "$HOME/AUTO-TRADE-R6/workspace-001" AAPL
+```
+
+El bootstrap/rehearsal no leen credenciales Alpaca, no llaman al broker y mantienen deshabilitado el write gate. Account/market preflight sí usan red, pero no tienen superficie de escritura de órdenes.
 
 Runbook completo:
 
@@ -49,7 +58,7 @@ Inspector local/read-only de un workspace existente:
 .venv/bin/python scripts/r6_inspect_paper_readiness.py --workspace <WORKSPACE>
 ```
 
-El recorrido externo posterior permanece separado: primero account preflight GET-only, luego market-data IEX GET-only, y sólo después preparación offline. Ningún paso de bootstrap/rehearsal avanza automáticamente hacia una orden.
+El recorrido externo posterior permanece separado: primero account preflight GET-only, luego market-data IEX GET-only, y sólo después preparación offline. Ningún paso de bootstrap/rehearsal/Safe Start avanza automáticamente hacia una orden.
 
 ## Cómo continuar el proyecto
 
