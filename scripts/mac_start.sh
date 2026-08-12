@@ -26,8 +26,6 @@ Useful commands:
   bash scripts/mac_start.sh doctor
   bash scripts/mac_start.sh rehearsal
   bash scripts/mac_start.sh safety-rehearsal
-  bash scripts/mac_start.sh safety-rehearsal --symbol AAPL --quantity 0.25
-  bash scripts/mac_start.sh safety-rehearsal --kill-switch
   bash scripts/mac_start.sh init-workspace "$HOME/AUTO-TRADE-R6/workspace-001"
   bash scripts/mac_start.sh readiness <WORKSPACE>
 
@@ -38,9 +36,18 @@ GET-only PAPER network steps, only after configuring PAPER credentials:
   bash scripts/mac_start.sh flat-account-preflight <WORKSPACE>
   bash scripts/mac_start.sh market-preflight <WORKSPACE> <SYMBOL>
 
-The first-canary path requires account -> asset -> flat account -> market in that order.
-Safety rehearsal is local-only and cannot authorize or send an external order.
-Any real PAPER order remains a separate command outside this safe launcher.
+After those four GET-only gates:
+
+  bash scripts/mac_start.sh build-connectivity-candidate <WORKSPACE>
+
+The candidate build strips Alpaca credentials and is local-only. It creates a real
+CapitalSafetyKernel RiskDecision + OMS VALIDATED order for purpose CONNECTIVITY_CANARY,
+but creates NO Strategy Health, NO operator authority and NO external POST authority.
+
+The first-canary path is:
+  account -> asset -> flat account -> market -> connectivity candidate
+
+Any real PAPER order remains a separate, later command outside this safe launcher.
 EOF
 
 case "${1:-}" in
@@ -73,32 +80,30 @@ case "${1:-}" in
     shift
     [[ $# -eq 2 ]] || { echo "usage: bash scripts/mac_start.sh account-preflight <WORKSPACE> <ALPACA_PAPER_ACCOUNT_ID>" >&2; exit 2; }
     exec .venv/bin/python scripts/mac_safe_console.py account-preflight \
-      --workspace "$1" \
-      --expected-account-id "$2" \
-      --allow-paper-account-read
+      --workspace "$1" --expected-account-id "$2" --allow-paper-account-read
     ;;
   asset-preflight)
     shift
     [[ $# -eq 2 ]] || { echo "usage: bash scripts/mac_start.sh asset-preflight <WORKSPACE> <SYMBOL>" >&2; exit 2; }
     exec .venv/bin/python scripts/mac_safe_console.py asset-preflight \
-      --workspace "$1" \
-      --symbol "$2" \
-      --allow-paper-asset-read
+      --workspace "$1" --symbol "$2" --allow-paper-asset-read
     ;;
   flat-account-preflight)
     shift
     [[ $# -eq 1 ]] || { echo "usage: bash scripts/mac_start.sh flat-account-preflight <WORKSPACE>" >&2; exit 2; }
     exec .venv/bin/python scripts/mac_safe_console.py flat-account-preflight \
-      --workspace "$1" \
-      --allow-paper-flat-account-read
+      --workspace "$1" --allow-paper-flat-account-read
     ;;
   market-preflight)
     shift
     [[ $# -eq 2 ]] || { echo "usage: bash scripts/mac_start.sh market-preflight <WORKSPACE> <SYMBOL>" >&2; exit 2; }
     exec .venv/bin/python scripts/mac_safe_console.py market-preflight \
-      --workspace "$1" \
-      --symbol "$2" \
-      --allow-paper-market-read
+      --workspace "$1" --symbol "$2" --allow-paper-market-read
+    ;;
+  build-connectivity-candidate)
+    shift
+    [[ $# -eq 1 ]] || { echo "usage: bash scripts/mac_start.sh build-connectivity-candidate <WORKSPACE>" >&2; exit 2; }
+    exec .venv/bin/python scripts/mac_safe_console.py build-connectivity-candidate --workspace "$1"
     ;;
   *)
     echo "Unknown safe command: $1" >&2
