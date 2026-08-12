@@ -30,14 +30,6 @@ SECRET = "paper-secret-key"
 CREDS = AlpacaPaperCredentials(key_id=KEY, secret_key=SECRET)
 
 
-class FixedDatetime(datetime):
-    @classmethod
-    def now(cls, tz=None):
-        if tz is None:
-            return NOW.replace(tzinfo=None)
-        return NOW.astimezone(tz)
-
-
 def account() -> AlpacaPaperAccountAttestation:
     return AlpacaPaperAccountAttestation(
         account_id="paper-account-001",
@@ -66,13 +58,13 @@ def flat() -> PaperFlatAccountAttestation:
         orders_response_hash="c" * 64,
         positions_request_id="req-positions",
         orders_request_id="req-orders",
-        attested_at=NOW - timedelta(seconds=1),
+        attested_at=datetime.now(timezone.utc),
     )
 
 
 def market() -> AlpacaPaperEquityMarketAttestation:
-    quote_at = NOW - timedelta(milliseconds=500)
     trade_at = NOW - timedelta(seconds=1)
+    quote_at = NOW - timedelta(milliseconds=500)
     return AlpacaPaperEquityMarketAttestation(
         market=MarketSnapshot(
             symbol="AAPL",
@@ -109,10 +101,6 @@ def setup_workspace(tmp_path) -> PaperOperationalWorkspace:
     workspace.write_account_attestation(account())
     PaperFlatAccountEvidenceStore(workspace).write(flat())
     return workspace
-
-
-def freeze_cli_clock(main) -> None:
-    main.__globals__["datetime"] = FixedDatetime
 
 
 def test_market_preflight_requires_explicit_read_opt_in(tmp_path, monkeypatch) -> None:
@@ -153,7 +141,6 @@ def test_market_preflight_requires_flat_account_before_network(tmp_path, monkeyp
     _, main = namespace()
     fake = FakeGateway()
     main.__globals__["AlpacaPaperEquityMarketDataGateway"] = lambda config: fake
-    freeze_cli_clock(main)
     with pytest.raises(SystemExit, match="not the allowed next step"):
         main(
             [
@@ -172,7 +159,6 @@ def test_market_preflight_requires_credentials_only_from_environment(tmp_path, m
     monkeypatch.delenv("APCA_API_KEY_ID", raising=False)
     monkeypatch.delenv("APCA_API_SECRET_KEY", raising=False)
     _, main = namespace()
-    freeze_cli_clock(main)
     with pytest.raises(SystemExit, match="credentials are never accepted as CLI arguments"):
         main(
             [
@@ -195,7 +181,6 @@ def test_market_preflight_happy_path_is_one_get_and_sanitized_artifact(
     _, main = namespace()
     fake = FakeGateway()
     main.__globals__["AlpacaPaperEquityMarketDataGateway"] = lambda config: fake
-    freeze_cli_clock(main)
 
     assert (
         main(
