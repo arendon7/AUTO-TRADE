@@ -49,8 +49,9 @@ def inspect_market_aware_readiness(*, root: Path, now: datetime) -> dict[str, ob
 
     This helper is read-only and non-authorizing. The base readiness inspector
     remains the durable state authority. For the first external canary this
-    projection inserts two additional GET-only gates before offline preparation:
-    exact PAPER account flatness, then fresh IEX equity market evidence.
+    projection requires exact PAPER account flatness and IEX market evidence in
+    every phase that can still lead to a first external submit. A legacy
+    prepared package cannot bypass either newer gate.
 
     A clean account observation is intentionally short-lived. If it becomes
     stale before preparation/human execution, the operator must abandon that
@@ -66,6 +67,7 @@ def inspect_market_aware_readiness(*, root: Path, now: datetime) -> dict[str, ob
     flat_store = PaperFlatAccountEvidenceStore(workspace)
     market_path = workspace.root / "market_snapshot.json"
     instant = now.astimezone(timezone.utc)
+    pre_execution = report.phase in _PRE_EXECUTION_PHASES
 
     payload["flat_account_evidence_present"] = flat_store.path.is_file()
     payload["flat_account_clean_for_first_canary"] = None
@@ -104,7 +106,7 @@ def inspect_market_aware_readiness(*, root: Path, now: datetime) -> dict[str, ob
         payload["flat_account_open_order_count"] = flat.open_order_count
         payload["flat_account_fingerprint"] = flat.fingerprint
 
-        if report.phase in _PRE_EXECUTION_PHASES and age_seconds > FLAT_ACCOUNT_MAX_AGE_SECONDS:
+        if pre_execution and age_seconds > FLAT_ACCOUNT_MAX_AGE_SECONDS:
             payload["phase"] = BLOCKED_STALE_FLAT_ACCOUNT_EVIDENCE
             payload["next_action"] = (
                 "CREATE_NEW_WORKSPACE_AND_REPEAT_ACCOUNT_FLAT_MARKET_PREFLIGHTS"
@@ -113,7 +115,7 @@ def inspect_market_aware_readiness(*, root: Path, now: datetime) -> dict[str, ob
             payload["broker_write_performed"] = False
             return payload
 
-        if not flat.clean_for_first_canary and report.phase in _PRE_EXECUTION_PHASES:
+        if not flat.clean_for_first_canary and pre_execution:
             payload["phase"] = BLOCKED_EXISTING_PAPER_EXPOSURE
             payload["next_action"] = (
                 "STOP_AND_REVIEW_EXISTING_PAPER_EXPOSURE_MANUALLY"
@@ -125,21 +127,23 @@ def inspect_market_aware_readiness(*, root: Path, now: datetime) -> dict[str, ob
             payload["broker_write_performed"] = False
             return payload
 
-    if report.phase is PaperReadinessPhase.PREPARATION_REQUIRED and flat is None:
+    if pre_execution and flat is None:
         payload["market_evidence_present"] = market_path.is_file()
         payload["market_symbol"] = None
         payload["market_fingerprint"] = None
         payload["phase"] = FLAT_ACCOUNT_PREFLIGHT_REQUIRED
         payload["next_action"] = FLAT_ACCOUNT_NEXT_ACTION
+        payload["execution_authorized"] = False
         return payload
 
     if not market_path.is_file():
         payload["market_evidence_present"] = False
         payload["market_symbol"] = None
         payload["market_fingerprint"] = None
-        if report.phase is PaperReadinessPhase.PREPARATION_REQUIRED:
+        if pre_execution:
             payload["phase"] = MARKET_DATA_PREFLIGHT_REQUIRED
             payload["next_action"] = MARKET_DATA_NEXT_ACTION
+            payload["execution_authorized"] = False
         return payload
 
     try:
