@@ -69,11 +69,26 @@ def _parser() -> argparse.ArgumentParser:
         help="Required explicit opt-in to the account GET.",
     )
 
+    asset = sub.add_parser(
+        "asset-preflight",
+        help=(
+            "Explicit single GET /v2/assets/{symbol} PAPER preflight. "
+            "Validates exact us_equity/tradable/whole-share constraints and never writes an order."
+        ),
+    )
+    asset.add_argument("--workspace", required=True, type=Path)
+    asset.add_argument("--symbol", required=True)
+    asset.add_argument(
+        "--allow-paper-asset-read",
+        action="store_true",
+        help="Required explicit opt-in to the asset GET.",
+    )
+
     flat = sub.add_parser(
         "flat-account-preflight",
         help=(
             "Explicit GET-only first-canary flatness check for positions and open orders. "
-            "Never cancels, liquidates or submits anything."
+            "Requires asset preflight first; never cancels, liquidates or submits anything."
         ),
     )
     flat.add_argument("--workspace", required=True, type=Path)
@@ -192,6 +207,25 @@ def main(argv: list[str] | None = None) -> int:
                 "--expected-account-id",
                 args.expected_account_id,
                 "--allow-paper-account-read",
+            ]
+        )
+
+    if args.command == "asset-preflight":
+        if not args.allow_paper_asset_read:
+            print(
+                "SAFE CONSOLE BLOCKED: asset GET requires --allow-paper-asset-read",
+                file=sys.stderr,
+            )
+            return 2
+        return _run(
+            [
+                str(PYTHON),
+                "scripts/r6_external_paper_asset_preflight.py",
+                "--workspace",
+                str(args.workspace),
+                "--symbol",
+                args.symbol,
+                "--allow-paper-asset-read",
             ]
         )
 

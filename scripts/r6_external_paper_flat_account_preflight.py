@@ -6,6 +6,10 @@ import json
 import os
 from pathlib import Path
 
+from autotrade.brokers.alpaca_paper_asset_evidence import (
+    PaperAssetEvidenceError,
+    PaperAssetEvidenceStore,
+)
 from autotrade.brokers.alpaca_paper_flat_account import AlpacaPaperFlatAccountGateway
 from autotrade.brokers.alpaca_paper_flat_account_evidence import PaperFlatAccountEvidenceStore
 from autotrade.brokers.alpaca_paper_gateway import (
@@ -28,7 +32,8 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
             "Perform exactly two GET-only Alpaca PAPER reads for first-canary flatness: "
-            "open positions and open orders. No cancellation, liquidation or order write exists."
+            "open positions and open orders. A safe asset preflight must already exist. "
+            "No cancellation, liquidation or order write exists."
         )
     )
     parser.add_argument("--workspace", required=True, type=Path)
@@ -66,6 +71,17 @@ def main(argv: list[str] | None = None) -> int:
     if not isinstance(account_fingerprint, str) or not isinstance(credential_reference, str):
         raise SystemExit("ERROR: persisted account evidence identifiers are invalid")
 
+    try:
+        asset = PaperAssetEvidenceStore(workspace).read()
+    except PaperAssetEvidenceError as exc:
+        raise SystemExit(
+            "ERROR: a valid GET-only PAPER asset preflight is required before flat-account preflight"
+        ) from exc
+    if asset.account_attestation_fingerprint != account_fingerprint:
+        raise SystemExit("ERROR: asset evidence does not bind the current account attestation")
+    if asset.credential_reference != credential_reference:
+        raise SystemExit("ERROR: asset evidence does not bind the current PAPER credential reference")
+
     credentials = AlpacaPaperCredentials(key_id=key_id, secret_key=secret_key)
     gateway = AlpacaPaperFlatAccountGateway(config=AlpacaPaperGatewayConfig(enabled=True))
     attestation = gateway.attest_flatness(
@@ -79,6 +95,8 @@ def main(argv: list[str] | None = None) -> int:
         "workspace": str(workspace.root),
         "artifact": str(artifact),
         "environment": "PAPER",
+        "asset_symbol": asset.symbol,
+        "asset_attestation_fingerprint": asset.fingerprint,
         "network_methods": ["GET", "GET"],
         "network_paths": [attestation.positions_path, attestation.orders_path],
         "position_count": attestation.position_count,

@@ -119,11 +119,15 @@ EOF
 Secuencia de red permitida desde Safe Start (GET-only):
 
   bash scripts/mac_start.sh account-preflight <WORKSPACE> <ALPACA_PAPER_ACCOUNT_ID>
+  bash scripts/mac_start.sh asset-preflight <WORKSPACE> <SYMBOL>
   bash scripts/mac_start.sh flat-account-preflight <WORKSPACE>
   bash scripts/mac_start.sh market-preflight <WORKSPACE> <SYMBOL>
 
 Orden obligatorio para el primer canary:
-  account -> flat-account -> market
+  account -> asset -> flat account -> market
+
+Asset preflight exige exact us_equity + active + tradable y demuestra que 1 acción entera
+cumple min_order_size/min_trade_increment; además bloquea IPO/PTP para el primer canary.
 
 Estos pasos requieren que configures credenciales PAPER de forma explícita.
 Este launcher de doble clic no carga .env, no conserva credenciales y no ofrece ejecución de órdenes.

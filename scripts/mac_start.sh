@@ -34,10 +34,11 @@ Useful commands:
 GET-only PAPER network steps, only after configuring PAPER credentials:
 
   bash scripts/mac_start.sh account-preflight <WORKSPACE> <ALPACA_PAPER_ACCOUNT_ID>
+  bash scripts/mac_start.sh asset-preflight <WORKSPACE> <SYMBOL>
   bash scripts/mac_start.sh flat-account-preflight <WORKSPACE>
   bash scripts/mac_start.sh market-preflight <WORKSPACE> <SYMBOL>
 
-The first-canary path requires account -> flat account -> market in that order.
+The first-canary path requires account -> asset -> flat account -> market in that order.
 Safety rehearsal is local-only and cannot authorize or send an external order.
 Any real PAPER order remains a separate command outside this safe launcher.
 EOF
@@ -75,6 +76,14 @@ case "${1:-}" in
       --workspace "$1" \
       --expected-account-id "$2" \
       --allow-paper-account-read
+    ;;
+  asset-preflight)
+    shift
+    [[ $# -eq 2 ]] || { echo "usage: bash scripts/mac_start.sh asset-preflight <WORKSPACE> <SYMBOL>" >&2; exit 2; }
+    exec .venv/bin/python scripts/mac_safe_console.py asset-preflight \
+      --workspace "$1" \
+      --symbol "$2" \
+      --allow-paper-asset-read
     ;;
   flat-account-preflight)
     shift

@@ -21,6 +21,7 @@ def test_safe_console_has_no_execution_subcommand() -> None:
     assert "init-workspace" in help_text
     assert "safety-rehearsal" in help_text
     assert "account-preflight" in help_text
+    assert "asset-preflight" in help_text
     assert "flat-account-preflight" in help_text
     assert "market-preflight" in help_text
 
@@ -113,6 +114,39 @@ def test_safe_console_account_preflight_requires_explicit_read_opt_in(monkeypatc
     )
     assert rc == 2
     assert called == []
+
+
+def test_safe_console_asset_preflight_requires_explicit_read_opt_in(monkeypatch) -> None:
+    monkeypatch.setattr(console, "_require_safe_shell", lambda: None)
+    called = []
+    monkeypatch.setattr(console, "_run", lambda argv: called.append(argv) or 0)
+    rc = console.main(
+        ["asset-preflight", "--workspace", "/tmp/workspace", "--symbol", "AAPL"]
+    )
+    assert rc == 2
+    assert called == []
+
+
+def test_safe_console_asset_preflight_routes_only_to_get_asset_script(monkeypatch) -> None:
+    monkeypatch.setattr(console, "_require_safe_shell", lambda: None)
+    captured = []
+    monkeypatch.setattr(console, "_run", lambda argv: captured.append(argv) or 0)
+    rc = console.main(
+        [
+            "asset-preflight",
+            "--workspace",
+            "/tmp/workspace",
+            "--symbol",
+            "AAPL",
+            "--allow-paper-asset-read",
+        ]
+    )
+    assert rc == 0
+    joined = " ".join(captured[0])
+    assert "r6_external_paper_asset_preflight.py" in joined
+    assert "--symbol AAPL" in joined
+    assert "--allow-paper-asset-read" in joined
+    assert "r6_execute_paper_canary.py" not in joined
 
 
 def test_safe_console_flat_account_requires_explicit_read_opt_in(monkeypatch) -> None:

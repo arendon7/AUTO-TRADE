@@ -6,6 +6,10 @@ import json
 import os
 from pathlib import Path
 
+from autotrade.brokers.alpaca_paper_asset_evidence import (
+    PaperAssetEvidenceError,
+    PaperAssetEvidenceStore,
+)
 from autotrade.brokers.alpaca_paper_gateway import AlpacaPaperCredentials
 from autotrade.brokers.alpaca_paper_market_data import (
     AlpacaPaperEquityMarketDataGateway,
@@ -31,7 +35,7 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
             "Explicit GET-only Alpaca IEX market-data preflight for one R6 PAPER workspace. "
-            "Requires clean first-canary account evidence and exposes no order API."
+            "Requires account-bound asset evidence plus clean first-canary account evidence and exposes no order API."
         )
     )
     parser.add_argument("--workspace", required=True, type=Path)
@@ -74,12 +78,24 @@ def main(argv: list[str] | None = None) -> int:
 
     credentials = AlpacaPaperCredentials(key_id=key_id, secret_key=secret_key)
     workspace = PaperOperationalWorkspace(root=workspace_root)
+    try:
+        asset = PaperAssetEvidenceStore(workspace).read()
+    except PaperAssetEvidenceError as exc:
+        raise SystemExit(
+            "Market preflight requires valid GET-only PAPER asset evidence first."
+        ) from exc
+    symbol = args.symbol.strip().upper()
+    if asset.symbol != symbol:
+        raise SystemExit(
+            f"Market symbol {symbol} does not match attested PAPER asset {asset.symbol}."
+        )
+
     gateway = AlpacaPaperEquityMarketDataGateway(
         AlpacaPaperMarketDataConfig(enabled=True)
     )
     attestation = gateway.attest_snapshot(
         credentials=credentials,
-        symbol=args.symbol,
+        symbol=symbol,
         now=now,
     )
     path = PaperMarketEvidenceStore(workspace).write(
@@ -91,6 +107,7 @@ def main(argv: list[str] | None = None) -> int:
         "status": "PAPER_MARKET_PREFLIGHT_COMPLETE",
         "artifact": str(path),
         "symbol": attestation.market.symbol,
+        "asset_attestation_fingerprint": asset.fingerprint,
         "feed": attestation.feed,
         "currency": attestation.currency,
         "market_fingerprint": payload["market_fingerprint"],
