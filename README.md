@@ -29,15 +29,26 @@ bash scripts/mac_start.sh
 
 `mac_start.sh` es el punto de entrada recomendado. Si `.venv` no existe, ejecuta primero el bootstrap seguro; después abre el Mac Doctor. El launcher **no contiene ninguna opción de ejecución de órdenes** y fuerza `R6_EXTERNAL_PAPER_WRITE=DISABLED`.
 
+Primer ensayo recomendado, todavía sin credenciales ni red al broker:
+
+```bash
+bash scripts/mac_start.sh rehearsal
+bash scripts/mac_start.sh init-workspace "$HOME/AUTO-TRADE-R6/workspace-001"
+bash scripts/mac_start.sh readiness "$HOME/AUTO-TRADE-R6/workspace-001"
+```
+
+El workspace se crea fuera del repositorio, con permisos privados, sin DBs de trading, sin credenciales y debe comenzar en `ACCOUNT_PREFLIGHT_REQUIRED`.
+
 Comandos seguros principales:
 
 ```bash
 bash scripts/mac_start.sh doctor
 bash scripts/mac_start.sh rehearsal
+bash scripts/mac_start.sh init-workspace "$HOME/AUTO-TRADE-R6/workspace-001"
 bash scripts/mac_start.sh readiness "$HOME/AUTO-TRADE-R6/workspace-001"
 ```
 
-Cuando ya hayas configurado credenciales Alpaca PAPER, los únicos pasos de red disponibles desde el Safe Start son GET-only y requieren una acción explícita:
+Cuando ya hayas configurado credenciales Alpaca PAPER, los únicos pasos de red disponibles desde Safe Start son GET-only y requieren una acción explícita:
 
 ```bash
 bash scripts/mac_start.sh account-preflight "$HOME/AUTO-TRADE-R6/workspace-001" '<ALPACA_PAPER_ACCOUNT_ID>'
@@ -45,6 +56,8 @@ bash scripts/mac_start.sh market-preflight "$HOME/AUTO-TRADE-R6/workspace-001" A
 ```
 
 El bootstrap/rehearsal no leen credenciales Alpaca, no llaman al broker y mantienen deshabilitado el write gate. Account/market preflight sí usan red, pero no tienen superficie de escritura de órdenes.
+
+**Límite actual antes del primer canary real:** estamos cerrando la inicialización autoritativa de cartera PAPER y la candidatura/`RiskDecision` producida por Capital Safety Kernel para que la preparación offline no requiera fabricar estado a mano. Hasta cerrar ese gate, se puede ensayar por completo el recorrido local y los dos GET-only, pero no se debe forzar manualmente `core.sqlite3` ni artifacts para avanzar.
 
 Runbook completo:
 
