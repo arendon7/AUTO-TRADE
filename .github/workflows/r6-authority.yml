@@ -42,6 +42,8 @@ jobs:
         run: python scripts/check_r6_operational_execution_boundary.py
       - name: R6 read-only readiness boundary
         run: python scripts/check_r6_readiness_boundary.py
+      - name: Mac rehearsal boundary
+        run: python scripts/check_mac_rehearsal_boundary.py
       - name: R6 unsupported-product boundary
         run: python scripts/check_r6_product_boundary.py
       - name: Operational lifecycle functional tests
