@@ -11,6 +11,36 @@ Estado objetivo de este runbook: poder abrir AUTO-TRADE en un Mac, validar el si
 - Una evidencia PAPER no demuestra rentabilidad ni autoriza LIVE.
 - Ningún paso de instalación o diagnóstico envía órdenes.
 - Account preflight, market-data preflight, preparación, decisión humana y ejecución son comandos separados.
+- `mac_start.sh` y `mac_safe_console.py` **no exponen ningún comando de ejecución de órdenes**.
+
+## Ruta que ya puedes ensayar en el Mac
+
+Sin cuenta Alpaca, sin credenciales y sin red al broker:
+
+```bash
+git clone https://github.com/arendon7/AUTO-TRADE.git
+cd AUTO-TRADE
+git switch reconstruction/r6-external-paper-protection
+bash scripts/mac_start.sh
+bash scripts/mac_start.sh rehearsal
+bash scripts/mac_start.sh init-workspace "$HOME/AUTO-TRADE-R6/workspace-001"
+bash scripts/mac_start.sh readiness "$HOME/AUTO-TRADE-R6/workspace-001"
+```
+
+Resultado esperado del workspace nuevo:
+
+```text
+ACCOUNT_PREFLIGHT_REQUIRED
+```
+
+Hasta aquí:
+
+- credenciales usadas: NO;
+- broker network I/O: NO;
+- broker write: NO;
+- capital authority: NONE;
+- `R6_EXTERNAL_PAPER_WRITE=DISABLED`;
+- LIVE: BLOCKED.
 
 ## Nivel 0 — Clonar y preparar el Mac
 
@@ -20,17 +50,19 @@ Mientras PR #14 siga DRAFT, usar la rama R6 explícita:
 git clone https://github.com/arendon7/AUTO-TRADE.git
 cd AUTO-TRADE
 git switch reconstruction/r6-external-paper-protection
-bash scripts/mac_bootstrap.sh
+bash scripts/mac_start.sh
 ```
+
+`mac_start.sh` es el entrypoint recomendado. Si `.venv` todavía no existe llama a `bash scripts/mac_bootstrap.sh`; después entra únicamente a la consola segura.
 
 El bootstrap:
 
 - exige Python 3.12+;
 - crea `.venv`;
 - instala el proyecto y dependencias de desarrollo;
-- compila el código;
-- ejecuta boundaries deterministas R6, incluido market data;
-- ejecuta un conjunto focalizado de pruebas de rehearsal;
+- compila código/tests/scripts;
+- ejecuta boundaries deterministas R6 y Mac;
+- ejecuta pruebas focalizadas del recorrido PAPER y de Safe Start;
 - elimina de su propio entorno las variables de credenciales Alpaca;
 - exige que la shell no llegue con `R6_EXTERNAL_PAPER_WRITE=ENABLED`;
 - fuerza `R6_EXTERNAL_PAPER_WRITE=DISABLED` dentro del bootstrap;
@@ -46,36 +78,29 @@ Para una validación completa adicional:
 
 Este nivel no requiere cuenta Alpaca ni credenciales.
 
-Después del bootstrap inicial, la forma normal de repetir el ensayo offline completo es:
+Forma recomendada:
+
+```bash
+bash scripts/mac_start.sh rehearsal
+```
+
+Equivalente directo:
 
 ```bash
 bash scripts/mac_rehearsal.sh
 ```
 
-`mac_rehearsal.sh`:
+El rehearsal:
 
 - se niega a correr si la shell tiene `R6_EXTERNAL_PAPER_WRITE=ENABLED`;
 - exige la `.venv` ya creada por bootstrap;
 - elimina las variables de credenciales Alpaca dentro del proceso;
 - fuerza `R6_EXTERNAL_PAPER_WRITE=DISABLED`;
-- ejecuta Mac Doctor, contract/debt checks y boundaries R6;
+- ejecuta Mac Doctor, contract/debt checks y boundaries R6/Mac;
 - ejecuta las pruebas focalizadas del recorrido PAPER;
+- prueba también que Safe Start y la creación de workspace no pueden adquirir autoridad;
 - no ejecuta account preflight, market-data preflight, decisión humana ni writer;
 - no usa broker I/O.
-
-Si se desea ejecutar manualmente el mismo tipo de comprobaciones, pruebas relevantes:
-
-```bash
-.venv/bin/python -m pytest -q \
-  tests/test_r6_paper_market_data.py \
-  tests/test_r6_paper_market_evidence.py \
-  tests/test_r6_market_preflight_cli.py \
-  tests/test_r6_market_readiness.py \
-  tests/test_r6_paper_readiness.py \
-  tests/test_r6_paper_readiness_failclosed.py \
-  tests/test_r6_operational_execute_validation.py \
-  tests/test_r6_execute_paper_canary_cli.py
-```
 
 Boundaries principales:
 
@@ -87,24 +112,41 @@ Boundaries principales:
 .venv/bin/python scripts/check_r6_operational_execution_boundary.py
 .venv/bin/python scripts/check_r6_readiness_boundary.py
 .venv/bin/python scripts/check_mac_rehearsal_boundary.py
+.venv/bin/python scripts/check_mac_safe_console_boundary.py
 ```
 
-Resultado esperado: PASS. Ninguno de estos comandos debe usar credenciales o broker I/O.
+Resultado esperado: PASS. Ninguno de esos comandos debe usar credenciales o broker I/O.
 
-## Nivel 2 — Inspector de readiness
+## Nivel 2 — Crear e inspeccionar un workspace privado
 
-Cuando exista un workspace R6, su estado se consulta sin red ni capacidad de ejecución:
+No crear workspaces dentro del repositorio. La ruta recomendada es `$HOME/AUTO-TRADE-R6/...`.
 
 ```bash
-.venv/bin/python scripts/r6_inspect_paper_readiness.py \
-  --workspace "$HOME/AUTO-TRADE-R6/workspace-001"
+export R6_WORKSPACE="$HOME/AUTO-TRADE-R6/workspace-001"
+bash scripts/mac_start.sh init-workspace "$R6_WORKSPACE"
+```
+
+El inicializador:
+
+- rechaza `R6_EXTERNAL_PAPER_WRITE=ENABLED`;
+- rechaza una shell con credenciales Alpaca cargadas;
+- rechaza rutas dentro del repositorio;
+- rechaza directorios existentes no vacíos;
+- crea sólo el directorio privado `0700`;
+- no crea `core.sqlite3`, submission DB, permit DB ni operator DB;
+- no usa red;
+- termina en `ACCOUNT_PREFLIGHT_REQUIRED`.
+
+Inspección read-only:
+
+```bash
+bash scripts/mac_start.sh readiness "$R6_WORKSPACE"
 ```
 
 También puede usarse el doctor:
 
 ```bash
-.venv/bin/python scripts/mac_doctor.py \
-  --workspace "$HOME/AUTO-TRADE-R6/workspace-001"
+bash scripts/mac_start.sh doctor --workspace "$R6_WORKSPACE"
 ```
 
 El inspector market-aware puede reportar, entre otros:
@@ -120,7 +162,7 @@ El inspector market-aware puede reportar, entre otros:
 - `QUALIFICATION_REVIEW_REQUIRED`
 - `BLOCKED_INCONSISTENT_STATE`
 
-Aunque el siguiente paso sea una decisión de ejecución, el report siempre conserva:
+Aunque el siguiente paso sea una decisión de ejecución, el report conserva:
 
 - `execution_authorized=false`
 - `broker_write_performed=false`
@@ -129,11 +171,11 @@ Aunque el siguiente paso sea una decisión de ejecución, el report siempre cons
 - `profitability_claim=false`
 - `live_trading=BLOCKED`
 
-## Nivel 3 — Configurar Alpaca PAPER y hacer los dos GET explícitos
+## Nivel 3 — Configurar Alpaca PAPER y hacer los GET explícitos
 
 Este es el primer nivel que usa red externa. Sigue sin existir autoridad de órdenes.
 
-Crear configuración local a partir del template:
+Crear configuración local:
 
 ```bash
 cp .env.example .env
@@ -148,7 +190,7 @@ APCA_API_SECRET_KEY=...
 R6_EXTERNAL_PAPER_WRITE=DISABLED
 ```
 
-Cargar esas variables en la terminal sólo cuando se vayan a hacer los preflights:
+Cargar variables sólo cuando se vaya a hacer un preflight:
 
 ```bash
 set -a
@@ -156,14 +198,17 @@ source .env
 set +a
 ```
 
-Crear un workspace fuera del repositorio, por ejemplo:
+### 3A — Account preflight: GET `/v2/account`
+
+Desde Safe Start:
 
 ```bash
-mkdir -p "$HOME/AUTO-TRADE-R6"
-export R6_WORKSPACE="$HOME/AUTO-TRADE-R6/workspace-001"
+bash scripts/mac_start.sh account-preflight \
+  "$R6_WORKSPACE" \
+  '<ALPACA_PAPER_ACCOUNT_ID>'
 ```
 
-### 3A — Account preflight: GET `/v2/account`
+Comando subyacente auditado:
 
 ```bash
 .venv/bin/python scripts/r6_external_paper_preflight.py \
@@ -177,14 +222,13 @@ Este comando:
 - sólo tiene autoridad para `GET /v2/account`;
 - valida cuenta/entorno PAPER;
 - guarda un artifact sanitizado;
-- no persiste la API secret;
+- no persiste API key/secret;
 - no contiene API de escritura de órdenes.
 
 Después:
 
 ```bash
-.venv/bin/python scripts/r6_inspect_paper_readiness.py \
-  --workspace "$R6_WORKSPACE"
+bash scripts/mac_start.sh readiness "$R6_WORKSPACE"
 ```
 
 El siguiente estado normal debe ser:
@@ -196,6 +240,12 @@ MARKET_DATA_PREFLIGHT_REQUIRED
 ### 3B — Equity market-data preflight: un GET IEX
 
 Elegir explícitamente el símbolo US equity del futuro canary. Ejemplo:
+
+```bash
+bash scripts/mac_start.sh market-preflight "$R6_WORKSPACE" AAPL
+```
+
+Comando subyacente auditado:
 
 ```bash
 .venv/bin/python scripts/r6_external_paper_market_preflight.py \
@@ -221,8 +271,7 @@ Este comando:
 Volver a consultar readiness:
 
 ```bash
-.venv/bin/python scripts/r6_inspect_paper_readiness.py \
-  --workspace "$R6_WORKSPACE"
+bash scripts/mac_start.sh readiness "$R6_WORKSPACE"
 ```
 
 Con account + market evidence válidos y sin package todavía, el siguiente estado normal debe ser:
@@ -243,15 +292,21 @@ OPERATOR_DECISION_REQUIRED
 
 No envía ninguna orden.
 
-**Estado actual de ergonomía:** el servicio `PaperOperationalCanaryPreparer` y sus pruebas están implementados y certificados, pero el primer canary externo todavía no debe depender de fabricar `core.sqlite3`, `RiskDecision` o Health a mano. El siguiente desarrollo es el boundary/exporter de candidatura R6 y el launcher de preparación offline que consuma estado durable autoritativo.
+**Estado actual:** `PaperOperationalCanaryPreparer` está implementado y certificado, pero el primer canary externo no debe depender de fabricar `core.sqlite3`, `RiskDecision`, Portfolio o Health a mano.
 
-Hasta que ese launcher esté cerrado y certificado:
+Antes de habilitar este nivel desde la consola Mac estamos cerrando dos piezas:
+
+1. **PAPER portfolio/account reconciliation preflight GET-only**: comprobar posiciones y órdenes abiertas; para el primer canary la ruta preferida será cuenta PAPER vacía, fail-closed si existe exposición desconocida.
+2. **R6 candidate → Safety launcher**: construir el `OrderIntent` candidato de forma explícita pero producir el `RiskDecision` exclusivamente con Capital Safety Kernel + estado durable + market evidence, y después invocar el preparer certificado.
+
+Hasta que esas dos piezas estén cerradas y triple-certificadas:
 
 - no fabricar manualmente JSON de `RiskDecision`/MarketSnapshot;
 - no editar `core.sqlite3` para forzar un estado;
-- no copiar artifacts entre attempts para avanzar readiness.
+- no copiar artifacts entre attempts para avanzar readiness;
+- no usar el writer para “probar que funciona”.
 
-Para rehearsal, este nivel ya se prueba automáticamente con la suite. Para el primer canary externo real, completar primero el launcher de preparación y volver a pasar Core/R6/Knowledge.
+Para rehearsal, el servicio de preparación ya se prueba automáticamente con la suite. Para el primer canary externo real, completar primero esta inicialización autoritativa y volver a pasar Core/R6/Knowledge.
 
 ## Nivel 5 — Decisión humana separada
 
@@ -273,13 +328,14 @@ El canary real debe ser una decisión explícita separada después de revisar:
 
 1. readiness del workspace;
 2. cuenta PAPER exacta;
-3. market evidence IEX exacta y fresca;
-4. símbolo, side, quantity/notional y limit price;
-5. take-profit y stop-loss;
-6. Safety/OMS/Portfolio/Health vigentes;
-7. notional máximo del canary;
-8. que no exista `UNKNOWN` pendiente;
-9. que `R6_EXTERNAL_PAPER_WRITE` siga `DISABLED` hasta el instante de la decisión final.
+3. portfolio PAPER reconciliado y exposición conocida;
+4. market evidence IEX exacta y fresca;
+5. símbolo, side, quantity/notional y limit price;
+6. take-profit y stop-loss;
+7. Safety/OMS/Portfolio/Health vigentes;
+8. notional máximo del canary;
+9. que no exista `UNKNOWN` pendiente;
+10. que `R6_EXTERNAL_PAPER_WRITE` siga `DISABLED` hasta el instante de la decisión final.
 
 ## Nivel 6 — Ejecución PAPER single-shot
 
