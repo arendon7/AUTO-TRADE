@@ -44,8 +44,8 @@ After those four GET-only gates, credentials are stripped again:
   bash scripts/mac_start.sh pre-canary-status <WORKSPACE>
 
 The candidate uses a real CapitalSafetyKernel RiskDecision + OMS VALIDATED order for
-purpose CONNECTIVITY_CANARY. Preparation freezes the bounded bracket package. Neither
-creates Strategy Health, human authority, OMS staging or external POST authority.
+purpose CONNECTIVITY_CANARY. Preparation freezes the bounded bracket package.
+Audited invariants: NO Strategy Health; NO operator authority; NO external POST authority.
 
 After a separately executed interactive FIRST human decision, this safe launcher may
 freeze the review document only:
