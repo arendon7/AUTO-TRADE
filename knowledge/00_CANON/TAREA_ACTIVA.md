@@ -1,70 +1,103 @@
 # TAREA ACTIVA — AUTO-TRADE
 
 ## Objetivo inmediato
-**R6 — external Alpaca PAPER gateway + bounded canary + protection/qualification evidence.**
+**R6 — dejar el sistema listo para ensayos seguros en Mac y preparar correctamente el primer external Alpaca PAPER canary, sin convertir una prueba de conectividad en una falsa prueba de rentabilidad.**
 
-Base obligatoria: post-R5-green `main` `75dcbef65b061f742745ba7be0665521967e0587`.
+Base obligatoria R0–R5: post-R5-green `main` `75dcbef65b061f742745ba7be0665521967e0587`.
 Branch activa: `reconstruction/r6-external-paper-protection`.
+PR #14: DRAFT, sin merge.
+Último checkpoint de código triple-certificado: `b0419c682a1af2907cbb559610fe021c93467859`.
+- Core Safety `31556266622`: PASS — **1292 tests / 85.18180897396941% coverage**.
+- R6 Authority `31556266743`: PASS.
+- Knowledge Contract `31556266619`: PASS.
 
-## Deuda registrada antes de programar
-- `TD-R6-001` — exact PAPER gateway/environment attestation.
-- `TD-R6-002` — submit ambiguity + durable client_order_id idempotency/reconciliation.
-- `TD-R6-003` — bounded PAPER canary prerequisites/cap.
-- `TD-R6-004` — PAPER terminality/fills/slippage/reconciliation qualification evidence.
-- `TD-R6-005` — broker-side equity bracket protection.
-- `TD-R6-006` — PAPER trade_updates protection evidence.
+## Estado de deuda
+CLOSED estructuralmente:
 - `TD-R6-007` — unsupported products/protection modes fail closed.
-- `TD-R6-008` — permanent PAPER-only/LIVE-deny authority boundary.
-- `TD-R6-010` — **CLOSED** — OMS-owned external PAPER handoff certified; no direct OrderStore status mutation.
-- `TD-R6-011` — **CLOSED** — exact prepared package + durable explicit human one-shot authority + execution bridge + human-gated writer certified.
-- `TD-R6-012` — **CLOSED** — crash-safe same-attempt resume certified; UNKNOWN/different attempt remains reconciliation-only.
-- `TD-R6-013` — operational external PAPER lifecycle harness; read-only preparation, separate human execution and separate evidence capture.
+- `TD-R6-008` — permanent PAPER-only/LIVE-deny.
+- `TD-R6-009` — final Safety/OMS PRE_CONSUME + PRE_IO recheck.
+- `TD-R6-010` — OMS-owned external PAPER handoff.
+- `TD-R6-011` — durable explicit human one-shot execution authority.
+- `TD-R6-012` — crash-safe same-attempt resume; UNKNOWN remains reconciliation-only.
+- `TD-R6-013` — durable operational external PAPER lifecycle, same-core provenance, separate preparation/execution/evidence capture and manual launcher.
 
-## Orden de implementación
-1. PAPER gateway policy + account/environment attestation, **without submit path enabled**;
-2. durable submit intent/client_order_id state machine + ambiguous transport reconciliation;
-3. deterministic canary preflight and tighter notional cap;
-4. equity bracket request/response protection validation;
-5. PAPER trade_updates ingestion/correlation;
-6. qualification evidence store and reconciliation proofs;
-7. OMS-owned external PAPER handoff: durable `VALIDATED -> SUBMITTING` without internal-broker I/O or direct store mutation;
-8. integrated manual single-shot canary coordinator that stops before network I/O;
-9. durable explicit human execution decision (`TD-R6-011`) and crash-safe same-attempt resume (`TD-R6-012`) are certified CLOSED;
-10. operational external PAPER lifecycle harness (`TD-R6-013`): durable read-only preparation, separate human execution and separate evidence capture;
-11. bounded external PAPER evidence only after all prior gates are green and an explicit final operator decision exists;
-12. adversarial certification + debt closure.
+OPEN/blocking — sólo evidencia real externa puede cerrarlas:
+- `TD-R6-001` — exact PAPER account/environment attestation evidence.
+- `TD-R6-002` — real submit ambiguity + durable idempotency/reconciliation evidence.
+- `TD-R6-003` — bounded real PAPER canary evidence.
+- `TD-R6-004` — terminality/fills/slippage/reconciliation qualification evidence.
+- `TD-R6-005` — broker-side nested US-equity bracket protection evidence.
+- `TD-R6-006` — authenticated PAPER `trade_updates` protection evidence.
 
-## Negative tests obligatorios para R6
-- gateway disabled by default => zero network and zero order submission;
-- exact LIVE host, arbitrary host, redirect, credentials in URL, unsafe proxy or path/method not allowlisted => reject before I/O;
-- missing/wrong paper credentials or account/environment attestation => no write;
-- `trading_blocked`, stale/unknown account or malformed account state => no write;
-- no deterministic Safety/OMS approval => gateway cannot submit;
-- direct R6 mutation of OMS order status to `SUBMITTING`, or staging without fresh control-plane identity, => fail closed;
-- same local order + same client_order_id => idempotent; same client_order_id + changed payload => conflict;
-- timeout/connection reset/ambiguous submit => UNKNOWN + GET by client_order_id/reconciliation; no blind POST retry;
-- restart during UNKNOWN preserves ambiguity and blocks new exposure until resolved;
-- canary prerequisites missing/stale/DEGRADED/UNKNOWN => blocked;
-- canary notional at exact boundary allowed only when all other gates pass; one quantum above rejected; no auto-upsize to venue minimum;
-- missing/partial/contradictory terminal/fill/slippage/reconciliation evidence => PAPER qualification FAIL;
-- bracket equity parent must have exactly one take-profit and one stop-loss; missing/extra/crossed/side/qty/price/TIF/extended-hours mismatch => reject;
-- broker nested response must prove exactly two coherent protection legs before bracket is considered protected;
-- crypto/unknown product bracket, OCO or OTO => fail closed; R6 crypto remains simple-order only;
-- PAPER `trade_updates` wrong host/auth, malformed/binary decode failure, event gap/order mismatch/disconnect ambiguity => protection evidence FAIL;
-- no R6 source may contain/use LIVE trading host or convert PAPER qualification into LIVE authority;
-- missing/stale/mismatched/replayed operator decision, or decision not bound to exact bracket/submission/account/attempt => zero POST;
-- crash after same-attempt authorization consumption but before durable UNKNOWN => exact same-attempt resume only; different attempt or any UNKNOWN => reconciliation-only;
-- AI/research output is never an execution authorization; Safety + OMS remain mandatory deterministic authority.
+OPEN nonblocking:
+- `TD-OPS-001` — Graphify semantic/deep evidence. Nunca fabricar output.
 
-## Restricciones
-- Coverage gate >=85% intacto.
-- No reduce/relax negative tests to close R6.
-- No external PAPER submit until gateway + ambiguity + canary + authority gates are green; `TD-R6-010/011/012` now prove OMS-owned handoff, explicit human-only operator authority and crash-safe same-attempt semantics, but they do not themselves authorize a real external PAPER order.
-- `TD-R6-013` must close structurally before any real canary: preparation and evidence commands must remain non-authorizing; real execution stays separate and explicitly human-triggered.
-- Any real PAPER test must be explicitly enabled, bounded and evidenced; no unbounded loops or broad market activity.
-- `TD-OPS-001` remains visible; never fabricate Graphify.
-- No profitability claim from paper simulation.
+## Lo ya ensayable en Mac sin riesgo de órdenes
+1. `bash scripts/mac_start.sh` — bootstrap seguro + Doctor.
+2. `bash scripts/mac_start.sh rehearsal` — rehearsal local sin credenciales ni broker I/O.
+3. `bash scripts/mac_start.sh init-workspace "$HOME/AUTO-TRADE-R6/workspace-001"` — workspace privado fuera del repo.
+4. `bash scripts/mac_start.sh readiness <WORKSPACE>` — inspector local/read-only.
+5. Con credenciales exclusivamente PAPER y opt-in explícito:
+   - account preflight `GET /v2/account`;
+   - flat-account preflight: exactamente `GET /v2/positions` + `GET /v2/orders?status=open...`;
+   - IEX market-data GET.
+
+Todos esos caminos mantienen:
+- external write gate DISABLED;
+- no order POST;
+- capital authority NONE;
+- LIVE BLOCKED.
+
+## Flat-account gate del primer canary
+La cuenta PAPER no puede asumirse vacía sólo por `GET /v2/account`.
+
+La evidencia de flat-account:
+- queda ligada a la account attestation persistida y al credential reference;
+- usa exactamente dos GET auditados;
+- requiere 0 posiciones y 0 órdenes abiertas para el primer canary;
+- se persiste sanitizada incluso cuando la cuenta no está limpia;
+- dura máximo 30 segundos en cualquier fase que todavía pueda conducir a ejecución;
+- si falta, está sucia o está vencida, readiness bloquea;
+- el execution runtime vuelve a comprobarla antes de crear stores writable, consumir la decisión humana o llamar al Execution Bridge.
+
+## Siguiente implementación
+### A. Mac candidate → Capital Safety rehearsal
+Construir un comando **estrictamente local/offline** para que el operador pueda ensayar cómo un `OrderIntent` candidato atraviesa el Capital Safety Kernel.
+
+Reglas:
+- el CLI puede describir un candidato acotado, pero no construir manualmente un `RiskDecision(status=APPROVED)`;
+- `CapitalSafetyKernel.evaluate(...)` debe ser quien produzca el RiskDecision;
+- no broker network;
+- no writer;
+- no Execution Bridge;
+- no operator decision;
+- no external PAPER authority;
+- salida explícita: rehearsal/simulation, `capital_authority=NONE`, `external_execution_authorized=false`, `profitability_claim=false`, LIVE BLOCKED;
+- negative tests para stale market, reconciliation false, unknown broker state, excessive notional/exposure, kill switch y unsupported symbol/order type.
+
+### B. No confundir conectividad con estrategia
+El primer external PAPER canary R6 puede probar infraestructura/broker/protection, pero **no debe presentarse como estrategia rentable**.
+
+La promoción de una estrategia autónoma deberá seguir dependiendo de evidence separado de research/backtest/holdout/shadow/forward + Health. R3/R5 certifican mecanismos y datos, no una estrategia US-equity rentable para R6.
+
+No crear Health sintético ni falsificar `core.sqlite3` para hacer avanzar readiness.
+
+## Después del Safety rehearsal
+Diseñar el puente semántico correcto hacia la preparación offline real:
+- si se trata de un connectivity canary, darle un authority/policy explícito y auditado que no suplante Strategy Health;
+- si se trata de trading de estrategia, exigir una estrategia US-equity realmente promovida por research/forward/Health;
+- en ambos casos, usar Capital Safety Kernel + OMS reales y detenerse otra vez antes de cualquier POST.
+
+## Restricciones permanentes
+- Coverage real >=85%, fail-closed.
+- No relajar negative tests/boundaries para avanzar.
+- No fabricar `RiskDecision`, Health, Portfolio, DBs o artifacts manualmente para saltar gates.
+- No enviar external PAPER order sin una decisión final separada y explícita del operador.
+- Cualquier `UNKNOWN` => reconciliation-only; nunca POST retry ciego.
+- US equity bracket only.
+- PAPER evidence no es profitability proof y no promueve LIVE.
 
 ## Capital
+External PAPER order enviado: **0**.
+Capital authority actual: **NONE**.
 **LIVE TRADING: BLOQUEADO.**
-R6 may authorize bounded PAPER only after separate certification; LIVE remains outside v0.28R.
