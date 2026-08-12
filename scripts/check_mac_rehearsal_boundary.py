@@ -26,6 +26,7 @@ def main() -> int:
             '== "ENABLED"',
             'export R6_EXTERNAL_PAPER_WRITE="DISABLED"',
             'scripts/check_r6_live_deny_boundary.py',
+            'scripts/check_r6_market_data_boundary.py',
             'scripts/check_r6_operational_execution_boundary.py',
             'scripts/check_r6_readiness_boundary.py',
             'scripts/mac_doctor.py',
@@ -35,6 +36,7 @@ def main() -> int:
                 errors.append(f"Mac bootstrap safety anchor missing: {anchor}")
         forbidden = (
             "r6_external_paper_preflight.py",
+            "r6_external_paper_market_preflight.py",
             "r6_issue_operator_decision.py",
             "r6_execute_paper_canary.py",
             "source .env",
@@ -56,6 +58,7 @@ def main() -> int:
             '"live_trading": "BLOCKED"',
             '"SET" if os.environ.get(KEY_ENV) else "NOT_SET"',
             '"SET" if os.environ.get(SECRET_ENV) else "NOT_SET"',
+            "inspect_market_aware_readiness(",
         )
         for anchor in required:
             if anchor not in text:
@@ -66,6 +69,7 @@ def main() -> int:
             "websockets",
             "AlpacaPaperCredentials",
             "AlpacaPaperSingleShotWriter",
+            "r6_external_paper_market_preflight",
             "r6_execute_paper_canary",
         ):
             if value in text:
@@ -86,6 +90,8 @@ def main() -> int:
         for anchor in (
             "## STOP — antes de cualquier orden PAPER real",
             "R6_EXTERNAL_PAPER_WRITE=DISABLED",
+            "r6_external_paper_market_preflight.py",
+            "--allow-paper-market-read",
             "external PAPER order sent: **NO**",
             "LIVE trading: **BLOCKED**",
         ):
