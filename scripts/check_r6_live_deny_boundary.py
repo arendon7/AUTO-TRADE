@@ -14,12 +14,14 @@ PAPER_TRADE_UPDATES_URL = "wss://paper-api.alpaca.markets/stream"
 LIVE_TRADE_UPDATES_URL = "wss://api.alpaca.markets/stream"
 
 ATTESTATION_FILE = "alpaca_paper_gateway.py"
+MARKET_DATA_FILE = "alpaca_paper_market_data.py"
 RECONCILIATION_FILE = "alpaca_paper_reconciliation_gateway.py"
 WRITER_FILE = "alpaca_paper_writer.py"
 TRADE_UPDATES_FILE = "alpaca_paper_trade_updates_transport.py"
 
 HTTP_METHOD_BY_FILE = {
     ATTESTATION_FILE: "GET",
+    MARKET_DATA_FILE: "GET",
     RECONCILIATION_FILE: "GET",
     WRITER_FILE: "POST",
 }
@@ -45,6 +47,16 @@ REQUIRED_ROLE_ANCHORS = {
         "parsed.hostname == ALPACA_LIVE_TRADING_HOST",
         "ProxyHandler({})",
         "_RejectRedirectHandler()",
+    ),
+    MARKET_DATA_FILE: (
+        'ALPACA_MARKET_DATA_HOST = "data.alpaca.markets"',
+        'ALPACA_BASIC_EQUITY_FEED = "iex"',
+        'ALPACA_MARKET_DATA_CURRENCY = "USD"',
+        'method="GET"',
+        "ProxyHandler({})",
+        "_RejectMarketDataRedirectHandler()",
+        'parsed.query != f"feed={ALPACA_BASIC_EQUITY_FEED}&currency={ALPACA_MARKET_DATA_CURRENCY}"',
+        "MarketSnapshot observed_at must be oldest component timestamp",
     ),
     RECONCILIATION_FILE: (
         "parsed.hostname != ALPACA_PAPER_TRADING_HOST",
