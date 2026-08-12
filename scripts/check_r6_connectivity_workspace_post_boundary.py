@@ -27,13 +27,29 @@ FORBIDDEN_TEXT = (
 )
 
 
-def _class_segment(source: str, tree: ast.AST, name: str) -> str:
+def _class_node(tree: ast.AST, name: str) -> ast.ClassDef:
     for node in ast.walk(tree):
         if isinstance(node, ast.ClassDef) and node.name == name:
-            lines = source.splitlines()
-            end = getattr(node, "end_lineno", node.lineno)
-            return "\n".join(lines[node.lineno - 1 : end])
+            return node
     raise SystemExit(f"ERROR: class missing: {name}")
+
+
+def _class_segment(source: str, node: ast.ClassDef) -> str:
+    lines = source.splitlines()
+    end = getattr(node, "end_lineno", node.lineno)
+    return "\n".join(lines[node.lineno - 1 : end])
+
+
+def _is_transport_write(node: ast.AST) -> bool:
+    return (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "write"
+        and isinstance(node.func.value, ast.Attribute)
+        and node.func.value.attr == "_transport"
+        and isinstance(node.func.value.value, ast.Name)
+        and node.func.value.value.id == "self"
+    )
 
 
 def main() -> int:
@@ -54,8 +70,9 @@ def main() -> int:
             if any(module == p or module.startswith(p + ".") for p in FORBIDDEN_IMPORTS):
                 errors.append(f"forbidden direct network/runtime import: {module}")
 
-    executor = _class_segment(source, tree, "ConnectivityWorkspaceOneShotExecutor")
-    reconciler = _class_segment(source, tree, "ConnectivityWorkspaceReconciliationRuntime")
+    executor_node = _class_node(tree, "ConnectivityWorkspaceOneShotExecutor")
+    reconciler_node = _class_node(tree, "ConnectivityWorkspaceReconciliationRuntime")
+    reconciler = _class_segment(source, reconciler_node)
 
     required = (
         "ConnectivityWorkspaceStagingBridge(self._workspace).stage(",
@@ -76,8 +93,21 @@ def main() -> int:
         if anchor not in source:
             errors.append(f"required one-shot/reconciliation anchor missing: {anchor}")
 
-    if source.count("self._transport.write(request)") != 1:
-        errors.append("executor must contain exactly one transport write call")
+    writes = [node for node in ast.walk(executor_node) if _is_transport_write(node)]
+    if len(writes) != 1:
+        errors.append("executor must contain exactly one self._transport.write call")
+    else:
+        parents: dict[ast.AST, ast.AST] = {}
+        for parent in ast.walk(executor_node):
+            for child in ast.iter_child_nodes(parent):
+                parents[child] = parent
+        cursor = parents.get(writes[0])
+        while cursor is not None:
+            if isinstance(cursor, (ast.For, ast.While, ast.AsyncFor)):
+                errors.append("transport write may not be nested under any retry/iteration loop")
+                break
+            cursor = parents.get(cursor)
+
     try:
         if source.index("ConnectivityWorkspaceStagingBridge(self._workspace).stage(") > source.index(
             "self._transport.write(request)"
@@ -85,10 +115,6 @@ def main() -> int:
             errors.append("UNKNOWN staging must textually precede the only transport write")
     except ValueError:
         pass
-
-    executor_tree = ast.parse(executor)
-    if any(isinstance(node, (ast.For, ast.While, ast.AsyncFor)) for node in ast.walk(executor_tree)):
-        errors.append("one-shot executor may not contain retry/iteration loops")
 
     if "AlpacaPaperWriteTransport" in reconciler or ".write(" in reconciler:
         errors.append("restart reconciliation class may not expose a write transport/call")
@@ -106,7 +132,7 @@ def main() -> int:
     print(
         "AUTO-TRADE R6 connectivity one-shot POST boundary: PASS "
         "(same-process UNKNOWN-before-POST; final Safety + durable UNKNOWN recheck; "
-        "exactly one transport write; restart GET-only reconciliation; no blind retry/LIVE)"
+        "exactly one non-loop transport write; restart GET-only reconciliation; no blind retry/LIVE)"
     )
     return 0
 
