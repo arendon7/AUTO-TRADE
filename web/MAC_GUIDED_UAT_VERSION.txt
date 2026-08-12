@@ -6,4 +6,4 @@ strategy_lab=NEXT_AFTER_R6_GUIDED_UAT
 external_paper_write=DISABLED
 capital_authority=NONE
 live_trading=BLOCKED
-canon_sync_parent=529d5db53c801569ed3c32b9a3922a90c586dd40
+canon_sync_parent=73da14788a0523dec4784b4c4386da8c9cfc8647
