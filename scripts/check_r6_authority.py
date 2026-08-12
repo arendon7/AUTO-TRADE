@@ -7,18 +7,26 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 BROKER_DIR = ROOT / "src/autotrade/brokers"
 R6_PREFIX = "alpaca_paper_"
-CURRENT_PHASE = "PAPER_SINGLE_SHOT_GET_RECONCILIATION_AND_TRADE_UPDATES_CONTROL_STREAM"
+CURRENT_PHASE = "PAPER_SINGLE_SHOT_MARKET_DATA_GET_RECONCILIATION_AND_TRADE_UPDATES_CONTROL_STREAM"
 
 PAPER_HOST = "paper-api.alpaca.markets"
 LIVE_HOST = "api.alpaca.markets"
+MARKET_DATA_HOST = "data.alpaca.markets"
 PAPER_TRADE_UPDATES_URL = "wss://paper-api.alpaca.markets/stream"
 LIVE_TRADE_UPDATES_URL = "wss://api.alpaca.markets/stream"
 ATTESTATION_FILE = "alpaca_paper_gateway.py"
+MARKET_DATA_FILE = "alpaca_paper_market_data.py"
 RECONCILIATION_FILE = "alpaca_paper_reconciliation_gateway.py"
 WRITER_FILE = "alpaca_paper_writer.py"
 TRADE_UPDATES_FILE = "alpaca_paper_trade_updates_transport.py"
 APPROVED_NETWORK_FILES = frozenset(
-    {ATTESTATION_FILE, RECONCILIATION_FILE, WRITER_FILE, TRADE_UPDATES_FILE}
+    {
+        ATTESTATION_FILE,
+        MARKET_DATA_FILE,
+        RECONCILIATION_FILE,
+        WRITER_FILE,
+        TRADE_UPDATES_FILE,
+    }
 )
 
 FORBIDDEN_IMPORT_PREFIXES = (
@@ -186,6 +194,28 @@ def _validate_network_roles() -> list[str]:
         _require_disabled_get_surface(text, ATTESTATION_FILE, errors)
         if "ALPACA_PAPER_ACCOUNT_PATH = \"/v2/account\"" not in text:
             errors.append("gateway: exact /v2/account path constant is missing")
+
+    market_data = BROKER_DIR / MARKET_DATA_FILE
+    if market_data.is_file():
+        text = market_data.read_text(encoding="utf-8")
+        if f'ALPACA_MARKET_DATA_HOST = "{MARKET_DATA_HOST}"' not in text:
+            errors.append("market data: exact data.alpaca.markets host constant is missing")
+        for anchor in (
+            'ALPACA_BASIC_EQUITY_FEED = "iex"',
+            'ALPACA_MARKET_DATA_CURRENCY = "USD"',
+            'enabled: bool = False',
+            'method="GET"',
+            'ProxyHandler({})',
+            '_RejectMarketDataRedirectHandler()',
+            '?feed={self._config.feed}&currency={self._config.currency}',
+            'parsed.query != f"feed={ALPACA_BASIC_EQUITY_FEED}&currency={ALPACA_MARKET_DATA_CURRENCY}"',
+        ):
+            if anchor not in text:
+                errors.append(f"market data: required read-only IEX anchor missing: {anchor}")
+        if 'method="POST"' in text or "method='POST'" in text:
+            errors.append("market data: POST authority is forbidden")
+        if "paper-api.alpaca.markets" in text or '"/v2/orders"' in text:
+            errors.append("market data: trading-host/order surface is forbidden")
 
     reconciliation = BROKER_DIR / RECONCILIATION_FILE
     if reconciliation.is_file():
