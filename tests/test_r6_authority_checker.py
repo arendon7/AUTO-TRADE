@@ -8,10 +8,6 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 CHECKER = ROOT / "scripts/check_r6_authority.py"
-CURRENT_PHASE = (
-    "PAPER_SINGLE_SHOT_FLAT_ACCOUNT_AND_MARKET_DATA_GET_RECONCILIATION_"
-    "AND_TRADE_UPDATES_CONTROL_STREAM"
-)
 
 
 def scan(tmp_path: Path, source: str, *, filename: str) -> list[str]:
@@ -33,7 +29,10 @@ def test_current_r6_authority_checker_passes_repository() -> None:
         check=False,
     )
     assert result.returncode == 0, result.stderr
-    assert CURRENT_PHASE in result.stdout
+    assert (
+        "PAPER_SINGLE_SHOT_FLAT_ACCOUNT_AND_MARKET_DATA_GET_RECONCILIATION_AND_TRADE_UPDATES_CONTROL_STREAM"
+        in result.stdout
+    )
 
 
 def test_checker_rejects_research_or_ai_authority_imports(tmp_path) -> None:
