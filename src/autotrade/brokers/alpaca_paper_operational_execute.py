@@ -30,6 +30,16 @@ from .alpaca_paper_execution_bridge import (
     PaperExecutionStageResult,
 )
 from .alpaca_paper_final_guard import PaperFinalWriteGuard
+from .alpaca_paper_flat_account import (
+    ORDERS_PATH,
+    ORDERS_QUERY,
+    POSITIONS_PATH,
+    PaperFlatAccountAttestation,
+)
+from .alpaca_paper_flat_account_evidence import (
+    PaperFlatAccountEvidenceError,
+    PaperFlatAccountEvidenceStore,
+)
 from .alpaca_paper_gateway import (
     ALPACA_PAPER_ACCOUNT_PATH,
     ALPACA_PAPER_TRADING_HOST,
@@ -59,6 +69,9 @@ from .alpaca_paper_writer import (
     AlpacaPaperSingleShotWriter,
     PaperSubmitAttemptResult,
 )
+
+
+FLAT_ACCOUNT_MAX_AGE_SECONDS = 30
 
 
 class PaperOperationalExecutionError(RuntimeError):
@@ -156,6 +169,11 @@ class PaperOperationalExecutionRuntime:
     OMS SUBMITTING only when the human decision was already consumed by the
     exact same attempt. Any submission state other than PREPARED is strictly
     reconciliation/evidence territory and can never issue another POST here.
+
+    The first-canary flat-account observation is also a hard runtime guard, not
+    merely a UI/readiness hint: it must remain current and prove zero positions
+    plus zero open orders before this class materializes any writable control
+    plane object or consumes operator authority.
     """
 
     def __init__(
@@ -206,6 +224,13 @@ class PaperOperationalExecutionRuntime:
             raise PaperOperationalExecutionBlocked(
                 "workspace account attestation endpoint is not exact PAPER"
             )
+
+        _require_fresh_clean_flat_account_evidence(
+            workspace=self._workspace,
+            account=account,
+            credentials=credentials,
+            now=instant,
+        )
 
         _require_regular_db(self._workspace.core_db_path, "core")
         _require_regular_db(self._workspace.submission_db_path, "submission")
@@ -279,9 +304,10 @@ class PaperOperationalExecutionRuntime:
             self._workspace.core_db_path
         )
 
-        # Writable control-plane objects are reconstructed only after all static
-        # workspace and fresh-path provenance checks have passed. Health reads
-        # remain isolated from Research authority and are validated by state hash.
+        # Writable control-plane objects are reconstructed only after every
+        # static workspace, fresh flat-account and provenance guard has passed.
+        # Health reads remain isolated from Research authority and are validated
+        # by their state hash.
         core_runtime = SQLiteRuntime(self._workspace.core_db_path)
         health_reader = _ExistingHealthStateReader(self._workspace.core_db_path)
         health_bridge = SQLiteHealthBridgeStore(
@@ -341,6 +367,53 @@ class PaperOperationalExecutionRuntime:
             submit=submit,
             portfolio_health_entity_id=portfolio_health_entity_id,
         )
+
+
+def _require_fresh_clean_flat_account_evidence(
+    *,
+    workspace: PaperOperationalWorkspace,
+    account: AlpacaPaperAccountAttestation,
+    credentials: AlpacaPaperCredentials,
+    now: datetime,
+) -> PaperFlatAccountAttestation:
+    try:
+        flat = PaperFlatAccountEvidenceStore(workspace).read()
+    except PaperFlatAccountEvidenceError as exc:
+        raise PaperOperationalExecutionBlocked(
+            "fresh clean flat-account evidence is required before execution"
+        ) from exc
+
+    if flat.account_attestation_fingerprint != account.fingerprint:
+        raise PaperOperationalExecutionBlocked(
+            "flat-account evidence does not match prepared PAPER account"
+        )
+    if flat.credential_reference != credentials.credential_reference:
+        raise PaperOperationalExecutionBlocked(
+            "flat-account evidence does not match runtime PAPER credentials"
+        )
+    if (
+        flat.source_host != ALPACA_PAPER_TRADING_HOST
+        or flat.positions_path != POSITIONS_PATH
+        or flat.orders_path != f"{ORDERS_PATH}?{ORDERS_QUERY}"
+    ):
+        raise PaperOperationalExecutionBlocked(
+            "flat-account evidence endpoint set is not exact PAPER"
+        )
+    if not flat.clean_for_first_canary:
+        raise PaperOperationalExecutionBlocked(
+            "first PAPER canary requires zero broker positions and zero open orders"
+        )
+
+    age_seconds = (now - flat.attested_at.astimezone(timezone.utc)).total_seconds()
+    if age_seconds < 0:
+        raise PaperOperationalExecutionBlocked(
+            "flat-account evidence timestamp is from the future"
+        )
+    if age_seconds > FLAT_ACCOUNT_MAX_AGE_SECONDS:
+        raise PaperOperationalExecutionBlocked(
+            "flat-account evidence is stale; repeat the GET-only flat-account preflight"
+        )
+    return flat
 
 
 def _read_account_attestation(path: Path) -> AlpacaPaperAccountAttestation:
