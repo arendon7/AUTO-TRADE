@@ -41,6 +41,20 @@ El bootstrap detecta `uname -m`, verifica hashes, extrae sólo el runtime corres
 
 Las credenciales PAPER no se escriben en `.env`, archivos, `localStorage` ni `sessionStorage`. Se conservan sólo en los campos de la página mientras está abierta y se pasan al proceso hijo del GET explícito que pulses.
 
+## Capital Safety sigue siendo el kernel real
+
+El botón **Probar Capital Safety** es un rehearsal local. No fabrica una aprobación ni sustituye el control crítico: la decisión se obtiene mediante `CapitalSafetyKernel.evaluate(...)` con los límites fijos del ensayo.
+
+Aunque el rehearsal resulte `APPROVED`, conserva explícitamente:
+
+- `external_execution_authorized=false`;
+- `capital_authority=NONE`;
+- `broker_network_used=false`;
+- `broker_write_performed=false`;
+- LIVE bloqueado.
+
+Esto prueba la ruta del kernel, no una estrategia rentable ni una autorización de broker.
+
 ## Frontera que sigue separada
 
 Por diseño, el dashboard **no** contiene acciones para:
@@ -56,6 +70,7 @@ Esas ceremonias siguen separadas porque son parte de la frontera de autoridad. `
 ## Estado seguro permanente
 
 - `R6_EXTERNAL_PAPER_WRITE=DISABLED` desde instalador/dashboard;
+- External PAPER order enviado por el proyecto: **0**;
 - External PAPER order enviado por instalación/dashboard: **0**;
 - Capital authority desde Control Center: **NONE**;
 - LIVE trading: **BLOCKED**;
