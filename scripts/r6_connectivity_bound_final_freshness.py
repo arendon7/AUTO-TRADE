@@ -7,9 +7,10 @@ from pathlib import Path
 
 from autotrade.brokers.alpaca_paper_gateway import AlpacaPaperCredentials
 from autotrade.brokers.alpaca_paper_operational import PaperOperationalWorkspace
-from autotrade.connectivity_execution_freshness_binding import (
-    ConnectivityBoundFinalFreshnessGuard,
-    ConnectivityExecutionFreshnessError,
+from autotrade.connectivity_execution_freshness_binding import ConnectivityExecutionFreshnessError
+from autotrade.connectivity_operator_review import (
+    ConnectivityOperatorReviewError,
+    ConnectivityReviewedBoundFinalFreshnessGuard,
 )
 
 _KEY_ENV = "APCA_API_KEY_ID"
@@ -20,8 +21,8 @@ _WRITE_ENV = "R6_EXTERNAL_PAPER_WRITE"
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
-            "Acquire Final Freshness only after the second CONNECTIVITY_CANARY human intent, "
-            "then bind both authorities immutably. Exactly five PAPER/IEX GETs; no OMS staging or POST."
+            "Acquire Final Freshness only after the receipt-bound second CONNECTIVITY_CANARY human intent, "
+            "then bind review + human intent + fresh authority. Exactly five PAPER/IEX GETs; no OMS staging or POST."
         )
     )
     parser.add_argument("--workspace", required=True, type=Path)
@@ -54,30 +55,38 @@ def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     if not args.allow_paper_final_freshness_read:
         raise SystemExit(
-            "bound Final Freshness is disabled unless --allow-paper-final-freshness-read is explicit"
+            "reviewed bound Final Freshness is disabled unless --allow-paper-final-freshness-read is explicit"
         )
     if os.environ.get(_WRITE_ENV) == "ENABLED":
         raise SystemExit(
-            "bound Final Freshness refuses R6_EXTERNAL_PAPER_WRITE=ENABLED; this phase is GET-only"
+            "reviewed bound Final Freshness refuses R6_EXTERNAL_PAPER_WRITE=ENABLED; this phase is GET-only"
         )
     workspace = _workspace(args.workspace)
     credentials = _credentials()
     try:
-        result = ConnectivityBoundFinalFreshnessGuard(workspace).acquire(
+        result = ConnectivityReviewedBoundFinalFreshnessGuard(workspace).acquire(
             credentials=credentials
         )
-    except (ConnectivityExecutionFreshnessError, TypeError, ValueError) as exc:
-        raise SystemExit(f"bound Final Freshness rejected: {exc}") from exc
+    except (ConnectivityOperatorReviewError, ConnectivityExecutionFreshnessError, TypeError, ValueError) as exc:
+        raise SystemExit(f"reviewed bound Final Freshness rejected: {exc}") from exc
 
+    review_binding = json.loads(
+        (workspace.root / "connectivity_review_final_freshness_binding.json").read_text(
+            encoding="utf-8"
+        )
+    )
     print(
         json.dumps(
             {
                 "status": "ISSUED",
                 "purpose": "CONNECTIVITY_CANARY",
                 "order_id": result.binding.order_id,
+                "operator_review_receipt_hash": review_binding["operator_review_receipt_hash"],
+                "execution_review_binding_hash": review_binding["execution_review_binding_hash"],
                 "execution_intent_decision_hash": result.binding.execution_intent_decision_hash,
                 "final_freshness_permit_hash": result.binding.final_freshness_permit_hash,
                 "binding_hash": result.binding.binding_hash,
+                "review_freshness_binding_hash": review_binding["binding_hash"],
                 "issued_at": result.binding.issued_at.isoformat(),
                 "expires_at": result.binding.expires_at.isoformat(),
                 "network_methods": ["GET", "GET", "GET", "GET", "GET"],
