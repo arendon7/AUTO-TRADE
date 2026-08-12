@@ -58,13 +58,13 @@ def flat() -> PaperFlatAccountAttestation:
         orders_response_hash="c" * 64,
         positions_request_id="req-positions",
         orders_request_id="req-orders",
-        attested_at=NOW - timedelta(seconds=1),
+        attested_at=datetime.now(timezone.utc),
     )
 
 
 def market() -> AlpacaPaperEquityMarketAttestation:
-    quote_at = NOW - timedelta(milliseconds=500)
     trade_at = NOW - timedelta(seconds=1)
+    quote_at = NOW - timedelta(milliseconds=500)
     return AlpacaPaperEquityMarketAttestation(
         market=MarketSnapshot(
             symbol="AAPL",
@@ -117,7 +117,7 @@ def test_market_preflight_rejects_enabled_write_gate_before_network(tmp_path, mo
     monkeypatch.setenv("APCA_API_KEY_ID", KEY)
     monkeypatch.setenv("APCA_API_SECRET_KEY", SECRET)
     monkeypatch.setenv("R6_EXTERNAL_PAPER_WRITE", "ENABLED")
-    ns, main = namespace()
+    _, main = namespace()
     fake = FakeGateway()
     main.__globals__["AlpacaPaperEquityMarketDataGateway"] = lambda config: fake
     with pytest.raises(SystemExit, match="disable the write gate"):
@@ -138,7 +138,7 @@ def test_market_preflight_requires_flat_account_before_network(tmp_path, monkeyp
     workspace.write_account_attestation(account())
     monkeypatch.setenv("APCA_API_KEY_ID", KEY)
     monkeypatch.setenv("APCA_API_SECRET_KEY", SECRET)
-    ns, main = namespace()
+    _, main = namespace()
     fake = FakeGateway()
     main.__globals__["AlpacaPaperEquityMarketDataGateway"] = lambda config: fake
     with pytest.raises(SystemExit, match="not the allowed next step"):
