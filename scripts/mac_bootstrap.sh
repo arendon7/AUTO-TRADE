@@ -9,7 +9,21 @@ if [[ "$(uname -s)" != "Darwin" ]]; then
   exit 1
 fi
 
-# Installation/rehearsal must never inherit broker credentials or execution authority.
+# A child script cannot modify the caller's shell. Refuse to start when the
+# caller already exposes real PAPER write authority, rather than hiding it only
+# inside this process and returning to an unsafe parent shell afterwards.
+if [[ "${R6_EXTERNAL_PAPER_WRITE:-}" == "ENABLED" ]]; then
+  cat >&2 <<'EOF'
+ERROR: R6_EXTERNAL_PAPER_WRITE is ENABLED in the calling shell.
+For installation/rehearsal, disable it in that terminal first:
+  unset R6_EXTERNAL_PAPER_WRITE
+Then rerun:
+  bash scripts/mac_bootstrap.sh
+EOF
+  exit 1
+fi
+
+# Installation/rehearsal must never use broker credentials or execution authority.
 unset APCA_API_KEY_ID || true
 unset APCA_API_SECRET_KEY || true
 export R6_EXTERNAL_PAPER_WRITE="DISABLED"
@@ -40,8 +54,8 @@ fi
 echo "AUTO-TRADE Mac bootstrap"
 echo "Repository: $ROOT"
 echo "Python: $($PYTHON_BIN --version 2>&1)"
-echo "Broker credentials loaded: NO"
-echo "External PAPER write enabled: NO"
+echo "Broker credentials loaded by bootstrap: NO"
+echo "External PAPER write enabled in bootstrap: NO"
 echo "LIVE trading: BLOCKED"
 
 if [[ ! -d .venv ]]; then
@@ -88,7 +102,7 @@ Safe next commands:
 No Alpaca credential was read by this bootstrap.
 No broker endpoint was called by this bootstrap.
 No PAPER order was submitted.
-R6_EXTERNAL_PAPER_WRITE remains DISABLED.
+This bootstrap ran with R6_EXTERNAL_PAPER_WRITE=DISABLED.
 LIVE trading remains BLOCKED.
 
 Read next:
