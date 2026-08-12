@@ -38,6 +38,22 @@ def _parser() -> argparse.ArgumentParser:
 
     sub.add_parser("rehearsal", help="Run the complete offline rehearsal; no broker I/O.")
 
+    safety = sub.add_parser(
+        "safety-rehearsal",
+        help=(
+            "Evaluate a local candidate through the real Capital Safety Kernel. "
+            "No broker, writer, OMS staging or external authority."
+        ),
+    )
+    safety.add_argument("--symbol", default="AAPL")
+    safety.add_argument("--side", choices=("BUY", "SELL"), default="BUY")
+    safety.add_argument("--quantity", default="0.25")
+    safety.add_argument("--limit-price", default="100")
+    safety.add_argument("--market-age-ms", type=int, default=250)
+    safety.add_argument("--reconciliation-failed", action="store_true")
+    safety.add_argument("--broker-state-unknown", action="store_true")
+    safety.add_argument("--kill-switch", action="store_true")
+
     readiness = sub.add_parser("readiness", help="Inspect one workspace read-only; no broker I/O.")
     readiness.add_argument("--workspace", required=True, type=Path)
 
@@ -126,6 +142,29 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "rehearsal":
         return _run(["bash", "scripts/mac_rehearsal.sh"])
+
+    if args.command == "safety-rehearsal":
+        command = [
+            str(PYTHON),
+            "scripts/mac_safety_rehearsal.py",
+            "--symbol",
+            args.symbol,
+            "--side",
+            args.side,
+            "--quantity",
+            args.quantity,
+            "--limit-price",
+            args.limit_price,
+            "--market-age-ms",
+            str(args.market_age_ms),
+        ]
+        if args.reconciliation_failed:
+            command.append("--reconciliation-failed")
+        if args.broker_state_unknown:
+            command.append("--broker-state-unknown")
+        if args.kill_switch:
+            command.append("--kill-switch")
+        return _run(command)
 
     if args.command == "readiness":
         return _run(
