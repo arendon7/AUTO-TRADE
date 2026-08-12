@@ -17,23 +17,11 @@ SELF_TEST = "tests/test_r6_flat_account_boundary.py"
 FUNCTIONAL_TEST = "tests/test_r6_flat_account_preflight.py"
 
 FORBIDDEN_IMPORT_FRAGMENTS = (
-    "alpaca_paper_writer",
-    "alpaca_paper_execution_bridge",
-    "autotrade.research",
-    "openai",
-    "anthropic",
+    "alpaca_paper_writer", "alpaca_paper_execution_bridge", "autotrade.research", "openai", "anthropic",
 )
 FORBIDDEN_CALLS = {
-    "submit_once",
-    "stage_external_submission",
-    "record_operator_approval",
-    "consume",
-    "cancel",
-    "cancel_all",
-    "close_position",
-    "close_all_positions",
-    "delete",
-    "patch",
+    "submit_once", "stage_external_submission", "record_operator_approval", "consume",
+    "cancel", "cancel_all", "close_position", "close_all_positions", "delete", "patch",
 }
 
 
@@ -47,15 +35,11 @@ def main() -> int:
         source = MODULE.read_text(encoding="utf-8")
         tree = ast.parse(source, filename=str(MODULE))
         for anchor in (
-            'POSITIONS_PATH = "/v2/positions"',
-            'ORDERS_PATH = "/v2/orders"',
-            'ORDERS_QUERY = "status=open&limit=500&direction=asc&nested=true"',
-            'method="GET"',
-            'position_count=len(position_payload)',
-            'open_order_count=len(order_payload)',
+            'POSITIONS_PATH = "/v2/positions"', 'ORDERS_PATH = "/v2/orders"',
+            'ORDERS_QUERY = "status=open&limit=500&direction=asc&nested=true"', 'method="GET"',
+            'position_count=len(position_payload)', 'open_order_count=len(order_payload)',
             'return self.position_count == 0 and self.open_order_count == 0',
-            'raise PaperFlatAccountDisabled(',
-            'credentials.credential_reference != expected_credential_reference',
+            'raise PaperFlatAccountDisabled(', 'credentials.credential_reference != expected_credential_reference',
         ):
             if anchor not in source:
                 errors.append(f"flat-account module safety anchor missing: {anchor}")
@@ -66,12 +50,9 @@ def main() -> int:
     if EVIDENCE.is_file():
         source = EVIDENCE.read_text(encoding="utf-8")
         for anchor in (
-            'ARTIFACT_NAME = "flat_account_attestation.json"',
-            '"credentials_persisted": False',
-            '"broker_mutation_performed": False',
-            '"execution_authorized": False',
-            '"capital_authority": "NONE"',
-            '"production_status": "PAPER_ONLY_LIVE_BLOCKED"',
+            'ARTIFACT_NAME = "flat_account_attestation.json"', '"credentials_persisted": False',
+            '"broker_mutation_performed": False', '"execution_authorized": False',
+            '"capital_authority": "NONE"', '"production_status": "PAPER_ONLY_LIVE_BLOCKED"',
             '"persisted PAPER account attestation is required before flat-account evidence"',
             '"flat-account evidence does not bind the persisted account attestation"',
         ):
@@ -82,13 +63,10 @@ def main() -> int:
     if CLI.is_file():
         source = CLI.read_text(encoding="utf-8")
         for anchor in (
-            "--allow-paper-flat-account-read",
-            'os.environ.get(WRITE_ENV) == WRITE_ENABLED',
-            "AlpacaPaperFlatAccountGateway",
-            "PaperFlatAccountEvidenceStore",
-            '"broker_mutation_performed": False',
-            '"execution_authorized": False',
-            '"STOP_AND_REVIEW_EXISTING_PAPER_EXPOSURE_MANUALLY"',
+            "--allow-paper-flat-account-read", 'os.environ.get(WRITE_ENV) == WRITE_ENABLED',
+            "PaperAssetEvidenceStore(workspace).read()", "AlpacaPaperFlatAccountGateway",
+            "PaperFlatAccountEvidenceStore", '"broker_mutation_performed": False',
+            '"execution_authorized": False', '"STOP_AND_REVIEW_EXISTING_PAPER_EXPOSURE_MANUALLY"',
         ):
             if anchor not in source:
                 errors.append(f"flat-account CLI safety anchor missing: {anchor}")
@@ -99,14 +77,14 @@ def main() -> int:
     if READINESS.is_file():
         source = READINESS.read_text(encoding="utf-8")
         for anchor in (
+            'ASSET_PREFLIGHT_REQUIRED = "ASSET_PREFLIGHT_REQUIRED"',
             'FLAT_ACCOUNT_PREFLIGHT_REQUIRED = "FLAT_ACCOUNT_PREFLIGHT_REQUIRED"',
             'BLOCKED_EXISTING_PAPER_EXPOSURE = "BLOCKED_EXISTING_PAPER_EXPOSURE"',
             'BLOCKED_STALE_FLAT_ACCOUNT_EVIDENCE = "BLOCKED_STALE_FLAT_ACCOUNT_EVIDENCE"',
             'FLAT_ACCOUNT_MAX_AGE_SECONDS = 30',
-            '"CREATE_NEW_WORKSPACE_AND_REPEAT_ACCOUNT_FLAT_MARKET_PREFLIGHTS"',
+            '"CREATE_NEW_WORKSPACE_AND_REPEAT_ACCOUNT_ASSET_FLAT_MARKET_PREFLIGHTS"',
             '"STOP_AND_REVIEW_EXISTING_PAPER_EXPOSURE_MANUALLY"',
-            "flat.clean_for_first_canary",
-            "flat.account_attestation_fingerprint != account.get",
+            "flat.clean_for_first_canary", "flat.account_attestation_fingerprint != account.get",
             "pre_execution = report.phase in _PRE_EXECUTION_PHASES",
         ):
             if anchor not in source:
@@ -116,10 +94,10 @@ def main() -> int:
         if not workflow.is_file() or SELF_COMMAND not in workflow.read_text(encoding="utf-8"):
             errors.append(f"{label}: flat-account checker is not wired into CI")
     if R6.is_file():
-        workflow_text = R6.read_text(encoding="utf-8")
-        if FUNCTIONAL_TEST not in workflow_text:
+        text = R6.read_text(encoding="utf-8")
+        if FUNCTIONAL_TEST not in text:
             errors.append("R6 Authority: flat-account functional tests are not wired into CI")
-        if SELF_TEST not in workflow_text:
+        if SELF_TEST not in text:
             errors.append("R6 Authority: flat-account adversarial checker tests are not wired into CI")
 
     if errors:
@@ -128,7 +106,7 @@ def main() -> int:
         return 1
     print(
         "AUTO-TRADE R6 flat-account boundary: PASS "
-        "(exact two GETs; account-bound fresh evidence; zero broker mutation; empty positions+orders required for first canary)"
+        "(asset-first; exact two GETs; account-bound fresh evidence; zero broker mutation; empty positions+orders required)"
     )
     return 0
 
