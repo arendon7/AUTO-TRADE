@@ -2,6 +2,12 @@
 
 Este paquete **FULL/STANDALONE** está preparado para instalar y operar el tramo seguro de AUTO-TRADE desde una interfaz local, antes de cualquier orden PAPER real.
 
+## Si vienes de un intento anterior que terminó en `Killed: 9`
+
+No reutilices la carpeta FULL anterior. Descarga y descomprime este paquete nuevo. El instalador nuevo no ejecuta el CPython embebido desde Downloads: primero verifica el bundle y crea la instalación operativa en **`~/Applications/AUTO-TRADE-R6`**.
+
+Si ya existe una instalación incompleta en `~/Applications/AUTO-TRADE-R6`, el instalador nuevo la reemplaza sólo después de verificar correctamente una copia nueva en staging. No necesitas ejecutar `xattr`, Homebrew ni comandos manuales.
+
 ## La forma más fácil
 
 1. Descomprime `AUTO-TRADE-R6-MAC-FULL.zip`.
