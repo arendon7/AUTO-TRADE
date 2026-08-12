@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from decimal import Decimal
 from hashlib import sha256
 import json
 
@@ -11,8 +12,12 @@ from autotrade.brokers.alpaca_paper_flat_account import (
     PaperFlatAccountIntegrityError,
     PaperFlatAccountReadPolicy,
 )
-from autotrade.brokers.alpaca_paper_flat_account_evidence import PaperFlatAccountEvidenceStore
+from autotrade.brokers.alpaca_paper_flat_account_evidence import (
+    PaperFlatAccountEvidenceError,
+    PaperFlatAccountEvidenceStore,
+)
 from autotrade.brokers.alpaca_paper_gateway import (
+    AlpacaPaperAccountAttestation,
     AlpacaPaperCredentials,
     AlpacaPaperGatewayConfig,
     AlpacaPaperHttpResponse,
@@ -55,15 +60,46 @@ def credentials() -> AlpacaPaperCredentials:
     return AlpacaPaperCredentials(key_id="paper-key", secret_key="paper-secret")
 
 
+def account_attestation(creds: AlpacaPaperCredentials) -> AlpacaPaperAccountAttestation:
+    return AlpacaPaperAccountAttestation(
+        account_id="7ca57c2a-1b8f-4e18-9414-cb88b80227c7",
+        account_reference=h("flat-account-test-account"),
+        credential_reference=creds.credential_reference,
+        status="ACTIVE",
+        currency="USD",
+        buying_power=Decimal("100000"),
+        portfolio_value=Decimal("100000"),
+        shorting_enabled=False,
+        attested_at=NOW,
+        request_id="req-account",
+        source_host="paper-api.alpaca.markets",
+        source_path="/v2/account",
+    )
+
+
+def flat_attestation(creds: AlpacaPaperCredentials):
+    account = account_attestation(creds)
+    return AlpacaPaperFlatAccountGateway(
+        config=AlpacaPaperGatewayConfig(enabled=True),
+        transport=FakeTransport(positions=[], orders=[]),
+    ).attest_flatness(
+        credentials=creds,
+        account_attestation_fingerprint=account.fingerprint,
+        expected_credential_reference=creds.credential_reference,
+        now=NOW,
+    )
+
+
 def test_flat_account_gate_proves_empty_positions_and_open_orders() -> None:
     transport = FakeTransport(positions=[], orders=[])
     creds = credentials()
+    account = account_attestation(creds)
     attestation = AlpacaPaperFlatAccountGateway(
         config=AlpacaPaperGatewayConfig(enabled=True),
         transport=transport,
     ).attest_flatness(
         credentials=creds,
-        account_attestation_fingerprint=h("account"),
+        account_attestation_fingerprint=account.fingerprint,
         expected_credential_reference=creds.credential_reference,
         now=NOW,
     )
@@ -84,12 +120,13 @@ def test_flat_account_gate_blocks_first_canary_truth_when_exposure_exists() -> N
         orders=[{"id": "order-1", "status": "new"}],
     )
     creds = credentials()
+    account = account_attestation(creds)
     attestation = AlpacaPaperFlatAccountGateway(
         config=AlpacaPaperGatewayConfig(enabled=True),
         transport=transport,
     ).attest_flatness(
         credentials=creds,
-        account_attestation_fingerprint=h("account"),
+        account_attestation_fingerprint=account.fingerprint,
         expected_credential_reference=creds.credential_reference,
         now=NOW,
     )
@@ -151,18 +188,33 @@ def test_flat_account_policy_allows_only_exact_get_targets() -> None:
         )
 
 
+def test_flat_account_evidence_requires_persisted_account_binding(tmp_path) -> None:
+    workspace = PaperOperationalWorkspace.initialize(tmp_path / "workspace")
+    creds = credentials()
+    attestation = flat_attestation(creds)
+    store = PaperFlatAccountEvidenceStore(workspace)
+
+    with pytest.raises(PaperFlatAccountEvidenceError, match="account attestation is required"):
+        store.write(attestation)
+
+
+def test_flat_account_evidence_rejects_mismatched_persisted_account(tmp_path) -> None:
+    workspace = PaperOperationalWorkspace.initialize(tmp_path / "workspace")
+    creds = credentials()
+    other = AlpacaPaperCredentials(key_id="other-paper-key", secret_key="other-paper-secret")
+    workspace.write_account_attestation(account_attestation(other))
+
+    store = PaperFlatAccountEvidenceStore(workspace)
+    with pytest.raises(PaperFlatAccountEvidenceError, match="persisted account attestation"):
+        store.write(flat_attestation(creds))
+
+
 def test_flat_account_evidence_round_trips_without_secret_or_mutation_authority(tmp_path) -> None:
     workspace = PaperOperationalWorkspace.initialize(tmp_path / "workspace")
     creds = credentials()
-    attestation = AlpacaPaperFlatAccountGateway(
-        config=AlpacaPaperGatewayConfig(enabled=True),
-        transport=FakeTransport(positions=[], orders=[]),
-    ).attest_flatness(
-        credentials=creds,
-        account_attestation_fingerprint=h("account"),
-        expected_credential_reference=creds.credential_reference,
-        now=NOW,
-    )
+    account = account_attestation(creds)
+    workspace.write_account_attestation(account)
+    attestation = flat_attestation(creds)
     store = PaperFlatAccountEvidenceStore(workspace)
     store.write(attestation)
     assert store.read() == attestation
