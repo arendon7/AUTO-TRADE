@@ -18,7 +18,7 @@ def test_r6_authority_cli_cannot_be_a_silent_noop() -> None:
     source = CHECKER.read_text(encoding="utf-8")
     assert 'with_name("check_r6_authority_core.py")' in source
     assert 'if __name__ == "__main__":' in source
-    assert "code = main()" in source
+    assert "raise SystemExit(main())" in source
     assert CORE.is_file()
 
     result = subprocess.run(

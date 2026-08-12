@@ -11,6 +11,8 @@ from autotrade.brokers.alpaca_paper_flat_account_evidence import PaperFlatAccoun
 from autotrade.brokers.alpaca_paper_market_data import AlpacaPaperEquityMarketAttestation
 from autotrade.brokers.alpaca_paper_market_evidence import market_evidence_payload
 from autotrade.brokers.alpaca_paper_market_readiness import (
+    BLOCKED_STALE_FLAT_ACCOUNT_EVIDENCE,
+    FLAT_ACCOUNT_MAX_AGE_SECONDS,
     FLAT_ACCOUNT_NEXT_ACTION,
     FLAT_ACCOUNT_PREFLIGHT_REQUIRED,
     MARKET_DATA_NEXT_ACTION,
@@ -45,7 +47,13 @@ def equity_market(*, symbol: str = "AAPL", last: str = "189.11") -> AlpacaPaperE
     )
 
 
-def write_flat(workspace: PaperOperationalWorkspace, *, positions: int = 0, orders: int = 0) -> None:
+def write_flat(
+    workspace: PaperOperationalWorkspace,
+    *,
+    positions: int = 0,
+    orders: int = 0,
+    attested_at=None,
+) -> None:
     account = attestation()
     flat = PaperFlatAccountAttestation(
         account_attestation_fingerprint=account.fingerprint,
@@ -56,7 +64,7 @@ def write_flat(workspace: PaperOperationalWorkspace, *, positions: int = 0, orde
         orders_response_hash="c" * 64,
         positions_request_id="req-positions",
         orders_request_id="req-orders",
-        attested_at=NOW,
+        attested_at=attested_at or NOW,
     )
     PaperFlatAccountEvidenceStore(workspace).write(flat)
 
@@ -102,7 +110,26 @@ def test_market_aware_readiness_inserts_market_get_only_after_flat_account(tmp_p
     assert report["flat_account_clean_for_first_canary"] is True
     assert report["flat_account_position_count"] == 0
     assert report["flat_account_open_order_count"] == 0
+    assert report["flat_account_age_seconds"] == 0
     assert report["market_evidence_present"] is False
+
+
+def test_market_aware_readiness_blocks_stale_flat_account_before_preparation(tmp_path) -> None:
+    workspace = PaperOperationalWorkspace.initialize(tmp_path / "workspace")
+    workspace.write_account_attestation(attestation())
+    write_flat(
+        workspace,
+        attested_at=NOW - timedelta(seconds=FLAT_ACCOUNT_MAX_AGE_SECONDS + 1),
+    )
+
+    report = inspect_market_aware_readiness(root=workspace.root, now=NOW)
+
+    assert report["phase"] == BLOCKED_STALE_FLAT_ACCOUNT_EVIDENCE
+    assert (
+        report["next_action"]
+        == "CREATE_NEW_WORKSPACE_AND_REPEAT_ACCOUNT_FLAT_MARKET_PREFLIGHTS"
+    )
+    assert report["execution_authorized"] is False
 
 
 def test_market_aware_readiness_blocks_existing_paper_exposure(tmp_path) -> None:
@@ -155,6 +182,7 @@ def test_market_aware_readiness_rejects_tampered_market_artifact(tmp_path) -> No
 def test_market_aware_readiness_cross_checks_prepared_package_market_fingerprint(tmp_path) -> None:
     preparer, workspace, _, submission, permit = build(tmp_path)
     run_prepare(preparer, submission, permit)
+    write_flat(workspace)
     write_market(workspace, equity_market(symbol="MSFT", last="420.00"))
 
     with pytest.raises(PaperReadinessIntegrityError, match="market fingerprint does not match"):
@@ -164,7 +192,7 @@ def test_market_aware_readiness_cross_checks_prepared_package_market_fingerprint
         )
 
 
-def test_market_aware_readiness_keeps_legacy_prepared_workspace_non_authorizing(tmp_path) -> None:
+def test_prepared_workspace_cannot_bypass_missing_flat_account_gate(tmp_path) -> None:
     preparer, workspace, _, submission, permit = build(tmp_path)
     run_prepare(preparer, submission, permit)
 
@@ -173,7 +201,22 @@ def test_market_aware_readiness_keeps_legacy_prepared_workspace_non_authorizing(
         now=NOW + timedelta(seconds=1),
     )
 
-    assert report["phase"] == "HUMAN_DECISION_REQUIRED"
-    assert report["market_evidence_present"] is False
+    assert report["phase"] == FLAT_ACCOUNT_PREFLIGHT_REQUIRED
+    assert report["next_action"] == FLAT_ACCOUNT_NEXT_ACTION
     assert report["execution_authorized"] is False
     assert report["broker_write_performed"] is False
+
+
+def test_prepared_workspace_cannot_bypass_missing_market_gate(tmp_path) -> None:
+    preparer, workspace, _, submission, permit = build(tmp_path)
+    run_prepare(preparer, submission, permit)
+    write_flat(workspace)
+
+    report = inspect_market_aware_readiness(
+        root=workspace.root,
+        now=NOW + timedelta(seconds=1),
+    )
+
+    assert report["phase"] == MARKET_DATA_PREFLIGHT_REQUIRED
+    assert report["next_action"] == MARKET_DATA_NEXT_ACTION
+    assert report["execution_authorized"] is False
