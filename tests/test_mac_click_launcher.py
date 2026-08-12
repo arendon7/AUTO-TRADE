@@ -32,6 +32,7 @@ def test_finder_launcher_is_write_disabled_and_broker_inert() -> None:
         "source .env",
         "curl ",
         "wget ",
+        "mac_safety_rehearsal.py",
     )
     for value in forbidden:
         assert value not in source
@@ -42,6 +43,8 @@ def test_finder_launcher_offers_only_safe_operator_actions() -> None:
     assert "run_safe init-workspace" in source
     assert "run_safe doctor" in source
     assert "run_safe rehearsal" in source
+    assert "run_safe safety-rehearsal" in source
+    assert "Capital Safety Kernel real" in source
     assert "run_safe readiness" in source
     assert "account-preflight" in source
     assert "flat-account-preflight" in source
