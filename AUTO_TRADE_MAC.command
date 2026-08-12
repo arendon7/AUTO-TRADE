@@ -1,8 +1,9 @@
 #!/bin/bash
 set -u
 
-ROOT="$(cd "$(dirname "$0")" && pwd)"
-cd "$ROOT" || exit 1
+SOURCE_ROOT="$(cd "$(dirname "$0")" && pwd -P)"
+INSTALL_ROOT="$HOME/Applications/AUTO-TRADE-R6"
+ROOT="$SOURCE_ROOT"
 
 if [[ "$(uname -s)" != "Darwin" ]]; then
   echo "AUTO-TRADE MAC START: este launcher solo funciona en macOS." >&2
@@ -15,6 +16,22 @@ fi
 unset APCA_API_KEY_ID || true
 unset APCA_API_SECRET_KEY || true
 export R6_EXTERNAL_PAPER_WRITE=DISABLED
+
+read_source_head() {
+  local root="$1"
+  awk -F= '$1 == "source_head" {print $2; exit}' "$root/MAC_BUILD_INFO.txt" 2>/dev/null || true
+}
+
+if [[ -f "$SOURCE_ROOT/MAC_STANDALONE_MANIFEST.txt" ]]; then
+  EXPECTED_HEAD="$(read_source_head "$SOURCE_ROOT")"
+  INSTALLED_HEAD="$(read_source_head "$INSTALL_ROOT")"
+  if [[ ! -x "$INSTALL_ROOT/.venv/bin/python" || "$EXPECTED_HEAD" != "$INSTALLED_HEAD" ]]; then
+    bash "$SOURCE_ROOT/INSTALAR_AUTO_TRADE.command" || exit $?
+  fi
+  ROOT="$INSTALL_ROOT"
+fi
+
+cd "$ROOT" || exit 1
 
 if [[ ! -x ".venv/bin/python" ]]; then
   clear
