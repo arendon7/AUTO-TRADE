@@ -228,7 +228,7 @@ class ConnectivityWorkspaceStagingBridge:
             "capital_authority": "NONE",
             "profitability_claim": False,
             "live_trading": "BLOCKED",
-            "next_action": "CONNECTIVITY_WRITER_NOT_YET_AVAILABLE",
+            "next_action": "CONNECTIVITY_ONE_SHOT_EXECUTOR_REQUIRED",
         }
         _write_json_exclusive(self.artifact_path, artifact)
         return ConnectivityWorkspaceStageResult(
