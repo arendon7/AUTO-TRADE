@@ -21,6 +21,7 @@ ALLOWED_SCRIPT_TARGETS = {
     "scripts/mac_rehearsal.sh",
     "scripts/r6_inspect_paper_readiness.py",
     "scripts/r6_external_paper_preflight.py",
+    "scripts/r6_external_paper_flat_account_preflight.py",
     "scripts/r6_external_paper_market_preflight.py",
 }
 FORBIDDEN_TEXT = (
@@ -61,6 +62,8 @@ def main() -> int:
             errors.append("safe console must refuse an inherited ENABLED write gate")
         if '"init-workspace"' not in source:
             errors.append("safe console must expose credential-free workspace initialization")
+        if '"flat-account-preflight"' not in source:
+            errors.append("safe console must expose the GET-only first-canary flat-account gate")
         for target in ALLOWED_SCRIPT_TARGETS:
             if target not in source:
                 errors.append(f"safe console expected audited command target is missing: {target}")
@@ -79,6 +82,8 @@ def main() -> int:
             errors.append("mac_start.sh must delegate all operator actions to the safe console")
         if "init-workspace" not in source:
             errors.append("mac_start.sh must expose safe workspace initialization")
+        if "flat-account-preflight" not in source:
+            errors.append("mac_start.sh must expose the flat-account gate before market preflight")
 
     if WORKSPACE_INIT.is_file():
         source = WORKSPACE_INIT.read_text(encoding="utf-8")
