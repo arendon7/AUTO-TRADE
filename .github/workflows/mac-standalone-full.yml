@@ -172,6 +172,9 @@ jobs:
           branch=${GITHUB_HEAD_REF:-${GITHUB_REF_NAME}}
           python_runtime=EMBEDDED_DUAL_ARCH_3.12.13
           offline_install=YES
+          installed_home=HOME/Applications/AUTO-TRADE-R6
+          downloaded_bundle_runtime_execution=DENIED
+          finder_quarantine_relocation=REQUIRED
           homebrew_required=NO
           system_python_required=NO
           pypi_required_at_first_launch=NO
@@ -214,6 +217,9 @@ jobs:
           unzip -p AUTO-TRADE-R6-MAC-FULL.zip AUTO-TRADE-R6-MAC-FULL/MAC_BUILD_INFO.txt > /tmp/MAC_BUILD_INFO.txt
           grep -Fq "source_head=${EXPECTED_SOURCE_SHA}" /tmp/MAC_BUILD_INFO.txt
           grep -Fq 'offline_install=YES' /tmp/MAC_BUILD_INFO.txt
+          grep -Fq 'installed_home=HOME/Applications/AUTO-TRADE-R6' /tmp/MAC_BUILD_INFO.txt
+          grep -Fq 'downloaded_bundle_runtime_execution=DENIED' /tmp/MAC_BUILD_INFO.txt
+          grep -Fq 'finder_quarantine_relocation=REQUIRED' /tmp/MAC_BUILD_INFO.txt
           grep -Fq 'homebrew_required=NO' /tmp/MAC_BUILD_INFO.txt
           grep -Fq 'system_python_required=NO' /tmp/MAC_BUILD_INFO.txt
           grep -Fq 'pypi_required_at_first_launch=NO' /tmp/MAC_BUILD_INFO.txt
@@ -238,6 +244,7 @@ jobs:
             done
           done
           grep -Fq 'scripts/mac_dashboard.py' /tmp/ABRIR_AUTO_TRADE.command
+          grep -Fq 'ditto --norsrc --noqtn' /tmp/INSTALAR_AUTO_TRADE.command
           grep -Fq 'scripts/mac_bootstrap.sh' /tmp/INSTALAR_AUTO_TRADE.command
 
       - name: Upload candidate for dual-arch boot tests
@@ -272,34 +279,58 @@ jobs:
           name: AUTO-TRADE-R6-MAC-FULL-CANDIDATE
           path: candidate
 
-      - name: Verify checksum and architecture
+      - name: Simulate Safari/Finder quarantine and verify architecture
         shell: bash
         run: |
           set -euo pipefail
           cd candidate
           shasum -a 256 -c AUTO-TRADE-R6-MAC-FULL.zip.sha256
           test "$(uname -m)" = '${{ matrix.arch }}'
-          unzip -q AUTO-TRADE-R6-MAC-FULL.zip
-          cd AUTO-TRADE-R6-MAC-FULL
-          test -f MAC_STANDALONE_MANIFEST.txt
-          test -x ABRIR_AUTO_TRADE.command
-          test -x INSTALAR_AUTO_TRADE.command
-          test ! -e .venv
-          test ! -e .runtime
 
-      - name: First user install using embedded runtime and offline wheels only
+          QTN_VALUE="0083;$(printf '%x' "$(date +%s)");Safari;AUTO-TRADE-R6-MAC-FULL.zip"
+          xattr -w com.apple.quarantine "$QTN_VALUE" AUTO-TRADE-R6-MAC-FULL.zip
+          ditto -x -k AUTO-TRADE-R6-MAC-FULL.zip .
+
+          SOURCE="$PWD/AUTO-TRADE-R6-MAC-FULL"
+          while IFS= read -r -d '' item; do
+            xattr -w com.apple.quarantine "$QTN_VALUE" "$item" 2>/dev/null || true
+          done < <(find "$SOURCE" -print0)
+
+          test -f "$SOURCE/MAC_STANDALONE_MANIFEST.txt"
+          test -x "$SOURCE/ABRIR_AUTO_TRADE.command"
+          test -x "$SOURCE/INSTALAR_AUTO_TRADE.command"
+          test ! -e "$SOURCE/.venv"
+          test ! -e "$SOURCE/.runtime"
+          xattr -p com.apple.quarantine "$SOURCE/vendor/runtime/cpython-3.12.13-20260718-${{ matrix.arch }}.tar.gz" >/dev/null
+
+      - name: First user install from quarantined downloaded package
         shell: bash
         run: |
           set -euo pipefail
-          cd candidate/AUTO-TRADE-R6-MAC-FULL
+          SOURCE="$PWD/candidate/AUTO-TRADE-R6-MAC-FULL"
+          INSTALL_ROOT="$HOME/Applications/AUTO-TRADE-R6"
+          rm -rf "$INSTALL_ROOT"
           unset APCA_API_KEY_ID APCA_API_SECRET_KEY || true
           export PIP_INDEX_URL='http://127.0.0.1:9/forbidden'
           export PIP_EXTRA_INDEX_URL='http://127.0.0.1:9/forbidden'
+
+          cd "$SOURCE"
           bash INSTALAR_AUTO_TRADE.command | tee /tmp/autotrade-standalone-bootstrap.log
           grep -Fq 'standalone_mode=YES' /tmp/autotrade-standalone-bootstrap.log
           grep -Fq 'AUTO-TRADE R6 INSTALL: OK' /tmp/autotrade-standalone-bootstrap.log
-          test -x ".runtime/${{ matrix.arch }}/python/bin/python3"
-          test -x .venv/bin/python
+          grep -Fq "install_root=$INSTALL_ROOT" /tmp/autotrade-standalone-bootstrap.log
+          grep -Fq 'standalone_install_relocated=YES' /tmp/autotrade-standalone-bootstrap.log
+
+          test ! -e "$SOURCE/.runtime"
+          test ! -e "$SOURCE/.venv"
+          test -x "$INSTALL_ROOT/.runtime/${{ matrix.arch }}/python/bin/python3"
+          test -x "$INSTALL_ROOT/.venv/bin/python"
+          if xattr -p com.apple.quarantine "$INSTALL_ROOT/.runtime/${{ matrix.arch }}/python/bin/python3" >/dev/null 2>&1; then
+            echo 'ERROR: installed embedded runtime retained Finder quarantine' >&2
+            exit 1
+          fi
+
+          cd "$INSTALL_ROOT"
           .venv/bin/python - <<'PY'
           import sys
           import autotrade
@@ -312,11 +343,12 @@ jobs:
           .venv/bin/python scripts/check_r6_precanary_status_boundary.py
           .venv/bin/pytest -q tests/test_mac_safe_console.py tests/test_mac_click_launcher.py tests/test_mac_dashboard.py tests/test_mac_doctor_provenance.py tests/test_r6_precanary_status.py
 
-      - name: Control Center localhost smoke test
+      - name: Control Center localhost smoke test from installed home
         shell: bash
         run: |
           set -euo pipefail
-          cd candidate/AUTO-TRADE-R6-MAC-FULL
+          INSTALL_ROOT="$HOME/Applications/AUTO-TRADE-R6"
+          cd "$INSTALL_ROOT"
           .venv/bin/python scripts/mac_dashboard.py --no-browser --port 18765 > /tmp/autotrade-dashboard.log 2>&1 &
           DASH_PID=$!
           cleanup() { kill "$DASH_PID" 2>/dev/null || true; wait "$DASH_PID" 2>/dev/null || true; }
@@ -335,18 +367,21 @@ jobs:
           grep -Fq '"external_paper_write":"DISABLED"' /tmp/autotrade-dashboard-meta.json
           grep -Fq 'Order execution from dashboard: UNAVAILABLE' /tmp/autotrade-dashboard.log
 
-      - name: Move package and prove venv recreation from embedded runtime
+      - name: Delete downloaded source and prove installed self-heal
         shell: bash
         run: |
           set -euo pipefail
-          mv candidate/AUTO-TRADE-R6-MAC-FULL "$RUNNER_TEMP/AUTO-TRADE-MOVED"
-          cd "$RUNNER_TEMP/AUTO-TRADE-MOVED"
-          rm -rf .runtime
-          bash INSTALAR_AUTO_TRADE.command | tee /tmp/autotrade-standalone-moved.log
-          grep -Fq 'standalone_mode=YES' /tmp/autotrade-standalone-moved.log
-          grep -Fq 'AUTO-TRADE R6 INSTALL: OK' /tmp/autotrade-standalone-moved.log
+          INSTALL_ROOT="$HOME/Applications/AUTO-TRADE-R6"
+          rm -rf candidate/AUTO-TRADE-R6-MAC-FULL
+          test -f "$INSTALL_ROOT/MAC_STANDALONE_MANIFEST.txt"
+          cd "$INSTALL_ROOT"
+          rm -rf .runtime .venv
+          bash INSTALAR_AUTO_TRADE.command | tee /tmp/autotrade-standalone-reinstall.log
+          grep -Fq 'standalone_mode=YES' /tmp/autotrade-standalone-reinstall.log
+          grep -Fq 'AUTO-TRADE R6 INSTALL: OK' /tmp/autotrade-standalone-reinstall.log
+          grep -Fq 'standalone_install_relocated=NO' /tmp/autotrade-standalone-reinstall.log
           test -x ".runtime/${{ matrix.arch }}/python/bin/python3"
-          .venv/bin/python -c 'import autotrade; print("moved_package_import=PASS")'
+          .venv/bin/python -c 'import autotrade; print("installed_copy_self_heal=PASS")'
 
   publish:
     needs: [build-universal, boot-test]
