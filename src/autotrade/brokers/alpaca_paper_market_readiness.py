@@ -5,6 +5,10 @@ from pathlib import Path
 
 from autotrade.domain import market_fingerprint
 
+from .alpaca_paper_asset_evidence import (
+    PaperAssetEvidenceError,
+    PaperAssetEvidenceStore,
+)
 from .alpaca_paper_flat_account_evidence import (
     PaperFlatAccountEvidenceError,
     PaperFlatAccountEvidenceStore,
@@ -26,6 +30,10 @@ from .alpaca_paper_readiness import (
 )
 
 
+ASSET_PREFLIGHT_REQUIRED = "ASSET_PREFLIGHT_REQUIRED"
+ASSET_NEXT_ACTION = "RUN_SEPARATE_GET_ONLY_ASSET_PREFLIGHT"
+ASSET_MAX_AGE_SECONDS = 300
+BLOCKED_STALE_ASSET_EVIDENCE = "BLOCKED_STALE_ASSET_EVIDENCE"
 FLAT_ACCOUNT_PREFLIGHT_REQUIRED = "FLAT_ACCOUNT_PREFLIGHT_REQUIRED"
 FLAT_ACCOUNT_NEXT_ACTION = "RUN_SEPARATE_GET_ONLY_FLAT_ACCOUNT_PREFLIGHT"
 BLOCKED_EXISTING_PAPER_EXPOSURE = "BLOCKED_EXISTING_PAPER_EXPOSURE"
@@ -45,29 +53,62 @@ _PRE_EXECUTION_PHASES = frozenset(
 
 
 def inspect_market_aware_readiness(*, root: Path, now: datetime) -> dict[str, object]:
-    """Project base R6 readiness plus flat-account and equity-market evidence.
-
-    This helper is read-only and non-authorizing. The base readiness inspector
-    remains the durable state authority. For the first external canary this
-    projection requires exact PAPER account flatness and IEX market evidence in
-    every phase that can still lead to a first external submit. A legacy
-    prepared package cannot bypass either newer gate.
-
-    A clean account observation is intentionally short-lived. If it becomes
-    stale before preparation/human execution, the operator must abandon that
-    workspace attempt and start again from fresh account evidence rather than
-    treating historical flatness as current broker truth.
-    """
-
+    """Read-only R6 readiness with mandatory account -> asset -> flat -> market gates."""
     if not isinstance(root, Path):
         raise TypeError("readiness workspace root must be pathlib.Path")
     report = PaperOperationalReadinessInspector(root).inspect(now=now)
     payload = report.to_dict()
     workspace = PaperOperationalWorkspace(root=root.expanduser().resolve())
+    asset_store = PaperAssetEvidenceStore(workspace)
     flat_store = PaperFlatAccountEvidenceStore(workspace)
     market_path = workspace.root / "market_snapshot.json"
     instant = now.astimezone(timezone.utc)
     pre_execution = report.phase in _PRE_EXECUTION_PHASES
+
+    payload["asset_evidence_present"] = asset_store.path.is_file()
+    payload["asset_symbol"] = None
+    payload["asset_fingerprint"] = None
+    payload["asset_age_seconds"] = None
+    payload["asset_max_age_seconds"] = ASSET_MAX_AGE_SECONDS
+
+    asset = None
+    if asset_store.path.is_file():
+        try:
+            asset = asset_store.read()
+        except PaperAssetEvidenceError as exc:
+            raise PaperReadinessIntegrityError("persisted PAPER asset evidence is invalid") from exc
+        account = _read_json_object(workspace.account_attestation_path)
+        if asset.account_attestation_fingerprint != account.get("attestation_fingerprint"):
+            raise PaperReadinessIntegrityError(
+                "asset evidence does not bind the current account attestation"
+            )
+        if asset.credential_reference != account.get("credential_reference"):
+            raise PaperReadinessIntegrityError(
+                "asset evidence does not bind the current PAPER credential reference"
+            )
+        asset_age = (instant - asset.observed_at.astimezone(timezone.utc)).total_seconds()
+        if asset_age < 0:
+            raise PaperReadinessIntegrityError("asset evidence timestamp is from the future")
+        payload["asset_symbol"] = asset.symbol
+        payload["asset_fingerprint"] = asset.fingerprint
+        payload["asset_age_seconds"] = asset_age
+        if pre_execution and asset_age > ASSET_MAX_AGE_SECONDS:
+            payload["phase"] = BLOCKED_STALE_ASSET_EVIDENCE
+            payload["next_action"] = (
+                "CREATE_NEW_WORKSPACE_AND_REPEAT_ACCOUNT_ASSET_FLAT_MARKET_PREFLIGHTS"
+            )
+            payload["execution_authorized"] = False
+            payload["broker_write_performed"] = False
+            return payload
+
+    if pre_execution and asset is None:
+        payload["flat_account_evidence_present"] = flat_store.path.is_file()
+        payload["market_evidence_present"] = market_path.is_file()
+        payload["phase"] = ASSET_PREFLIGHT_REQUIRED
+        payload["next_action"] = ASSET_NEXT_ACTION
+        payload["execution_authorized"] = False
+        payload["broker_write_performed"] = False
+        return payload
 
     payload["flat_account_evidence_present"] = flat_store.path.is_file()
     payload["flat_account_clean_for_first_canary"] = None
@@ -81,13 +122,9 @@ def inspect_market_aware_readiness(*, root: Path, now: datetime) -> dict[str, ob
         try:
             flat = flat_store.read()
         except PaperFlatAccountEvidenceError as exc:
-            raise PaperReadinessIntegrityError(
-                "persisted flat-account evidence is invalid"
-            ) from exc
+            raise PaperReadinessIntegrityError("persisted flat-account evidence is invalid") from exc
         account = _read_json_object(workspace.account_attestation_path)
-        if flat.account_attestation_fingerprint != account.get(
-            "attestation_fingerprint"
-        ):
+        if flat.account_attestation_fingerprint != account.get("attestation_fingerprint"):
             raise PaperReadinessIntegrityError(
                 "flat-account evidence does not bind the current account attestation"
             )
@@ -97,29 +134,23 @@ def inspect_market_aware_readiness(*, root: Path, now: datetime) -> dict[str, ob
             )
         age_seconds = (instant - flat.attested_at.astimezone(timezone.utc)).total_seconds()
         if age_seconds < 0:
-            raise PaperReadinessIntegrityError(
-                "flat-account evidence timestamp is from the future"
-            )
+            raise PaperReadinessIntegrityError("flat-account evidence timestamp is from the future")
         payload["flat_account_age_seconds"] = age_seconds
         payload["flat_account_clean_for_first_canary"] = flat.clean_for_first_canary
         payload["flat_account_position_count"] = flat.position_count
         payload["flat_account_open_order_count"] = flat.open_order_count
         payload["flat_account_fingerprint"] = flat.fingerprint
-
         if pre_execution and age_seconds > FLAT_ACCOUNT_MAX_AGE_SECONDS:
             payload["phase"] = BLOCKED_STALE_FLAT_ACCOUNT_EVIDENCE
             payload["next_action"] = (
-                "CREATE_NEW_WORKSPACE_AND_REPEAT_ACCOUNT_FLAT_MARKET_PREFLIGHTS"
+                "CREATE_NEW_WORKSPACE_AND_REPEAT_ACCOUNT_ASSET_FLAT_MARKET_PREFLIGHTS"
             )
             payload["execution_authorized"] = False
             payload["broker_write_performed"] = False
             return payload
-
         if not flat.clean_for_first_canary and pre_execution:
             payload["phase"] = BLOCKED_EXISTING_PAPER_EXPOSURE
-            payload["next_action"] = (
-                "STOP_AND_REVIEW_EXISTING_PAPER_EXPOSURE_MANUALLY"
-            )
+            payload["next_action"] = "STOP_AND_REVIEW_EXISTING_PAPER_EXPOSURE_MANUALLY"
             payload["market_evidence_present"] = market_path.is_file()
             payload["market_symbol"] = None
             payload["market_fingerprint"] = None
@@ -149,9 +180,13 @@ def inspect_market_aware_readiness(*, root: Path, now: datetime) -> dict[str, ob
     try:
         attestation = PaperMarketEvidenceStore(workspace).read()
     except PaperMarketEvidenceError as exc:
+        raise PaperReadinessIntegrityError("persisted equity market evidence is invalid") from exc
+    if asset is None:
+        raise PaperReadinessIntegrityError("market evidence exists without required asset evidence")
+    if attestation.market.symbol != asset.symbol:
         raise PaperReadinessIntegrityError(
-            "persisted equity market evidence is invalid"
-        ) from exc
+            "persisted market symbol does not match persisted asset evidence"
+        )
 
     observed_fingerprint = market_fingerprint(attestation.market)
     payload["market_evidence_present"] = True
@@ -170,11 +205,14 @@ def inspect_market_aware_readiness(*, root: Path, now: datetime) -> dict[str, ob
             raise PaperReadinessIntegrityError(
                 "prepared package identity disagrees with durable readiness state"
             )
-
     return payload
 
 
 __all__ = [
+    "ASSET_PREFLIGHT_REQUIRED",
+    "ASSET_NEXT_ACTION",
+    "ASSET_MAX_AGE_SECONDS",
+    "BLOCKED_STALE_ASSET_EVIDENCE",
     "FLAT_ACCOUNT_PREFLIGHT_REQUIRED",
     "FLAT_ACCOUNT_NEXT_ACTION",
     "BLOCKED_EXISTING_PAPER_EXPOSURE",

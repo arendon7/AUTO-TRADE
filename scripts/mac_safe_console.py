@@ -11,6 +11,8 @@ ROOT = Path(__file__).resolve().parents[1]
 PYTHON = ROOT / ".venv/bin/python"
 WRITE_ENV = "R6_EXTERNAL_PAPER_WRITE"
 WRITE_ENABLED = "ENABLED"
+KEY_ENV = "APCA_API_KEY_ID"
+SECRET_ENV = "APCA_API_SECRET_KEY"
 
 
 class SafeConsoleError(RuntimeError):
@@ -21,8 +23,8 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
             "Safe Mac operator console for AUTO-TRADE R6. This console exposes only "
-            "local setup/diagnostics/rehearsal and explicit GET-only PAPER preflights. "
-            "It has no order execution command."
+            "local setup/diagnostics/rehearsal, explicit GET-only PAPER preflights, "
+            "and a non-executable connectivity candidate builder. It has no order execution command."
         )
     )
     sub = parser.add_subparsers(dest="command", required=True)
@@ -63,40 +65,22 @@ def _parser() -> argparse.ArgumentParser:
     )
     account.add_argument("--workspace", required=True, type=Path)
     account.add_argument("--expected-account-id", required=True)
-    account.add_argument(
-        "--allow-paper-account-read",
-        action="store_true",
-        help="Required explicit opt-in to the account GET.",
-    )
+    account.add_argument("--allow-paper-account-read", action="store_true")
 
     asset = sub.add_parser(
         "asset-preflight",
-        help=(
-            "Explicit single GET /v2/assets/{symbol} PAPER preflight. "
-            "Validates exact us_equity/tradable/whole-share constraints and never writes an order."
-        ),
+        help="Explicit single GET /v2/assets/{symbol} PAPER preflight. Never writes an order.",
     )
     asset.add_argument("--workspace", required=True, type=Path)
     asset.add_argument("--symbol", required=True)
-    asset.add_argument(
-        "--allow-paper-asset-read",
-        action="store_true",
-        help="Required explicit opt-in to the asset GET.",
-    )
+    asset.add_argument("--allow-paper-asset-read", action="store_true")
 
     flat = sub.add_parser(
         "flat-account-preflight",
-        help=(
-            "Explicit GET-only first-canary flatness check for positions and open orders. "
-            "Requires asset preflight first; never cancels, liquidates or submits anything."
-        ),
+        help="Explicit GET-only first-canary flatness check. Never mutates broker state.",
     )
     flat.add_argument("--workspace", required=True, type=Path)
-    flat.add_argument(
-        "--allow-paper-flat-account-read",
-        action="store_true",
-        help="Required explicit opt-in to the two flat-account GETs.",
-    )
+    flat.add_argument("--allow-paper-flat-account-read", action="store_true")
 
     market = sub.add_parser(
         "market-preflight",
@@ -104,11 +88,16 @@ def _parser() -> argparse.ArgumentParser:
     )
     market.add_argument("--workspace", required=True, type=Path)
     market.add_argument("--symbol", required=True)
-    market.add_argument(
-        "--allow-paper-market-read",
-        action="store_true",
-        help="Required explicit opt-in to the IEX GET.",
+    market.add_argument("--allow-paper-market-read", action="store_true")
+
+    candidate = sub.add_parser(
+        "build-connectivity-candidate",
+        help=(
+            "Build a local OMS VALIDATED CONNECTIVITY_CANARY candidate from existing GET evidence. "
+            "Credentials are stripped; no Strategy Health, operator authority or POST is created."
+        ),
     )
+    candidate.add_argument("--workspace", required=True, type=Path)
     return parser
 
 
@@ -119,15 +108,25 @@ def _require_safe_shell() -> None:
             "Run: export R6_EXTERNAL_PAPER_WRITE=DISABLED"
         )
     if not PYTHON.is_file():
-        raise SafeConsoleError(
-            "Missing .venv. Run first: bash scripts/mac_bootstrap.sh"
-        )
+        raise SafeConsoleError("Missing .venv. Run first: bash scripts/mac_bootstrap.sh")
 
 
-def _run(argv: list[str]) -> int:
+def _child_env(*, credential_free: bool = False) -> dict[str, str]:
     env = os.environ.copy()
     env[WRITE_ENV] = "DISABLED"
-    completed = subprocess.run(argv, cwd=ROOT, env=env, check=False)
+    if credential_free:
+        env.pop(KEY_ENV, None)
+        env.pop(SECRET_ENV, None)
+    return env
+
+
+def _run(argv: list[str], *, credential_free: bool = False) -> int:
+    completed = subprocess.run(
+        argv,
+        cwd=ROOT,
+        env=_child_env(credential_free=credential_free),
+        check=False,
+    )
     return int(completed.returncode)
 
 
@@ -141,37 +140,22 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "init-workspace":
         return _run(
-            [
-                str(PYTHON),
-                "scripts/mac_create_workspace.py",
-                "--workspace",
-                str(args.workspace),
-            ]
+            [str(PYTHON), "scripts/mac_create_workspace.py", "--workspace", str(args.workspace)],
+            credential_free=True,
         )
-
     if args.command == "doctor":
         command = [str(PYTHON), "scripts/mac_doctor.py"]
         if args.workspace is not None:
             command.extend(["--workspace", str(args.workspace)])
-        return _run(command)
-
+        return _run(command, credential_free=True)
     if args.command == "rehearsal":
-        return _run(["bash", "scripts/mac_rehearsal.sh"])
-
+        return _run(["bash", "scripts/mac_rehearsal.sh"], credential_free=True)
     if args.command == "safety-rehearsal":
         command = [
-            str(PYTHON),
-            "scripts/mac_safety_rehearsal.py",
-            "--symbol",
-            args.symbol,
-            "--side",
-            args.side,
-            "--quantity",
-            args.quantity,
-            "--limit-price",
-            args.limit_price,
-            "--market-age-ms",
-            str(args.market_age_ms),
+            str(PYTHON), "scripts/mac_safety_rehearsal.py",
+            "--symbol", args.symbol, "--side", args.side,
+            "--quantity", args.quantity, "--limit-price", args.limit_price,
+            "--market-age-ms", str(args.market_age_ms),
         ]
         if args.reconciliation_failed:
             command.append("--reconciliation-failed")
@@ -179,92 +163,57 @@ def main(argv: list[str] | None = None) -> int:
             command.append("--broker-state-unknown")
         if args.kill_switch:
             command.append("--kill-switch")
-        return _run(command)
-
+        return _run(command, credential_free=True)
     if args.command == "readiness":
         return _run(
-            [
-                str(PYTHON),
-                "scripts/r6_inspect_paper_readiness.py",
-                "--workspace",
-                str(args.workspace),
-            ]
+            [str(PYTHON), "scripts/r6_inspect_paper_readiness.py", "--workspace", str(args.workspace)],
+            credential_free=True,
         )
-
     if args.command == "account-preflight":
         if not args.allow_paper_account_read:
-            print(
-                "SAFE CONSOLE BLOCKED: account GET requires --allow-paper-account-read",
-                file=sys.stderr,
-            )
+            print("SAFE CONSOLE BLOCKED: account GET requires --allow-paper-account-read", file=sys.stderr)
             return 2
-        return _run(
-            [
-                str(PYTHON),
-                "scripts/r6_external_paper_preflight.py",
-                "--workspace",
-                str(args.workspace),
-                "--expected-account-id",
-                args.expected_account_id,
-                "--allow-paper-account-read",
-            ]
-        )
-
+        return _run([
+            str(PYTHON), "scripts/r6_external_paper_preflight.py",
+            "--workspace", str(args.workspace), "--expected-account-id", args.expected_account_id,
+            "--allow-paper-account-read",
+        ])
     if args.command == "asset-preflight":
         if not args.allow_paper_asset_read:
-            print(
-                "SAFE CONSOLE BLOCKED: asset GET requires --allow-paper-asset-read",
-                file=sys.stderr,
-            )
+            print("SAFE CONSOLE BLOCKED: asset GET requires --allow-paper-asset-read", file=sys.stderr)
             return 2
-        return _run(
-            [
-                str(PYTHON),
-                "scripts/r6_external_paper_asset_preflight.py",
-                "--workspace",
-                str(args.workspace),
-                "--symbol",
-                args.symbol,
-                "--allow-paper-asset-read",
-            ]
-        )
-
+        return _run([
+            str(PYTHON), "scripts/r6_external_paper_asset_preflight.py",
+            "--workspace", str(args.workspace), "--symbol", args.symbol,
+            "--allow-paper-asset-read",
+        ])
     if args.command == "flat-account-preflight":
         if not args.allow_paper_flat_account_read:
-            print(
-                "SAFE CONSOLE BLOCKED: flat-account GETs require --allow-paper-flat-account-read",
-                file=sys.stderr,
-            )
+            print("SAFE CONSOLE BLOCKED: flat-account GETs require --allow-paper-flat-account-read", file=sys.stderr)
             return 2
-        return _run(
-            [
-                str(PYTHON),
-                "scripts/r6_external_paper_flat_account_preflight.py",
-                "--workspace",
-                str(args.workspace),
-                "--allow-paper-flat-account-read",
-            ]
-        )
-
+        return _run([
+            str(PYTHON), "scripts/r6_external_paper_flat_account_preflight.py",
+            "--workspace", str(args.workspace), "--allow-paper-flat-account-read",
+        ])
     if args.command == "market-preflight":
         if not args.allow_paper_market_read:
-            print(
-                "SAFE CONSOLE BLOCKED: market GET requires --allow-paper-market-read",
-                file=sys.stderr,
-            )
+            print("SAFE CONSOLE BLOCKED: market GET requires --allow-paper-market-read", file=sys.stderr)
             return 2
+        return _run([
+            str(PYTHON), "scripts/r6_external_paper_market_preflight.py",
+            "--workspace", str(args.workspace), "--symbol", args.symbol,
+            "--allow-paper-market-read",
+        ])
+    if args.command == "build-connectivity-candidate":
         return _run(
             [
                 str(PYTHON),
-                "scripts/r6_external_paper_market_preflight.py",
+                "scripts/r6_build_connectivity_candidate.py",
                 "--workspace",
                 str(args.workspace),
-                "--symbol",
-                args.symbol,
-                "--allow-paper-market-read",
-            ]
+            ],
+            credential_free=True,
         )
-
     raise SafeConsoleError(f"unsupported safe command: {args.command}")
 
 

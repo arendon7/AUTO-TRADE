@@ -20,6 +20,7 @@ from autotrade.brokers.alpaca_paper_market_evidence import (
     market_evidence_payload,
 )
 from autotrade.brokers.alpaca_paper_market_readiness import (
+    ASSET_PREFLIGHT_REQUIRED,
     MARKET_DATA_PREFLIGHT_REQUIRED,
     inspect_market_aware_readiness,
 )
@@ -64,7 +65,12 @@ def main(argv: list[str] | None = None) -> int:
         raise SystemExit("Workspace does not exist; create it with Mac Safe Start first.")
     now = datetime.now(timezone.utc)
     readiness = inspect_market_aware_readiness(root=workspace_root, now=now)
-    if readiness.get("phase") != MARKET_DATA_PREFLIGHT_REQUIRED:
+    phase = readiness.get("phase")
+    if phase == ASSET_PREFLIGHT_REQUIRED:
+        raise SystemExit(
+            "Market preflight requires valid GET-only PAPER asset evidence first."
+        )
+    if phase != MARKET_DATA_PREFLIGHT_REQUIRED:
         raise SystemExit(
             "Market preflight is not the allowed next step for this workspace; run readiness and satisfy earlier gates first."
         )

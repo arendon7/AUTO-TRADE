@@ -70,7 +70,7 @@ def asset() -> AlpacaPaperEquityAssetAttestation:
         attributes=("has_options",),
         account_attestation_fingerprint=current.fingerprint,
         credential_reference=CREDS.credential_reference,
-        observed_at=NOW - timedelta(seconds=1),
+        observed_at=datetime.now(timezone.utc),
         request_id="req-asset",
         response_sha256=h("asset-response"),
         source_host=ALPACA_PAPER_TRADING_HOST,
@@ -153,15 +153,7 @@ def test_market_preflight_rejects_enabled_write_gate_before_network(tmp_path, mo
     fake = FakeGateway()
     main.__globals__["AlpacaPaperEquityMarketDataGateway"] = lambda config: fake
     with pytest.raises(SystemExit, match="disable the write gate"):
-        main(
-            [
-                "--workspace",
-                str(workspace.root),
-                "--symbol",
-                "AAPL",
-                "--allow-paper-market-read",
-            ]
-        )
+        main(["--workspace", str(workspace.root), "--symbol", "AAPL", "--allow-paper-market-read"])
     assert fake.calls == []
 
 
@@ -175,15 +167,7 @@ def test_market_preflight_requires_flat_account_before_network(tmp_path, monkeyp
     fake = FakeGateway()
     main.__globals__["AlpacaPaperEquityMarketDataGateway"] = lambda config: fake
     with pytest.raises(SystemExit, match="not the allowed next step"):
-        main(
-            [
-                "--workspace",
-                str(workspace.root),
-                "--symbol",
-                "AAPL",
-                "--allow-paper-market-read",
-            ]
-        )
+        main(["--workspace", str(workspace.root), "--symbol", "AAPL", "--allow-paper-market-read"])
     assert fake.calls == []
 
 
@@ -197,15 +181,7 @@ def test_market_preflight_requires_asset_evidence_before_network(tmp_path, monke
     fake = FakeGateway()
     main.__globals__["AlpacaPaperEquityMarketDataGateway"] = lambda config: fake
     with pytest.raises(SystemExit, match="asset evidence"):
-        main(
-            [
-                "--workspace",
-                str(workspace.root),
-                "--symbol",
-                "AAPL",
-                "--allow-paper-market-read",
-            ]
-        )
+        main(["--workspace", str(workspace.root), "--symbol", "AAPL", "--allow-paper-market-read"])
     assert fake.calls == []
 
 
@@ -215,15 +191,7 @@ def test_market_preflight_requires_credentials_only_from_environment(tmp_path, m
     monkeypatch.delenv("APCA_API_SECRET_KEY", raising=False)
     _, main = namespace()
     with pytest.raises(SystemExit, match="credentials are never accepted as CLI arguments"):
-        main(
-            [
-                "--workspace",
-                str(workspace.root),
-                "--symbol",
-                "AAPL",
-                "--allow-paper-market-read",
-            ]
-        )
+        main(["--workspace", str(workspace.root), "--symbol", "AAPL", "--allow-paper-market-read"])
 
 
 def test_market_preflight_rejects_symbol_not_bound_to_asset(tmp_path, monkeypatch) -> None:
@@ -234,22 +202,13 @@ def test_market_preflight_rejects_symbol_not_bound_to_asset(tmp_path, monkeypatc
     fake = FakeGateway()
     main.__globals__["AlpacaPaperEquityMarketDataGateway"] = lambda config: fake
     with pytest.raises(SystemExit, match="does not match attested PAPER asset"):
-        main(
-            [
-                "--workspace",
-                str(workspace.root),
-                "--symbol",
-                "MSFT",
-                "--allow-paper-market-read",
-            ]
-        )
+        main(["--workspace", str(workspace.root), "--symbol", "MSFT", "--allow-paper-market-read"])
     assert fake.calls == []
 
 
-def test_market_preflight_happy_path_is_one_get_and_sanitized_artifact(
-    tmp_path, monkeypatch, capsys
-) -> None:
+def test_market_preflight_happy_path_is_one_get_and_sanitized_artifact(tmp_path, monkeypatch, capsys) -> None:
     workspace = setup_workspace(tmp_path)
+    persisted_asset = PaperAssetEvidenceStore(workspace).read()
     monkeypatch.setenv("APCA_API_KEY_ID", KEY)
     monkeypatch.setenv("APCA_API_SECRET_KEY", SECRET)
     monkeypatch.setenv("R6_EXTERNAL_PAPER_WRITE", "DISABLED")
@@ -257,18 +216,7 @@ def test_market_preflight_happy_path_is_one_get_and_sanitized_artifact(
     fake = FakeGateway()
     main.__globals__["AlpacaPaperEquityMarketDataGateway"] = lambda config: fake
 
-    assert (
-        main(
-            [
-                "--workspace",
-                str(workspace.root),
-                "--symbol",
-                "AAPL",
-                "--allow-paper-market-read",
-            ]
-        )
-        == 0
-    )
+    assert main(["--workspace", str(workspace.root), "--symbol", "AAPL", "--allow-paper-market-read"]) == 0
     assert len(fake.calls) == 1
     credentials, symbol, _ = fake.calls[0]
     assert credentials.credential_reference == CREDS.credential_reference
@@ -278,7 +226,7 @@ def test_market_preflight_happy_path_is_one_get_and_sanitized_artifact(
     assert persisted == market()
     output = json.loads(capsys.readouterr().out)
     assert output["status"] == "PAPER_MARKET_PREFLIGHT_COMPLETE"
-    assert output["asset_attestation_fingerprint"] == asset().fingerprint
+    assert output["asset_attestation_fingerprint"] == persisted_asset.fingerprint
     assert output["network_method"] == "GET"
     assert output["network_host"] == "data.alpaca.markets"
     assert output["broker_write_authorized"] is False

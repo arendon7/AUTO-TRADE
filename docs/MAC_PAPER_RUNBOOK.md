@@ -1,196 +1,103 @@
 # AUTO-TRADE — Mac PAPER Runbook
 
-Estado objetivo de este runbook: poder abrir AUTO-TRADE en un Mac, validar el sistema localmente y avanzar de forma explícita desde **cero red al broker** hasta, en una fase posterior y separada, un canary real de Alpaca PAPER.
+Objetivo: abrir AUTO-TRADE en un Mac, certificar el sistema localmente y avanzar de forma controlada hacia un primer **CONNECTIVITY_CANARY** en Alpaca PAPER. Este runbook separa deliberadamente conectividad/protecciones de trading de estrategia.
 
-## Regla operativa
+## Invariantes
 
 - R6 es **PAPER-only**.
 - LIVE permanece bloqueado.
-- La IA no puede otorgar autoridad de capital ni aprobación humana.
-- `UNKNOWN` nunca se reintenta con otro POST: va a reconciliación GET-only.
-- Una evidencia PAPER no demuestra rentabilidad ni autoriza LIVE.
-- Ningún paso de instalación o diagnóstico envía órdenes.
-- Account preflight, market-data preflight, preparación, decisión humana y ejecución son comandos separados.
-- `mac_start.sh` y `mac_safe_console.py` **no exponen ningún comando de ejecución de órdenes**.
+- `R6_EXTERNAL_PAPER_WRITE=DISABLED` es el estado normal.
+- IA/research no pueden otorgar autoridad de capital ni de operador.
+- `UNKNOWN` nunca genera blind retry; sólo reconciliación.
+- PAPER no demuestra rentabilidad.
+- Connectivity canary **no equivale** a Strategy Health.
+- `mac_start.sh`, `mac_safe_console.py` y `AUTO_TRADE_MAC.command` no exponen ejecución de órdenes.
 
-## Ruta que ya puedes ensayar en el Mac
+## Flujo actual certificado
 
-Sin cuenta Alpaca, sin credenciales y sin red al broker:
+```text
+Mac bootstrap / Doctor / rehearsal
+        ↓
+workspace privado
+        ↓
+GET /v2/account
+        ↓
+GET /v2/assets/{symbol}
+        ↓
+GET positions + open orders  → debe quedar 0 / 0
+        ↓
+GET IEX market snapshot
+        ↓
+CONNECTIVITY_CANARY candidate local
+        ↓
+STOP: CONNECTIVITY_PREPARATION_BRIDGE_REQUIRED
+```
+
+Hasta el STOP anterior:
+
+- external POST authority: NO;
+- external PAPER order: NO;
+- Strategy Health creado: NO;
+- operator authority: NO;
+- credentials en el candidate builder: NO;
+- LIVE: BLOCKED.
+
+## Nivel 0 — Preparar el Mac
+
+Mientras PR #14 siga DRAFT:
 
 ```bash
 git clone https://github.com/arendon7/AUTO-TRADE.git
 cd AUTO-TRADE
 git switch reconstruction/r6-external-paper-protection
 bash scripts/mac_start.sh
-bash scripts/mac_start.sh rehearsal
-bash scripts/mac_start.sh init-workspace "$HOME/AUTO-TRADE-R6/workspace-001"
-bash scripts/mac_start.sh readiness "$HOME/AUTO-TRADE-R6/workspace-001"
 ```
 
-Resultado esperado del workspace nuevo:
+También puede abrirse `AUTO_TRADE_MAC.command` desde Finder.
+
+El bootstrap crea `.venv`, instala Python 3.12+, compila, ejecuta boundaries y rehearsal. No usa broker I/O ni credenciales.
+
+## Nivel 1 — Rehearsal local
+
+```bash
+bash scripts/mac_start.sh rehearsal
+bash scripts/mac_start.sh safety-rehearsal
+```
+
+`safety-rehearsal` usa el `CapitalSafetyKernel.evaluate(...)` real, pero sigue siendo local-only: no crea OMS staging, operador, permit, writer ni capital authority.
+
+## Nivel 2 — Workspace privado
+
+No crear el workspace dentro del repo:
+
+```bash
+export R6_WORKSPACE="$HOME/AUTO-TRADE-R6/workspace-001"
+bash scripts/mac_start.sh init-workspace "$R6_WORKSPACE"
+bash scripts/mac_start.sh readiness "$R6_WORKSPACE"
+```
+
+Estado inicial esperado:
 
 ```text
 ACCOUNT_PREFLIGHT_REQUIRED
 ```
 
-Hasta aquí:
+## Nivel 3 — Cuatro gates PAPER GET-only
 
-- credenciales usadas: NO;
-- broker network I/O: NO;
-- broker write: NO;
-- capital authority: NONE;
-- `R6_EXTERNAL_PAPER_WRITE=DISABLED`;
-- LIVE: BLOCKED.
-
-## Nivel 0 — Clonar y preparar el Mac
-
-Mientras PR #14 siga DRAFT, usar la rama R6 explícita:
-
-```bash
-git clone https://github.com/arendon7/AUTO-TRADE.git
-cd AUTO-TRADE
-git switch reconstruction/r6-external-paper-protection
-bash scripts/mac_start.sh
-```
-
-`mac_start.sh` es el entrypoint recomendado. Si `.venv` todavía no existe llama a `bash scripts/mac_bootstrap.sh`; después entra únicamente a la consola segura.
-
-El bootstrap:
-
-- exige Python 3.12+;
-- crea `.venv`;
-- instala el proyecto y dependencias de desarrollo;
-- compila código/tests/scripts;
-- ejecuta boundaries deterministas R6 y Mac;
-- ejecuta pruebas focalizadas del recorrido PAPER y de Safe Start;
-- elimina de su propio entorno las variables de credenciales Alpaca;
-- exige que la shell no llegue con `R6_EXTERNAL_PAPER_WRITE=ENABLED`;
-- fuerza `R6_EXTERNAL_PAPER_WRITE=DISABLED` dentro del bootstrap;
-- no llama al broker y no envía órdenes.
-
-Para una validación completa adicional:
-
-```bash
-.venv/bin/python -m pytest
-```
-
-## Nivel 1 — Rehearsal local
-
-Este nivel no requiere cuenta Alpaca ni credenciales.
-
-Forma recomendada:
-
-```bash
-bash scripts/mac_start.sh rehearsal
-```
-
-Equivalente directo:
-
-```bash
-bash scripts/mac_rehearsal.sh
-```
-
-El rehearsal:
-
-- se niega a correr si la shell tiene `R6_EXTERNAL_PAPER_WRITE=ENABLED`;
-- exige la `.venv` ya creada por bootstrap;
-- elimina las variables de credenciales Alpaca dentro del proceso;
-- fuerza `R6_EXTERNAL_PAPER_WRITE=DISABLED`;
-- ejecuta Mac Doctor, contract/debt checks y boundaries R6/Mac;
-- ejecuta las pruebas focalizadas del recorrido PAPER;
-- prueba también que Safe Start y la creación de workspace no pueden adquirir autoridad;
-- no ejecuta account preflight, market-data preflight, decisión humana ni writer;
-- no usa broker I/O.
-
-Boundaries principales:
-
-```bash
-.venv/bin/python scripts/check_r6_authority.py
-.venv/bin/python scripts/check_r6_live_deny_boundary.py
-.venv/bin/python scripts/check_r6_market_data_boundary.py
-.venv/bin/python scripts/check_r6_operational_lifecycle_boundary.py
-.venv/bin/python scripts/check_r6_operational_execution_boundary.py
-.venv/bin/python scripts/check_r6_readiness_boundary.py
-.venv/bin/python scripts/check_mac_rehearsal_boundary.py
-.venv/bin/python scripts/check_mac_safe_console_boundary.py
-```
-
-Resultado esperado: PASS. Ninguno de esos comandos debe usar credenciales o broker I/O.
-
-## Nivel 2 — Crear e inspeccionar un workspace privado
-
-No crear workspaces dentro del repositorio. La ruta recomendada es `$HOME/AUTO-TRADE-R6/...`.
-
-```bash
-export R6_WORKSPACE="$HOME/AUTO-TRADE-R6/workspace-001"
-bash scripts/mac_start.sh init-workspace "$R6_WORKSPACE"
-```
-
-El inicializador:
-
-- rechaza `R6_EXTERNAL_PAPER_WRITE=ENABLED`;
-- rechaza una shell con credenciales Alpaca cargadas;
-- rechaza rutas dentro del repositorio;
-- rechaza directorios existentes no vacíos;
-- crea sólo el directorio privado `0700`;
-- no crea `core.sqlite3`, submission DB, permit DB ni operator DB;
-- no usa red;
-- termina en `ACCOUNT_PREFLIGHT_REQUIRED`.
-
-Inspección read-only:
-
-```bash
-bash scripts/mac_start.sh readiness "$R6_WORKSPACE"
-```
-
-También puede usarse el doctor:
-
-```bash
-bash scripts/mac_start.sh doctor --workspace "$R6_WORKSPACE"
-```
-
-El inspector market-aware puede reportar, entre otros:
-
-- `ACCOUNT_PREFLIGHT_REQUIRED`
-- `MARKET_DATA_PREFLIGHT_REQUIRED`
-- `PREPARATION_REQUIRED`
-- `HUMAN_DECISION_REQUIRED`
-- `EXPLICIT_EXECUTION_DECISION_REQUIRED`
-- `EXPLICIT_EXECUTION_RESUME_REQUIRED`
-- `RECONCILIATION_REQUIRED`
-- `EVIDENCE_CAPTURE_REQUIRED`
-- `QUALIFICATION_REVIEW_REQUIRED`
-- `BLOCKED_INCONSISTENT_STATE`
-
-Aunque el siguiente paso sea una decisión de ejecución, el report conserva:
-
-- `execution_authorized=false`
-- `broker_write_performed=false`
-- `network_used=false`
-- `capital_authority=NONE`
-- `profitability_claim=false`
-- `live_trading=BLOCKED`
-
-## Nivel 3 — Configurar Alpaca PAPER y hacer los GET explícitos
-
-Este es el primer nivel que usa red externa. Sigue sin existir autoridad de órdenes.
-
-Crear configuración local:
+Crear `.env` local únicamente para los GET preflights:
 
 ```bash
 cp .env.example .env
 chmod 600 .env
 ```
 
-Editar `.env` y colocar únicamente las credenciales de la cuenta **Alpaca PAPER**:
+Debe conservar:
 
 ```text
-APCA_API_KEY_ID=...
-APCA_API_SECRET_KEY=...
 R6_EXTERNAL_PAPER_WRITE=DISABLED
 ```
 
-Cargar variables sólo cuando se vaya a hacer un preflight:
+Cargar temporalmente:
 
 ```bash
 set -a
@@ -198,9 +105,7 @@ source .env
 set +a
 ```
 
-### 3A — Account preflight: GET `/v2/account`
-
-Desde Safe Start:
+### 3A — Account
 
 ```bash
 bash scripts/mac_start.sh account-preflight \
@@ -208,38 +113,69 @@ bash scripts/mac_start.sh account-preflight \
   '<ALPACA_PAPER_ACCOUNT_ID>'
 ```
 
-Comando subyacente auditado:
+Sólo `GET /v2/account`. Persiste evidencia sanitizada y no guarda API secret.
+
+Readiness debe proyectar después:
+
+```text
+ASSET_PREFLIGHT_REQUIRED
+```
+
+### 3B — Asset / venue
+
+Elegir explícitamente un US equity para el futuro connectivity canary:
 
 ```bash
-.venv/bin/python scripts/r6_external_paper_preflight.py \
+bash scripts/mac_start.sh asset-preflight "$R6_WORKSPACE" AAPL
+```
+
+Comando subyacente:
+
+```bash
+.venv/bin/python scripts/r6_external_paper_asset_preflight.py \
   --workspace "$R6_WORKSPACE" \
-  --expected-account-id '<ALPACA_PAPER_ACCOUNT_ID>' \
-  --allow-paper-account-read
+  --symbol AAPL \
+  --allow-paper-asset-read
 ```
 
-Este comando:
+Este gate:
 
-- sólo tiene autoridad para `GET /v2/account`;
-- valida cuenta/entorno PAPER;
-- guarda un artifact sanitizado;
-- no persiste API key/secret;
-- no contiene API de escritura de órdenes.
+- hace un solo GET PAPER de `/v2/assets/{symbol}`;
+- exige `class=us_equity`, `status=active`, `tradable=true`;
+- exige que 1 acción entera satisfaga `min_order_size` y `min_trade_increment`;
+- usa `price_increment` del broker;
+- bloquea IPO/PTP para el primer canary;
+- liga la evidencia al account attestation + credential reference;
+- no crea autoridad de trading.
 
-Después:
+Readiness normal:
+
+```text
+FLAT_ACCOUNT_PREFLIGHT_REQUIRED
+```
+
+### 3C — Cuenta PAPER plana
 
 ```bash
-bash scripts/mac_start.sh readiness "$R6_WORKSPACE"
+bash scripts/mac_start.sh flat-account-preflight "$R6_WORKSPACE"
 ```
 
-El siguiente estado normal debe ser:
+Hace exactamente dos GETs: posiciones y órdenes abiertas. Para el primer canary exige:
+
+```text
+position_count = 0
+open_order_count = 0
+```
+
+La evidencia es corta y fail-closed. Si expira, usar un workspace nuevo y repetir account → asset → flat → market.
+
+Readiness normal:
 
 ```text
 MARKET_DATA_PREFLIGHT_REQUIRED
 ```
 
-### 3B — Equity market-data preflight: un GET IEX
-
-Elegir explícitamente el símbolo US equity del futuro canary. Ejemplo:
+### 3D — Market IEX
 
 ```bash
 bash scripts/mac_start.sh market-preflight "$R6_WORKSPACE" AAPL
@@ -254,124 +190,116 @@ Comando subyacente auditado:
   --allow-paper-market-read
 ```
 
-Este comando:
+El `--allow-paper-market-read` es obligatorio. El símbolo debe coincidir exactamente con `asset_attestation.json`. El artifact `market_snapshot.json` queda sanitizado.
 
-- exige el opt-in `--allow-paper-market-read`;
-- se niega a correr si `R6_EXTERNAL_PAPER_WRITE=ENABLED`;
-- usa `data.alpaca.markets`;
-- fija `feed=iex` y `currency=USD`;
-- realiza un solo GET del snapshot equity;
-- valida bid/ask/last, timestamps, freshness y skew quote/trade;
-- usa como `MarketSnapshot.observed_at` el componente más antiguo de quote/trade;
-- guarda `market_snapshot.json` sanitizado e idempotente;
-- no persiste key/secret;
-- no tiene acceso al trading host ni a `/v2/orders`;
-- no concede autoridad de capital ni ejecución.
+## Nivel 4 — Candidate local CONNECTIVITY_CANARY
 
-Volver a consultar readiness:
+Después de completar los cuatro GETs:
 
 ```bash
-bash scripts/mac_start.sh readiness "$R6_WORKSPACE"
+bash scripts/mac_start.sh build-connectivity-candidate "$R6_WORKSPACE"
 ```
 
-Con account + market evidence válidos y sin package todavía, el siguiente estado normal debe ser:
-
-```text
-PREPARATION_REQUIRED
-```
-
-Si se intenta mezclar un `market_snapshot.json` con un package ya preparado cuyo `market_fingerprint` sea distinto, readiness falla cerrado.
-
-## Nivel 4 — Preparación offline
-
-La preparación construye un único canary acotado, lo liga a RiskDecision, MarketSnapshot, Safety, OMS, Portfolio, Health, account attestation, bracket y permit, y termina en:
-
-```text
-OPERATOR_DECISION_REQUIRED
-```
-
-No envía ninguna orden.
-
-**Estado actual:** `PaperOperationalCanaryPreparer` está implementado y certificado, pero el primer canary externo no debe depender de fabricar `core.sqlite3`, `RiskDecision`, Portfolio o Health a mano.
-
-Antes de habilitar este nivel desde la consola Mac estamos cerrando dos piezas:
-
-1. **PAPER portfolio/account reconciliation preflight GET-only**: comprobar posiciones y órdenes abiertas; para el primer canary la ruta preferida será cuenta PAPER vacía, fail-closed si existe exposición desconocida.
-2. **R6 candidate → Safety launcher**: construir el `OrderIntent` candidato de forma explícita pero producir el `RiskDecision` exclusivamente con Capital Safety Kernel + estado durable + market evidence, y después invocar el preparer certificado.
-
-Hasta que esas dos piezas estén cerradas y triple-certificadas:
-
-- no fabricar manualmente JSON de `RiskDecision`/MarketSnapshot;
-- no editar `core.sqlite3` para forzar un estado;
-- no copiar artifacts entre attempts para avanzar readiness;
-- no usar el writer para “probar que funciona”.
-
-Para rehearsal, el servicio de preparación ya se prueba automáticamente con la suite. Para el primer canary externo real, completar primero esta inicialización autoritativa y volver a pasar Core/R6/Knowledge.
-
-## Nivel 5 — Decisión humana separada
-
-Sólo para un workspace preparado y con provenance vigente:
+La consola segura elimina `APCA_API_KEY_ID` y `APCA_API_SECRET_KEY` del proceso hijo antes de construir la candidata. La invocación directa también se niega a correr si detecta credenciales:
 
 ```bash
-.venv/bin/python scripts/r6_issue_operator_decision.py \
-  --workspace "$R6_WORKSPACE" \
-  --operator-id '<OPERADOR>'
+unset APCA_API_KEY_ID APCA_API_SECRET_KEY
+.venv/bin/python scripts/r6_build_connectivity_candidate.py \
+  --workspace "$R6_WORKSPACE"
 ```
 
-El comando exige TTY y challenge exacto. Registra una decisión humana de corta duración. **No envía una orden.**
+Este paso crea un `core.sqlite3` real con:
+
+1. Instrument Master ligado a la evidencia del broker y restringido por política whole-share R6.
+2. Portfolio baseline de sesión de conectividad, derivado de la evidencia `0 positions / 0 open orders`.
+3. `RiskDecision` producido por el `CapitalSafetyKernel` real.
+4. orden OMS durable en estado exacto `VALIDATED`.
+5. autoridad durable `CONNECTIVITY_CANARY`, ligada al Event Ledger.
+6. `connectivity_candidate.json`.
+
+Límites del primer candidate:
+
+- side: BUY;
+- type: LIMIT;
+- quantity: exactamente 1 acción;
+- notional cap: `min(USD 10, 0.1% del portfolio_value PAPER, buying_power)`;
+- un solo símbolo attested;
+- max open orders: 1;
+- LIVE: bloqueado.
+
+Semántica crítica:
+
+- `strategy_health_required=false`;
+- `strategy_health_created=false`;
+- `strategy_trading_authorized=false`;
+- `operator_authority_created=false`;
+- `external_post_authorized=false`;
+- `capital_authority=NONE`;
+- `profitability_claim=false`.
+
+Los `daily_pnl=0` y `drawdown=0` de este baseline significan exclusivamente **inicio de una sesión connectivity con cuenta broker-proven-flat**. No son historial ni Health de una estrategia.
+
+Resultado esperado:
+
+```text
+CONNECTIVITY_PREPARATION_BRIDGE_REQUIRED
+```
+
+## Nivel 5 — Connectivity preparation bridge
+
+**Aún no es un comando operador autorizado.**
+
+El siguiente incremento estructural debe permitir que preparación, OMS stage y final guard reconozcan la autoridad durable `CONNECTIVITY_CANARY` sin fabricar Strategy Health. La ruta normal de estrategia debe continuar exigiendo Health real.
+
+Hasta que ese bridge tenga Core + R6 Authority + Knowledge + macOS verdes:
+
+- no editar SQLite;
+- no fabricar Health;
+- no fabricar `RiskDecision`;
+- no copiar artifacts entre attempts;
+- no activar writer para “probar”.
+
+## Strategy trading — ruta separada
+
+Un connectivity canary sólo prueba infraestructura/protecciones. Trading basado en estrategia requiere adicionalmente evidencia real de research/backtest/holdout/shadow/forward y Strategy/Portfolio Health según las políticas canónicas. El connectivity authority nunca puede promover una estrategia ni LIVE.
 
 ## STOP — antes de cualquier orden PAPER real
 
-No ejecutar el siguiente nivel sólo por haber llegado hasta aquí.
+No ejecutar un POST sólo porque los pasos anteriores pasan.
 
-El canary real debe ser una decisión explícita separada después de revisar:
+Antes del primer POST PAPER deben existir y estar certificados, como mínimo:
 
-1. readiness del workspace;
-2. cuenta PAPER exacta;
-3. portfolio PAPER reconciliado y exposición conocida;
-4. market evidence IEX exacta y fresca;
-5. símbolo, side, quantity/notional y limit price;
-6. take-profit y stop-loss;
-7. Safety/OMS/Portfolio/Health vigentes;
-8. notional máximo del canary;
-9. que no exista `UNKNOWN` pendiente;
-10. que `R6_EXTERNAL_PAPER_WRITE` siga `DISABLED` hasta el instante de la decisión final.
+1. connectivity preparation bridge durable;
+2. final pre-write guard específico de propósito;
+3. revalidación fresca de account/asset/flat/market;
+4. Safety + OMS bindings exactos;
+5. decisión humana explícita y single-use;
+6. bracket protector exacto;
+7. idempotencia/UNKNOWN/reconciliation;
+8. captura `trade_updates` y qualification.
 
-## Nivel 6 — Ejecución PAPER single-shot
+El comando de ejecución existente permanece fuera de Safe Start y no forma parte de este runbook hasta cerrar el bridge.
 
-Este comando existe, pero **no debe ejecutarse durante instalación/rehearsal**:
+## Reconciliación posterior a un futuro POST
 
-```bash
-R6_EXTERNAL_PAPER_WRITE=ENABLED \
-.venv/bin/python scripts/r6_execute_paper_canary.py \
-  --workspace "$R6_WORKSPACE" \
-  --execute-paper-canary
-```
-
-Además del flag y la variable de entorno, exige TTY y un challenge exacto ligado al `attempt_id` y `package_hash`.
-
-El writer puede realizar como máximo el POST certificado de ese attempt. Antes del I/O vuelve a verificar los guards finales. Si la situación del POST queda ambigua, el estado durable pasa a `UNKNOWN` y queda prohibido repetir el POST a ciegas.
-
-## Nivel 7 — Reconciliación, trade_updates y qualification
-
-Después de un POST real:
+Cuando se autorice eventualmente un canary real:
 
 - `UNKNOWN` → reconciliación GET-only por `client_order_id`;
-- broker order encontrado → GET nested y validación exacta del bracket;
-- `trade_updates` PAPER → stream autenticado receive-only;
-- eventos → ledger durable/tamper-evident;
-- terminalidad + fills + slippage + latency → `PaperQualificationEvaluator`;
-- qualification PAPER mantiene `capital_authority=NONE`, `profitability_claim=false`, `live_trading=BLOCKED`.
+- broker order → nested bracket validation;
+- `trade_updates` PAPER → authenticated receive-only stream;
+- fills/slippage/latency/terminality → qualification;
+- cualquier PAPER qualification mantiene `capital_authority=NONE`, `profitability_claim=false`, `live_trading=BLOCKED`.
 
-Los debts `TD-R6-001..006` sólo pueden cerrarse con esta evidencia externa real, no con mocks ni tests.
+`TD-R6-001..006` sólo pueden cerrarse con evidencia externa real.
 
 ## Si algo no coincide
 
-No editar SQLite, hashes, manifests ni artifacts para forzar el siguiente estado. Ejecutar readiness, conservar el workspace y revisar el error. Un estado inconsistente es deliberadamente fail-closed.
+No modificar hashes, SQLite, manifests ni evidence JSON para avanzar. Conservar el workspace, ejecutar readiness y tratar cualquier inconsistencia como fail-closed.
 
-## Estado de seguridad al terminar este runbook sin Nivel 6
+## Estado al terminar este runbook en el STOP
 
 - external PAPER order sent: **NO**
+- external PAPER order enviado por el proyecto: **0**
 - capital authority: **NONE**
-- LIVE trading: **BLOCKED**
 - broker write: **NO**
+- LIVE trading: **BLOCKED**
