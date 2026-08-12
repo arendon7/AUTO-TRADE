@@ -53,6 +53,20 @@ def _parser() -> argparse.ArgumentParser:
         help="Required explicit opt-in to the account GET.",
     )
 
+    flat = sub.add_parser(
+        "flat-account-preflight",
+        help=(
+            "Explicit GET-only first-canary flatness check for positions and open orders. "
+            "Never cancels, liquidates or submits anything."
+        ),
+    )
+    flat.add_argument("--workspace", required=True, type=Path)
+    flat.add_argument(
+        "--allow-paper-flat-account-read",
+        action="store_true",
+        help="Required explicit opt-in to the two flat-account GETs.",
+    )
+
     market = sub.add_parser(
         "market-preflight",
         help="Explicit single GET IEX market snapshot preflight. Never writes an order.",
@@ -139,6 +153,23 @@ def main(argv: list[str] | None = None) -> int:
                 "--expected-account-id",
                 args.expected_account_id,
                 "--allow-paper-account-read",
+            ]
+        )
+
+    if args.command == "flat-account-preflight":
+        if not args.allow_paper_flat_account_read:
+            print(
+                "SAFE CONSOLE BLOCKED: flat-account GETs require --allow-paper-flat-account-read",
+                file=sys.stderr,
+            )
+            return 2
+        return _run(
+            [
+                str(PYTHON),
+                "scripts/r6_external_paper_flat_account_preflight.py",
+                "--workspace",
+                str(args.workspace),
+                "--allow-paper-flat-account-read",
             ]
         )
 

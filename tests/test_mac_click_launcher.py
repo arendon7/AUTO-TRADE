@@ -44,5 +44,7 @@ def test_finder_launcher_offers_only_safe_operator_actions() -> None:
     assert "run_safe rehearsal" in source
     assert "run_safe readiness" in source
     assert "account-preflight" in source
+    assert "flat-account-preflight" in source
     assert "market-preflight" in source
+    assert "account -> flat-account -> market" in source
     assert "Orden real desde este launcher: IMPOSIBLE" in source

@@ -46,6 +46,15 @@ def main() -> int:
             errors.append("Finder launcher must use the certified safe bootstrap")
         if "scripts/mac_start.sh" not in source:
             errors.append("Finder launcher must delegate operator actions to mac_start.sh")
+        for anchor in (
+            "init-workspace",
+            "account-preflight",
+            "flat-account-preflight",
+            "market-preflight",
+            "account -> flat-account -> market",
+        ):
+            if anchor not in source:
+                errors.append(f"Finder launcher missing safe first-canary anchor: {anchor}")
         for forbidden in FORBIDDEN:
             if forbidden in source:
                 errors.append(f"Finder launcher contains forbidden surface: {forbidden}")
@@ -78,7 +87,7 @@ def main() -> int:
         return 1
     print(
         "AUTO-TRADE Mac Finder launcher boundary: PASS "
-        "(double-click entrypoint is broker-inert, write-disabled and CI-packaged on macOS)"
+        "(double-click entrypoint is broker-inert, write-disabled, flat-account aware and CI-packaged on macOS)"
     )
     return 0
 

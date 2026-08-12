@@ -6,6 +6,7 @@ from typing import Mapping
 
 from .alpaca_paper_flat_account import PaperFlatAccountAttestation
 from .alpaca_paper_operational import (
+    PaperOperationalConflict,
     PaperOperationalIntegrityError,
     PaperOperationalWorkspace,
     _read_json_object,
@@ -33,6 +34,18 @@ class PaperFlatAccountEvidenceStore:
     def write(self, attestation: PaperFlatAccountAttestation) -> Path:
         if not isinstance(attestation, PaperFlatAccountAttestation):
             raise TypeError("PaperFlatAccountAttestation is required")
+        account = self._read_bound_account_evidence()
+        if attestation.account_attestation_fingerprint != account.get(
+            "attestation_fingerprint"
+        ):
+            raise PaperFlatAccountEvidenceError(
+                "flat-account evidence does not bind the persisted account attestation"
+            )
+        if attestation.credential_reference != account.get("credential_reference"):
+            raise PaperFlatAccountEvidenceError(
+                "flat-account evidence does not bind the persisted PAPER credential reference"
+            )
+
         payload = {
             "schema_version": 1,
             "environment": "PAPER",
@@ -46,19 +59,25 @@ class PaperFlatAccountEvidenceStore:
         }
         try:
             _write_json_idempotent(self.path, payload)
-        except PaperOperationalIntegrityError as exc:
-            raise PaperFlatAccountEvidenceError("cannot persist flat-account evidence") from exc
+        except (PaperOperationalIntegrityError, PaperOperationalConflict) as exc:
+            raise PaperFlatAccountEvidenceError(
+                "cannot persist flat-account evidence"
+            ) from exc
         return self.path
 
     def read(self) -> PaperFlatAccountAttestation:
         try:
             raw = _read_json_object(self.path)
         except PaperOperationalIntegrityError as exc:
-            raise PaperFlatAccountEvidenceError("cannot read flat-account evidence") from exc
+            raise PaperFlatAccountEvidenceError(
+                "cannot read flat-account evidence"
+            ) from exc
         _validate_envelope(raw)
         try:
             attestation = PaperFlatAccountAttestation(
-                account_attestation_fingerprint=_string(raw, "account_attestation_fingerprint"),
+                account_attestation_fingerprint=_string(
+                    raw, "account_attestation_fingerprint"
+                ),
                 credential_reference=_string(raw, "credential_reference"),
                 position_count=_integer(raw, "position_count"),
                 open_order_count=_integer(raw, "open_order_count"),
@@ -72,27 +91,87 @@ class PaperFlatAccountEvidenceStore:
                 orders_path=_string(raw, "orders_path"),
             )
         except (TypeError, ValueError) as exc:
-            raise PaperFlatAccountEvidenceError("persisted flat-account evidence is invalid") from exc
-        if attestation.to_dict().get("clean_for_first_canary") != raw.get("clean_for_first_canary"):
-            raise PaperFlatAccountEvidenceError("flat-account clean-state evidence mismatch")
+            raise PaperFlatAccountEvidenceError(
+                "persisted flat-account evidence is invalid"
+            ) from exc
+        if (
+            attestation.to_dict().get("clean_for_first_canary")
+            != raw.get("clean_for_first_canary")
+        ):
+            raise PaperFlatAccountEvidenceError(
+                "flat-account clean-state evidence mismatch"
+            )
         if attestation.fingerprint != raw.get("attestation_fingerprint"):
-            raise PaperFlatAccountEvidenceError("flat-account evidence fingerprint mismatch")
+            raise PaperFlatAccountEvidenceError(
+                "flat-account evidence fingerprint mismatch"
+            )
+
+        account = self._read_bound_account_evidence()
+        if attestation.account_attestation_fingerprint != account.get(
+            "attestation_fingerprint"
+        ):
+            raise PaperFlatAccountEvidenceError(
+                "flat-account evidence no longer matches persisted account evidence"
+            )
+        if attestation.credential_reference != account.get("credential_reference"):
+            raise PaperFlatAccountEvidenceError(
+                "flat-account evidence no longer matches persisted credential reference"
+            )
         return attestation
+
+    def _read_bound_account_evidence(self) -> dict[str, object]:
+        try:
+            raw = _read_json_object(self._workspace.account_attestation_path)
+        except PaperOperationalIntegrityError as exc:
+            raise PaperFlatAccountEvidenceError(
+                "persisted PAPER account attestation is required before flat-account evidence"
+            ) from exc
+        if raw.get("environment") != "PAPER":
+            raise PaperFlatAccountEvidenceError(
+                "persisted account evidence is not PAPER"
+            )
+        if raw.get("credentials_persisted") is not False:
+            raise PaperFlatAccountEvidenceError(
+                "persisted account evidence cannot contain credentials"
+            )
+        fingerprint = raw.get("attestation_fingerprint")
+        credential_reference = raw.get("credential_reference")
+        if not isinstance(fingerprint, str) or len(fingerprint) != 64:
+            raise PaperFlatAccountEvidenceError(
+                "persisted account attestation fingerprint is invalid"
+            )
+        if not isinstance(credential_reference, str) or len(credential_reference) != 64:
+            raise PaperFlatAccountEvidenceError(
+                "persisted account credential reference is invalid"
+            )
+        return raw
 
 
 def _validate_envelope(raw: Mapping[str, object]) -> None:
     if raw.get("schema_version") != 1 or raw.get("environment") != "PAPER":
-        raise PaperFlatAccountEvidenceError("flat-account evidence envelope is invalid")
+        raise PaperFlatAccountEvidenceError(
+            "flat-account evidence envelope is invalid"
+        )
     if raw.get("credentials_persisted") is not False:
-        raise PaperFlatAccountEvidenceError("flat-account evidence cannot persist credentials")
+        raise PaperFlatAccountEvidenceError(
+            "flat-account evidence cannot persist credentials"
+        )
     if raw.get("broker_mutation_performed") is not False:
-        raise PaperFlatAccountEvidenceError("flat-account evidence may not claim broker mutation")
+        raise PaperFlatAccountEvidenceError(
+            "flat-account evidence may not claim broker mutation"
+        )
     if raw.get("execution_authorized") is not False:
-        raise PaperFlatAccountEvidenceError("flat-account evidence may not authorize execution")
+        raise PaperFlatAccountEvidenceError(
+            "flat-account evidence may not authorize execution"
+        )
     if raw.get("capital_authority") != "NONE":
-        raise PaperFlatAccountEvidenceError("flat-account evidence may not grant capital authority")
+        raise PaperFlatAccountEvidenceError(
+            "flat-account evidence may not grant capital authority"
+        )
     if raw.get("production_status") != "PAPER_ONLY_LIVE_BLOCKED":
-        raise PaperFlatAccountEvidenceError("flat-account evidence must preserve blocked production status")
+        raise PaperFlatAccountEvidenceError(
+            "flat-account evidence must preserve blocked production status"
+        )
 
 
 def _string(raw: Mapping[str, object], key: str) -> str:

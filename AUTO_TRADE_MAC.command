@@ -62,7 +62,7 @@ Modo actual:
 3) Ensayo offline completo
 4) Inspeccionar readiness de un workspace
 5) Abrir runbook de Mac
-6) Mostrar pasos GET-only de Alpaca PAPER
+6) Mostrar secuencia GET-only de Alpaca PAPER
 0) Salir
 EOF
 }
@@ -99,10 +99,14 @@ while true; do
       ;;
     6)
       cat <<'EOF'
-Pasos de red permitidos desde el Safe Start (GET-only):
+Secuencia de red permitida desde Safe Start (GET-only):
 
   bash scripts/mac_start.sh account-preflight <WORKSPACE> <ALPACA_PAPER_ACCOUNT_ID>
+  bash scripts/mac_start.sh flat-account-preflight <WORKSPACE>
   bash scripts/mac_start.sh market-preflight <WORKSPACE> <SYMBOL>
+
+Orden obligatorio para el primer canary:
+  account -> flat-account -> market
 
 Estos pasos requieren que configures credenciales PAPER de forma explícita.
 Este launcher de doble clic no carga .env, no conserva credenciales y no ofrece ejecución de órdenes.

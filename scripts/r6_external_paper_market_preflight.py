@@ -15,6 +15,10 @@ from autotrade.brokers.alpaca_paper_market_evidence import (
     PaperMarketEvidenceStore,
     market_evidence_payload,
 )
+from autotrade.brokers.alpaca_paper_market_readiness import (
+    MARKET_DATA_PREFLIGHT_REQUIRED,
+    inspect_market_aware_readiness,
+)
 from autotrade.brokers.alpaca_paper_operational import PaperOperationalWorkspace
 
 
@@ -27,7 +31,7 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
             "Explicit GET-only Alpaca IEX market-data preflight for one R6 PAPER workspace. "
-            "No order API is available from this command."
+            "Requires clean first-canary account evidence and exposes no order API."
         )
     )
     parser.add_argument("--workspace", required=True, type=Path)
@@ -50,6 +54,17 @@ def main(argv: list[str] | None = None) -> int:
         raise SystemExit(
             "Refusing market preflight while R6_EXTERNAL_PAPER_WRITE=ENABLED; disable the write gate first."
         )
+
+    workspace_root = args.workspace.expanduser().resolve()
+    if not workspace_root.is_dir():
+        raise SystemExit("Workspace does not exist; create it with Mac Safe Start first.")
+    now = datetime.now(timezone.utc)
+    readiness = inspect_market_aware_readiness(root=workspace_root, now=now)
+    if readiness.get("phase") != MARKET_DATA_PREFLIGHT_REQUIRED:
+        raise SystemExit(
+            "Market preflight is not the allowed next step for this workspace; run readiness and satisfy earlier gates first."
+        )
+
     key_id = os.environ.get(_KEY_ENV)
     secret_key = os.environ.get(_SECRET_ENV)
     if not key_id or not secret_key:
@@ -58,14 +73,14 @@ def main(argv: list[str] | None = None) -> int:
         )
 
     credentials = AlpacaPaperCredentials(key_id=key_id, secret_key=secret_key)
-    workspace = PaperOperationalWorkspace.initialize(args.workspace)
+    workspace = PaperOperationalWorkspace(root=workspace_root)
     gateway = AlpacaPaperEquityMarketDataGateway(
         AlpacaPaperMarketDataConfig(enabled=True)
     )
     attestation = gateway.attest_snapshot(
         credentials=credentials,
         symbol=args.symbol,
-        now=datetime.now(timezone.utc),
+        now=now,
     )
     path = PaperMarketEvidenceStore(workspace).write(
         attestation=attestation,

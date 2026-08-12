@@ -20,6 +20,7 @@ def test_safe_console_has_no_execution_subcommand() -> None:
     assert "execute" not in help_text.lower()
     assert "init-workspace" in help_text
     assert "account-preflight" in help_text
+    assert "flat-account-preflight" in help_text
     assert "market-preflight" in help_text
 
 
@@ -85,6 +86,35 @@ def test_safe_console_account_preflight_requires_explicit_read_opt_in(monkeypatc
     )
     assert rc == 2
     assert called == []
+
+
+def test_safe_console_flat_account_requires_explicit_read_opt_in(monkeypatch) -> None:
+    monkeypatch.setattr(console, "_require_safe_shell", lambda: None)
+    called = []
+    monkeypatch.setattr(console, "_run", lambda argv: called.append(argv) or 0)
+
+    rc = console.main(["flat-account-preflight", "--workspace", "/tmp/workspace"])
+    assert rc == 2
+    assert called == []
+
+
+def test_safe_console_flat_account_routes_only_to_get_preflight(monkeypatch) -> None:
+    monkeypatch.setattr(console, "_require_safe_shell", lambda: None)
+    captured = []
+    monkeypatch.setattr(console, "_run", lambda argv: captured.append(argv) or 0)
+
+    rc = console.main(
+        [
+            "flat-account-preflight",
+            "--workspace",
+            "/tmp/workspace",
+            "--allow-paper-flat-account-read",
+        ]
+    )
+    assert rc == 0
+    joined = " ".join(captured[0])
+    assert "r6_external_paper_flat_account_preflight.py" in joined
+    assert "r6_execute_paper_canary.py" not in joined
 
 
 def test_safe_console_market_preflight_requires_explicit_read_opt_in(monkeypatch) -> None:
