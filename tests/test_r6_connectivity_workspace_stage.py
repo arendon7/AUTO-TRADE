@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import timedelta
 import json
 
@@ -10,6 +11,7 @@ from autotrade.brokers.alpaca_paper_submission import (
     SQLitePaperSubmissionRegistry,
 )
 from autotrade.connectivity_workspace_stage import (
+    ConnectivityWorkspaceStageConflict,
     ConnectivityWorkspaceStageRejected,
     ConnectivityWorkspaceStagingBridge,
 )
@@ -171,3 +173,91 @@ def test_workspace_stage_never_overwrites_existing_staging_artifact(tmp_path, mo
     order, submission = durable_state(ws, bound.binding.order_id)
     assert order.status is OrderStatus.VALIDATED
     assert submission.status is PaperSubmissionStatus.PREPARED
+
+
+def test_workspace_stage_constructor_and_call_type_guards(tmp_path, monkeypatch) -> None:
+    with pytest.raises(TypeError, match="PaperOperationalWorkspace"):
+        ConnectivityWorkspaceStagingBridge(object())  # type: ignore[arg-type]
+
+    ws, _, _, bound = bound_workspace(tmp_path, monkeypatch)
+    bridge = ConnectivityWorkspaceStagingBridge(ws)
+    with pytest.raises(TypeError, match="ConnectivityBoundFinalFreshnessResult"):
+        bridge.stage(bound_result=object(), now=inside(bound))  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="timezone-aware"):
+        bridge.stage(
+            bound_result=bound,
+            now=inside(bound).replace(tzinfo=None),
+        )
+
+
+def test_workspace_stage_rejects_invalid_json_prerequisite(tmp_path, monkeypatch) -> None:
+    ws, _, _, bound = bound_workspace(tmp_path, monkeypatch)
+    path = ws.root / "connectivity_execution_freshness_binding.json"
+    path.write_text("{", encoding="utf-8")
+
+    with pytest.raises(ConnectivityWorkspaceStageRejected, match="invalid staging prerequisite artifact"):
+        ConnectivityWorkspaceStagingBridge(ws).stage(
+            bound_result=bound,
+            now=inside(bound),
+        )
+
+
+def test_workspace_stage_rejects_non_object_json_prerequisite(tmp_path, monkeypatch) -> None:
+    ws, _, _, bound = bound_workspace(tmp_path, monkeypatch)
+    path = ws.root / "connectivity_execution_freshness_binding.json"
+    path.write_text("[]\n", encoding="utf-8")
+
+    with pytest.raises(ConnectivityWorkspaceStageRejected, match="must be a JSON object"):
+        ConnectivityWorkspaceStagingBridge(ws).stage(
+            bound_result=bound,
+            now=inside(bound),
+        )
+
+
+def test_workspace_stage_rejects_symlinked_execution_freshness_artifact(tmp_path, monkeypatch) -> None:
+    ws, _, _, bound = bound_workspace(tmp_path, monkeypatch)
+    path = ws.root / "connectivity_execution_freshness_binding.json"
+    copy = ws.root / "binding-copy.json"
+    copy.write_bytes(path.read_bytes())
+    path.unlink()
+    path.symlink_to(copy.name)
+
+    with pytest.raises(ConnectivityWorkspaceStageRejected, match="path is not canonical"):
+        ConnectivityWorkspaceStagingBridge(ws).stage(
+            bound_result=bound,
+            now=inside(bound),
+        )
+
+
+def test_workspace_stage_rejects_symlinked_final_freshness_artifact(tmp_path, monkeypatch) -> None:
+    ws, _, _, bound = bound_workspace(tmp_path, monkeypatch)
+    path = ws.root / "connectivity_final_freshness.json"
+    copy = ws.root / "freshness-copy.json"
+    copy.write_bytes(path.read_bytes())
+    path.unlink()
+    path.symlink_to(copy.name)
+
+    with pytest.raises(ConnectivityWorkspaceStageRejected, match="Final Freshness artifact path is not canonical"):
+        ConnectivityWorkspaceStagingBridge(ws).stage(
+            bound_result=bound,
+            now=inside(bound),
+        )
+
+
+def test_workspace_stage_rejects_forged_fresh_risk_decision_object(tmp_path, monkeypatch) -> None:
+    ws, _, _, bound = bound_workspace(tmp_path, monkeypatch)
+    forged_decision = replace(
+        bound.final_freshness.fresh_risk_decision,
+        reason_detail="forged-after-final-freshness",
+    )
+    forged_final = replace(
+        bound.final_freshness,
+        fresh_risk_decision=forged_decision,
+    )
+    forged_bound = replace(bound, final_freshness=forged_final)
+
+    with pytest.raises(ConnectivityWorkspaceStageConflict, match="fresh RiskDecision binding changed"):
+        ConnectivityWorkspaceStagingBridge(ws).stage(
+            bound_result=forged_bound,
+            now=inside(bound),
+        )
