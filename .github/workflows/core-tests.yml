@@ -47,6 +47,9 @@ jobs:
       - name: R6 permanent LIVE-deny authority boundary
         run: python scripts/check_r6_live_deny_boundary.py
 
+      - name: R6 asset/venue preflight boundary
+        run: python scripts/check_r6_asset_boundary.py
+
       - name: R6 flat-account first-canary boundary
         run: python scripts/check_r6_flat_account_boundary.py
 

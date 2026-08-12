@@ -47,7 +47,9 @@ def test_finder_launcher_offers_only_safe_operator_actions() -> None:
     assert "Capital Safety Kernel real" in source
     assert "run_safe readiness" in source
     assert "account-preflight" in source
+    assert "asset-preflight" in source
     assert "flat-account-preflight" in source
     assert "market-preflight" in source
-    assert "account -> flat-account -> market" in source
+    assert "account -> asset -> flat account -> market" in source
+    assert "exact us_equity + active + tradable" in source
     assert "Orden real desde este launcher: IMPOSIBLE" in source

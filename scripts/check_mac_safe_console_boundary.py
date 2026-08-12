@@ -22,6 +22,7 @@ ALLOWED_SCRIPT_TARGETS = {
     "scripts/mac_safety_rehearsal.py",
     "scripts/r6_inspect_paper_readiness.py",
     "scripts/r6_external_paper_preflight.py",
+    "scripts/r6_external_paper_asset_preflight.py",
     "scripts/r6_external_paper_flat_account_preflight.py",
     "scripts/r6_external_paper_market_preflight.py",
 }
@@ -61,12 +62,14 @@ def main() -> int:
             errors.append("safe console must force the child write gate to DISABLED")
         if 'os.environ.get(WRITE_ENV) == WRITE_ENABLED' not in source:
             errors.append("safe console must refuse an inherited ENABLED write gate")
-        if '"init-workspace"' not in source:
-            errors.append("safe console must expose credential-free workspace initialization")
-        if '"safety-rehearsal"' not in source:
-            errors.append("safe console must expose local Capital Safety rehearsal")
-        if '"flat-account-preflight"' not in source:
-            errors.append("safe console must expose the GET-only first-canary flat-account gate")
+        for command, label in (
+            ('"init-workspace"', "credential-free workspace initialization"),
+            ('"safety-rehearsal"', "local Capital Safety rehearsal"),
+            ('"asset-preflight"', "GET-only asset/venue preflight"),
+            ('"flat-account-preflight"', "GET-only first-canary flat-account gate"),
+        ):
+            if command not in source:
+                errors.append(f"safe console must expose {label}")
         for target in ALLOWED_SCRIPT_TARGETS:
             if target not in source:
                 errors.append(f"safe console expected audited command target is missing: {target}")
@@ -83,12 +86,15 @@ def main() -> int:
             errors.append("mac_start.sh must bootstrap safely when .venv is absent")
         if "mac_safe_console.py" not in source:
             errors.append("mac_start.sh must delegate all operator actions to the safe console")
-        if "init-workspace" not in source:
-            errors.append("mac_start.sh must expose safe workspace initialization")
-        if "safety-rehearsal" not in source:
-            errors.append("mac_start.sh must expose local Capital Safety rehearsal")
-        if "flat-account-preflight" not in source:
-            errors.append("mac_start.sh must expose the flat-account gate before market preflight")
+        for anchor in (
+            "init-workspace",
+            "safety-rehearsal",
+            "asset-preflight",
+            "flat-account-preflight",
+            "account -> asset -> flat account -> market",
+        ):
+            if anchor not in source:
+                errors.append(f"mac_start.sh safe first-canary anchor missing: {anchor}")
 
     if WORKSPACE_INIT.is_file():
         source = WORKSPACE_INIT.read_text(encoding="utf-8")
@@ -140,7 +146,7 @@ def main() -> int:
         return 1
     print(
         "AUTO-TRADE Mac safe console boundary: PASS "
-        "(no execution command; write gate forced disabled; local Safety plus private workspace/read-only/GET-only surfaces)"
+        "(no execution command; write gate forced disabled; local Safety plus private workspace/account/asset/flat/market GET-only surfaces)"
     )
     return 0
 

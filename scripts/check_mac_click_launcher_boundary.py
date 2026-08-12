@@ -68,9 +68,11 @@ def main() -> int:
             "run_safe safety-rehearsal",
             "Capital Safety Kernel real",
             "account-preflight",
+            "asset-preflight",
             "flat-account-preflight",
             "market-preflight",
-            "account -> flat-account -> market",
+            "account -> asset -> flat account -> market",
+            "exact us_equity + active + tradable",
         ):
             if anchor not in source:
                 errors.append(f"Finder launcher missing safe first-canary/Safety anchor: {anchor}")
@@ -106,7 +108,7 @@ def main() -> int:
         return 1
     print(
         "AUTO-TRADE Mac Finder launcher boundary: PASS "
-        "(double-click entrypoint + first-run guide are broker-inert, write-disabled, local-Safety/flat-account aware and CI-packaged on macOS)"
+        "(double-click entrypoint + first-run guide are broker-inert, write-disabled, local-Safety/account/asset/flat/market aware and CI-packaged on macOS)"
     )
     return 0
 
