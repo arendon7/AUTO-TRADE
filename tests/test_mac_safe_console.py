@@ -1,11 +1,17 @@
 from __future__ import annotations
 
-import os
+import importlib.util
 from pathlib import Path
 
 import pytest
 
-import scripts.mac_safe_console as console
+
+ROOT = Path(__file__).resolve().parents[1]
+MODULE_PATH = ROOT / "scripts/mac_safe_console.py"
+SPEC = importlib.util.spec_from_file_location("mac_safe_console_under_test", MODULE_PATH)
+assert SPEC is not None and SPEC.loader is not None
+console = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(console)
 
 
 def test_safe_console_has_no_execution_subcommand() -> None:
@@ -30,7 +36,7 @@ def test_safe_console_requires_bootstrap(monkeypatch) -> None:
         console._require_safe_shell()
 
 
-def test_safe_console_forces_disabled_write_gate_for_children(monkeypatch, tmp_path) -> None:
+def test_safe_console_forces_disabled_write_gate_for_children(monkeypatch) -> None:
     captured = {}
 
     class Result:
