@@ -13,6 +13,7 @@ READINESS = ROOT / "src/autotrade/brokers/alpaca_paper_market_readiness.py"
 CORE = ROOT / ".github/workflows/core-tests.yml"
 R6 = ROOT / ".github/workflows/r6-authority.yml"
 SELF_COMMAND = "python scripts/check_r6_flat_account_boundary.py"
+SELF_TEST = "tests/test_r6_flat_account_boundary.py"
 FUNCTIONAL_TEST = "tests/test_r6_flat_account_preflight.py"
 
 FORBIDDEN_IMPORT_FRAGMENTS = (
@@ -71,6 +72,8 @@ def main() -> int:
             '"execution_authorized": False',
             '"capital_authority": "NONE"',
             '"production_status": "PAPER_ONLY_LIVE_BLOCKED"',
+            '"persisted PAPER account attestation is required before flat-account evidence"',
+            '"flat-account evidence does not bind the persisted account attestation"',
         ):
             if anchor not in source:
                 errors.append(f"flat-account evidence safety anchor missing: {anchor}")
@@ -98,9 +101,13 @@ def main() -> int:
         for anchor in (
             'FLAT_ACCOUNT_PREFLIGHT_REQUIRED = "FLAT_ACCOUNT_PREFLIGHT_REQUIRED"',
             'BLOCKED_EXISTING_PAPER_EXPOSURE = "BLOCKED_EXISTING_PAPER_EXPOSURE"',
+            'BLOCKED_STALE_FLAT_ACCOUNT_EVIDENCE = "BLOCKED_STALE_FLAT_ACCOUNT_EVIDENCE"',
+            'FLAT_ACCOUNT_MAX_AGE_SECONDS = 30',
+            '"CREATE_NEW_WORKSPACE_AND_REPEAT_ACCOUNT_FLAT_MARKET_PREFLIGHTS"',
             '"STOP_AND_REVIEW_EXISTING_PAPER_EXPOSURE_MANUALLY"',
             "flat.clean_for_first_canary",
             "flat.account_attestation_fingerprint != account.get",
+            "pre_execution = report.phase in _PRE_EXECUTION_PHASES",
         ):
             if anchor not in source:
                 errors.append(f"readiness flat-account anchor missing: {anchor}")
@@ -108,8 +115,12 @@ def main() -> int:
     for workflow, label in ((CORE, "Core Safety"), (R6, "R6 Authority")):
         if not workflow.is_file() or SELF_COMMAND not in workflow.read_text(encoding="utf-8"):
             errors.append(f"{label}: flat-account checker is not wired into CI")
-    if R6.is_file() and FUNCTIONAL_TEST not in R6.read_text(encoding="utf-8"):
-        errors.append("R6 Authority: flat-account functional tests are not wired into CI")
+    if R6.is_file():
+        workflow_text = R6.read_text(encoding="utf-8")
+        if FUNCTIONAL_TEST not in workflow_text:
+            errors.append("R6 Authority: flat-account functional tests are not wired into CI")
+        if SELF_TEST not in workflow_text:
+            errors.append("R6 Authority: flat-account adversarial checker tests are not wired into CI")
 
     if errors:
         for error in errors:
@@ -117,14 +128,14 @@ def main() -> int:
         return 1
     print(
         "AUTO-TRADE R6 flat-account boundary: PASS "
-        "(exact two GETs; zero broker mutation; empty positions+orders required for first canary)"
+        "(exact two GETs; account-bound fresh evidence; zero broker mutation; empty positions+orders required for first canary)"
     )
     return 0
 
 
 def _scan_ast(tree: ast.AST, path: Path) -> list[str]:
     errors: list[str] = []
-    rel = path.relative_to(ROOT)
+    rel = path.relative_to(ROOT) if ROOT in path.parents else path
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             names = [alias.name for alias in node.names]
