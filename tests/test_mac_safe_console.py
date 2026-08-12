@@ -18,6 +18,7 @@ def test_safe_console_has_no_execution_subcommand() -> None:
     parser = console._parser()
     help_text = parser.format_help()
     assert "execute" not in help_text.lower()
+    assert "init-workspace" in help_text
     assert "account-preflight" in help_text
     assert "market-preflight" in help_text
 
@@ -54,6 +55,19 @@ def test_safe_console_forces_disabled_write_gate_for_children(monkeypatch) -> No
     assert console._run(["python", "noop.py"]) == 0
     assert captured["env"][console.WRITE_ENV] == "DISABLED"
     assert captured["check"] is False
+
+
+def test_safe_console_workspace_routes_only_to_credential_free_initializer(monkeypatch) -> None:
+    monkeypatch.setattr(console, "_require_safe_shell", lambda: None)
+    captured = []
+    monkeypatch.setattr(console, "_run", lambda argv: captured.append(argv) or 0)
+
+    rc = console.main(["init-workspace", "--workspace", "/tmp/workspace"])
+    assert rc == 0
+    joined = " ".join(captured[0])
+    assert "mac_create_workspace.py" in joined
+    assert "r6_execute_paper_canary.py" not in joined
+    assert "r6_external_paper_preflight.py" not in joined
 
 
 def test_safe_console_account_preflight_requires_explicit_read_opt_in(monkeypatch) -> None:
