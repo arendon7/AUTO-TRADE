@@ -8,6 +8,8 @@ No reutilices la carpeta FULL anterior. Descarga y descomprime este paquete nuev
 
 Si ya existe una instalación incompleta en `~/Applications/AUTO-TRADE-R6`, el instalador nuevo la reemplaza sólo después de verificar correctamente una copia nueva en staging. No necesitas ejecutar `xattr`, Homebrew ni comandos manuales.
 
+Este flujo se prueba en CI tanto en Apple Silicon como Intel partiendo de un ZIP y árbol extraído marcados explícitamente con `com.apple.quarantine`: instalación, arranque del Control Center y reconstrucción del runtime después de borrar la copia descargada deben pasar antes de publicar el artifact FULL.
+
 ## La forma más fácil
 
 1. Descomprime `AUTO-TRADE-R6-MAC-FULL.zip`.
@@ -21,7 +23,7 @@ Si macOS bloquea un `.command` por Gatekeeper, haz clic derecho sobre él → **
 
 ### Por qué el FULL se instala fuera de Downloads
 
-Safari/Finder puede marcar un ZIP descargado y los archivos extraídos con `com.apple.quarantine`. Además, Downloads/Desktop/Documents están sujetos a controles adicionales de macOS. Por eso el runtime embebido **nunca se ejecuta directamente desde la carpeta descargada**.
+Safari/Finder puede marcar un ZIP descargado y los archivos extraídos con `com.apple.quarantine`. Por eso el runtime embebido **nunca se ejecuta directamente desde la carpeta descargada**.
 
 El instalador FULL sigue este orden fail-closed:
 
