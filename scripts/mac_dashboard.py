@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import argparse
-from dataclasses import dataclass
 from datetime import datetime, timezone
+from http import HTTPStatus
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
 from pathlib import Path
@@ -10,12 +11,11 @@ import re
 import secrets
 import subprocess
 import sys
-from http import HTTPStatus
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import threading
 import time
-import webbrowser
+from typing import NamedTuple
 from urllib.parse import urlparse
+import webbrowser
 
 ROOT = Path(__file__).resolve().parents[1]
 PYTHON = ROOT / ".venv/bin/python"
@@ -32,27 +32,25 @@ class DashboardError(RuntimeError):
     pass
 
 
-@dataclass(frozen=True)
-class ActionSpec:
-    name: str
+class ActionSpec(NamedTuple):
     credential_mode: str
     timeout_seconds: int = 180
 
 
 SAFE_ACTIONS: dict[str, ActionSpec] = {
-    "init_workspace": ActionSpec("init_workspace", "none"),
-    "doctor": ActionSpec("doctor", "none"),
-    "rehearsal": ActionSpec("rehearsal", "none", 600),
-    "safety_rehearsal": ActionSpec("safety_rehearsal", "none"),
-    "readiness": ActionSpec("readiness", "none"),
-    "status": ActionSpec("status", "none"),
-    "account_preflight": ActionSpec("account_preflight", "paper"),
-    "asset_preflight": ActionSpec("asset_preflight", "paper"),
-    "flat_account_preflight": ActionSpec("flat_account_preflight", "paper"),
-    "market_preflight": ActionSpec("market_preflight", "paper"),
-    "build_candidate": ActionSpec("build_candidate", "none"),
-    "prepare_candidate": ActionSpec("prepare_candidate", "none"),
-    "review_receipt": ActionSpec("review_receipt", "none"),
+    "init_workspace": ActionSpec("none"),
+    "doctor": ActionSpec("none"),
+    "rehearsal": ActionSpec("none", 600),
+    "safety_rehearsal": ActionSpec("none"),
+    "readiness": ActionSpec("none"),
+    "status": ActionSpec("none"),
+    "account_preflight": ActionSpec("paper"),
+    "asset_preflight": ActionSpec("paper"),
+    "flat_account_preflight": ActionSpec("paper"),
+    "market_preflight": ActionSpec("paper"),
+    "build_candidate": ActionSpec("none"),
+    "prepare_candidate": ActionSpec("none"),
+    "review_receipt": ActionSpec("none"),
 }
 
 
@@ -121,7 +119,6 @@ def _command(action: str, payload: dict[str, object]) -> tuple[list[str], tuple[
     if action not in SAFE_ACTIONS:
         raise DashboardError("Action is not in the certified dashboard allowlist")
     base = [str(PYTHON), "scripts/mac_safe_console.py"]
-    credentials: tuple[str, str] | None = None
 
     if action == "rehearsal":
         return base + ["rehearsal"], None
@@ -146,8 +143,7 @@ def _command(action: str, payload: dict[str, object]) -> tuple[list[str], tuple[
     if action == "status":
         return base + ["pre-canary-status", "--workspace", workspace], None
 
-    if SAFE_ACTIONS[action].credential_mode == "paper":
-        credentials = _paper_credentials(payload)
+    credentials = _paper_credentials(payload) if SAFE_ACTIONS[action].credential_mode == "paper" else None
     if action == "account_preflight":
         account_id = str(payload.get("account_id") or "").strip()
         if not account_id or len(account_id) > 256:
@@ -197,8 +193,7 @@ def _extract_json(text: str) -> dict[str, object] | None:
     try:
         value = json.loads(stripped)
     except json.JSONDecodeError:
-        start = stripped.find("{")
-        end = stripped.rfind("}")
+        start, end = stripped.find("{"), stripped.rfind("}")
         if start < 0 or end <= start:
             return None
         try:
@@ -220,7 +215,6 @@ def _run_action(action: str, payload: dict[str, object]) -> dict[str, object]:
         timeout=SAFE_ACTIONS[action].timeout_seconds,
         check=False,
     )
-    elapsed_ms = int((time.monotonic() - started) * 1000)
     stdout = _redact(completed.stdout, credentials)
     stderr = _redact(completed.stderr, credentials)
     return {
@@ -230,7 +224,7 @@ def _run_action(action: str, payload: dict[str, object]) -> dict[str, object]:
         "stdout": stdout,
         "stderr": stderr,
         "json": _extract_json(stdout),
-        "elapsed_ms": elapsed_ms,
+        "elapsed_ms": int((time.monotonic() - started) * 1000),
         "broker_write_performed": False,
         "external_post_authorized": False,
         "capital_authority": "NONE",
@@ -300,8 +294,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
         origin = self.headers.get("Origin")
         if not origin:
             return True
-        expected = f"http://127.0.0.1:{self.dashboard_server.server_port}"
-        return origin == expected
+        return origin == f"http://127.0.0.1:{self.dashboard_server.server_port}"
 
     def _read_payload(self) -> dict[str, object]:
         try:
@@ -310,9 +303,8 @@ class DashboardHandler(BaseHTTPRequestHandler):
             raise DashboardError("Invalid request length") from exc
         if length <= 0 or length > MAX_BODY_BYTES:
             raise DashboardError("Invalid request body size")
-        raw = self.rfile.read(length)
         try:
-            payload = json.loads(raw.decode("utf-8"))
+            payload = json.loads(self.rfile.read(length).decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
             raise DashboardError("Request must be JSON") from exc
         if not isinstance(payload, dict):
@@ -334,11 +326,11 @@ class DashboardHandler(BaseHTTPRequestHandler):
             if not runbook.is_file():
                 self._json(HTTPStatus.NOT_FOUND, {"ok": False, "error": "runbook missing"})
                 return
-            text = runbook.read_text(encoding="utf-8")
+            escaped = runbook.read_text(encoding="utf-8").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
             body = (
                 "<!doctype html><meta charset=\"utf-8\"><title>AUTO-TRADE R6 Runbook</title>"
                 "<style>body{font:14px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace;max-width:1100px;margin:40px auto;padding:0 24px;background:#08100e;color:#dbeae4}pre{white-space:pre-wrap}</style>"
-                "<pre>" + text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;") + "</pre>"
+                f"<pre>{escaped}</pre>"
             )
             self._headers(HTTPStatus.OK, "text/html; charset=utf-8")
             self.wfile.write(body.encode("utf-8"))
@@ -357,8 +349,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
             return
         try:
             payload = self._read_payload()
-            action = str(payload.get("action") or "")
-            result = _run_action(action, payload)
+            result = _run_action(str(payload.get("action") or ""), payload)
         except subprocess.TimeoutExpired:
             self._json(HTTPStatus.REQUEST_TIMEOUT, {"ok": False, "error": "safe action timed out"})
             return
@@ -388,7 +379,15 @@ def _start_server(host: str, port: int) -> DashboardServer:
         return DashboardServer((host, 0), token)
 
 
+def _enable_line_buffered_console() -> None:
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if callable(reconfigure):
+            reconfigure(line_buffering=True)
+
+
 def main(argv: list[str] | None = None) -> int:
+    _enable_line_buffered_console()
     args = _parser().parse_args(argv)
     try:
         _require_safe_runtime()
