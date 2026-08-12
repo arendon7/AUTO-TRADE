@@ -8,6 +8,7 @@ on:
       - "scripts/r6_issue_connectivity_execution_intent.py"
       - "scripts/check_r6_connectivity_execution_intent_boundary.py"
       - "tests/test_r6_connectivity_execution_intent.py"
+      - "tests/test_r6_connectivity_execution_intent_edges.py"
       - "tests/test_r6_connectivity_execution_intent_cli.py"
       - ".github/workflows/r6-connectivity-execution-intent.yml"
   pull_request:
@@ -16,6 +17,7 @@ on:
       - "scripts/r6_issue_connectivity_execution_intent.py"
       - "scripts/check_r6_connectivity_execution_intent_boundary.py"
       - "tests/test_r6_connectivity_execution_intent.py"
+      - "tests/test_r6_connectivity_execution_intent_edges.py"
       - "tests/test_r6_connectivity_execution_intent_cli.py"
       - ".github/workflows/r6-connectivity-execution-intent.yml"
   workflow_dispatch:
@@ -38,4 +40,4 @@ jobs:
       - name: Second execution-intent authority boundary
         run: python scripts/check_r6_connectivity_execution_intent_boundary.py
       - name: Execution-intent functional and adversarial tests
-        run: pytest -q tests/test_r6_connectivity_execution_intent.py tests/test_r6_connectivity_execution_intent_cli.py
+        run: pytest -q tests/test_r6_connectivity_execution_intent.py tests/test_r6_connectivity_execution_intent_edges.py tests/test_r6_connectivity_execution_intent_cli.py
