@@ -76,11 +76,13 @@ def main(argv: list[str] | None = None) -> int:
     _validate_local_only_environment()
     ttl_seconds = _ttl(args.ttl_seconds)
     workspace = _workspace(args.workspace)
-    bridge = ConnectivityOperatorBridge(workspace)
 
+    # A piped command, CI job, agent or background process must not even enter
+    # the authority-building bridge. Require a real interactive terminal first.
     if not sys.stdin.isatty() or not sys.stdout.isatty():
         raise SystemExit("connectivity human authorization requires an interactive TTY")
 
+    bridge = ConnectivityOperatorBridge(workspace)
     first_checked_at = datetime.now(timezone.utc)
     try:
         context = bridge.prepare_context(now=first_checked_at)
