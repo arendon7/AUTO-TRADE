@@ -56,10 +56,31 @@ def main() -> int:
         for anchor in required:
             if anchor not in source:
                 errors.append(f"market gateway safety anchor missing: {anchor}")
-        if source.count("Request(") != 1:
-            errors.append("market gateway must contain exactly one urllib Request constructor")
-        if source.count("self._opener.open(") != 1:
-            errors.append("market gateway must contain exactly one low-level HTTP open")
+        try:
+            tree = ast.parse(source, filename=str(GATEWAY))
+        except SyntaxError as exc:
+            errors.append(f"market gateway syntax error: {exc}")
+        else:
+            request_calls = [
+                node
+                for node in ast.walk(tree)
+                if isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id == "Request"
+            ]
+            opener_calls = [
+                node
+                for node in ast.walk(tree)
+                if isinstance(node, ast.Call) and _is_opener_open(node)
+            ]
+            if len(request_calls) != 1:
+                errors.append(
+                    f"market gateway must contain exactly one urllib Request constructor, found {len(request_calls)}"
+                )
+            if len(opener_calls) != 1:
+                errors.append(
+                    f"market gateway must contain exactly one low-level HTTP open, found {len(opener_calls)}"
+                )
         for forbidden in (
             'method="POST"',
             "method='POST'",
@@ -164,6 +185,16 @@ def _forbidden_imports(source: str, path: Path) -> list[str]:
             if any(fragment in module for fragment in FORBIDDEN_AUTHORITY_IMPORTS):
                 errors.append(f"{_relative(path)}:{node.lineno}: forbidden authority import {module}")
     return errors
+
+
+def _is_opener_open(node: ast.Call) -> bool:
+    func = node.func
+    return (
+        isinstance(func, ast.Attribute)
+        and func.attr == "open"
+        and isinstance(func.value, ast.Attribute)
+        and func.value.attr == "_opener"
+    )
 
 
 def _relative(path: Path) -> Path:
