@@ -66,6 +66,8 @@ jobs:
         run: python scripts/check_r6_operational_execution_boundary.py
       - name: R6 read-only readiness boundary
         run: python scripts/check_r6_readiness_boundary.py
+      - name: R6 read-only pre-canary status boundary
+        run: python scripts/check_r6_precanary_status_boundary.py
       - name: R6 connectivity UNKNOWN-before-POST staging boundary
         run: python scripts/check_r6_connectivity_workspace_stage_boundary.py
       - name: R6 connectivity same-process one-shot POST boundary
