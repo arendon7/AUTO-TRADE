@@ -7,12 +7,29 @@ Este paquete **FULL/STANDALONE** está preparado para instalar y operar el tramo
 1. Descomprime `AUTO-TRADE-R6-MAC-FULL.zip`.
 2. Abre la carpeta `AUTO-TRADE-R6-MAC-FULL`.
 3. Haz doble clic en **`INSTALAR_AUTO_TRADE.command`** una sola vez.
-4. Cuando termine en `AUTO-TRADE R6 INSTALL: OK`, haz doble clic en **`ABRIR_AUTO_TRADE.command`**.
-5. Se abrirá **AUTO-TRADE R6 Control Center** en tu navegador. Mantén abierta la pequeña ventana de Terminal mientras usas la plataforma.
+4. El instalador verifica primero los manifiestos SHA-256 y después crea una copia operativa limpia en **`~/Applications/AUTO-TRADE-R6`**.
+5. Cuando termine en `AUTO-TRADE R6 INSTALL: OK`, abre **`~/Applications/AUTO-TRADE-R6/ABRIR_AUTO_TRADE.command`**. El `ABRIR_AUTO_TRADE.command` de la carpeta descargada también redirige automáticamente a esa instalación.
+6. Se abrirá **AUTO-TRADE R6 Control Center** en tu navegador. Mantén abierta la pequeña ventana de Terminal mientras usas la plataforma.
 
 Si macOS bloquea un `.command` por Gatekeeper, haz clic derecho sobre él → **Abrir** → **Abrir** una sola vez. No desactives Gatekeeper globalmente.
 
-`AUTO_TRADE_MAC.command` permanece incluido como consola técnica de respaldo, pero ya no es la interfaz recomendada para el uso cotidiano.
+### Por qué el FULL se instala fuera de Downloads
+
+Safari/Finder puede marcar un ZIP descargado y los archivos extraídos con `com.apple.quarantine`. Además, Downloads/Desktop/Documents están sujetos a controles adicionales de macOS. Por eso el runtime embebido **nunca se ejecuta directamente desde la carpeta descargada**.
+
+El instalador FULL sigue este orden fail-closed:
+
+1. valida los SHA-256 del runtime y wheelhouse en la carpeta descargada;
+2. copia el bundle a un staging bajo `~/Applications` usando `ditto --norsrc --noqtn`, sin propagar quarantine/xattrs/ACLs;
+3. elimina cualquier estado transitorio local (`.venv`, `.runtime`, `.env`, SQLite/cache) de ese staging;
+4. vuelve a validar los SHA-256;
+5. sólo entonces promueve el staging a `~/Applications/AUTO-TRADE-R6` y ejecuta el CPython embebido.
+
+Si alguien intenta ejecutar directamente `scripts/mac_bootstrap.sh` desde un FULL descargado fuera de `~/Applications/AUTO-TRADE-R6`, el bootstrap se detiene antes de ejecutar CPython y pide usar el instalador.
+
+Después de una instalación correcta puedes borrar la carpeta descomprimida de Downloads; la copia de `~/Applications/AUTO-TRADE-R6` conserva los runtimes, wheelhouse, código y launchers necesarios para reconstruir su entorno local.
+
+`AUTO_TRADE_MAC.command` permanece incluido como consola técnica de respaldo, pero ya no es la interfaz recomendada para el uso cotidiano y, en el FULL, también redirige a la copia instalada.
 
 ## Qué incluye el FULL/STANDALONE
 
@@ -25,7 +42,7 @@ No depende de Homebrew, de un Python instalado previamente ni de PyPI durante el
 - Control Center local + launcher Finder + consola técnica;
 - código, tests, boundaries y runbook del mismo checkpoint R6.
 
-El bootstrap detecta `uname -m`, verifica hashes, extrae sólo el runtime correspondiente y crea `.venv` localmente. Si mueves la carpeta, recrea el entorno desde el runtime embebido.
+El bootstrap detecta `uname -m`, verifica hashes, extrae sólo el runtime correspondiente y crea `.venv` dentro de la copia instalada. Si `.runtime` o `.venv` se eliminan, puede reconstruirlos desde los activos embebidos sin PyPI.
 
 ## Qué puedes hacer desde el Control Center sin escribir comandos
 
