@@ -73,11 +73,16 @@ VENV_PIP="$ROOT/.venv/bin/pip"
   tests/test_r6_operational_execute_validation.py \
   tests/test_r6_execute_paper_canary_cli.py
 
+# Final local diagnostics. This does not load .env or use broker I/O.
+"$VENV_PY" scripts/mac_doctor.py
+
 cat <<'EOF'
 
 MAC BOOTSTRAP: PASS
 
-Safe next command (local/read-only; requires an existing workspace):
+Safe next commands:
+  .venv/bin/python scripts/mac_doctor.py
+  .venv/bin/python scripts/mac_doctor.py --workspace <WORKSPACE>
   .venv/bin/python scripts/r6_inspect_paper_readiness.py --workspace <WORKSPACE>
 
 No Alpaca credential was read by this bootstrap.
