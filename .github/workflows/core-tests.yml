@@ -83,6 +83,9 @@ jobs:
       - name: Mac rehearsal boundary
         run: python scripts/check_mac_rehearsal_boundary.py
 
+      - name: Mac safe-console boundary
+        run: python scripts/check_mac_safe_console_boundary.py
+
       - name: R6 unsupported-product boundary
         run: python scripts/check_r6_product_boundary.py
 
