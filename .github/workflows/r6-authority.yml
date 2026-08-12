@@ -45,6 +45,6 @@ jobs:
       - name: R6 unsupported-product boundary
         run: python scripts/check_r6_product_boundary.py
       - name: Operational lifecycle functional tests
-        run: pytest -q tests/test_r6_operational_prepare.py tests/test_r6_preparation_snapshot.py tests/test_r6_operational_evidence.py tests/test_r6_core_provenance.py tests/test_r6_operator_decision_cli.py tests/test_r6_operational_execute.py tests/test_r6_operational_execute_validation.py tests/test_r6_execute_paper_canary_cli.py tests/test_r6_paper_readiness.py
+        run: pytest -q tests/test_r6_operational_prepare.py tests/test_r6_preparation_snapshot.py tests/test_r6_operational_evidence.py tests/test_r6_core_provenance.py tests/test_r6_operator_decision_cli.py tests/test_r6_operational_execute.py tests/test_r6_operational_execute_validation.py tests/test_r6_execute_paper_canary_cli.py tests/test_r6_paper_readiness.py tests/test_r6_paper_readiness_failclosed.py
       - name: Adversarial checker tests
         run: pytest -q tests/test_r6_authority_checker.py tests/test_r6_live_deny_boundary.py tests/test_r6_oms_handoff_boundary.py tests/test_r6_canary_coordinator_boundary.py tests/test_r6_operator_decision_boundary.py tests/test_r6_execution_bridge_boundary.py tests/test_r6_writer_human_gate_boundary.py tests/test_r6_operational_lifecycle_boundary.py tests/test_r6_core_provenance_boundary.py tests/test_r6_preparation_core_binding.py tests/test_r6_operational_execution_boundary.py tests/test_r6_readiness_boundary.py tests/test_r6_unsupported_products_boundary.py
