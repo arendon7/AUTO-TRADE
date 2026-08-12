@@ -28,8 +28,8 @@ FORBIDDEN_CALLS = {
     "submit_once",
     "post",
     "send",
-    "execute",
     "mark_submit_attempt_unknown",
+    "consume_execution_authority",
 }
 
 
