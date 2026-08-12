@@ -23,11 +23,19 @@ FORBIDDEN_RUNTIME_FRAGMENTS = (
     "PaperCanaryCoordinator",
     "record_operator_approval",
     "attest_account(",
+    "attest_flatness(",
+    "AlpacaPaperFlatAccountGateway",
     "ALPACA_LIVE_TRADING_HOST",
     "api.alpaca.markets",
 )
 REQUIRED_RUNTIME = (
     "class PaperOperationalExecutionRuntime:",
+    "FLAT_ACCOUNT_MAX_AGE_SECONDS = 30",
+    "_require_fresh_clean_flat_account_evidence(",
+    "PaperFlatAccountEvidenceStore(workspace).read()",
+    "flat.clean_for_first_canary",
+    "flat.source_host != ALPACA_PAPER_TRADING_HOST",
+    "age_seconds > FLAT_ACCOUNT_MAX_AGE_SECONDS",
     "submission_state.status is not PaperSubmissionStatus.PREPARED",
     "POST replay is forbidden, continue with reconciliation/evidence",
     "PaperOperationalCoreProvenanceReader(self._workspace).verify(",
@@ -85,6 +93,16 @@ def main() -> int:
             errors.append("operational execution runtime must contain exactly one writer submit surface")
         if source.count("bridge.stage_after_operator_decision(") != 1:
             errors.append("operational execution runtime must contain exactly one execution-stage surface")
+        if source.count("_require_fresh_clean_flat_account_evidence(") != 2:
+            errors.append(
+                "operational execution runtime must contain one flat-account guard call and one helper definition"
+            )
+        flat_guard = source.index("_require_fresh_clean_flat_account_evidence(")
+        first_writable_store = source.index("submission_registry = SQLitePaperSubmissionRegistry(")
+        if flat_guard > first_writable_store:
+            errors.append(
+                "fresh flat-account guard must run before any writable submission/control store is created"
+            )
         if source.index("submission_state.status is not PaperSubmissionStatus.PREPARED") > source.index(
             "bridge.stage_after_operator_decision("
         ):
@@ -93,6 +111,8 @@ def main() -> int:
             "bridge.stage_after_operator_decision("
         ):
             errors.append("fresh core provenance verification must precede execution staging")
+        if flat_guard > source.index("bridge.stage_after_operator_decision("):
+            errors.append("fresh flat-account evidence must precede operator consumption/OMS staging")
         if source.index("bridge.stage_after_operator_decision(") > source.index(
             "self._writer.submit_once("
         ):
@@ -143,8 +163,9 @@ def main() -> int:
         return 1
     print(
         "AUTO-TRADE R6 operational execution boundary: PASS "
-        "(triple explicit manual gate; same-workspace durable control plane; "
-        "single writer surface; UNKNOWN is never reposted; LIVE/AI/research denied)"
+        "(fresh clean flat-account evidence before writable state; triple explicit manual gate; "
+        "same-workspace durable control plane; single writer surface; UNKNOWN is never reposted; "
+        "LIVE/AI/research denied)"
     )
     return 0
 
