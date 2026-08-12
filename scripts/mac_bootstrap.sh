@@ -79,6 +79,8 @@ VENV_PIP="$ROOT/.venv/bin/pip"
 "$VENV_PY" scripts/check_r6_operational_lifecycle_boundary.py
 "$VENV_PY" scripts/check_r6_operational_execution_boundary.py
 "$VENV_PY" scripts/check_r6_readiness_boundary.py
+"$VENV_PY" scripts/check_mac_rehearsal_boundary.py
+"$VENV_PY" scripts/check_mac_safe_console_boundary.py
 
 # Focused local rehearsal: no broker I/O and no credentials.
 "$VENV_PY" -m pytest -q \
@@ -90,7 +92,9 @@ VENV_PIP="$ROOT/.venv/bin/pip"
   tests/test_r6_paper_readiness_failclosed.py \
   tests/test_r6_readiness_boundary.py \
   tests/test_r6_operational_execute_validation.py \
-  tests/test_r6_execute_paper_canary_cli.py
+  tests/test_r6_execute_paper_canary_cli.py \
+  tests/test_mac_safe_console.py \
+  tests/test_mac_create_workspace.py
 
 # Final local diagnostics. This does not load .env or use broker I/O.
 "$VENV_PY" scripts/mac_doctor.py
@@ -99,13 +103,18 @@ cat <<'EOF'
 
 MAC BOOTSTRAP: PASS
 
-Repeatable offline rehearsal after this first installation:
-  bash scripts/mac_rehearsal.sh
+Recommended single safe entry point:
+  bash scripts/mac_start.sh
 
-Safe diagnostic commands:
-  .venv/bin/python scripts/mac_doctor.py
-  .venv/bin/python scripts/mac_doctor.py --workspace <WORKSPACE>
-  .venv/bin/python scripts/r6_inspect_paper_readiness.py --workspace <WORKSPACE>
+Create the first private workspace outside the repository:
+  bash scripts/mac_start.sh init-workspace "$HOME/AUTO-TRADE-R6/workspace-001"
+
+Repeatable offline rehearsal after this first installation:
+  bash scripts/mac_start.sh rehearsal
+
+Safe diagnostics:
+  bash scripts/mac_start.sh doctor
+  bash scripts/mac_start.sh readiness "$HOME/AUTO-TRADE-R6/workspace-001"
 
 No Alpaca credential was read by this bootstrap.
 No broker endpoint was called by this bootstrap.
