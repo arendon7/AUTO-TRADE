@@ -6,8 +6,11 @@ import sqlite3
 
 import pytest
 
+from autotrade.brokers.alpaca_paper_flat_account import PaperFlatAccountAttestation
+from autotrade.brokers.alpaca_paper_flat_account_evidence import PaperFlatAccountEvidenceStore
 from autotrade.brokers.alpaca_paper_gateway import AlpacaPaperCredentials
 from autotrade.brokers.alpaca_paper_operational_execute import (
+    FLAT_ACCOUNT_MAX_AGE_SECONDS,
     PaperOperationalExecutionBlocked,
     PaperOperationalExecutionRuntime,
     _ExistingHealthStateReader,
@@ -80,9 +83,38 @@ def credentials() -> AlpacaPaperCredentials:
     )
 
 
+def _write_flat_account(
+    workspace,
+    *,
+    positions: int = 0,
+    orders: int = 0,
+    attested_at=None,
+    source_host: str = "paper-api.alpaca.markets",
+    positions_path: str = "/v2/positions",
+    orders_path: str = "/v2/orders?status=open&limit=500&direction=asc&nested=true",
+) -> None:
+    account = _read_account_attestation(workspace.account_attestation_path)
+    flat = PaperFlatAccountAttestation(
+        account_attestation_fingerprint=account.fingerprint,
+        credential_reference=credentials().credential_reference,
+        position_count=positions,
+        open_order_count=orders,
+        positions_response_hash="b" * 64,
+        orders_response_hash="c" * 64,
+        positions_request_id="runtime-flat-positions",
+        orders_request_id="runtime-flat-orders",
+        attested_at=attested_at or NOW,
+        source_host=source_host,
+        positions_path=positions_path,
+        orders_path=orders_path,
+    )
+    PaperFlatAccountEvidenceStore(workspace).write(flat)
+
+
 def prepared_and_approved(tmp_path):
     preparer, workspace, broker, submission, permit = build(tmp_path)
     prepared = run_prepare(preparer, submission, permit)
+    _write_flat_account(workspace)
     context = PaperOperatorDecisionContext.from_prepared_package(prepared.result.package)
     registry = SQLitePaperOperatorDecisionRegistry(SQLiteRuntime(workspace.operator_db_path))
     state = registry.record_operator_approval(
@@ -233,6 +265,84 @@ def test_runtime_wrong_credentials_fail_before_human_consumption_or_io(tmp_path)
         PaperOperatorDecisionContext.from_prepared_package(
             prepared.result.package
         ).preparation_hash
+    )
+    assert state.status is PaperOperatorDecisionStatus.ISSUED
+
+
+def test_runtime_missing_flat_account_evidence_fails_before_human_consumption_or_io(tmp_path) -> None:
+    prepared, workspace, operator_registry = prepared_and_approved(tmp_path)
+    (workspace.root / "flat_account_attestation.json").unlink()
+    transport = FakeWriteTransport()
+    runtime = PaperOperationalExecutionRuntime(
+        workspace=workspace,
+        writer=enabled_writer(transport),
+    )
+
+    with pytest.raises(PaperOperationalExecutionBlocked, match="fresh clean flat-account evidence"):
+        runtime.execute_once(credentials=credentials(), now=NOW + timedelta(seconds=1))
+    assert transport.requests == []
+    state = operator_registry.get(
+        PaperOperatorDecisionContext.from_prepared_package(prepared.result.package).preparation_hash
+    )
+    assert state.status is PaperOperatorDecisionStatus.ISSUED
+
+
+def test_runtime_dirty_flat_account_evidence_fails_before_human_consumption_or_io(tmp_path) -> None:
+    prepared, workspace, operator_registry = prepared_and_approved(tmp_path)
+    (workspace.root / "flat_account_attestation.json").unlink()
+    _write_flat_account(workspace, positions=1)
+    transport = FakeWriteTransport()
+    runtime = PaperOperationalExecutionRuntime(
+        workspace=workspace,
+        writer=enabled_writer(transport),
+    )
+
+    with pytest.raises(PaperOperationalExecutionBlocked, match="zero broker positions"):
+        runtime.execute_once(credentials=credentials(), now=NOW + timedelta(seconds=1))
+    assert transport.requests == []
+    state = operator_registry.get(
+        PaperOperatorDecisionContext.from_prepared_package(prepared.result.package).preparation_hash
+    )
+    assert state.status is PaperOperatorDecisionStatus.ISSUED
+
+
+def test_runtime_stale_flat_account_evidence_fails_before_human_consumption_or_io(tmp_path) -> None:
+    prepared, workspace, operator_registry = prepared_and_approved(tmp_path)
+    (workspace.root / "flat_account_attestation.json").unlink()
+    _write_flat_account(
+        workspace,
+        attested_at=NOW - timedelta(seconds=FLAT_ACCOUNT_MAX_AGE_SECONDS + 1),
+    )
+    transport = FakeWriteTransport()
+    runtime = PaperOperationalExecutionRuntime(
+        workspace=workspace,
+        writer=enabled_writer(transport),
+    )
+
+    with pytest.raises(PaperOperationalExecutionBlocked, match="is stale"):
+        runtime.execute_once(credentials=credentials(), now=NOW)
+    assert transport.requests == []
+    state = operator_registry.get(
+        PaperOperatorDecisionContext.from_prepared_package(prepared.result.package).preparation_hash
+    )
+    assert state.status is PaperOperatorDecisionStatus.ISSUED
+
+
+def test_runtime_noncanonical_flat_account_endpoint_fails_before_human_consumption_or_io(tmp_path) -> None:
+    prepared, workspace, operator_registry = prepared_and_approved(tmp_path)
+    (workspace.root / "flat_account_attestation.json").unlink()
+    _write_flat_account(workspace, source_host="example.invalid")
+    transport = FakeWriteTransport()
+    runtime = PaperOperationalExecutionRuntime(
+        workspace=workspace,
+        writer=enabled_writer(transport),
+    )
+
+    with pytest.raises(PaperOperationalExecutionBlocked, match="endpoint set is not exact PAPER"):
+        runtime.execute_once(credentials=credentials(), now=NOW + timedelta(seconds=1))
+    assert transport.requests == []
+    state = operator_registry.get(
+        PaperOperatorDecisionContext.from_prepared_package(prepared.result.package).preparation_hash
     )
     assert state.status is PaperOperatorDecisionStatus.ISSUED
 
