@@ -29,7 +29,10 @@ def test_current_r6_authority_checker_passes_repository() -> None:
         check=False,
     )
     assert result.returncode == 0, result.stderr
-    assert "PAPER_SINGLE_SHOT_MARKET_DATA_GET_RECONCILIATION_AND_TRADE_UPDATES_CONTROL_STREAM" in result.stdout
+    assert (
+        "PAPER_SINGLE_SHOT_FLAT_ACCOUNT_AND_MARKET_DATA_GET_RECONCILIATION_AND_TRADE_UPDATES_CONTROL_STREAM"
+        in result.stdout
+    )
 
 
 def test_checker_rejects_research_or_ai_authority_imports(tmp_path) -> None:
@@ -56,6 +59,7 @@ def test_checker_allows_network_imports_only_in_audited_gateway_roles(tmp_path) 
     source = "import socket\nfrom urllib.request import Request\n"
     for filename in (
         "alpaca_paper_gateway.py",
+        "alpaca_paper_flat_account.py",
         "alpaca_paper_market_data.py",
         "alpaca_paper_reconciliation_gateway.py",
         "alpaca_paper_writer.py",
