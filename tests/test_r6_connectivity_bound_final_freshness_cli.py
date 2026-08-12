@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 import importlib.util
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -36,6 +37,15 @@ def test_cli_credentials_are_environment_only(monkeypatch) -> None:
         cli._credentials()
 
 
+def test_cli_workspace_rejects_symlink_before_resolution(tmp_path) -> None:
+    target = tmp_path / "target"
+    target.mkdir()
+    link = tmp_path / "link"
+    link.symlink_to(target, target_is_directory=True)
+    with pytest.raises(SystemExit, match="existing non-symlink"):
+        cli._workspace(link)
+
+
 def test_cli_success_still_exposes_no_staging_or_post(monkeypatch, tmp_path, capsys) -> None:
     root = tmp_path / "workspace"
     root.mkdir()
@@ -49,21 +59,32 @@ def test_cli_success_still_exposes_no_staging_or_post(monkeypatch, tmp_path, cap
         expires_at=now + timedelta(seconds=5),
     )
     result = SimpleNamespace(binding=binding)
+    review_doc = {
+        "operator_review_receipt_hash": "d" * 64,
+        "execution_review_binding_hash": "e" * 64,
+        "binding_hash": "f" * 64,
+    }
 
     class FakeGuard:
         def __init__(self, workspace):
             self.workspace = workspace
         def acquire(self, *, credentials):
+            (self.workspace.root / "connectivity_review_final_freshness_binding.json").write_text(
+                json.dumps(review_doc), encoding="utf-8"
+            )
             return result
 
     monkeypatch.setenv(cli._WRITE_ENV, "DISABLED")
     monkeypatch.setenv(cli._KEY_ENV, "paper-key")
     monkeypatch.setenv(cli._SECRET_ENV, "paper-secret")
-    monkeypatch.setattr(cli, "ConnectivityBoundFinalFreshnessGuard", FakeGuard)
+    monkeypatch.setattr(cli, "ConnectivityReviewedBoundFinalFreshnessGuard", FakeGuard)
     assert cli.main([
         "--workspace", str(root), "--allow-paper-final-freshness-read"
     ]) == 0
     out = capsys.readouterr().out
+    assert '"operator_review_receipt_hash":' in out
+    assert '"execution_review_binding_hash":' in out
+    assert '"review_freshness_binding_hash":' in out
     assert '"network_read_count": 5' in out
     assert '"max_external_post_attempts": 1' in out
     assert '"oms_staging_authorized": false' in out

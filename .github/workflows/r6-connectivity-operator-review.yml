@@ -1,0 +1,55 @@
+name: R6 Connectivity Operator Review Boundary
+
+on:
+  push:
+    branches: ["reconstruction/**", "work/**", "feature/**"]
+    paths:
+      - "src/autotrade/connectivity_operator_review.py"
+      - "src/autotrade/connectivity_workspace_stage.py"
+      - "scripts/r6_connectivity_review_receipt.py"
+      - "scripts/r6_issue_connectivity_execution_intent.py"
+      - "scripts/r6_connectivity_bound_final_freshness.py"
+      - "scripts/check_r6_connectivity_operator_review_boundary.py"
+      - "tests/test_r6_connectivity_operator_review.py"
+      - "tests/test_r6_connectivity_operator_review_failclosed.py"
+      - "tests/test_r6_connectivity_operator_review_no_bypass.py"
+      - "tests/test_r6_connectivity_review_receipt_cli.py"
+      - "tests/test_r6_connectivity_execution_intent_cli.py"
+      - "tests/test_r6_connectivity_bound_final_freshness_cli.py"
+      - ".github/workflows/r6-connectivity-operator-review.yml"
+  pull_request:
+    paths:
+      - "src/autotrade/connectivity_operator_review.py"
+      - "src/autotrade/connectivity_workspace_stage.py"
+      - "scripts/r6_connectivity_review_receipt.py"
+      - "scripts/r6_issue_connectivity_execution_intent.py"
+      - "scripts/r6_connectivity_bound_final_freshness.py"
+      - "scripts/check_r6_connectivity_operator_review_boundary.py"
+      - "tests/test_r6_connectivity_operator_review.py"
+      - "tests/test_r6_connectivity_operator_review_failclosed.py"
+      - "tests/test_r6_connectivity_operator_review_no_bypass.py"
+      - "tests/test_r6_connectivity_review_receipt_cli.py"
+      - "tests/test_r6_connectivity_execution_intent_cli.py"
+      - "tests/test_r6_connectivity_bound_final_freshness_cli.py"
+      - ".github/workflows/r6-connectivity-operator-review.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  connectivity-operator-review:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: python -m pip install -e '.[dev]'
+      - name: Compile
+        run: python -m compileall -q src tests scripts
+      - name: Operator review authority boundary
+        run: python scripts/check_r6_connectivity_operator_review_boundary.py
+      - name: Receipt / reviewed intent / reviewed freshness / fail-closed / no-bypass tests
+        run: pytest -q tests/test_r6_connectivity_operator_review.py tests/test_r6_connectivity_operator_review_failclosed.py tests/test_r6_connectivity_operator_review_no_bypass.py tests/test_r6_connectivity_review_receipt_cli.py tests/test_r6_connectivity_execution_intent_cli.py tests/test_r6_connectivity_bound_final_freshness_cli.py

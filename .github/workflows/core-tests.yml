@@ -50,6 +50,8 @@ jobs:
         run: python scripts/check_r6_canary_coordinator_boundary.py
       - name: R6 human operator decision boundary
         run: python scripts/check_r6_operator_decision_boundary.py
+      - name: R6 connectivity operator review receipt boundary
+        run: python scripts/check_r6_connectivity_operator_review_boundary.py
       - name: R6 execution bridge boundary
         run: python scripts/check_r6_execution_bridge_boundary.py
       - name: R6 writer human-execution gate

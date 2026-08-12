@@ -10,6 +10,10 @@ REQUIRED = (
     "ConnectivityOmsStager(",
     "mark_submit_attempt_unknown(",
     "PaperSubmissionStatus.UNKNOWN",
+    "verify_reviewed_final_freshness_binding(",
+    "reviewed human intent/freshness chain is missing or invalid",
+    '"operator_review_required": True',
+    '"review_freshness_binding_hash": review_freshness_binding_hash',
     '"unknown_before_post_committed": True',
     '"external_post_authorized": False',
     '"external_order_submitted": False',
@@ -43,8 +47,9 @@ def main() -> int:
             raise SystemExit(f"ERROR: forbidden connectivity workspace staging surface: {forbidden}")
     print(
         "AUTO-TRADE R6 connectivity workspace staging boundary: PASS "
-        "(verified <=5s binding; durable handoff; OMS SUBMITTING; submission UNKNOWN-before-POST; "
-        "next action is same-process one-shot executor; no broker/writer/network/Health/LIVE authority)"
+        "(reviewed receipt+human-intent+freshness chain required; verified <=5s binding; durable handoff; "
+        "OMS SUBMITTING; submission UNKNOWN-before-POST; next action is same-process one-shot executor; "
+        "no broker/writer/network/Health/LIVE authority)"
     )
     return 0
 
