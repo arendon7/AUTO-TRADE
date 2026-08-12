@@ -8,6 +8,8 @@ import runpy
 
 import pytest
 
+from autotrade.brokers.alpaca_paper_flat_account import PaperFlatAccountAttestation
+from autotrade.brokers.alpaca_paper_flat_account_evidence import PaperFlatAccountEvidenceStore
 from autotrade.brokers.alpaca_paper_gateway import (
     ALPACA_PAPER_ACCOUNT_PATH,
     ALPACA_PAPER_TRADING_HOST,
@@ -42,6 +44,21 @@ def account() -> AlpacaPaperAccountAttestation:
         request_id="request-account-001",
         source_host=ALPACA_PAPER_TRADING_HOST,
         source_path=ALPACA_PAPER_ACCOUNT_PATH,
+    )
+
+
+def flat() -> PaperFlatAccountAttestation:
+    current = account()
+    return PaperFlatAccountAttestation(
+        account_attestation_fingerprint=current.fingerprint,
+        credential_reference=current.credential_reference,
+        position_count=0,
+        open_order_count=0,
+        positions_response_hash="b" * 64,
+        orders_response_hash="c" * 64,
+        positions_request_id="req-positions",
+        orders_request_id="req-orders",
+        attested_at=NOW - timedelta(seconds=1),
     )
 
 
@@ -82,6 +99,7 @@ def namespace():
 def setup_workspace(tmp_path) -> PaperOperationalWorkspace:
     workspace = PaperOperationalWorkspace.initialize(tmp_path / "workspace")
     workspace.write_account_attestation(account())
+    PaperFlatAccountEvidenceStore(workspace).write(flat())
     return workspace
 
 
@@ -103,6 +121,27 @@ def test_market_preflight_rejects_enabled_write_gate_before_network(tmp_path, mo
     fake = FakeGateway()
     main.__globals__["AlpacaPaperEquityMarketDataGateway"] = lambda config: fake
     with pytest.raises(SystemExit, match="disable the write gate"):
+        main(
+            [
+                "--workspace",
+                str(workspace.root),
+                "--symbol",
+                "AAPL",
+                "--allow-paper-market-read",
+            ]
+        )
+    assert fake.calls == []
+
+
+def test_market_preflight_requires_flat_account_before_network(tmp_path, monkeypatch) -> None:
+    workspace = PaperOperationalWorkspace.initialize(tmp_path / "workspace")
+    workspace.write_account_attestation(account())
+    monkeypatch.setenv("APCA_API_KEY_ID", KEY)
+    monkeypatch.setenv("APCA_API_SECRET_KEY", SECRET)
+    ns, main = namespace()
+    fake = FakeGateway()
+    main.__globals__["AlpacaPaperEquityMarketDataGateway"] = lambda config: fake
+    with pytest.raises(SystemExit, match="not the allowed next step"):
         main(
             [
                 "--workspace",
