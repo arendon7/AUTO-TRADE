@@ -29,6 +29,14 @@ bash scripts/mac_bootstrap.sh
 
 El bootstrap crea `.venv`, instala el proyecto, ejecuta boundaries y rehearsal local, **no lee credenciales Alpaca, no llama al broker y fuerza `R6_EXTERNAL_PAPER_WRITE=DISABLED`**.
 
+Después de la primera instalación, para repetir el ensayo offline sin reinstalar:
+
+```bash
+bash scripts/mac_rehearsal.sh
+```
+
+Ese rehearsal vuelve a ejecutar doctor, boundaries y pruebas R6 con las credenciales removidas del proceso y el write gate deshabilitado. No llama al broker.
+
 Runbook completo:
 
 ```text
@@ -40,6 +48,8 @@ Inspector local/read-only de un workspace existente:
 ```bash
 .venv/bin/python scripts/r6_inspect_paper_readiness.py --workspace <WORKSPACE>
 ```
+
+El recorrido externo posterior permanece separado: primero account preflight GET-only, luego market-data IEX GET-only, y sólo después preparación offline. Ningún paso de bootstrap/rehearsal avanza automáticamente hacia una orden.
 
 ## Cómo continuar el proyecto
 
