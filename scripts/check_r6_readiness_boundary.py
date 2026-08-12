@@ -7,12 +7,16 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 MODULE = ROOT / "src/autotrade/brokers/alpaca_paper_readiness.py"
+MARKET_PROJECTION = ROOT / "src/autotrade/brokers/alpaca_paper_market_readiness.py"
 CLI = ROOT / "scripts/r6_inspect_paper_readiness.py"
 CORE = ROOT / ".github/workflows/core-tests.yml"
 R6 = ROOT / ".github/workflows/r6-authority.yml"
 SELF_COMMAND = "python scripts/check_r6_readiness_boundary.py"
 SELF_TEST = "tests/test_r6_readiness_boundary.py"
-FUNCTIONAL_TEST = "tests/test_r6_paper_readiness.py"
+FUNCTIONAL_TESTS = (
+    "tests/test_r6_paper_readiness.py",
+    "tests/test_r6_market_readiness.py",
+)
 
 FORBIDDEN_IMPORT_PREFIXES = (
     "urllib",
@@ -35,6 +39,7 @@ FORBIDDEN_CALLS = {
     "stage_external_submission",
     "record_operator_approval",
     "attest_account",
+    "attest_snapshot",
     "connect_and_listen",
     "write_text",
     "write_bytes",
@@ -57,8 +62,18 @@ REQUIRED_MODULE = (
     'PaperReadinessPhase.RECONCILIATION_REQUIRED',
     '"RUN_SEPARATE_GET_ONLY_RECONCILIATION_AND_EVIDENCE_CAPTURE"',
 )
+REQUIRED_MARKET_PROJECTION = (
+    'MARKET_DATA_PREFLIGHT_REQUIRED = "MARKET_DATA_PREFLIGHT_REQUIRED"',
+    'MARKET_DATA_NEXT_ACTION = "RUN_SEPARATE_GET_ONLY_IEX_MARKET_PREFLIGHT"',
+    "PaperOperationalReadinessInspector(root).inspect(now=now)",
+    'market_path = workspace.root / "market_snapshot.json"',
+    'payload["market_evidence_present"] = False',
+    'payload["market_evidence_present"] = True',
+    "PaperMarketEvidenceStore(workspace).read()",
+    "package.market_fingerprint != observed_fingerprint",
+)
 REQUIRED_CLI = (
-    "PaperOperationalReadinessInspector(args.workspace).inspect(",
+    "inspect_market_aware_readiness(",
     '"network_used": False',
     '"broker_write_performed": False',
     '"execution_authorized": False',
@@ -70,7 +85,11 @@ REQUIRED_CLI = (
 
 def main() -> int:
     errors: list[str] = []
-    for path, label in ((MODULE, "readiness module"), (CLI, "readiness CLI")):
+    for path, label in (
+        (MODULE, "readiness module"),
+        (MARKET_PROJECTION, "market readiness projection"),
+        (CLI, "readiness CLI"),
+    ):
         if not path.is_file():
             errors.append(f"required {label} missing: {_relative(path)}")
             continue
@@ -87,6 +106,21 @@ def main() -> int:
             errors.append("readiness inspector must explicitly use read-only SQLite connections")
         if "?mode=ro" not in source:
             errors.append("readiness inspector SQLite URI is not mode=ro")
+
+    if MARKET_PROJECTION.is_file():
+        source = MARKET_PROJECTION.read_text(encoding="utf-8")
+        for anchor in REQUIRED_MARKET_PROJECTION:
+            if anchor not in source:
+                errors.append(f"market readiness projection anchor missing: {anchor}")
+        for forbidden in (
+            "AlpacaPaperCredentials",
+            "AlpacaPaperEquityMarketDataGateway",
+            "R6_EXTERNAL_PAPER_WRITE",
+            "APCA_API_KEY_ID",
+            "APCA_API_SECRET_KEY",
+        ):
+            if forbidden in source:
+                errors.append(f"market readiness projection contains forbidden authority surface: {forbidden}")
 
     if CLI.is_file():
         source = CLI.read_text(encoding="utf-8")
@@ -111,8 +145,9 @@ def main() -> int:
         source = R6.read_text(encoding="utf-8")
         if SELF_TEST not in source:
             errors.append("R6 Authority: readiness adversarial checker tests are not wired into CI")
-        if FUNCTIONAL_TEST not in source:
-            errors.append("R6 Authority: readiness functional tests are not wired into CI")
+        for test in FUNCTIONAL_TESTS:
+            if test not in source:
+                errors.append(f"R6 Authority: readiness functional test is not wired into CI: {test}")
 
     if errors:
         for error in errors:
@@ -120,7 +155,7 @@ def main() -> int:
         return 1
     print(
         "AUTO-TRADE R6 readiness boundary: PASS "
-        "(local read-only inspection; no credentials/network/write/execution authority; explicit next-step reporting only)"
+        "(local read-only inspection; market evidence projection; no credentials/network/write/execution authority)"
     )
     return 0
 
