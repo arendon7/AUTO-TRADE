@@ -14,7 +14,7 @@ REQUIRED = (
     '"external_post_authorized": False',
     '"external_order_submitted": False',
     '"live_trading": "BLOCKED"',
-    '"next_action": "CONNECTIVITY_WRITER_NOT_YET_AVAILABLE"',
+    '"next_action": "CONNECTIVITY_ONE_SHOT_EXECUTOR_REQUIRED"',
     "core.sqlite3 changed after Final Freshness",
 )
 
@@ -44,7 +44,7 @@ def main() -> int:
     print(
         "AUTO-TRADE R6 connectivity workspace staging boundary: PASS "
         "(verified <=5s binding; durable handoff; OMS SUBMITTING; submission UNKNOWN-before-POST; "
-        "no broker/writer/network/Health/LIVE authority)"
+        "next action is same-process one-shot executor; no broker/writer/network/Health/LIVE authority)"
     )
     return 0
 
