@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from datetime import datetime, timezone
 import json
 import os
 from pathlib import Path
@@ -66,7 +67,10 @@ def main(argv: list[str] | None = None) -> int:
     if mode & 0o077:
         raise SystemExit("ERROR: workspace permissions are not private")
 
-    readiness = inspect_market_aware_readiness(root=workspace.root, now=__import__("datetime").datetime.now(__import__("datetime").timezone.utc))
+    readiness = inspect_market_aware_readiness(
+        root=workspace.root,
+        now=datetime.now(timezone.utc),
+    )
     if readiness.get("phase") != "ACCOUNT_PREFLIGHT_REQUIRED":
         raise SystemExit("ERROR: a new workspace did not start at ACCOUNT_PREFLIGHT_REQUIRED")
 
