@@ -138,12 +138,6 @@ def test_receipt_builder_type_and_expiry_guards(tmp_path, monkeypatch) -> None:
             now=(NOW + timedelta(seconds=20)).replace(tzinfo=None)
         )
 
-    expired_decision = replace(
-        state.decision,
-        expires_at=NOW + timedelta(seconds=20, milliseconds=250),
-    )
-    expired_state = replace(state, decision=expired_decision)
-
     class FakeOperatorBridge:
         def __init__(self, workspace):
             self.workspace = workspace
@@ -151,7 +145,8 @@ def test_receipt_builder_type_and_expiry_guards(tmp_path, monkeypatch) -> None:
             return operator_context
 
     monkeypatch.setattr(review, "ConnectivityOperatorBridge", FakeOperatorBridge)
-    monkeypatch.setattr(review, "_load_operator_state", lambda workspace: expired_state)
+    monkeypatch.setattr(review, "_load_operator_state", lambda workspace: state)
+    monkeypatch.setattr(type(state.decision), "is_valid_at", lambda self, now: False)
     with pytest.raises(ConnectivityOperatorReviewRejected, match="expired before review"):
         ConnectivityOperatorReviewReceiptBuilder(ws).build(
             now=NOW + timedelta(seconds=20, milliseconds=500)
