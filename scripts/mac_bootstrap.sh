@@ -99,7 +99,10 @@ cat <<'EOF'
 
 MAC BOOTSTRAP: PASS
 
-Safe next commands:
+Repeatable offline rehearsal after this first installation:
+  bash scripts/mac_rehearsal.sh
+
+Safe diagnostic commands:
   .venv/bin/python scripts/mac_doctor.py
   .venv/bin/python scripts/mac_doctor.py --workspace <WORKSPACE>
   .venv/bin/python scripts/r6_inspect_paper_readiness.py --workspace <WORKSPACE>
