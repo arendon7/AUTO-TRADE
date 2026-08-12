@@ -9,9 +9,6 @@ if [[ "$(uname -s)" != "Darwin" ]]; then
   exit 1
 fi
 
-# A child script cannot modify the caller's shell. Refuse to start when the
-# caller already exposes real PAPER write authority, rather than hiding it only
-# inside this process and returning to an unsafe parent shell afterwards.
 if [[ "${R6_EXTERNAL_PAPER_WRITE:-}" == "ENABLED" ]]; then
   cat >&2 <<'EOF'
 ERROR: R6_EXTERNAL_PAPER_WRITE is ENABLED in the calling shell.
@@ -23,7 +20,6 @@ EOF
   exit 1
 fi
 
-# Installation/rehearsal must never use broker credentials or execution authority.
 unset APCA_API_KEY_ID || true
 unset APCA_API_SECRET_KEY || true
 export R6_EXTERNAL_PAPER_WRITE="DISABLED"
@@ -75,15 +71,19 @@ VENV_PIP="$ROOT/.venv/bin/pip"
 "$VENV_PY" scripts/check_debt_register.py
 "$VENV_PY" scripts/check_r6_authority.py
 "$VENV_PY" scripts/check_r6_live_deny_boundary.py
+"$VENV_PY" scripts/check_r6_flat_account_boundary.py
 "$VENV_PY" scripts/check_r6_market_data_boundary.py
 "$VENV_PY" scripts/check_r6_operational_lifecycle_boundary.py
 "$VENV_PY" scripts/check_r6_operational_execution_boundary.py
 "$VENV_PY" scripts/check_r6_readiness_boundary.py
 "$VENV_PY" scripts/check_mac_rehearsal_boundary.py
 "$VENV_PY" scripts/check_mac_safe_console_boundary.py
+"$VENV_PY" scripts/check_mac_safety_rehearsal_boundary.py
 
 # Focused local rehearsal: no broker I/O and no credentials.
 "$VENV_PY" -m pytest -q \
+  tests/test_r6_flat_account_preflight.py \
+  tests/test_r6_flat_account_failclosed.py \
   tests/test_r6_paper_market_data.py \
   tests/test_r6_paper_market_evidence.py \
   tests/test_r6_market_preflight_cli.py \
@@ -94,9 +94,14 @@ VENV_PIP="$ROOT/.venv/bin/pip"
   tests/test_r6_operational_execute_validation.py \
   tests/test_r6_execute_paper_canary_cli.py \
   tests/test_mac_safe_console.py \
-  tests/test_mac_create_workspace.py
+  tests/test_mac_create_workspace.py \
+  tests/test_mac_safety_rehearsal.py \
+  tests/test_mac_safety_rehearsal_boundary.py
 
-# Final local diagnostics. This does not load .env or use broker I/O.
+# Prove the real Capital Safety Kernel is executable locally without broker authority.
+"$VENV_PY" scripts/mac_safety_rehearsal.py >/dev/null
+"$VENV_PY" scripts/mac_safety_rehearsal.py --kill-switch >/dev/null
+
 "$VENV_PY" scripts/mac_doctor.py
 
 cat <<'EOF'
@@ -105,6 +110,10 @@ MAC BOOTSTRAP: PASS
 
 Recommended single safe entry point:
   bash scripts/mac_start.sh
+
+Try the real Capital Safety Kernel locally:
+  bash scripts/mac_start.sh safety-rehearsal
+  bash scripts/mac_start.sh safety-rehearsal --kill-switch
 
 Create the first private workspace outside the repository:
   bash scripts/mac_start.sh init-workspace "$HOME/AUTO-TRADE-R6/workspace-001"
