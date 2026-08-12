@@ -11,12 +11,35 @@ La IA puede investigar, proponer, explicar y priorizar. **No puede saltarse lím
 - R0–R5: baseline certificado en `main`.
 - R6: external Alpaca PAPER en rama/PR DRAFT.
 - R6 es PAPER-only; LIVE permanece bloqueado.
-- El runtime single-shot, decisión humana durable, OMS handoff, reconciliación, trade updates, qualification y readiness local están implementados bajo boundaries permanentes.
-- `TD-R6-013` está cerrado; la certificación final de R6 depende todavía de evidencia externa real `TD-R6-001..006`.
+- Runtime single-shot, decisión humana durable, OMS handoff, reconciliación, bracket protection, trade updates, qualification y readiness están implementados bajo boundaries permanentes.
+- `TD-R6-007..013` están cerrados estructuralmente.
+- La certificación final de R6 depende todavía de evidencia externa real `TD-R6-001..006`.
 - Ninguna evidencia PAPER demuestra rentabilidad ni concede autoridad LIVE.
-- No se ha enviado todavía un external PAPER order como parte de la certificación R6.
+- External PAPER orders enviados hasta ahora: **0**.
 
-## Inicio rápido en Mac
+## Inicio rápido en Mac — doble clic
+
+El paquete Mac generado por CI incluye `AUTO_TRADE_MAC.command`.
+
+1. Descomprime el paquete.
+2. Lee `LEEME_PRIMERO_MAC.md`.
+3. Haz doble clic en `AUTO_TRADE_MAC.command`.
+4. Si Gatekeeper bloquea el primer arranque, usa clic derecho → **Abrir** y confirma una sola vez.
+
+No desactives Gatekeeper globalmente.
+
+El menú de doble clic sólo ofrece superficies seguras:
+- crear workspace privado;
+- Doctor;
+- rehearsal offline;
+- **Capital Safety rehearsal local**;
+- readiness;
+- abrir runbook;
+- mostrar la secuencia GET-only.
+
+No contiene ninguna opción de ejecución de órdenes.
+
+## Inicio rápido desde Git/Terminal
 
 Mientras PR #14 siga DRAFT:
 
@@ -27,51 +50,87 @@ git switch reconstruction/r6-external-paper-protection
 bash scripts/mac_start.sh
 ```
 
-`mac_start.sh` es el punto de entrada recomendado. Si `.venv` no existe, ejecuta primero el bootstrap seguro; después abre el Mac Doctor. El launcher **no contiene ninguna opción de ejecución de órdenes** y fuerza `R6_EXTERNAL_PAPER_WRITE=DISABLED`.
+`mac_start.sh` es el entrypoint seguro por Terminal. Si `.venv` no existe, ejecuta automáticamente el bootstrap seguro y después abre Mac Doctor. Fuerza `R6_EXTERNAL_PAPER_WRITE=DISABLED`.
 
-Primer ensayo recomendado, todavía sin credenciales ni red al broker:
+### Primer ensayo sin cuenta Alpaca
 
 ```bash
 bash scripts/mac_start.sh rehearsal
+bash scripts/mac_start.sh safety-rehearsal
+bash scripts/mac_start.sh safety-rehearsal --kill-switch
 bash scripts/mac_start.sh init-workspace "$HOME/AUTO-TRADE-R6/workspace-001"
 bash scripts/mac_start.sh readiness "$HOME/AUTO-TRADE-R6/workspace-001"
 ```
+
+`Safety rehearsal` usa el `CapitalSafetyKernel` real con límites fijos de ensayo. El usuario puede cambiar candidato/escenario, pero no elevar los límites duros desde CLI. Incluso si el kernel devuelve `APPROVED`, el rehearsal mantiene:
+- broker network: NO;
+- broker write: NO;
+- OMS staging: NO;
+- operator authority: NO;
+- external execution authority: NO;
+- capital authority: NONE;
+- profitability claim: false;
+- LIVE: BLOCKED.
 
 El workspace se crea fuera del repositorio, con permisos privados, sin DBs de trading, sin credenciales y debe comenzar en `ACCOUNT_PREFLIGHT_REQUIRED`.
 
-Comandos seguros principales:
+## Primeros GET reales de Alpaca PAPER
+
+Sólo después de configurar credenciales **PAPER** y manteniendo el write gate deshabilitado:
 
 ```bash
-bash scripts/mac_start.sh doctor
-bash scripts/mac_start.sh rehearsal
-bash scripts/mac_start.sh init-workspace "$HOME/AUTO-TRADE-R6/workspace-001"
-bash scripts/mac_start.sh readiness "$HOME/AUTO-TRADE-R6/workspace-001"
+bash scripts/mac_start.sh account-preflight \
+  "$HOME/AUTO-TRADE-R6/workspace-001" \
+  '<ALPACA_PAPER_ACCOUNT_ID>'
+
+bash scripts/mac_start.sh flat-account-preflight \
+  "$HOME/AUTO-TRADE-R6/workspace-001"
+
+bash scripts/mac_start.sh market-preflight \
+  "$HOME/AUTO-TRADE-R6/workspace-001" \
+  AAPL
 ```
 
-Cuando ya hayas configurado credenciales Alpaca PAPER, los únicos pasos de red disponibles desde Safe Start son GET-only y requieren una acción explícita:
+Secuencia obligatoria del primer canary:
 
-```bash
-bash scripts/mac_start.sh account-preflight "$HOME/AUTO-TRADE-R6/workspace-001" '<ALPACA_PAPER_ACCOUNT_ID>'
-bash scripts/mac_start.sh market-preflight "$HOME/AUTO-TRADE-R6/workspace-001" AAPL
+```text
+account -> flat-account -> market -> readiness
 ```
 
-El bootstrap/rehearsal no leen credenciales Alpaca, no llaman al broker y mantienen deshabilitado el write gate. Account/market preflight sí usan red, pero no tienen superficie de escritura de órdenes.
+Flat-account realiza exactamente los GET auditados de posiciones y órdenes abiertas. Para el primer canary exige 0 posiciones + 0 órdenes abiertas y su evidencia es de corta duración. Market preflight usa IEX y sigue sin tener autoridad de órdenes.
 
-**Límite actual antes del primer canary real:** estamos cerrando la inicialización autoritativa de cartera PAPER y la candidatura/`RiskDecision` producida por Capital Safety Kernel para que la preparación offline no requiera fabricar estado a mano. Hasta cerrar ese gate, se puede ensayar por completo el recorrido local y los dos GET-only, pero no se debe forzar manualmente `core.sqlite3` ni artifacts para avanzar.
+## Límite actual antes del primer canary real
 
-Runbook completo:
+Ya podemos ensayar en Mac:
+- bootstrap real en macOS ARM64;
+- rehearsal offline;
+- Finder launcher;
+- Capital Safety Kernel local;
+- workspace/readiness;
+- account GET;
+- flat-account two-GET;
+- IEX market GET.
+
+Lo siguiente no es “forzar un POST”. Debemos preservar la separación entre:
+
+1. **connectivity/protection canary** — prueba infraestructura PAPER, no rentabilidad;
+2. **strategy trading** — requiere una estrategia US-equity promovida por research/backtest/holdout/shadow/forward + Health.
+
+No se debe fabricar manualmente Strategy Health, `RiskDecision`, `core.sqlite3` o artifacts para avanzar readiness.
+
+## Documentación Mac
+
+Primer uso:
+
+```text
+LEEME_PRIMERO_MAC.md
+```
+
+Runbook técnico:
 
 ```text
 docs/MAC_PAPER_RUNBOOK.md
 ```
-
-Inspector local/read-only de un workspace existente:
-
-```bash
-.venv/bin/python scripts/r6_inspect_paper_readiness.py --workspace <WORKSPACE>
-```
-
-El recorrido externo posterior permanece separado: primero account preflight GET-only, luego market-data IEX GET-only, y sólo después preparación offline. Ningún paso de bootstrap/rehearsal/Safe Start avanza automáticamente hacia una orden.
 
 ## Cómo continuar el proyecto
 
