@@ -79,6 +79,9 @@ CLOSED structurally:
 OPEN nonblocking:
 - `TD-OPS-001`.
 
+## Negative tests
+Toda iteración de esta UAT debe conservar y ejecutar los **Negative tests** de seguridad relevantes: acciones fuera de orden, credenciales ausentes, account ID ausente, cuenta no plana, evidence stale/tampered, unsupported symbol/product, kill switch, reconciliation failure, broker ambiguity y cualquier intento de exponer writer/POST/LIVE desde el Control Center. Ningún test negativo se relaja para mejorar UX.
+
 ## Restricciones permanentes
 - Coverage real >=85%, fail-closed.
 - No fabricar RiskDecision, Health, Portfolio, DBs o evidence JSON para saltar gates.
