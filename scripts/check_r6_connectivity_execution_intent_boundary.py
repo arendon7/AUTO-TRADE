@@ -96,13 +96,17 @@ def main() -> int:
             'os.environ.get(_KEY_ENV) or os.environ.get(_SECRET_ENV)',
             "sys.stdin.isatty()",
             "sys.stdout.isatty()",
-            "connectivity_execution_intent_challenge(context)",
+            "ConnectivityReviewedExecutionIntentBridge",
+            "reviewed_execution_intent_challenge(context, receipt)",
+            "receipt_hash=receipt.receipt_hash",
+            '"operator_review_receipt_hash": receipt.receipt_hash',
+            '"execution_review_binding_hash": review_binding.binding_hash',
             '"max_external_post_attempts": 1',
             '"final_freshness_required": True',
             '"oms_staging_authorized": False',
             '"external_post_authorized": False',
             '"external_order_submitted": False',
-            '"next_action": "INLINE_FINAL_FRESHNESS_REQUIRED"',
+            '"next_action": "REVIEWED_BOUND_FINAL_FRESHNESS_REQUIRED"',
         ):
             if anchor not in source:
                 errors.append(f"execution-intent CLI anchor missing: {anchor}")
@@ -116,7 +120,7 @@ def main() -> int:
         return 1
     print(
         "AUTO-TRADE R6 connectivity execution-intent boundary: PASS "
-        "(second HUMAN_OPERATOR confirmation; one-attempt budget; Final Freshness still required; "
+        "(second HUMAN_OPERATOR confirmation is receipt-bound; one-attempt budget; reviewed Final Freshness still required; "
         "OMS VALIDATED; submission PREPARED; no network/staging/POST/LIVE authority)"
     )
     return 0
