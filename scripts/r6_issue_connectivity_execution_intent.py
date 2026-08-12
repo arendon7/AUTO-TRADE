@@ -36,10 +36,10 @@ def _parser() -> argparse.ArgumentParser:
 
 
 def _workspace(path: Path) -> PaperOperationalWorkspace:
-    root = path.expanduser().resolve()
-    if not root.is_dir() or root.is_symlink():
+    expanded = path.expanduser()
+    if expanded.is_symlink() or not expanded.is_dir():
         raise SystemExit("connectivity workspace must be an existing non-symlink directory")
-    return PaperOperationalWorkspace(root=root)
+    return PaperOperationalWorkspace(root=expanded.resolve())
 
 
 def _validate_local_only_environment() -> None:
