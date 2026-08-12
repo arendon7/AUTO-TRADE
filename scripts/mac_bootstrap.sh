@@ -75,12 +75,17 @@ VENV_PIP="$ROOT/.venv/bin/pip"
 "$VENV_PY" scripts/check_debt_register.py
 "$VENV_PY" scripts/check_r6_authority.py
 "$VENV_PY" scripts/check_r6_live_deny_boundary.py
+"$VENV_PY" scripts/check_r6_market_data_boundary.py
 "$VENV_PY" scripts/check_r6_operational_lifecycle_boundary.py
 "$VENV_PY" scripts/check_r6_operational_execution_boundary.py
 "$VENV_PY" scripts/check_r6_readiness_boundary.py
 
 # Focused local rehearsal: no broker I/O and no credentials.
 "$VENV_PY" -m pytest -q \
+  tests/test_r6_paper_market_data.py \
+  tests/test_r6_paper_market_evidence.py \
+  tests/test_r6_market_preflight_cli.py \
+  tests/test_r6_market_readiness.py \
   tests/test_r6_paper_readiness.py \
   tests/test_r6_paper_readiness_failclosed.py \
   tests/test_r6_readiness_boundary.py \
