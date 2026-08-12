@@ -27,6 +27,10 @@ from autotrade.connectivity_oms_stage import (
     ConnectivityOmsStager,
     ConnectivitySubmissionHandoff,
 )
+from autotrade.connectivity_operator_review import (
+    ConnectivityOperatorReviewError,
+    verify_reviewed_final_freshness_binding,
+)
 from autotrade.domain import OrderRecord, OrderStatus, market_fingerprint, risk_decision_fingerprint
 from autotrade.persistence import (
     SQLiteEventLedger,
@@ -65,9 +69,9 @@ class ConnectivityWorkspaceStageResult:
 class ConnectivityWorkspaceStagingBridge:
     """Commit the pre-POST connectivity ambiguity barrier without any network API.
 
-    The bridge is intentionally not a writer. It verifies the execution/freshness
-    chain, stages the OMS through the typed connectivity kernel, and commits the
-    durable submission UNKNOWN state before any future external POST can exist.
+    The bridge is intentionally not a writer. It verifies the reviewed human +
+    execution/freshness chain, stages the OMS through the typed connectivity
+    kernel, and commits durable submission UNKNOWN before any future POST.
     """
 
     def __init__(self, workspace: PaperOperationalWorkspace) -> None:
@@ -104,6 +108,15 @@ class ConnectivityWorkspaceStagingBridge:
             raise ConnectivityWorkspaceStageRejected(
                 "Final Freshness permit expired before staging"
             )
+
+        try:
+            review_freshness_binding_hash = verify_reviewed_final_freshness_binding(
+                self._workspace, bound_result
+            )
+        except ConnectivityOperatorReviewError as exc:
+            raise ConnectivityWorkspaceStageRejected(
+                "reviewed human intent/freshness chain is missing or invalid"
+            ) from exc
 
         self._verify_binding_evidence(bound_result)
         self._verify_final_freshness_evidence(bound_result)
@@ -211,6 +224,8 @@ class ConnectivityWorkspaceStagingBridge:
             "order_id": binding.order_id,
             "client_order_id": binding.client_order_id,
             "attempt_id": binding.attempt_id,
+            "operator_review_required": True,
+            "review_freshness_binding_hash": review_freshness_binding_hash,
             "execution_freshness_binding_hash": binding.binding_hash,
             "final_freshness_permit_hash": binding.final_freshness_permit_hash,
             "fresh_risk_decision_id": binding.fresh_risk_decision_id,
