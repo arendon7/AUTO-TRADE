@@ -5,14 +5,20 @@ on:
     branches: ["reconstruction/**", "work/**", "feature/**"]
     paths:
       - "src/autotrade/connectivity_oms_stage.py"
+      - "src/autotrade/connectivity_workspace_stage.py"
       - "scripts/check_r6_connectivity_oms_stage_boundary.py"
+      - "scripts/check_r6_connectivity_workspace_stage_boundary.py"
       - "tests/test_r6_connectivity_oms_stage.py"
+      - "tests/test_r6_connectivity_workspace_stage.py"
       - ".github/workflows/r6-connectivity-oms-stage.yml"
   pull_request:
     paths:
       - "src/autotrade/connectivity_oms_stage.py"
+      - "src/autotrade/connectivity_workspace_stage.py"
       - "scripts/check_r6_connectivity_oms_stage_boundary.py"
+      - "scripts/check_r6_connectivity_workspace_stage_boundary.py"
       - "tests/test_r6_connectivity_oms_stage.py"
+      - "tests/test_r6_connectivity_workspace_stage.py"
       - ".github/workflows/r6-connectivity-oms-stage.yml"
   workflow_dispatch:
 
@@ -33,5 +39,7 @@ jobs:
         run: python -m compileall -q src tests scripts
       - name: Typed connectivity OMS staging authority boundary
         run: python scripts/check_r6_connectivity_oms_stage_boundary.py
-      - name: Typed connectivity OMS staging tests
-        run: pytest -q tests/test_r6_connectivity_oms_stage.py
+      - name: Workspace UNKNOWN-before-POST staging boundary
+        run: python scripts/check_r6_connectivity_workspace_stage_boundary.py
+      - name: Connectivity staging functional and adversarial tests
+        run: pytest -q tests/test_r6_connectivity_oms_stage.py tests/test_r6_connectivity_workspace_stage.py
