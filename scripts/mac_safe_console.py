@@ -24,7 +24,8 @@ def _parser() -> argparse.ArgumentParser:
         description=(
             "Safe Mac operator console for AUTO-TRADE R6. This console exposes only "
             "local setup/diagnostics/rehearsal, explicit GET-only PAPER preflights, "
-            "and a non-executable connectivity candidate builder. It has no order execution command."
+            "credential-free candidate/preparation/review artifacts and read-only pre-canary status. "
+            "It has no order execution command."
         )
     )
     sub = parser.add_subparsers(dest="command", required=True)
@@ -56,8 +57,17 @@ def _parser() -> argparse.ArgumentParser:
     safety.add_argument("--broker-state-unknown", action="store_true")
     safety.add_argument("--kill-switch", action="store_true")
 
-    readiness = sub.add_parser("readiness", help="Inspect one workspace read-only; no broker I/O.")
+    readiness = sub.add_parser("readiness", help="Inspect legacy workspace readiness read-only; no broker I/O.")
     readiness.add_argument("--workspace", required=True, type=Path)
+
+    pre_status = sub.add_parser(
+        "pre-canary-status",
+        help=(
+            "Read the current CONNECTIVITY_CANARY gate chain locally. READY means only "
+            "ready for the named next gate; never POST authority."
+        ),
+    )
+    pre_status.add_argument("--workspace", required=True, type=Path)
 
     account = sub.add_parser(
         "account-preflight",
@@ -98,6 +108,24 @@ def _parser() -> argparse.ArgumentParser:
         ),
     )
     candidate.add_argument("--workspace", required=True, type=Path)
+
+    preparation = sub.add_parser(
+        "prepare-connectivity-candidate",
+        help=(
+            "Build the credential-free deterministic bracket/preparation package from an existing candidate. "
+            "No broker I/O, human authority, OMS staging or POST."
+        ),
+    )
+    preparation.add_argument("--workspace", required=True, type=Path)
+
+    review = sub.add_parser(
+        "review-receipt",
+        help=(
+            "Freeze the exact offline operator review receipt after the first human decision. "
+            "No broker I/O, new human authority, OMS staging or POST."
+        ),
+    )
+    review.add_argument("--workspace", required=True, type=Path)
     return parser
 
 
@@ -169,6 +197,11 @@ def main(argv: list[str] | None = None) -> int:
             [str(PYTHON), "scripts/r6_inspect_paper_readiness.py", "--workspace", str(args.workspace)],
             credential_free=True,
         )
+    if args.command == "pre-canary-status":
+        return _run(
+            [str(PYTHON), "scripts/r6_precanary_status.py", "--workspace", str(args.workspace)],
+            credential_free=True,
+        )
     if args.command == "account-preflight":
         if not args.allow_paper_account_read:
             print("SAFE CONSOLE BLOCKED: account GET requires --allow-paper-account-read", file=sys.stderr)
@@ -206,12 +239,17 @@ def main(argv: list[str] | None = None) -> int:
         ])
     if args.command == "build-connectivity-candidate":
         return _run(
-            [
-                str(PYTHON),
-                "scripts/r6_build_connectivity_candidate.py",
-                "--workspace",
-                str(args.workspace),
-            ],
+            [str(PYTHON), "scripts/r6_build_connectivity_candidate.py", "--workspace", str(args.workspace)],
+            credential_free=True,
+        )
+    if args.command == "prepare-connectivity-candidate":
+        return _run(
+            [str(PYTHON), "scripts/r6_prepare_connectivity_candidate.py", "--workspace", str(args.workspace)],
+            credential_free=True,
+        )
+    if args.command == "review-receipt":
+        return _run(
+            [str(PYTHON), "scripts/r6_connectivity_review_receipt.py", "--workspace", str(args.workspace)],
             credential_free=True,
         )
     raise SafeConsoleError(f"unsupported safe command: {args.command}")
