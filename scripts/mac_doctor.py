@@ -10,7 +10,7 @@ import stat
 import subprocess
 import sys
 
-from autotrade.brokers.alpaca_paper_readiness import PaperOperationalReadinessInspector
+from autotrade.brokers.alpaca_paper_market_readiness import inspect_market_aware_readiness
 
 
 EXPECTED_BRANCH = "reconstruction/r6-external-paper-protection"
@@ -96,10 +96,10 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.workspace is not None:
         try:
-            readiness = PaperOperationalReadinessInspector(args.workspace).inspect(
-                now=datetime.now(timezone.utc)
+            report["workspace_readiness"] = inspect_market_aware_readiness(
+                root=args.workspace,
+                now=datetime.now(timezone.utc),
             )
-            report["workspace_readiness"] = readiness.to_dict()
         except Exception as exc:  # diagnostic boundary: message only, no authority fallback
             report["workspace_readiness_error"] = f"{type(exc).__name__}: {exc}"
             ok = False
