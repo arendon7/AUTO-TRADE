@@ -77,7 +77,7 @@ def test_workspace_stage_commits_handoff_then_unknown_barrier_without_post(tmp_p
     assert artifact["strategy_trading_authorized"] is False
     assert artifact["capital_authority"] == "NONE"
     assert artifact["live_trading"] == "BLOCKED"
-    assert artifact["next_action"] == "CONNECTIVITY_WRITER_NOT_YET_AVAILABLE"
+    assert artifact["next_action"] == "CONNECTIVITY_ONE_SHOT_EXECUTOR_REQUIRED"
 
 
 def test_workspace_stage_rejects_expired_binding_without_mutation(tmp_path, monkeypatch) -> None:
