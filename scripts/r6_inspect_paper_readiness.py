@@ -5,9 +5,9 @@ from datetime import datetime, timezone
 import json
 from pathlib import Path
 
-from autotrade.brokers.alpaca_paper_readiness import (
-    PaperOperationalReadinessInspector,
+from autotrade.brokers.alpaca_paper_market_readiness import (
     PaperReadinessError,
+    inspect_market_aware_readiness,
 )
 
 
@@ -26,8 +26,9 @@ def _parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
-        report = PaperOperationalReadinessInspector(args.workspace).inspect(
-            now=datetime.now(timezone.utc)
+        report = inspect_market_aware_readiness(
+            root=args.workspace,
+            now=datetime.now(timezone.utc),
         )
     except (PaperReadinessError, OSError, ValueError) as exc:
         print(
@@ -46,7 +47,7 @@ def main(argv: list[str] | None = None) -> int:
             )
         )
         return 2
-    print(json.dumps(report.to_dict(), sort_keys=True))
+    print(json.dumps(report, sort_keys=True))
     return 0
 
 
