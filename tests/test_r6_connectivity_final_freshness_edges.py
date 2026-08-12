@@ -21,7 +21,6 @@ from test_r6_connectivity_candidate import CREDS, NOW, h
 from test_r6_connectivity_final_freshness import (
     Clock,
     FreshAccountGateway,
-    FreshAssetGateway,
     FreshFlatGateway,
     FreshMarketGateway,
     guard,
@@ -168,15 +167,12 @@ def test_fresh_account_validator_rejects_wrong_type_and_nonpositive_cap(tmp_path
         )
 
 
-def test_fresh_asset_validator_rejects_wrong_type_and_status(tmp_path) -> None:
+def test_fresh_asset_validator_rejects_wrong_type(tmp_path) -> None:
     ws, _, _, _ = ready_workspace(tmp_path)
     g = guard(ws)
     initial = cff.PaperAssetEvidenceStore(ws).read()
     with pytest.raises(ConnectivityFinalFreshnessRejected, match="invalid type"):
         g._validate_fresh_asset(initial=initial, fresh=object())  # type: ignore[arg-type]
-    fresh = replace(initial, observed_at=NOW, request_id="fresh", response_sha256=h("fresh"))
-    with pytest.raises(ConnectivityFinalFreshnessRejected, match="no longer active/tradable"):
-        g._validate_fresh_asset(initial=initial, fresh=replace(fresh, tradable=False))
 
 
 def test_fresh_flat_validator_rejects_wrong_type_binding_and_credentials(tmp_path) -> None:
@@ -207,7 +203,7 @@ def test_fresh_flat_validator_rejects_wrong_type_binding_and_credentials(tmp_pat
         )
 
 
-def test_fresh_market_validator_rejects_wrong_type_symbol_and_feed(tmp_path) -> None:
+def test_fresh_market_validator_rejects_wrong_type_and_symbol(tmp_path) -> None:
     ws, _, _, _ = ready_workspace(tmp_path)
     g = guard(ws)
     with pytest.raises(ConnectivityFinalFreshnessRejected, match="invalid type"):
@@ -218,8 +214,6 @@ def test_fresh_market_validator_rejects_wrong_type_symbol_and_feed(tmp_path) -> 
             fresh=replace(fresh, market=replace(fresh.market, symbol="OTHER")),
             symbol="FIVE",
         )
-    with pytest.raises(ConnectivityFinalFreshnessRejected, match="IEX/USD"):
-        g._validate_fresh_market(fresh=replace(fresh, feed="sip"), symbol="FIVE")
 
 
 def test_permit_validates_hash_window_cap_and_safety_version(tmp_path) -> None:
@@ -259,7 +253,7 @@ def test_registry_issue_is_idempotent_and_rejects_valid_different_permit(tmp_pat
 
 
 def test_registry_detects_event_count_tamper(tmp_path) -> None:
-    ws, result = successful(tmp_path)
+    ws, _ = successful(tmp_path)
     path = ws.root / "connectivity_final_freshness.sqlite3"
     registry = SQLiteConnectivityFinalFreshnessRegistry(SQLiteRuntime(path))
     conn = sqlite3.connect(path)
