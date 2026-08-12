@@ -25,14 +25,13 @@ def test_safe_console_has_no_execution_subcommand() -> None:
 
 def test_safe_console_refuses_enabled_write_gate(monkeypatch) -> None:
     monkeypatch.setenv(console.WRITE_ENV, console.WRITE_ENABLED)
-    monkeypatch.setattr(console.PYTHON, "is_file", lambda: True)
     with pytest.raises(console.SafeConsoleError, match="R6_EXTERNAL_PAPER_WRITE=ENABLED"):
         console._require_safe_shell()
 
 
-def test_safe_console_requires_bootstrap(monkeypatch) -> None:
+def test_safe_console_requires_bootstrap(monkeypatch, tmp_path) -> None:
     monkeypatch.delenv(console.WRITE_ENV, raising=False)
-    monkeypatch.setattr(console.PYTHON, "is_file", lambda: False)
+    monkeypatch.setattr(console, "PYTHON", tmp_path / "missing-python")
     with pytest.raises(console.SafeConsoleError, match="Missing .venv"):
         console._require_safe_shell()
 
