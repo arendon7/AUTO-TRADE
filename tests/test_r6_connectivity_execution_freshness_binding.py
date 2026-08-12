@@ -16,6 +16,11 @@ from autotrade.connectivity_execution_freshness_binding import (
     ConnectivityExecutionFreshnessRejected,
     SQLiteConnectivityExecutionFreshnessRegistry,
 )
+from autotrade.connectivity_operator_review import (
+    ConnectivityOperatorReviewReceiptBuilder,
+    ConnectivityReviewedBoundFinalFreshnessGuard,
+    ConnectivityReviewedExecutionIntentBridge,
+)
 from autotrade.domain import OrderStatus
 from autotrade.persistence import SQLiteOrderStore, SQLiteRuntime
 from test_r6_connectivity_candidate import CREDS, NOW
@@ -24,12 +29,29 @@ from test_r6_connectivity_final_freshness import Clock, clock_from, guard, ready
 
 
 def bound_workspace(tmp_path, monkeypatch):
-    ws, _, _, _, execution_bridge, execution_context = prepared(tmp_path)
-    execution_state = issue(execution_bridge, execution_context)
+    ws, _, _, _ = ready_workspace(tmp_path)
+    receipt = ConnectivityOperatorReviewReceiptBuilder(ws).build(
+        now=NOW + timedelta(seconds=20, milliseconds=500)
+    )
+    execution_bridge = ConnectivityReviewedExecutionIntentBridge(ws)
+    execution_context, observed_receipt = execution_bridge.prepare(
+        now=NOW + timedelta(seconds=21)
+    )
+    assert observed_receipt == receipt
+    execution_state, _ = execution_bridge.issue(
+        context=execution_context,
+        receipt_hash=receipt.receipt_hash,
+        operator_id="operator:arendon7",
+        issued_at=NOW + timedelta(seconds=21),
+        expires_at=NOW + timedelta(seconds=51),
+    )
     monkeypatch.setattr(cefb, "_utc_now", lambda: NOW + timedelta(seconds=22))
     final_guard = guard(ws, clock=clock_from(offset=22))
-    result = ConnectivityBoundFinalFreshnessGuard(
+    base_guard = ConnectivityBoundFinalFreshnessGuard(
         ws, final_guard=final_guard
+    )
+    result = ConnectivityReviewedBoundFinalFreshnessGuard(
+        ws, base_guard=base_guard
     ).acquire(credentials=CREDS)
     return ws, execution_context, execution_state, result
 
@@ -67,6 +89,7 @@ def test_bound_final_freshness_happy_path_is_still_pre_staging(tmp_path, monkeyp
     assert payload["profitability_claim"] is False
     assert payload["live_trading"] == "BLOCKED"
     assert payload["next_action"] == "CONNECTIVITY_STAGING_BRIDGE_REQUIRED"
+    assert (ws.root / "connectivity_review_final_freshness_binding.json").is_file()
 
 
 def test_missing_second_execution_intent_blocks_before_final_gets(tmp_path, monkeypatch) -> None:
