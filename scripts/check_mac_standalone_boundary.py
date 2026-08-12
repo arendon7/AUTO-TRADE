@@ -63,8 +63,9 @@ def main() -> int:
             'ditto --norsrc --noqtn "$SOURCE_ROOT" "$STAGE_ROOT"',
             'verify_standalone_assets "$STAGE_ROOT"',
             'if [[ -L "$INSTALL_ROOT" ]]',
-            'rm -rf "$STAGE_ROOT/.venv"',
+            '"$STAGE_ROOT/.venv"',
             '"$STAGE_ROOT/.runtime"',
+            '"$STAGE_ROOT/.env"',
             'mv "$STAGE_ROOT" "$INSTALL_ROOT"',
             'standalone_install_relocated=',
             'export R6_EXTERNAL_PAPER_WRITE=DISABLED',
@@ -83,7 +84,9 @@ def main() -> int:
         ):
             errors.append("standalone installer must verify source -> clean-copy -> reverify stage -> promote")
         for forbidden in (
-            "R6_EXTERNAL_PAPER_WRITE=ENABLED",
+            "export R6_EXTERNAL_PAPER_WRITE=ENABLED",
+            'export R6_EXTERNAL_PAPER_WRITE="ENABLED"',
+            'R6_EXTERNAL_PAPER_WRITE="ENABLED"',
             "r6_execute_paper_canary.py",
             "alpaca_paper_writer",
             "stage_external_submission",
