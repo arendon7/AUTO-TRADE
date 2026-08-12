@@ -7,7 +7,7 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 BROKER_DIR = ROOT / "src/autotrade/brokers"
 R6_PREFIX = "alpaca_paper_"
-CURRENT_PHASE = "PAPER_SINGLE_SHOT_MARKET_DATA_GET_RECONCILIATION_AND_TRADE_UPDATES_CONTROL_STREAM"
+CURRENT_PHASE = "PAPER_SINGLE_SHOT_FLAT_ACCOUNT_AND_MARKET_DATA_GET_RECONCILIATION_AND_TRADE_UPDATES_CONTROL_STREAM"
 
 PAPER_HOST = "paper-api.alpaca.markets"
 LIVE_HOST = "api.alpaca.markets"
@@ -15,6 +15,7 @@ MARKET_DATA_HOST = "data.alpaca.markets"
 PAPER_TRADE_UPDATES_URL = "wss://paper-api.alpaca.markets/stream"
 LIVE_TRADE_UPDATES_URL = "wss://api.alpaca.markets/stream"
 ATTESTATION_FILE = "alpaca_paper_gateway.py"
+FLAT_ACCOUNT_FILE = "alpaca_paper_flat_account.py"
 MARKET_DATA_FILE = "alpaca_paper_market_data.py"
 RECONCILIATION_FILE = "alpaca_paper_reconciliation_gateway.py"
 WRITER_FILE = "alpaca_paper_writer.py"
@@ -22,6 +23,7 @@ TRADE_UPDATES_FILE = "alpaca_paper_trade_updates_transport.py"
 APPROVED_NETWORK_FILES = frozenset(
     {
         ATTESTATION_FILE,
+        FLAT_ACCOUNT_FILE,
         MARKET_DATA_FILE,
         RECONCILIATION_FILE,
         WRITER_FILE,
@@ -195,6 +197,40 @@ def _validate_network_roles() -> list[str]:
         if "ALPACA_PAPER_ACCOUNT_PATH = \"/v2/account\"" not in text:
             errors.append("gateway: exact /v2/account path constant is missing")
 
+    flat_account = BROKER_DIR / FLAT_ACCOUNT_FILE
+    if flat_account.is_file():
+        text = flat_account.read_text(encoding="utf-8")
+        for anchor in (
+            'POSITIONS_PATH = "/v2/positions"',
+            'ORDERS_PATH = "/v2/orders"',
+            'ORDERS_QUERY = "status=open&limit=500&direction=asc&nested=true"',
+            'if not self._config.enabled:',
+            'request.method != "GET"',
+            'self._transport.read(request)',
+            'path=POSITIONS_PATH',
+            'path=ORDERS_PATH',
+            'query=ORDERS_QUERY',
+            'position_count=len(position_payload)',
+            'open_order_count=len(order_payload)',
+        ):
+            if anchor not in text:
+                errors.append(f"flat account: required exact two-GET anchor missing: {anchor}")
+        if text.count("self._read(") != 2:
+            errors.append("flat account: attest_flatness must invoke exactly two controlled reads")
+        if text.count("self._transport.read(request)") != 1:
+            errors.append("flat account: exactly one transport read call site is required")
+        if 'method="POST"' in text or "method='POST'" in text:
+            errors.append("flat account: POST authority is forbidden")
+        for forbidden in (
+            "submit_once",
+            "stage_external_submission",
+            "AlpacaPaperSingleShotWriter",
+            "alpaca_paper_writer",
+            "alpaca_paper_execution_bridge",
+        ):
+            if forbidden in text:
+                errors.append(f"flat account: execution authority is forbidden: {forbidden}")
+
     market_data = BROKER_DIR / MARKET_DATA_FILE
     if market_data.is_file():
         text = market_data.read_text(encoding="utf-8")
@@ -358,7 +394,3 @@ def _inside_loop(tree: ast.AST, target: ast.AST) -> bool:
             if any(child is target for child in ast.walk(node)):
                 return True
     return False
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
