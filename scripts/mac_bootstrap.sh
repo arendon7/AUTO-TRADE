@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 cd "$ROOT"
 
 if [[ "$(uname -s)" != "Darwin" ]]; then
@@ -22,6 +22,14 @@ STANDALONE_MODE="NO"
 
 if [[ -f "$STANDALONE_MARKER" ]]; then
   STANDALONE_MODE="YES"
+  EXPECTED_INSTALL_ROOT="$HOME/Applications/AUTO-TRADE-R6"
+  if [[ "$ROOT" != "$EXPECTED_INSTALL_ROOT" ]]; then
+    echo "ERROR: FULL/STANDALONE runtime execution is allowed only from:" >&2
+    echo "  $EXPECTED_INSTALL_ROOT" >&2
+    echo "Run INSTALAR_AUTO_TRADE.command from the downloaded package; it verifies and relocates the bundle before CPython executes." >&2
+    exit 2
+  fi
+
   case "$(uname -m)" in
     arm64) RUNTIME_ARCH="arm64" ;;
     x86_64) RUNTIME_ARCH="x86_64" ;;
@@ -65,10 +73,19 @@ if [[ -f "$STANDALONE_MARKER" ]]; then
   fi
 
   PYTHON_BIN="$RUNTIME_ROOT/python/bin/python3"
+  set +e
   "$PYTHON_BIN" - <<'PY'
 import sys
 raise SystemExit(0 if sys.version_info[:3] == (3, 12, 13) else 1)
 PY
+  PYTHON_PROBE_STATUS=$?
+  set -e
+  if [[ $PYTHON_PROBE_STATUS -ne 0 ]]; then
+    echo "ERROR: embedded CPython probe failed with status $PYTHON_PROBE_STATUS." >&2
+    echo "Runtime path: $PYTHON_BIN" >&2
+    echo "The installed FULL copy did not pass trusted execution; installation remains fail-closed." >&2
+    exit 2
+  fi
 
   EXPECTED_VENV_STAMP="${RUNTIME_ARCH}|3.12.13|20260718|${ROOT}"
   VENV_STAMP="$ROOT/.venv/.autotrade-standalone-runtime"
