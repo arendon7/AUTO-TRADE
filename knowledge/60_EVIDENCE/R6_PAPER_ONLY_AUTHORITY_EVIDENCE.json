@@ -1,0 +1,52 @@
+{
+  "schema_version": 1,
+  "track": "R6",
+  "debt_id": "TD-R6-008",
+  "status": "CLOSED_AFTER_OFFICIAL_EXACT_HEAD_CI",
+  "purpose": "Permanent fail-closed CI boundary that prevents R6 PAPER execution surfaces from acquiring LIVE endpoint authority, unaudited network/write authority, AI/research authorization, or PAPER-to-LIVE promotion semantics.",
+  "controls": [
+    "Scans every production alpaca_paper_* module, not only known network files.",
+    "Only explicit LIVE deny constants may contain LIVE Trading API/WSS authority literals.",
+    "LIVE deny constants may only be read inside comparisons; using them to construct URLs or authority fails CI.",
+    "HTTP gateway/reconciliation/writer roles each have an exact one-Request and one-low-level-open I/O budget with literal GET/GET/POST methods.",
+    "Exactly one self._transport.write(request) is permitted and only in the audited writer.",
+    "trade_updates has exactly one websocket_connect, one connector.open and two socket.send control frames.",
+    "OpenAI, Anthropic and autotrade.research imports are forbidden in all R6 external execution modules.",
+    "New identifiers containing live are forbidden except the two explicit deny constants, preventing PAPER-to-LIVE promotion surfaces.",
+    "Required Safety/OMS final-write guard and exact PAPER host/path anchors are checked statically.",
+    "The boundary is wired into both Core Safety and R6 Authority workflows with adversarial tests."
+  ],
+  "evidence_files": [
+    "scripts/check_r6_live_deny_boundary.py",
+    "scripts/check_r6_authority.py",
+    "tests/test_r6_live_deny_boundary.py",
+    "tests/test_r6_authority_checker.py",
+    ".github/workflows/core-tests.yml",
+    ".github/workflows/r6-authority.yml"
+  ],
+  "external_paper_order_sent": false,
+  "capital_authority": "NONE",
+  "live_trading": "BLOCKED",
+  "non_claims": [
+    "This boundary does not qualify external PAPER execution.",
+    "This boundary does not prove profitability.",
+    "This boundary does not authorize LIVE trading."
+  ],
+  "next_gate": "Post-closure exact-head CI must remain green; TD-R6-001..006 remain OPEN.",
+  "implementation_certification": {
+    "head_sha": "5a4f4730ef6ac242c52f925bb94ccdd0bd7eb5fc",
+    "tests_passed": 966,
+    "coverage_percent": 85.89,
+    "core_safety_run_id": 31513050038,
+    "knowledge_contract_run_id": 31513049813,
+    "r6_authority_run_id": 31513049786,
+    "contract_registry": "PASS",
+    "research_authority": "PASS",
+    "r5_authority": "PASS",
+    "r6_authority": "PASS",
+    "r6_live_deny_boundary": "PASS",
+    "r6_product_boundary": "PASS",
+    "debt_register": "PASS",
+    "knowledge_contract": "PASS"
+  }
+}

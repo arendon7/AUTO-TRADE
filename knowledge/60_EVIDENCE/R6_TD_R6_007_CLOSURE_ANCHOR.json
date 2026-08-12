@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "track": "R6",
+  "debt_id": "TD-R6-007",
+  "status": "CLOSED_PENDING_POST_CLOSURE_EXACT_HEAD_CI",
+  "closure_commit": "a61f48a6ba3db01127a6d3d174ec1e99291c7147",
+  "pre_closure_evidence_head": "081ab06415500c4a2786c347db5a93f3ceb8c21f",
+  "pre_closure_ci": {
+    "core_safety_run_id": 31509844731,
+    "knowledge_contract_run_id": 31509844728,
+    "r6_authority_run_id": 31509844735,
+    "result": "PASS"
+  },
+  "closure_evidence": "knowledge/60_EVIDENCE/R6_UNSUPPORTED_PRODUCTS_EVIDENCE.json",
+  "debt_register": "knowledge/00_CANON/debt_register.json",
+  "human_debt_register": "knowledge/00_CANON/DEBT_REGISTER.md",
+  "remaining_open_r6_debts": [
+    "TD-R6-001",
+    "TD-R6-002",
+    "TD-R6-003",
+    "TD-R6-004",
+    "TD-R6-005",
+    "TD-R6-006",
+    "TD-R6-008"
+  ],
+  "external_paper_order_sent": false,
+  "capital_authority": "NONE",
+  "live_trading": "BLOCKED",
+  "next_gate": "Core Safety, Knowledge Contract and R6 Authority must PASS on the exact commit containing this anchor before TD-R6-007 is considered post-closure certified."
+}

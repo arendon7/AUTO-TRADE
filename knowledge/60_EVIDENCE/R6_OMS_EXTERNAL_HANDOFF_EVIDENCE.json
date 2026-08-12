@@ -1,0 +1,55 @@
+{
+  "schema_version": 1,
+  "track": "R6",
+  "debt_id": "TD-R6-010",
+  "status": "CLOSED_AFTER_OFFICIAL_EXACT_HEAD_CI",
+  "implementation_head_sha": "dfc2424f7bc42552ad7fc0a4ffb1f03284f76dad",
+  "controls": [
+    "OMS validates the external path through the normal deterministic RiskDecision/MarketSnapshot control plane without broker I/O.",
+    "OMS alone owns VALIDATED->SUBMITTING for external PAPER; R6 broker modules cannot mutate OrderStore or synthesize SUBMITTING.",
+    "EXTERNAL_ORDER_HANDOFF_AUTHORIZED is durable and hash-bound before the SUBMITTING update, making crash replay fail-safe.",
+    "The handoff binds order, intent fingerprint, risk decision, Safety-state version, market fingerprint, decision expiry and authorization time.",
+    "Staging re-reads Safety twice and requires the exact RiskDecision Safety version, blocking activate/reset races.",
+    "Staging requires authoritative Health NORMAL with exact 1.0 order/strategy/portfolio multipliers.",
+    "The writer requires the durable OMS handoff, binds handoff_id to the one-shot canary approval hash and re-verifies the handoff through OMS.",
+    "PRE_CONSUME Safety version must still equal the OMS handoff Safety version; PRE_IO remains a second fail-closed race barrier.",
+    "Permanent Core Safety and R6 Authority CI execute check_r6_oms_handoff_boundary.py plus adversarial tests."
+  ],
+  "evidence_files": [
+    "src/autotrade/oms.py",
+    "src/autotrade/brokers/alpaca_paper_writer.py",
+    "scripts/check_r6_oms_handoff_boundary.py",
+    "tests/test_r6_oms_external_handoff.py",
+    "tests/test_r6_oms_handoff_boundary.py",
+    "tests/test_r6_paper_writer.py",
+    ".github/workflows/core-tests.yml",
+    ".github/workflows/r6-authority.yml"
+  ],
+  "official_exact_head_ci": {
+    "head_sha": "dfc2424f7bc42552ad7fc0a4ffb1f03284f76dad",
+    "tests_passed": 979,
+    "coverage_percent": 85.56,
+    "core_safety_run_id": 31516722995,
+    "knowledge_contract_run_id": 31516722976,
+    "r6_authority_run_id": 31516722971,
+    "contract_registry": "PASS",
+    "research_authority": "PASS",
+    "r5_authority": "PASS",
+    "r6_authority": "PASS",
+    "r6_live_deny_boundary": "PASS",
+    "r6_oms_handoff_boundary": "PASS",
+    "r6_product_boundary": "PASS",
+    "debt_register": "PASS",
+    "knowledge_contract": "PASS"
+  },
+  "external_paper_order_sent": false,
+  "capital_authority": "NONE",
+  "live_trading": "BLOCKED",
+  "remaining_r6_blocking_open": 6,
+  "next_gate": "Build and certify the integrated manual single-shot canary coordinator; do not send an external PAPER order without an explicit final execution decision.",
+  "non_claims": [
+    "This evidence does not qualify an external PAPER execution.",
+    "This evidence does not demonstrate profitability.",
+    "This evidence does not authorize LIVE trading."
+  ]
+}

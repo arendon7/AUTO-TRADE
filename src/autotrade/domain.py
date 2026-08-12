@@ -177,3 +177,24 @@ def market_fingerprint(market: MarketSnapshot) -> str:
     }
     raw = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
     return sha256(raw).hexdigest()
+
+
+def risk_decision_fingerprint(decision: RiskDecision) -> str:
+    """Canonical identity for the entire RiskDecision authority object."""
+    payload = {
+        "decision_id": decision.decision_id,
+        "intent_id": decision.intent_id,
+        "status": decision.status.value,
+        "reason_code": decision.reason_code,
+        "reason_detail": decision.reason_detail,
+        "evaluated_at": decision.evaluated_at.isoformat(),
+        "valid_until": decision.valid_until.isoformat(),
+        "limits_version": decision.limits_version,
+        "intent_fingerprint": decision.intent_fingerprint,
+        "market_fingerprint": decision.market_fingerprint,
+        "approved_notional": _canonical_decimal(decision.approved_notional),
+        "risk_reducing": decision.risk_reducing,
+        "safety_state_version": decision.safety_state_version,
+    }
+    raw = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return sha256(raw).hexdigest()

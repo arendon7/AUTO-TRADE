@@ -1,0 +1,56 @@
+{
+  "capital_authority": "NONE",
+  "clean_tree_commit_before_evidence_anchor": "7a3b7c78b96287186b98137705fbec73b1094fa0",
+  "controls": [
+    "PaperEquityVenueRules rejects every asset_class other than us_equity.",
+    "AlpacaEquityBracketRequest is self-validating and rejects non-equity asset classes even when manually instantiated.",
+    "The request payload surface is exact: BUY, LIMIT, DAY, bracket, extended_hours=false, take_profit limit plus stop_loss stop only.",
+    "Extra/missing payload fields, simple/OCO/trailing/market/stop-limit variants, noncanonical decimals, geometry forgery, serialization forgery and payload-hash forgery fail closed.",
+    "The builder binds the authoritative Instrument Master asset_class and fingerprint into the immutable request.",
+    "PAPER trade_updates parser and event evidence accept us_equity only.",
+    "Permanent AST boundary forbids AlpacaEquityBracketRequest construction anywhere in production R6 except the certified bracket builder.",
+    "Core Safety and R6 Authority both execute the unsupported-product boundary permanently."
+  ],
+  "debt_id": "TD-R6-007",
+  "evidence_files": [
+    "src/autotrade/brokers/alpaca_paper_bracket.py",
+    "src/autotrade/brokers/alpaca_paper_trade_updates.py",
+    "scripts/check_r6_product_boundary.py",
+    "scripts/check_r6_authority.py",
+    "tests/test_r6_unsupported_products_boundary.py",
+    "tests/test_r6_equity_bracket.py",
+    ".github/workflows/r6-authority.yml",
+    ".github/workflows/core-tests.yml"
+  ],
+  "external_paper_order_sent": false,
+  "implementation_certification": {
+    "contract_registry": "PASS",
+    "coverage_percent": 85.89,
+    "debt_register": "PASS",
+    "knowledge_contract": "PASS",
+    "r5_authority": "PASS",
+    "r6_authority": "PASS",
+    "r6_product_boundary": "PASS",
+    "research_authority": "PASS",
+    "tests_passed": 958,
+    "workflow_run_id": 31509656588
+  },
+  "live_trading": "BLOCKED",
+  "next_gate": "Post-closure exact-head CI must remain green; TD-R6-001..006 and TD-R6-008 remain OPEN.",
+  "non_claims": [
+    "This evidence does not qualify external PAPER execution.",
+    "This evidence does not demonstrate profitability.",
+    "This evidence does not authorize LIVE trading."
+  ],
+  "official_exact_head_ci": {
+    "core_safety_run_id": 31509844731,
+    "head_sha": "081ab06415500c4a2786c347db5a93f3ceb8c21f",
+    "knowledge_contract_run_id": 31509844728,
+    "r6_authority_run_id": 31509844735,
+    "result": "PASS"
+  },
+  "purpose": "Fail closed for every R6 external PAPER product/protection mode except the explicitly certified first-canary US-equity BUY LIMIT bracket surface.",
+  "schema_version": 1,
+  "status": "CLOSED_AFTER_OFFICIAL_EXACT_HEAD_CI",
+  "track": "R6"
+}

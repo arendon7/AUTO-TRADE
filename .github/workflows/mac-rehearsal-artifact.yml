@@ -1,0 +1,147 @@
+name: Mac Rehearsal Artifact
+
+on:
+  push:
+    branches: ["reconstruction/**"]
+    paths:
+      - "AUTO_TRADE_MAC.command"
+      - "LEEME_PRIMERO_MAC.md"
+      - "scripts/mac_*.sh"
+      - "scripts/mac_*.py"
+      - "scripts/check_mac_*.py"
+      - "scripts/r6_*.py"
+      - "src/autotrade/**"
+      - "tests/test_mac_*.py"
+      - "tests/test_r6_*.py"
+      - "docs/MAC_PAPER_RUNBOOK.md"
+      - "README.md"
+      - ".github/workflows/mac-rehearsal-artifact.yml"
+  pull_request:
+    paths:
+      - "AUTO_TRADE_MAC.command"
+      - "LEEME_PRIMERO_MAC.md"
+      - "scripts/mac_*.sh"
+      - "scripts/mac_*.py"
+      - "scripts/check_mac_*.py"
+      - "scripts/r6_*.py"
+      - "src/autotrade/**"
+      - "tests/test_mac_*.py"
+      - "tests/test_r6_*.py"
+      - "docs/MAC_PAPER_RUNBOOK.md"
+      - "README.md"
+      - ".github/workflows/mac-rehearsal-artifact.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate-and-package:
+    runs-on: macos-14
+    steps:
+      - name: Checkout exact source head
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Restore executable entrypoints
+        run: |
+          chmod +x AUTO_TRADE_MAC.command
+          chmod +x scripts/mac_bootstrap.sh scripts/mac_rehearsal.sh scripts/mac_start.sh
+
+      - name: Full safe Mac bootstrap rehearsal
+        run: bash scripts/mac_bootstrap.sh
+
+      - name: Finder launcher boundary
+        run: .venv/bin/python scripts/check_mac_click_launcher_boundary.py
+
+      - name: Pre-canary read-only status boundary
+        run: .venv/bin/python scripts/check_r6_precanary_status_boundary.py
+
+      - name: Pre-canary and Mac safe-console tests
+        run: .venv/bin/pytest -q tests/test_r6_precanary_status.py tests/test_mac_safe_console.py tests/test_mac_click_launcher.py
+
+      - name: Build clean Mac rehearsal package
+        shell: bash
+        run: |
+          set -euo pipefail
+          SOURCE_SHA="$(git rev-parse HEAD)"
+          PKG="dist/AUTO-TRADE-R6-MAC"
+          ZIP="dist/AUTO-TRADE-R6-MAC.zip"
+          rm -rf dist
+          mkdir -p "$PKG"
+          rsync -a ./ "$PKG/" \
+            --exclude '.git' \
+            --exclude '.venv' \
+            --exclude '.env' \
+            --exclude 'dist' \
+            --exclude '.pytest_cache' \
+            --exclude '.coverage' \
+            --exclude 'coverage.json' \
+            --exclude '__pycache__' \
+            --exclude '*.pyc' \
+            --exclude '*.sqlite3' \
+            --exclude '*.sqlite3-*'
+          chmod +x "$PKG/AUTO_TRADE_MAC.command"
+          chmod +x "$PKG/scripts/mac_bootstrap.sh" "$PKG/scripts/mac_rehearsal.sh" "$PKG/scripts/mac_start.sh"
+          cat > "$PKG/MAC_BUILD_INFO.txt" <<EOF
+          AUTO-TRADE R6 MAC REHEARSAL PACKAGE
+          source_head=${SOURCE_SHA}
+          branch=${GITHUB_HEAD_REF:-${GITHUB_REF_NAME}}
+          external_paper_write=DISABLED_BY_LAUNCHER
+          live_trading=BLOCKED
+          broker_credentials_in_package=NO
+          external_order_submitted_by_build=NO
+          EOF
+          ditto -c -k --sequesterRsrc --keepParent "$PKG" "$ZIP"
+          (
+            cd dist
+            shasum -a 256 AUTO-TRADE-R6-MAC.zip > AUTO-TRADE-R6-MAC.zip.sha256
+          )
+
+      - name: Verify final Mac package
+        shell: bash
+        run: |
+          set -euo pipefail
+          EXPECTED_SOURCE_SHA="$(git rev-parse HEAD)"
+          cd dist
+          shasum -a 256 -c AUTO-TRADE-R6-MAC.zip.sha256
+          unzip -l AUTO-TRADE-R6-MAC.zip | grep -q 'AUTO-TRADE-R6-MAC/LEEME_PRIMERO_MAC.md'
+          unzip -l AUTO-TRADE-R6-MAC.zip | grep -q 'AUTO-TRADE-R6-MAC/AUTO_TRADE_MAC.command'
+          unzip -l AUTO-TRADE-R6-MAC.zip | grep -q 'AUTO-TRADE-R6-MAC/MAC_BUILD_INFO.txt'
+          unzip -l AUTO-TRADE-R6-MAC.zip | grep -q 'AUTO-TRADE-R6-MAC/scripts/r6_precanary_status.py'
+          unzip -p AUTO-TRADE-R6-MAC.zip AUTO-TRADE-R6-MAC/MAC_BUILD_INFO.txt > /tmp/MAC_BUILD_INFO.txt
+          grep -Fq "source_head=${EXPECTED_SOURCE_SHA}" /tmp/MAC_BUILD_INFO.txt
+          if unzip -l AUTO-TRADE-R6-MAC.zip | grep -Eq '(^|/)(\.env|\.venv)(/|$)'; then
+            echo 'ERROR: package contains forbidden .env/.venv material' >&2
+            exit 1
+          fi
+          unzip -p AUTO-TRADE-R6-MAC.zip AUTO-TRADE-R6-MAC/AUTO_TRADE_MAC.command > /tmp/AUTO_TRADE_MAC.command
+          grep -Fq 'pre-canary-status' /tmp/AUTO_TRADE_MAC.command
+          for forbidden in \
+            'r6_execute_paper_canary.py' \
+            'r6_connectivity_bound_final_freshness.py' \
+            '--execute-paper-canary' \
+            'source .env' \
+            'alpaca_paper_writer' \
+            'stage_external_submission'; do
+            if grep -Fq -- "$forbidden" /tmp/AUTO_TRADE_MAC.command; then
+              echo "ERROR: Finder launcher contains forbidden execution surface: $forbidden" >&2
+              exit 1
+            fi
+          done
+
+      - name: Upload Mac rehearsal artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: AUTO-TRADE-R6-MAC
+          path: |
+            dist/AUTO-TRADE-R6-MAC.zip
+            dist/AUTO-TRADE-R6-MAC.zip.sha256
+          if-no-files-found: error
+          retention-days: 14

@@ -1,0 +1,100 @@
+{
+  "artifact_type": "R6_TD_R6_013_OPERATIONAL_LIFECYCLE_CERTIFICATION",
+  "schema_version": 1,
+  "recorded_at": "2026-08-11T23:45:00Z",
+  "track": "R6",
+  "debt_id": "TD-R6-013",
+  "preclosure_head_sha": "aa3cc3c7eb5cad26ea9427c0d448f827ddffb6f5",
+  "base_main_sha": "75dcbef65b061f742745ba7be0665521967e0587",
+  "certification": {
+    "core_safety": {
+      "run_id": 31547368270,
+      "conclusion": "success",
+      "tests_passed": 1191,
+      "coverage_percent": 85.04916607812245,
+      "coverage_floor_percent": 85.0
+    },
+    "r6_paper_authority": {
+      "run_id": 31547368240,
+      "conclusion": "success"
+    },
+    "knowledge_contract": {
+      "run_id": 31547368285,
+      "conclusion": "success"
+    },
+    "contract_registry": {
+      "contracts": 10,
+      "sha256": "ddb94afa8916be37d0d956e6c32f775ea41c0fb79f4ea26d2d65dfa286c62785",
+      "conclusion": "success"
+    }
+  },
+  "implemented_surfaces": {
+    "sanitized_workspace": "src/autotrade/brokers/alpaca_paper_operational.py",
+    "get_only_account_preflight": "scripts/r6_external_paper_preflight.py",
+    "offline_preparation": "src/autotrade/brokers/alpaca_paper_operational_prepare.py",
+    "preparation_snapshot": "src/autotrade/brokers/alpaca_paper_preparation_snapshot.py",
+    "read_only_core_provenance": "src/autotrade/brokers/alpaca_paper_core_provenance.py",
+    "human_operator_issuer": "scripts/r6_issue_operator_decision.py",
+    "manual_execution_runtime": "src/autotrade/brokers/alpaca_paper_operational_execute.py",
+    "manual_execution_launcher": "scripts/r6_execute_paper_canary.py",
+    "separate_evidence_collector": "src/autotrade/brokers/alpaca_paper_operational_evidence.py",
+    "execution_bridge": "src/autotrade/brokers/alpaca_paper_execution_bridge.py",
+    "single_shot_writer": "src/autotrade/brokers/alpaca_paper_writer.py"
+  },
+  "permanent_boundaries": [
+    "scripts/check_r6_operational_lifecycle_boundary.py",
+    "scripts/check_r6_core_provenance_boundary.py",
+    "scripts/check_r6_preparation_core_binding.py",
+    "scripts/check_r6_operator_decision_boundary.py",
+    "scripts/check_r6_execution_bridge_boundary.py",
+    "scripts/check_r6_writer_human_gate.py",
+    "scripts/check_r6_operational_execution_boundary.py",
+    "scripts/check_r6_live_deny_boundary.py"
+  ],
+  "functional_evidence": [
+    "tests/test_r6_operational_prepare.py",
+    "tests/test_r6_preparation_snapshot.py",
+    "tests/test_r6_core_provenance.py",
+    "tests/test_r6_operator_decision_cli.py",
+    "tests/test_r6_operational_execute.py",
+    "tests/test_r6_operational_execute_validation.py",
+    "tests/test_r6_execute_paper_canary_cli.py",
+    "tests/test_r6_operational_evidence.py",
+    "tests/test_r6_operational_execution_boundary.py"
+  ],
+  "properties_proven": {
+    "preparation_execution_separation": true,
+    "preparation_has_order_post_authority": false,
+    "evidence_capture_has_order_post_authority": false,
+    "execution_is_separate_explicit_human_command": true,
+    "execution_requires_cli_flag": true,
+    "execution_requires_dedicated_environment_enable": true,
+    "execution_requires_interactive_exact_challenge": true,
+    "credentials_cli_arguments_allowed": false,
+    "credentials_persisted": false,
+    "same_workspace_core_sqlite_required": true,
+    "fresh_core_provenance_required_before_fresh_execution": true,
+    "same_attempt_restart_after_bridge_staging_supported": true,
+    "unknown_submission_can_repost": false,
+    "portfolio_health_identity_is_caller_supplied": false,
+    "legacy_oms_broker_submission_surface_enabled": false,
+    "ai_or_research_execution_authority": false,
+    "live_trading": "BLOCKED"
+  },
+  "scope": {
+    "real_external_paper_post_performed": false,
+    "real_broker_evidence_claimed": false,
+    "profitability_claim": false,
+    "capital_authority": "NONE",
+    "closes_structural_debt_only": true,
+    "remaining_real_external_evidence_debts": [
+      "TD-R6-001",
+      "TD-R6-002",
+      "TD-R6-003",
+      "TD-R6-004",
+      "TD-R6-005",
+      "TD-R6-006"
+    ]
+  },
+  "resolution": "The R6 operational lifecycle is now durable, reproducible and authority-separated: GET-only account preflight, sanitized same-workspace preparation with read-only core provenance, separate human-only decision, separate triple-gated single-shot execution runtime with same-attempt restart and UNKNOWN no-repost semantics, and separate GET/receive-only evidence collection. Permanent CI prohibits preparation/evidence authority widening, AI/research execution authority and LIVE access. No real PAPER POST was required or performed for this structural closure."
+}

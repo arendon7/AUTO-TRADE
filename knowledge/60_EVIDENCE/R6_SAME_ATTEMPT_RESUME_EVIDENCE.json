@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "track": "R6",
+  "debt_id": "TD-R6-012",
+  "status": "CLOSED_AFTER_OFFICIAL_EXACT_HEAD_CI",
+  "implementation_head_sha": "e163dc74dfe2bc36e2be004d3d77d6d6e1df2ef4",
+  "official_exact_head_ci": {
+    "core_safety_run_id": 31518438417,
+    "knowledge_contract_run_id": 31518438421,
+    "r6_authority_run_id": 31518438415,
+    "tests_passed": 983,
+    "coverage_percent": 85.54,
+    "result": "PASS"
+  },
+  "invariants": [
+    "PREPARED plus attempt_count=0 proves the writer has not crossed the durable UNKNOWN-before-POST boundary.",
+    "A CONSUMED permit is resumable only when its attempt_id equals the current writer attempt_id.",
+    "Approval freshness, frozen binding, OMS handoff, Safety/Health guards and PRE_IO are re-evaluated on resume.",
+    "UNKNOWN is never converted back into write authority and always requires reconciliation.",
+    "A different attempt cannot reuse a consumed permit.",
+    "An expired approval cannot resume even when the permit belongs to the same attempt."
+  ],
+  "external_paper_order_sent": false,
+  "live_trading": "BLOCKED",
+  "capital_authority": "NONE",
+  "remaining_r6_blocking_open": 7,
+  "next_gate": "Implement TD-R6-011 durable explicit human final PAPER execution decision before any external PAPER POST."
+}

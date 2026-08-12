@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "track": "R6",
+  "debt_id": "TD-R6-008",
+  "closure_parent_sha": "374206a4b961b67590b3387e2e2a14789d24f4c5",
+  "working_tree_certification": {
+    "workflow_run_id": 31513508108,
+    "tests_passed": 966,
+    "coverage_percent": 85.89,
+    "contract_registry": "PASS",
+    "research_authority": "PASS",
+    "r5_authority": "PASS",
+    "r6_authority": "PASS",
+    "r6_live_deny_boundary": "PASS",
+    "r6_product_boundary": "PASS",
+    "debt_register": "PASS",
+    "knowledge_contract": "PASS"
+  },
+  "expected_r6_blocking_open_after_closure": 6,
+  "external_paper_order_sent": false,
+  "live_trading": "BLOCKED",
+  "capital_authority": "NONE",
+  "purpose": "Human-authored post-closure anchor used to run official Core Safety, Knowledge Contract and R6 Authority CI on the closed TD-R6-008 tree.",
+  "non_claims": [
+    "This closure does not qualify external PAPER execution.",
+    "This closure does not demonstrate profitability.",
+    "This closure does not authorize LIVE trading."
+  ]
+}

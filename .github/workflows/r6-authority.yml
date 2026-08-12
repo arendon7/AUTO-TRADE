@@ -1,0 +1,84 @@
+name: R6 PAPER Authority Boundary
+
+on:
+  push:
+    branches: [main, stable, "reconstruction/**"]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  r6-paper-authority:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e '.[dev]'
+      - name: R6 PAPER-only authority boundary
+        run: python scripts/check_r6_authority.py
+      - name: R6 permanent LIVE-deny authority boundary
+        run: python scripts/check_r6_live_deny_boundary.py
+      - name: R6 asset/venue preflight boundary
+        run: python scripts/check_r6_asset_boundary.py
+      - name: R6 connectivity candidate boundary
+        run: python scripts/check_r6_connectivity_candidate_boundary.py
+      - name: R6 connectivity preparation core boundary
+        run: python scripts/check_r6_connectivity_preparation_core_boundary.py
+      - name: R6 connectivity operator authority boundary
+        run: python scripts/check_r6_connectivity_operator_boundary.py
+      - name: R6 connectivity operator review receipt boundary
+        run: python scripts/check_r6_connectivity_operator_review_boundary.py
+      - name: R6 connectivity execution-intent boundary
+        run: python scripts/check_r6_connectivity_execution_intent_boundary.py
+      - name: R6 connectivity final freshness boundary
+        run: python scripts/check_r6_connectivity_final_freshness_boundary.py
+      - name: R6 connectivity execution/freshness binding boundary
+        run: python scripts/check_r6_connectivity_execution_freshness_boundary.py
+      - name: R6 flat-account first-canary boundary
+        run: python scripts/check_r6_flat_account_boundary.py
+      - name: R6 equity market-data boundary
+        run: python scripts/check_r6_market_data_boundary.py
+      - name: R6 OMS external-handoff boundary
+        run: python scripts/check_r6_oms_handoff_boundary.py
+      - name: R6 offline canary coordinator boundary
+        run: python scripts/check_r6_canary_coordinator_boundary.py
+      - name: R6 human operator decision boundary
+        run: python scripts/check_r6_operator_decision_boundary.py
+      - name: R6 execution bridge boundary
+        run: python scripts/check_r6_execution_bridge_boundary.py
+      - name: R6 writer human-execution gate
+        run: python scripts/check_r6_writer_human_gate.py
+      - name: R6 operational lifecycle boundary
+        run: python scripts/check_r6_operational_lifecycle_boundary.py
+      - name: R6 read-only core provenance boundary
+        run: python scripts/check_r6_core_provenance_boundary.py
+      - name: R6 preparation core-binding boundary
+        run: python scripts/check_r6_preparation_core_binding.py
+      - name: R6 operational execution boundary
+        run: python scripts/check_r6_operational_execution_boundary.py
+      - name: R6 read-only readiness boundary
+        run: python scripts/check_r6_readiness_boundary.py
+      - name: R6 read-only pre-canary status boundary
+        run: python scripts/check_r6_precanary_status_boundary.py
+      - name: R6 connectivity UNKNOWN-before-POST staging boundary
+        run: python scripts/check_r6_connectivity_workspace_stage_boundary.py
+      - name: R6 connectivity same-process one-shot POST boundary
+        run: python scripts/check_r6_connectivity_workspace_post_boundary.py
+      - name: Mac rehearsal boundary
+        run: python scripts/check_mac_rehearsal_boundary.py
+      - name: Mac safe-console boundary
+        run: python scripts/check_mac_safe_console_boundary.py
+      - name: Mac Capital Safety rehearsal boundary
+        run: python scripts/check_mac_safety_rehearsal_boundary.py
+      - name: Mac Finder launcher boundary
+        run: python scripts/check_mac_click_launcher_boundary.py
+      - name: R6 unsupported-product boundary
+        run: python scripts/check_r6_product_boundary.py
+      - name: Operational lifecycle functional tests
+        run: pytest -q tests/test_r6_paper_asset.py tests/test_r6_asset_evidence.py tests/test_r6_asset_preflight_cli.py tests/test_connectivity_canary_authority.py tests/test_r6_connectivity_candidate.py tests/test_r6_build_connectivity_candidate_cli.py tests/test_r6_connectivity_prepare.py tests/test_r6_connectivity_preparation_adversarial.py tests/test_r6_connectivity_prepare_edges.py tests/test_r6_prepare_connectivity_candidate_cli.py tests/test_r6_connectivity_operator_decision.py tests/test_r6_connectivity_operator_edges.py tests/test_r6_connectivity_operator_cli.py tests/test_r6_connectivity_operator_review.py tests/test_r6_connectivity_operator_review_failclosed.py tests/test_r6_connectivity_operator_review_no_bypass.py tests/test_r6_connectivity_review_receipt_cli.py tests/test_r6_connectivity_execution_intent.py tests/test_r6_connectivity_execution_intent_edges.py tests/test_r6_connectivity_execution_intent_cli.py tests/test_r6_connectivity_final_freshness.py tests/test_r6_connectivity_final_freshness_edges.py tests/test_r6_connectivity_final_freshness_cli.py tests/test_r6_connectivity_execution_freshness_binding.py tests/test_r6_connectivity_execution_freshness_edges.py tests/test_r6_connectivity_bound_final_freshness_cli.py tests/test_r6_connectivity_oms_stage.py tests/test_r6_connectivity_workspace_stage.py tests/test_r6_connectivity_workspace_post.py tests/test_r6_connectivity_workspace_post_failclosed.py tests/test_r6_precanary_status.py tests/test_r6_flat_account_preflight.py tests/test_r6_flat_account_failclosed.py tests/test_r6_flat_account_evidence_integrity.py tests/test_r6_paper_market_data.py tests/test_r6_paper_market_evidence.py tests/test_r6_market_preflight_cli.py tests/test_r6_market_readiness.py tests/test_r6_operational_prepare.py tests/test_r6_preparation_snapshot.py tests/test_r6_operational_evidence.py tests/test_r6_core_provenance.py tests/test_r6_operator_decision_cli.py tests/test_r6_operational_execute.py tests/test_r6_operational_execute_validation.py tests/test_r6_execute_paper_canary_cli.py tests/test_r6_paper_readiness.py tests/test_r6_paper_readiness_failclosed.py tests/test_mac_safe_console.py tests/test_mac_create_workspace.py tests/test_mac_safety_rehearsal.py tests/test_mac_click_launcher.py
+      - name: Adversarial checker tests
+        run: pytest -q tests/test_r6_authority_checker.py tests/test_r6_live_deny_boundary.py tests/test_r6_flat_account_boundary.py tests/test_r6_market_data_boundary.py tests/test_r6_oms_handoff_boundary.py tests/test_r6_canary_coordinator_boundary.py tests/test_r6_operator_decision_boundary.py tests/test_r6_execution_bridge_boundary.py tests/test_r6_writer_human_gate_boundary.py tests/test_r6_operational_lifecycle_boundary.py tests/test_r6_core_provenance_boundary.py tests/test_r6_preparation_core_binding.py tests/test_r6_operational_execution_boundary.py tests/test_r6_readiness_boundary.py tests/test_r6_unsupported_products_boundary.py tests/test_mac_safety_rehearsal_boundary.py

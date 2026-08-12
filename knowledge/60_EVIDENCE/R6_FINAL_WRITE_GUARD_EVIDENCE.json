@@ -1,0 +1,56 @@
+{
+  "clean_tree_commit_before_evidence_anchor": "dd593e8dc4b09c2b6a14ed164adb3823c3f60237",
+  "closure_commit": "b215e1caeb3d1b7bd088ad15b7b463c45a2d4b0a",
+  "controls": [
+    "PRE_CONSUME re-reads authoritative OMS order, Safety kill/circuit, Portfolio reconciliation/broker-known state, Health and tamper-verified global PAPER submission registry.",
+    "Permit consumption is followed by durable UNKNOWN before any external I/O.",
+    "PRE_IO is re-read after request validation and immediately before the single transport write.",
+    "PRE_IO is cryptographically chained to the actual PRE_CONSUME attestation through previous_attestation_hash.",
+    "Any Safety or Portfolio version change between PRE_CONSUME and PRE_IO blocks the write even if the resulting state appears safe again.",
+    "Intervening kill-switch activation produces zero external I/O; the permit remains consumed and submission remains UNKNOWN for reconciliation only.",
+    "The permanent R6 authority checker enforces PRE_CONSUME -> durable UNKNOWN -> request validation -> PRE_IO -> exactly one transport write."
+  ],
+  "debt_id": "TD-R6-009",
+  "evidence_files": [
+    "src/autotrade/brokers/alpaca_paper_final_guard.py",
+    "src/autotrade/brokers/alpaca_paper_writer.py",
+    "src/autotrade/brokers/alpaca_paper_submission.py",
+    "scripts/check_r6_authority.py",
+    "tests/test_r6_final_write_guard.py",
+    "tests/test_r6_final_guard_phase_chain.py",
+    "tests/test_r6_paper_writer.py",
+    "tests/test_r6_authority_checker.py"
+  ],
+  "external_paper_order_sent": false,
+  "implementation_commit": "e66828d69684654c5301f88e8988c924e23b47e2",
+  "implementation_workflow": {
+    "contract_registry": "PASS",
+    "coverage_percent": 85.25,
+    "debt_register": "PASS",
+    "job_id": 93827590477,
+    "knowledge_contract": "PASS",
+    "r5_authority": "PASS",
+    "r6_authority": "PASS",
+    "research_authority": "PASS",
+    "run_id": 31505993933,
+    "tests_passed": 803
+  },
+  "live_trading": "BLOCKED",
+  "next_gate": "Official Core Safety + Knowledge Contract + R6 Authority must PASS on the exact closure-anchor head before continuing R6 qualification work; TD-R6-001..008 remain OPEN.",
+  "non_claims": [
+    "This evidence does not qualify external PAPER execution.",
+    "This evidence does not demonstrate profitability.",
+    "This evidence does not authorize LIVE trading."
+  ],
+  "official_clean_head_ci": {
+    "core_safety_run_id": 31506151261,
+    "head_sha": "c65e8b0c5fe43f8657a93673e5ea431d3ef2b69a",
+    "knowledge_contract_run_id": 31506151276,
+    "r6_authority_run_id": 31506151231,
+    "result": "PASS"
+  },
+  "purpose": "Just-in-time deterministic Safety/OMS/Portfolio/Health recheck around the only audited external PAPER write boundary.",
+  "schema_version": 1,
+  "status": "CLOSED_PENDING_POST_CLOSURE_EXACT_HEAD_CI",
+  "track": "R6"
+}
