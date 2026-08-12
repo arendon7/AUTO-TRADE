@@ -126,6 +126,7 @@ fi
 "$VENV_PY" scripts/check_mac_rehearsal_boundary.py
 "$VENV_PY" scripts/check_mac_safe_console_boundary.py
 "$VENV_PY" scripts/check_mac_safety_rehearsal_boundary.py
+"$VENV_PY" scripts/check_mac_standalone_boundary.py
 
 "$VENV_PY" -m pytest -q \
   tests/test_r6_paper_asset.py \
