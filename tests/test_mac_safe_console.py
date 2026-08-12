@@ -19,6 +19,7 @@ def test_safe_console_has_no_execution_subcommand() -> None:
     help_text = parser.format_help()
     assert "execute" not in help_text.lower()
     assert "init-workspace" in help_text
+    assert "safety-rehearsal" in help_text
     assert "account-preflight" in help_text
     assert "flat-account-preflight" in help_text
     assert "market-preflight" in help_text
@@ -68,6 +69,32 @@ def test_safe_console_workspace_routes_only_to_credential_free_initializer(monke
     assert "mac_create_workspace.py" in joined
     assert "r6_execute_paper_canary.py" not in joined
     assert "r6_external_paper_preflight.py" not in joined
+
+
+def test_safe_console_safety_rehearsal_routes_only_to_local_kernel_script(monkeypatch) -> None:
+    monkeypatch.setattr(console, "_require_safe_shell", lambda: None)
+    captured = []
+    monkeypatch.setattr(console, "_run", lambda argv: captured.append(argv) or 0)
+
+    rc = console.main(
+        [
+            "safety-rehearsal",
+            "--symbol",
+            "AAPL",
+            "--quantity",
+            "0.5",
+            "--kill-switch",
+        ]
+    )
+    assert rc == 0
+    joined = " ".join(captured[0])
+    assert "mac_safety_rehearsal.py" in joined
+    assert "--symbol AAPL" in joined
+    assert "--quantity 0.5" in joined
+    assert "--kill-switch" in joined
+    assert "r6_execute_paper_canary.py" not in joined
+    assert "r6_external_paper_preflight.py" not in joined
+    assert "--max-order-notional" not in joined
 
 
 def test_safe_console_account_preflight_requires_explicit_read_opt_in(monkeypatch) -> None:
