@@ -30,6 +30,7 @@ def test_safe_console_has_no_execution_subcommand() -> None:
     for command in (
         "init-workspace", "safety-rehearsal", "account-preflight", "asset-preflight",
         "flat-account-preflight", "market-preflight", "build-connectivity-candidate",
+        "prepare-connectivity-candidate", "review-receipt", "pre-canary-status",
     ):
         assert command in help_text
 
@@ -82,6 +83,10 @@ def test_safe_console_local_actions_are_credential_free(monkeypatch) -> None:
         (["rehearsal"], "mac_rehearsal.sh"),
         (["safety-rehearsal"], "mac_safety_rehearsal.py"),
         (["readiness", "--workspace", "/tmp/w"], "r6_inspect_paper_readiness.py"),
+        (["pre-canary-status", "--workspace", "/tmp/w"], "r6_precanary_status.py"),
+        (["build-connectivity-candidate", "--workspace", "/tmp/w"], "r6_build_connectivity_candidate.py"),
+        (["prepare-connectivity-candidate", "--workspace", "/tmp/w"], "r6_prepare_connectivity_candidate.py"),
+        (["review-receipt", "--workspace", "/tmp/w"], "r6_connectivity_review_receipt.py"),
     ):
         captured = _capture_run(monkeypatch)
         assert console.main(argv) == 0
@@ -122,13 +127,18 @@ def test_get_preflights_route_only_to_read_scripts(monkeypatch) -> None:
         assert kwargs.get("credential_free", False) is False
 
 
-def test_connectivity_candidate_routes_only_to_local_credential_free_builder(monkeypatch) -> None:
+def test_safe_connectivity_routes_never_reach_execution_surface(monkeypatch) -> None:
     monkeypatch.setattr(console, "_require_safe_shell", lambda: None)
-    captured = _capture_run(monkeypatch)
-    assert console.main(["build-connectivity-candidate", "--workspace", "/tmp/w"]) == 0
-    command, kwargs = captured[-1]
-    joined = " ".join(command)
-    assert "r6_build_connectivity_candidate.py" in joined
-    assert "r6_execute_paper_canary.py" not in joined
-    assert "r6_external_paper_preflight.py" not in joined
-    assert kwargs.get("credential_free") is True
+    for argv in (
+        ["pre-canary-status", "--workspace", "/tmp/w"],
+        ["build-connectivity-candidate", "--workspace", "/tmp/w"],
+        ["prepare-connectivity-candidate", "--workspace", "/tmp/w"],
+        ["review-receipt", "--workspace", "/tmp/w"],
+    ):
+        captured = _capture_run(monkeypatch)
+        assert console.main(argv) == 0
+        command, kwargs = captured[-1]
+        joined = " ".join(command)
+        assert "r6_execute_paper_canary.py" not in joined
+        assert "r6_connectivity_bound_final_freshness.py" not in joined
+        assert kwargs.get("credential_free") is True

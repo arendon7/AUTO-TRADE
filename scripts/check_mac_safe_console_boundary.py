@@ -19,14 +19,18 @@ _ALLOWED_TARGETS = {
     "scripts/mac_rehearsal.sh",
     "scripts/mac_safety_rehearsal.py",
     "scripts/r6_inspect_paper_readiness.py",
+    "scripts/r6_precanary_status.py",
     "scripts/r6_external_paper_preflight.py",
     "scripts/r6_external_paper_asset_preflight.py",
     "scripts/r6_external_paper_flat_account_preflight.py",
     "scripts/r6_external_paper_market_preflight.py",
     "scripts/r6_build_connectivity_candidate.py",
+    "scripts/r6_prepare_connectivity_candidate.py",
+    "scripts/r6_connectivity_review_receipt.py",
 }
 _FORBIDDEN = (
     "r6_execute_paper_canary.py",
+    "r6_connectivity_bound_final_freshness.py",
     "alpaca_paper_writer",
     "alpaca_paper_execution_bridge",
     "stage_external_submission",
@@ -52,8 +56,11 @@ def main() -> int:
             'env[WRITE_ENV] = "DISABLED"',
             "env.pop(KEY_ENV, None)",
             "env.pop(SECRET_ENV, None)",
+            '"pre-canary-status"',
+            '"scripts/r6_precanary_status.py"',
             '"build-connectivity-candidate"',
-            '"scripts/r6_build_connectivity_candidate.py"',
+            '"prepare-connectivity-candidate"',
+            '"review-receipt"',
             "credential_free=True",
         ):
             if anchor not in source:
@@ -71,10 +78,12 @@ def main() -> int:
         source = START.read_text(encoding="utf-8")
         for anchor in (
             "export R6_EXTERNAL_PAPER_WRITE=DISABLED",
+            "pre-canary-status",
             "build-connectivity-candidate",
+            "prepare-connectivity-candidate",
+            "review-receipt",
             "CapitalSafetyKernel RiskDecision + OMS VALIDATED",
             "NO Strategy Health",
-            "NO operator authority",
             "NO external POST authority",
             "account -> asset -> flat account -> market -> connectivity candidate",
         ):
@@ -98,7 +107,7 @@ def main() -> int:
     print(
         "AUTO-TRADE Mac safe console boundary: PASS "
         "(write-disabled; credential stripping on local phases; GET-only broker reads; "
-        "non-executable connectivity candidate; no order execution command)"
+        "read-only pre-canary status + offline preparation/review; no order execution command)"
     )
     return 0
 

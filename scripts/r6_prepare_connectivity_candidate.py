@@ -20,18 +20,23 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _workspace(path: Path) -> PaperOperationalWorkspace:
+    expanded = path.expanduser()
+    if expanded.is_symlink() or not expanded.is_dir():
+        raise SystemExit("connectivity workspace must be an existing non-symlink directory")
+    return PaperOperationalWorkspace(root=expanded.resolve())
+
+
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     if os.environ.get(_WRITE_ENV) == "ENABLED":
         raise SystemExit("Refusing connectivity preparation while R6_EXTERNAL_PAPER_WRITE=ENABLED; disable the write gate first.")
     if os.environ.get(_KEY_ENV) or os.environ.get(_SECRET_ENV):
         raise SystemExit("Refusing connectivity preparation while Alpaca credentials are present; this phase is deliberately credential-free.")
-    root = args.workspace.expanduser().resolve()
-    if not root.is_dir():
-        raise SystemExit("Workspace does not exist.")
-    result = PaperConnectivityPreparationBridge(PaperOperationalWorkspace(root=root)).prepare(now=datetime.now(timezone.utc))
+    workspace = _workspace(args.workspace)
+    result = PaperConnectivityPreparationBridge(workspace).prepare(now=datetime.now(timezone.utc))
     output = {
-        "status": "CONNECTIVITY_CANARY_PREPARED", "workspace": str(root), "artifact": str(result.artifact_path),
+        "status": "CONNECTIVITY_CANARY_PREPARED", "workspace": str(workspace.root), "artifact": str(result.artifact_path),
         "order_id": result.order_id, "attempt_id": result.attempt_id,
         "connectivity_authority_id": result.connectivity_authority_id,
         "connectivity_binding_id": result.connectivity_binding_id,

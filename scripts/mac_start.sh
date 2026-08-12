@@ -28,6 +28,7 @@ Useful commands:
   bash scripts/mac_start.sh safety-rehearsal
   bash scripts/mac_start.sh init-workspace "$HOME/AUTO-TRADE-R6/workspace-001"
   bash scripts/mac_start.sh readiness <WORKSPACE>
+  bash scripts/mac_start.sh pre-canary-status <WORKSPACE>
 
 GET-only PAPER network steps, only after configuring PAPER credentials:
 
@@ -36,18 +37,28 @@ GET-only PAPER network steps, only after configuring PAPER credentials:
   bash scripts/mac_start.sh flat-account-preflight <WORKSPACE>
   bash scripts/mac_start.sh market-preflight <WORKSPACE> <SYMBOL>
 
-After those four GET-only gates:
+After those four GET-only gates, credentials are stripped again:
 
   bash scripts/mac_start.sh build-connectivity-candidate <WORKSPACE>
+  bash scripts/mac_start.sh prepare-connectivity-candidate <WORKSPACE>
+  bash scripts/mac_start.sh pre-canary-status <WORKSPACE>
 
-The candidate build strips Alpaca credentials and is local-only. It creates a real
-CapitalSafetyKernel RiskDecision + OMS VALIDATED order for purpose CONNECTIVITY_CANARY,
-but creates NO Strategy Health, NO operator authority and NO external POST authority.
+The candidate uses a real CapitalSafetyKernel RiskDecision + OMS VALIDATED order for
+purpose CONNECTIVITY_CANARY. Preparation freezes the bounded bracket package.
+Audited invariants: NO Strategy Health; NO operator authority; NO external POST authority.
 
-The first-canary path is:
-  account -> asset -> flat account -> market -> connectivity candidate
+After a separately executed interactive FIRST human decision, this safe launcher may
+freeze the review document only:
 
-Any real PAPER order remains a separate, later command outside this safe launcher.
+  bash scripts/mac_start.sh review-receipt <WORKSPACE>
+  bash scripts/mac_start.sh pre-canary-status <WORKSPACE>
+
+The first-canary safe path exposed here is:
+  account -> asset -> flat account -> market -> connectivity candidate -> offline preparation -> status/review
+
+Second human intent, reviewed Final Freshness, staging and any single PAPER POST remain
+outside this safe launcher. READY from pre-canary-status means ready only for the named
+next gate; it NEVER means POST-authorized.
 EOF
 
 case "${1:-}" in
@@ -75,6 +86,11 @@ case "${1:-}" in
     shift
     [[ $# -eq 1 ]] || { echo "usage: bash scripts/mac_start.sh readiness <WORKSPACE>" >&2; exit 2; }
     exec .venv/bin/python scripts/mac_safe_console.py readiness --workspace "$1"
+    ;;
+  pre-canary-status)
+    shift
+    [[ $# -eq 1 ]] || { echo "usage: bash scripts/mac_start.sh pre-canary-status <WORKSPACE>" >&2; exit 2; }
+    exec .venv/bin/python scripts/mac_safe_console.py pre-canary-status --workspace "$1"
     ;;
   account-preflight)
     shift
@@ -104,6 +120,16 @@ case "${1:-}" in
     shift
     [[ $# -eq 1 ]] || { echo "usage: bash scripts/mac_start.sh build-connectivity-candidate <WORKSPACE>" >&2; exit 2; }
     exec .venv/bin/python scripts/mac_safe_console.py build-connectivity-candidate --workspace "$1"
+    ;;
+  prepare-connectivity-candidate)
+    shift
+    [[ $# -eq 1 ]] || { echo "usage: bash scripts/mac_start.sh prepare-connectivity-candidate <WORKSPACE>" >&2; exit 2; }
+    exec .venv/bin/python scripts/mac_safe_console.py prepare-connectivity-candidate --workspace "$1"
+    ;;
+  review-receipt)
+    shift
+    [[ $# -eq 1 ]] || { echo "usage: bash scripts/mac_start.sh review-receipt <WORKSPACE>" >&2; exit 2; }
+    exec .venv/bin/python scripts/mac_safe_console.py review-receipt --workspace "$1"
     ;;
   *)
     echo "Unknown safe command: $1" >&2
