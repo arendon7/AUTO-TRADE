@@ -36,7 +36,7 @@ def test_cli_refuses_write_enabled_before_credentials(monkeypatch, tmp_path) -> 
 def test_cli_credentials_are_environment_only(monkeypatch) -> None:
     monkeypatch.delenv(cli._KEY_ENV, raising=False)
     monkeypatch.delenv(cli._SECRET_ENV, raising=False)
-    with pytest.raises(SystemExit, match="environment"):
+    with pytest.raises(SystemExit, match="APCA_API_KEY_ID/APCA_API_SECRET_KEY"):
         cli._credentials()
     monkeypatch.setenv(cli._KEY_ENV, "paper-key")
     monkeypatch.setenv(cli._SECRET_ENV, "paper-secret")
