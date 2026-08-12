@@ -11,12 +11,21 @@ PREPARE = ROOT / "src/autotrade/brokers/alpaca_paper_connectivity_prepare.py"
 CLI = ROOT / "scripts/r6_prepare_connectivity_candidate.py"
 
 FORBIDDEN_IMPORTS = (
-    "autotrade.research", "autotrade.health_bridge", "openai", "anthropic",
-    "requests", "urllib", "websockets",
+    "autotrade.research",
+    "autotrade.health_bridge",
+    "openai",
+    "anthropic",
+    "requests",
+    "urllib",
+    "websockets",
 )
 FORBIDDEN_TEXT = (
-    "AlpacaPaperCredentials", "AlpacaPaperSingleShotWriter", "PaperCanaryExecutionBridge",
-    "stage_external_submission", "submit_once", "record_operator_approval",
+    "AlpacaPaperCredentials",
+    "AlpacaPaperSingleShotWriter",
+    "PaperCanaryExecutionBridge",
+    "stage_external_submission",
+    "submit_once",
+    "record_operator_approval",
 )
 
 
@@ -34,17 +43,26 @@ def main() -> int:
             "health_allows_new_exposure is not False",
             "must not be represented as Strategy Health approval",
             "CONNECTIVITY_CANARY_STRATEGY_ID",
-            'order.intent.quantity != Decimal("1")',
-            'order.intent.side.value != "BUY"',
-            'order.intent.order_type.value != "LIMIT"',
+            'CERTIFIED_TRACKS = ("R0", "R1", "R2", "R3", "R4", "R5")',
+            'intent.quantity != Decimal("1")',
+            'intent.side.value != "BUY"',
+            'intent.order_type.value != "LIMIT"',
+            "intent.limit_price is None",
             "PaperSubmissionStatus.PREPARED",
+            "submission.binding_hash != binding.fingerprint",
+            "binding_hash=binding.fingerprint",
             "context.prior_canary_submissions != 0",
+            "class PaperCanaryGateRejected(PaperCanaryRejected)",
         ):
             if anchor not in source:
                 errors.append(f"connectivity gate anchor missing: {anchor}")
-        for forbidden in FORBIDDEN_TEXT:
+        for forbidden in FORBIDDEN_TEXT + (
+            "binding.binding_hash",
+            "order.notional",
+            "CERTIFIED_TRACKS = frozenset",
+        ):
             if forbidden in source:
-                errors.append(f"connectivity gate contains forbidden authority: {forbidden}")
+                errors.append(f"connectivity gate contains forbidden/invalid surface: {forbidden}")
 
     if BINDING.is_file():
         source = BINDING.read_text(encoding="utf-8")
@@ -86,7 +104,13 @@ def main() -> int:
         tree = ast.parse(source, filename=str(PREPARE))
         for node in ast.walk(tree):
             if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
-                if node.func.attr in {"post", "send", "write", "submit_once", "stage_external_submission"}:
+                if node.func.attr in {
+                    "post",
+                    "send",
+                    "write",
+                    "submit_once",
+                    "stage_external_submission",
+                }:
                     errors.append(
                         f"connectivity preparation:{node.lineno}: forbidden network/execution call {node.func.attr}"
                     )
@@ -116,8 +140,9 @@ def main() -> int:
         return 1
     print(
         "AUTO-TRADE R6 connectivity preparation core boundary: PASS "
-        "(health=false purpose gate; OMS remains VALIDATED; PREPARED+permit reuse; "
-        "connectivity ledger binding; no credentials/network/operator/POST authority)"
+        "(health=false purpose gate; exact R0-R5 tuple; OMS remains VALIDATED; "
+        "PREPARED+permit reuse; immutable binding fingerprints; "
+        "no credentials/network/operator/POST authority)"
     )
     return 0
 
@@ -132,7 +157,10 @@ def _scan_imports(path: Path) -> list[str]:
         elif isinstance(node, ast.ImportFrom):
             modules.append(node.module or "")
         for module in modules:
-            if any(module == prefix or module.startswith(prefix + ".") for prefix in FORBIDDEN_IMPORTS):
+            if any(
+                module == prefix or module.startswith(prefix + ".")
+                for prefix in FORBIDDEN_IMPORTS
+            ):
                 errors.append(f"{path.relative_to(ROOT)}:{node.lineno}: forbidden import {module}")
     return errors
 
