@@ -46,7 +46,24 @@ Para una validación completa adicional:
 
 Este nivel no requiere cuenta Alpaca ni credenciales.
 
-Pruebas relevantes:
+Después del bootstrap inicial, la forma normal de repetir el ensayo offline completo es:
+
+```bash
+bash scripts/mac_rehearsal.sh
+```
+
+`mac_rehearsal.sh`:
+
+- se niega a correr si la shell tiene `R6_EXTERNAL_PAPER_WRITE=ENABLED`;
+- exige la `.venv` ya creada por bootstrap;
+- elimina las variables de credenciales Alpaca dentro del proceso;
+- fuerza `R6_EXTERNAL_PAPER_WRITE=DISABLED`;
+- ejecuta Mac Doctor, contract/debt checks y boundaries R6;
+- ejecuta las pruebas focalizadas del recorrido PAPER;
+- no ejecuta account preflight, market-data preflight, decisión humana ni writer;
+- no usa broker I/O.
+
+Si se desea ejecutar manualmente el mismo tipo de comprobaciones, pruebas relevantes:
 
 ```bash
 .venv/bin/python -m pytest -q \
