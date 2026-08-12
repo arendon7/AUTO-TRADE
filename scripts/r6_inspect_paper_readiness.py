@@ -23,11 +23,19 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _workspace(path: Path) -> Path:
+    expanded = path.expanduser()
+    if expanded.is_symlink() or not expanded.is_dir():
+        raise ValueError("workspace must be an existing non-symlink directory")
+    return expanded.resolve()
+
+
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
+        root = _workspace(args.workspace)
         report = inspect_market_aware_readiness(
-            root=args.workspace,
+            root=root,
             now=datetime.now(timezone.utc),
         )
     except (PaperReadinessError, OSError, ValueError) as exc:
