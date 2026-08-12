@@ -16,6 +16,7 @@ SELF_TEST = "tests/test_mac_click_launcher.py"
 
 FORBIDDEN = (
     "r6_execute_paper_canary.py",
+    "r6_connectivity_bound_final_freshness.py",
     "--execute-paper-canary",
     "alpaca_paper_writer",
     "alpaca_paper_execution_bridge",
@@ -67,12 +68,18 @@ def main() -> int:
             "init-workspace",
             "run_safe safety-rehearsal",
             "Capital Safety Kernel real",
+            "run_safe pre-canary-status",
+            "run_safe build-connectivity-candidate",
+            "run_safe prepare-connectivity-candidate",
+            "run_safe review-receipt",
+            "READY en estado pre-canary",
             "account-preflight",
             "asset-preflight",
             "flat-account-preflight",
             "market-preflight",
             "account -> asset -> flat account -> market",
             "exact us_equity + active + tradable",
+            "NO se emiten",
         ):
             if anchor not in source:
                 errors.append(f"Finder launcher missing safe first-canary/Safety anchor: {anchor}")
@@ -108,7 +115,8 @@ def main() -> int:
         return 1
     print(
         "AUTO-TRADE Mac Finder launcher boundary: PASS "
-        "(double-click entrypoint + first-run guide are broker-inert, write-disabled, local-Safety/account/asset/flat/market aware and CI-packaged on macOS)"
+        "(double-click entrypoint is broker-inert/write-disabled; pre-canary status + offline preparation/review are safe; "
+        "human execution intent, Final Freshness and order execution remain absent)"
     )
     return 0
 
