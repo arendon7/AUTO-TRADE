@@ -11,6 +11,7 @@ on:
       - "scripts/check_r6_connectivity_preparation_core_boundary.py"
       - "tests/test_r6_connectivity_prepare.py"
       - "tests/test_r6_connectivity_preparation_adversarial.py"
+      - "tests/test_r6_connectivity_prepare_edges.py"
       - "tests/test_r6_prepare_connectivity_candidate_cli.py"
       - ".github/workflows/r6-connectivity-preparation.yml"
   pull_request:
@@ -22,6 +23,7 @@ on:
       - "scripts/check_r6_connectivity_preparation_core_boundary.py"
       - "tests/test_r6_connectivity_prepare.py"
       - "tests/test_r6_connectivity_preparation_adversarial.py"
+      - "tests/test_r6_connectivity_prepare_edges.py"
       - "tests/test_r6_prepare_connectivity_candidate_cli.py"
       - ".github/workflows/r6-connectivity-preparation.yml"
   workflow_dispatch:
@@ -44,4 +46,4 @@ jobs:
       - name: Connectivity preparation authority boundary
         run: python scripts/check_r6_connectivity_preparation_core_boundary.py
       - name: Connectivity preparation functional and adversarial tests
-        run: pytest -q tests/test_r6_connectivity_prepare.py tests/test_r6_connectivity_preparation_adversarial.py tests/test_r6_prepare_connectivity_candidate_cli.py
+        run: pytest -q tests/test_r6_connectivity_prepare.py tests/test_r6_connectivity_preparation_adversarial.py tests/test_r6_connectivity_prepare_edges.py tests/test_r6_prepare_connectivity_candidate_cli.py
