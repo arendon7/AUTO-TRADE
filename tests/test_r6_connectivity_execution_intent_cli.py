@@ -37,6 +37,15 @@ def test_cli_ttl_is_bounded() -> None:
             cli._ttl(value)
 
 
+def test_cli_workspace_rejects_symlink_before_resolution(tmp_path) -> None:
+    target = tmp_path / "target"
+    target.mkdir()
+    link = tmp_path / "link"
+    link.symlink_to(target, target_is_directory=True)
+    with pytest.raises(SystemExit, match="existing non-symlink"):
+        cli._workspace(link)
+
+
 def test_cli_requires_tty_before_bridge(monkeypatch, tmp_path) -> None:
     root = tmp_path / "workspace"
     root.mkdir()
