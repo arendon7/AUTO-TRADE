@@ -1,0 +1,419 @@
+from __future__ import annotations
+
+import argparse
+from dataclasses import dataclass
+from datetime import datetime, timezone
+import json
+import os
+from pathlib import Path
+import re
+import secrets
+import subprocess
+import sys
+from http import HTTPStatus
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import threading
+import time
+import webbrowser
+from urllib.parse import urlparse
+
+ROOT = Path(__file__).resolve().parents[1]
+PYTHON = ROOT / ".venv/bin/python"
+HTML_PATH = ROOT / "web/mac_dashboard.html"
+WRITE_ENV = "R6_EXTERNAL_PAPER_WRITE"
+KEY_ENV = "APCA_API_KEY_ID"
+SECRET_ENV = "APCA_API_SECRET_KEY"
+MAX_BODY_BYTES = 64 * 1024
+DEFAULT_WORKSPACE = Path.home() / "AUTO-TRADE-R6/workspace-001"
+SYMBOL_RE = re.compile(r"^[A-Z0-9.\-]{1,16}$")
+
+
+class DashboardError(RuntimeError):
+    pass
+
+
+@dataclass(frozen=True)
+class ActionSpec:
+    name: str
+    credential_mode: str
+    timeout_seconds: int = 180
+
+
+SAFE_ACTIONS: dict[str, ActionSpec] = {
+    "init_workspace": ActionSpec("init_workspace", "none"),
+    "doctor": ActionSpec("doctor", "none"),
+    "rehearsal": ActionSpec("rehearsal", "none", 600),
+    "safety_rehearsal": ActionSpec("safety_rehearsal", "none"),
+    "readiness": ActionSpec("readiness", "none"),
+    "status": ActionSpec("status", "none"),
+    "account_preflight": ActionSpec("account_preflight", "paper"),
+    "asset_preflight": ActionSpec("asset_preflight", "paper"),
+    "flat_account_preflight": ActionSpec("flat_account_preflight", "paper"),
+    "market_preflight": ActionSpec("market_preflight", "paper"),
+    "build_candidate": ActionSpec("build_candidate", "none"),
+    "prepare_candidate": ActionSpec("prepare_candidate", "none"),
+    "review_receipt": ActionSpec("review_receipt", "none"),
+}
+
+
+def _parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        description=(
+            "Local browser control center for AUTO-TRADE R6 safe/PAPER-read operations. "
+            "No staging, Final Freshness, order POST or LIVE action is exposed."
+        )
+    )
+    parser.add_argument("--host", default="127.0.0.1")
+    parser.add_argument("--port", type=int, default=8765)
+    parser.add_argument("--no-browser", action="store_true")
+    return parser
+
+
+def _require_safe_runtime() -> None:
+    if os.environ.get(WRITE_ENV) == "ENABLED":
+        raise DashboardError("Refusing dashboard while R6_EXTERNAL_PAPER_WRITE=ENABLED")
+    if not PYTHON.is_file():
+        raise DashboardError("AUTO-TRADE runtime is not installed; run INSTALAR_AUTO_TRADE.command")
+    if not HTML_PATH.is_file():
+        raise DashboardError("Missing local dashboard asset: web/mac_dashboard.html")
+
+
+def _workspace(payload: dict[str, object], *, allow_missing: bool = False) -> str:
+    raw = str(payload.get("workspace") or "").strip() or str(DEFAULT_WORKSPACE)
+    if "\x00" in raw or len(raw) > 1024:
+        raise DashboardError("Invalid workspace path")
+    path = Path(raw).expanduser()
+    if path.is_symlink():
+        raise DashboardError("Workspace may not be a symlink")
+    if not allow_missing and not path.is_dir():
+        raise DashboardError("Workspace does not exist yet")
+    return str(path)
+
+
+def _symbol(payload: dict[str, object]) -> str:
+    value = str(payload.get("symbol") or "AAPL").strip().upper()
+    if not SYMBOL_RE.fullmatch(value):
+        raise DashboardError("Symbol must be 1-16 uppercase market characters")
+    return value
+
+
+def _paper_credentials(payload: dict[str, object]) -> tuple[str, str]:
+    key = str(payload.get("paper_key") or "").strip()
+    secret = str(payload.get("paper_secret") or "").strip()
+    if not key or not secret:
+        raise DashboardError("PAPER key and secret are required for this GET-only action")
+    if len(key) > 512 or len(secret) > 1024:
+        raise DashboardError("Credential input is unexpectedly long")
+    return key, secret
+
+
+def _safe_env(*, paper_credentials: tuple[str, str] | None = None) -> dict[str, str]:
+    env = os.environ.copy()
+    env[WRITE_ENV] = "DISABLED"
+    env.pop(KEY_ENV, None)
+    env.pop(SECRET_ENV, None)
+    if paper_credentials is not None:
+        env[KEY_ENV], env[SECRET_ENV] = paper_credentials
+    return env
+
+
+def _command(action: str, payload: dict[str, object]) -> tuple[list[str], tuple[str, str] | None]:
+    if action not in SAFE_ACTIONS:
+        raise DashboardError("Action is not in the certified dashboard allowlist")
+    base = [str(PYTHON), "scripts/mac_safe_console.py"]
+    credentials: tuple[str, str] | None = None
+
+    if action == "rehearsal":
+        return base + ["rehearsal"], None
+    if action == "safety_rehearsal":
+        return base + [
+            "safety-rehearsal",
+            "--symbol", _symbol(payload),
+            "--quantity", str(payload.get("quantity") or "0.25").strip(),
+            "--limit-price", str(payload.get("limit_price") or "100").strip(),
+        ], None
+
+    workspace = _workspace(payload, allow_missing=action in {"init_workspace", "doctor"})
+    if action == "init_workspace":
+        return base + ["init-workspace", "--workspace", workspace], None
+    if action == "doctor":
+        command = base + ["doctor"]
+        if Path(workspace).is_dir():
+            command += ["--workspace", workspace]
+        return command, None
+    if action == "readiness":
+        return base + ["readiness", "--workspace", workspace], None
+    if action == "status":
+        return base + ["pre-canary-status", "--workspace", workspace], None
+
+    if SAFE_ACTIONS[action].credential_mode == "paper":
+        credentials = _paper_credentials(payload)
+    if action == "account_preflight":
+        account_id = str(payload.get("account_id") or "").strip()
+        if not account_id or len(account_id) > 256:
+            raise DashboardError("Expected Alpaca PAPER account ID is required")
+        return base + [
+            "account-preflight", "--workspace", workspace,
+            "--expected-account-id", account_id,
+            "--allow-paper-account-read",
+        ], credentials
+    if action == "asset_preflight":
+        return base + [
+            "asset-preflight", "--workspace", workspace,
+            "--symbol", _symbol(payload), "--allow-paper-asset-read",
+        ], credentials
+    if action == "flat_account_preflight":
+        return base + [
+            "flat-account-preflight", "--workspace", workspace,
+            "--allow-paper-flat-account-read",
+        ], credentials
+    if action == "market_preflight":
+        return base + [
+            "market-preflight", "--workspace", workspace,
+            "--symbol", _symbol(payload), "--allow-paper-market-read",
+        ], credentials
+    if action == "build_candidate":
+        return base + ["build-connectivity-candidate", "--workspace", workspace], None
+    if action == "prepare_candidate":
+        return base + ["prepare-connectivity-candidate", "--workspace", workspace], None
+    if action == "review_receipt":
+        return base + ["review-receipt", "--workspace", workspace], None
+    raise DashboardError("Unsupported safe action")
+
+
+def _redact(text: str, secrets_to_remove: tuple[str, str] | None) -> str:
+    result = text
+    if secrets_to_remove:
+        for value in secrets_to_remove:
+            if value:
+                result = result.replace(value, "[REDACTED]")
+    return result
+
+
+def _extract_json(text: str) -> dict[str, object] | None:
+    stripped = text.strip()
+    if not stripped:
+        return None
+    try:
+        value = json.loads(stripped)
+    except json.JSONDecodeError:
+        start = stripped.find("{")
+        end = stripped.rfind("}")
+        if start < 0 or end <= start:
+            return None
+        try:
+            value = json.loads(stripped[start : end + 1])
+        except json.JSONDecodeError:
+            return None
+    return value if isinstance(value, dict) else None
+
+
+def _run_action(action: str, payload: dict[str, object]) -> dict[str, object]:
+    argv, credentials = _command(action, payload)
+    started = time.monotonic()
+    completed = subprocess.run(
+        argv,
+        cwd=ROOT,
+        env=_safe_env(paper_credentials=credentials),
+        text=True,
+        capture_output=True,
+        timeout=SAFE_ACTIONS[action].timeout_seconds,
+        check=False,
+    )
+    elapsed_ms = int((time.monotonic() - started) * 1000)
+    stdout = _redact(completed.stdout, credentials)
+    stderr = _redact(completed.stderr, credentials)
+    return {
+        "ok": completed.returncode == 0,
+        "action": action,
+        "returncode": completed.returncode,
+        "stdout": stdout,
+        "stderr": stderr,
+        "json": _extract_json(stdout),
+        "elapsed_ms": elapsed_ms,
+        "broker_write_performed": False,
+        "external_post_authorized": False,
+        "capital_authority": "NONE",
+        "live_trading": "BLOCKED",
+        "at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+def _read_key_values(path: Path) -> dict[str, str]:
+    values: dict[str, str] = {}
+    if path.is_file() and not path.is_symlink():
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if "=" in line:
+                key, value = line.split("=", 1)
+                values[key.strip()] = value.strip()
+    return values
+
+
+def _build_meta() -> dict[str, object]:
+    build = _read_key_values(ROOT / "MAC_BUILD_INFO.txt")
+    standalone = _read_key_values(ROOT / "MAC_STANDALONE_MANIFEST.txt")
+    return {
+        "source_head": build.get("source_head") or standalone.get("source_head") or "UNKNOWN",
+        "bundle_mode": "FULL_STANDALONE" if standalone else "SOURCE_CHECKOUT",
+        "supported_architectures": standalone.get("supported_architectures") or "host",
+        "embedded_python": standalone.get("python_version") or "host",
+        "installed": PYTHON.is_file(),
+        "default_workspace": str(DEFAULT_WORKSPACE),
+        "external_paper_write": "DISABLED",
+        "capital_authority": "NONE",
+        "live_trading": "BLOCKED",
+        "order_execution_from_dashboard": False,
+    }
+
+
+class DashboardHandler(BaseHTTPRequestHandler):
+    server_version = "AUTO-TRADE-R6-LocalDashboard"
+
+    @property
+    def dashboard_server(self) -> "DashboardServer":
+        return self.server  # type: ignore[return-value]
+
+    def log_message(self, format: str, *args: object) -> None:
+        return
+
+    def _headers(self, status: HTTPStatus, content_type: str) -> None:
+        self.send_response(status)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Cache-Control", "no-store, max-age=0")
+        self.send_header("Pragma", "no-cache")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("X-Frame-Options", "DENY")
+        self.send_header("Referrer-Policy", "no-referrer")
+        self.send_header(
+            "Content-Security-Policy",
+            "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; "
+            "img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'",
+        )
+        self.end_headers()
+
+    def _json(self, status: HTTPStatus, payload: dict[str, object]) -> None:
+        body = json.dumps(payload, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+        self._headers(status, "application/json; charset=utf-8")
+        self.wfile.write(body)
+
+    def _require_local_origin(self) -> bool:
+        origin = self.headers.get("Origin")
+        if not origin:
+            return True
+        expected = f"http://127.0.0.1:{self.dashboard_server.server_port}"
+        return origin == expected
+
+    def _read_payload(self) -> dict[str, object]:
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+        except ValueError as exc:
+            raise DashboardError("Invalid request length") from exc
+        if length <= 0 or length > MAX_BODY_BYTES:
+            raise DashboardError("Invalid request body size")
+        raw = self.rfile.read(length)
+        try:
+            payload = json.loads(raw.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise DashboardError("Request must be JSON") from exc
+        if not isinstance(payload, dict):
+            raise DashboardError("Request JSON root must be an object")
+        return payload
+
+    def do_GET(self) -> None:  # noqa: N802
+        parsed = urlparse(self.path)
+        if parsed.path == "/":
+            html = HTML_PATH.read_text(encoding="utf-8").replace("__CSRF_TOKEN__", self.dashboard_server.csrf_token)
+            self._headers(HTTPStatus.OK, "text/html; charset=utf-8")
+            self.wfile.write(html.encode("utf-8"))
+            return
+        if parsed.path == "/api/meta":
+            self._json(HTTPStatus.OK, {"ok": True, "meta": _build_meta()})
+            return
+        if parsed.path == "/runbook":
+            runbook = ROOT / "docs/MAC_PAPER_RUNBOOK.md"
+            if not runbook.is_file():
+                self._json(HTTPStatus.NOT_FOUND, {"ok": False, "error": "runbook missing"})
+                return
+            text = runbook.read_text(encoding="utf-8")
+            body = (
+                "<!doctype html><meta charset=\"utf-8\"><title>AUTO-TRADE R6 Runbook</title>"
+                "<style>body{font:14px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace;max-width:1100px;margin:40px auto;padding:0 24px;background:#08100e;color:#dbeae4}pre{white-space:pre-wrap}</style>"
+                "<pre>" + text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;") + "</pre>"
+            )
+            self._headers(HTTPStatus.OK, "text/html; charset=utf-8")
+            self.wfile.write(body.encode("utf-8"))
+            return
+        self._json(HTTPStatus.NOT_FOUND, {"ok": False, "error": "not found"})
+
+    def do_POST(self) -> None:  # noqa: N802
+        if self.path != "/api/action":
+            self._json(HTTPStatus.NOT_FOUND, {"ok": False, "error": "not found"})
+            return
+        if not self._require_local_origin():
+            self._json(HTTPStatus.FORBIDDEN, {"ok": False, "error": "origin rejected"})
+            return
+        if self.headers.get("X-CSRF-Token") != self.dashboard_server.csrf_token:
+            self._json(HTTPStatus.FORBIDDEN, {"ok": False, "error": "csrf rejected"})
+            return
+        try:
+            payload = self._read_payload()
+            action = str(payload.get("action") or "")
+            result = _run_action(action, payload)
+        except subprocess.TimeoutExpired:
+            self._json(HTTPStatus.REQUEST_TIMEOUT, {"ok": False, "error": "safe action timed out"})
+            return
+        except (DashboardError, OSError, ValueError) as exc:
+            self._json(HTTPStatus.BAD_REQUEST, {"ok": False, "error": str(exc)})
+            return
+        self._json(HTTPStatus.OK, result)
+
+
+class DashboardServer(ThreadingHTTPServer):
+    daemon_threads = True
+
+    def __init__(self, address: tuple[str, int], csrf_token: str) -> None:
+        self.csrf_token = csrf_token
+        super().__init__(address, DashboardHandler)
+
+
+def _start_server(host: str, port: int) -> DashboardServer:
+    if host != "127.0.0.1":
+        raise DashboardError("Dashboard may bind only to 127.0.0.1")
+    token = secrets.token_urlsafe(32)
+    try:
+        return DashboardServer((host, port), token)
+    except OSError:
+        if port == 0:
+            raise
+        return DashboardServer((host, 0), token)
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = _parser().parse_args(argv)
+    try:
+        _require_safe_runtime()
+        server = _start_server(args.host, args.port)
+    except DashboardError as exc:
+        print(f"AUTO-TRADE DASHBOARD BLOCKED: {exc}", file=sys.stderr)
+        return 2
+
+    url = f"http://127.0.0.1:{server.server_port}/"
+    print("AUTO-TRADE R6 — LOCAL CONTROL CENTER")
+    print(f"Dashboard: {url}")
+    print("External PAPER write: DISABLED")
+    print("LIVE trading: BLOCKED")
+    print("Order execution from dashboard: UNAVAILABLE")
+    print("Keep this terminal open while using the dashboard. Ctrl+C closes it.")
+    if not args.no_browser:
+        threading.Timer(0.35, lambda: webbrowser.open(url, new=1)).start()
+    try:
+        server.serve_forever(poll_interval=0.25)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        server.server_close()
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
