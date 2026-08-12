@@ -60,9 +60,10 @@ Modo actual:
 1) Crear workspace privado
 2) Doctor local
 3) Ensayo offline completo
-4) Inspeccionar readiness de un workspace
-5) Abrir runbook de Mac
-6) Mostrar secuencia GET-only de Alpaca PAPER
+4) Probar Capital Safety con una orden candidata local
+5) Inspeccionar readiness de un workspace
+6) Abrir runbook de Mac
+7) Mostrar secuencia GET-only de Alpaca PAPER
 0) Salir
 EOF
 }
@@ -86,6 +87,22 @@ while true; do
       run_safe rehearsal
       ;;
     4)
+      cat <<'EOF'
+Capital Safety rehearsal es 100% local:
+  • no usa Alpaca;
+  • no carga credenciales;
+  • no crea autoridad de operador;
+  • no envía órdenes;
+  • el RiskDecision lo genera el Capital Safety Kernel real.
+EOF
+      echo
+      read -r -p "Símbolo [AAPL]: " symbol
+      symbol="${symbol:-AAPL}"
+      read -r -p "Cantidad [0.25]: " quantity
+      quantity="${quantity:-0.25}"
+      run_safe safety-rehearsal --symbol "$symbol" --quantity "$quantity"
+      ;;
+    5)
       read -r -p "Ruta del workspace (ej. $HOME/AUTO-TRADE-R6/workspace-001): " workspace
       if [[ -z "$workspace" ]]; then
         echo "Ruta vacía: no se ejecutó ninguna acción."
@@ -93,11 +110,11 @@ while true; do
         run_safe readiness "$workspace"
       fi
       ;;
-    5)
+    6)
       open "$ROOT/docs/MAC_PAPER_RUNBOOK.md" >/dev/null 2>&1 || \
         echo "Runbook: $ROOT/docs/MAC_PAPER_RUNBOOK.md"
       ;;
-    6)
+    7)
       cat <<'EOF'
 Secuencia de red permitida desde Safe Start (GET-only):
 
