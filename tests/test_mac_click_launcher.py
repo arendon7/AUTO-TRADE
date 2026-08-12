@@ -24,6 +24,7 @@ def test_finder_launcher_is_write_disabled_and_broker_inert() -> None:
 
     forbidden = (
         "r6_execute_paper_canary.py",
+        "r6_connectivity_bound_final_freshness.py",
         "--execute-paper-canary",
         "alpaca_paper_writer",
         "alpaca_paper_execution_bridge",
@@ -45,11 +46,17 @@ def test_finder_launcher_offers_only_safe_operator_actions() -> None:
     assert "run_safe rehearsal" in source
     assert "run_safe safety-rehearsal" in source
     assert "Capital Safety Kernel real" in source
+    assert "run_safe pre-canary-status" in source
     assert "run_safe readiness" in source
+    assert "run_safe build-connectivity-candidate" in source
+    assert "run_safe prepare-connectivity-candidate" in source
+    assert "run_safe review-receipt" in source
     assert "account-preflight" in source
     assert "asset-preflight" in source
     assert "flat-account-preflight" in source
     assert "market-preflight" in source
     assert "account -> asset -> flat account -> market" in source
     assert "exact us_equity + active + tradable" in source
+    assert "READY en estado pre-canary" in source
+    assert "NO se emiten" in source
     assert "Orden real desde este launcher: IMPOSIBLE" in source
