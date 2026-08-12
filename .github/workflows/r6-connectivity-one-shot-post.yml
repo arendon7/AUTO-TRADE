@@ -4,20 +4,24 @@ on:
   push:
     branches: ["reconstruction/**", "work/**", "feature/**"]
     paths:
+      - "src/autotrade/connectivity_operator_review.py"
       - "src/autotrade/connectivity_workspace_post.py"
       - "src/autotrade/connectivity_workspace_stage.py"
       - "scripts/check_r6_connectivity_workspace_post_boundary.py"
       - "scripts/check_r6_connectivity_workspace_stage_boundary.py"
+      - "tests/test_r6_connectivity_operator_review_no_bypass.py"
       - "tests/test_r6_connectivity_workspace_post.py"
       - "tests/test_r6_connectivity_workspace_post_failclosed.py"
       - "tests/test_r6_connectivity_workspace_stage.py"
       - ".github/workflows/r6-connectivity-one-shot-post.yml"
   pull_request:
     paths:
+      - "src/autotrade/connectivity_operator_review.py"
       - "src/autotrade/connectivity_workspace_post.py"
       - "src/autotrade/connectivity_workspace_stage.py"
       - "scripts/check_r6_connectivity_workspace_post_boundary.py"
       - "scripts/check_r6_connectivity_workspace_stage_boundary.py"
+      - "tests/test_r6_connectivity_operator_review_no_bypass.py"
       - "tests/test_r6_connectivity_workspace_post.py"
       - "tests/test_r6_connectivity_workspace_post_failclosed.py"
       - "tests/test_r6_connectivity_workspace_stage.py"
@@ -41,7 +45,7 @@ jobs:
         run: python -m compileall -q src tests scripts
       - name: Same-process one-shot POST authority boundary
         run: python scripts/check_r6_connectivity_workspace_post_boundary.py
-      - name: Pre-POST staging remains network-free
+      - name: Pre-POST staging remains network-free and review-bound
         run: python scripts/check_r6_connectivity_workspace_stage_boundary.py
-      - name: Functional and adversarial one-shot/reconciliation tests
-        run: pytest -q tests/test_r6_connectivity_workspace_post.py tests/test_r6_connectivity_workspace_post_failclosed.py tests/test_r6_connectivity_workspace_stage.py
+      - name: Functional/adversarial one-shot, reconciliation and no-bypass tests
+        run: pytest -q tests/test_r6_connectivity_workspace_post.py tests/test_r6_connectivity_workspace_post_failclosed.py tests/test_r6_connectivity_workspace_stage.py tests/test_r6_connectivity_operator_review_no_bypass.py
