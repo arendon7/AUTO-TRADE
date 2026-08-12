@@ -1,22 +1,419 @@
 <!doctype html>
-<html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="dark"><title>AUTO-TRADE R6 · Control Center</title>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>AUTO-TRADE R6 · Control Center</title>
 <style>
-:root{--bg:#08100e;--panel:#0d1714;--line:#21352f;--text:#eaf3ef;--muted:#8fa69e;--green:#4fe09a;--amber:#ffcd6a;--red:#ff7c7c;--shadow:0 18px 60px rgba(0,0,0,.28)}*{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 12% -10%,#173c2f 0,transparent 34%),var(--bg);color:var(--text);font:14px/1.45 ui-sans-serif,-apple-system,BlinkMacSystemFont,"SF Pro Text",Inter,system-ui,sans-serif;min-height:100vh}button,input{font:inherit}.shell{max-width:1500px;margin:auto;padding:24px}.top{display:flex;gap:20px;align-items:flex-start;justify-content:space-between;margin-bottom:18px}.brand{display:flex;gap:14px;align-items:center}.logo{width:46px;height:46px;border:1px solid #2f6551;border-radius:14px;display:grid;place-items:center;background:linear-gradient(145deg,#153d2f,#0b1713);box-shadow:var(--shadow);font-weight:800;color:var(--green)}h1{font-size:22px;line-height:1.1;margin:0 0 5px}.subtitle{color:var(--muted);font-size:13px}.badges{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}.badge{padding:7px 10px;border-radius:999px;border:1px solid var(--line);background:#0b1512;color:var(--muted);font-size:12px;font-weight:700}.badge.good{border-color:#276447;color:#7ef0b5;background:#0e241b}.badge.warn{border-color:#66542b;color:var(--amber);background:#211b0c}.badge.bad{border-color:#633939;color:#ff9d9d;background:#241111}.grid{display:grid;grid-template-columns:1.02fr 1.5fr;gap:16px}.stack{display:grid;gap:16px}.card{border:1px solid var(--line);border-radius:18px;background:linear-gradient(180deg,rgba(17,31,26,.96),rgba(11,20,17,.97));box-shadow:var(--shadow);overflow:hidden}.cardHead{padding:15px 17px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;gap:12px}.cardHead h2{font-size:14px;margin:0}.cardBody{padding:16px 17px}.small{font-size:12px;color:var(--muted)}.field{display:grid;gap:6px;margin-bottom:12px}.field label{color:#a9bdb5;font-size:12px;font-weight:650}.input{width:100%;border:1px solid #2a4038;background:#08110e;color:var(--text);border-radius:11px;padding:10px 11px;outline:none}.input:focus{border-color:#3d8a6b;box-shadow:0 0 0 3px rgba(79,224,154,.08)}.row{display:grid;grid-template-columns:1fr 1fr;gap:10px}.btnrow{display:flex;gap:8px;flex-wrap:wrap}.btn{border:1px solid #2c493f;border-radius:11px;padding:9px 12px;background:#12201b;color:#dbeae4;cursor:pointer;font-weight:700}.btn:hover{transform:translateY(-1px);border-color:#3e705e;background:#162820}.btn:disabled{opacity:.45;cursor:not-allowed;transform:none}.btn.primary{background:linear-gradient(180deg,#2cbd7a,#1d9a64);border-color:#43d391;color:#03120c}.btn.ghost{background:transparent}.btn.danger{border-color:#623939;color:#ffaeae;background:#241313}.divider{height:1px;background:var(--line);margin:15px 0}.heroStatus{display:grid;grid-template-columns:1fr auto;gap:12px;align-items:start}.statusName{font-size:24px;font-weight:820;letter-spacing:-.02em;margin-bottom:4px}.statusReason{color:var(--muted)}.statusBox{padding:10px 12px;border-radius:12px;border:1px solid #325745;background:#0c2017;text-align:right}.statusBox b{display:block;color:var(--green);font-size:13px}.statusBox span{font-size:11px;color:var(--muted)}.timeline{display:grid;gap:7px;margin-top:14px}.gate{display:grid;grid-template-columns:26px 1fr auto;align-items:center;gap:9px;padding:8px 9px;border:1px solid transparent;border-radius:10px}.gate.current{border-color:#365b4c;background:#10241b}.dot{width:20px;height:20px;border-radius:7px;display:grid;place-items:center;background:#17231f;color:#72867f;font-size:11px;font-weight:900;border:1px solid #2a3934}.gate.done .dot{background:#133626;border-color:#256446;color:#72efaf}.gate.current .dot{background:#4fe09a;color:#05120d;border-color:#4fe09a}.gateName{font-size:12.5px;font-weight:700}.gateMeta{font-size:11px;color:var(--muted)}.pill{font-size:10px;padding:3px 6px;border-radius:999px;border:1px solid #2a4038;color:#91a89f}.gate.done .pill{color:#72e9ad;border-color:#24583f}.gate.current .pill{color:var(--amber);border-color:#705a28}.safety{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}.metric{padding:10px;border:1px solid var(--line);border-radius:11px;background:#0a1411}.metric span{display:block;font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:4px}.metric b{font-size:12px;color:#bfe9d6}.metric b.ok{color:var(--green)}.callout{border:1px solid #4a4023;background:#1b170b;border-radius:12px;padding:11px 12px;color:#f2dda6;font-size:12px}.callout strong{color:#ffe7a4}.log{background:#06100c;border:1px solid #24372f;border-radius:12px;padding:12px;min-height:190px;max-height:380px;overflow:auto;font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;white-space:pre-wrap;word-break:break-word;color:#b8d0c6}.log .ok{color:#67e7a8}.log .err{color:#ff9696}.log .muted{color:#738a81}.spinner{display:inline-block;width:12px;height:12px;border:2px solid #477262;border-top-color:transparent;border-radius:50%;animation:spin .75s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}.twoActions{display:grid;grid-template-columns:1fr 1fr;gap:8px}.actionTile{padding:13px;border:1px solid var(--line);border-radius:13px;background:#0b1512}.actionTile h3{font-size:13px;margin:0 0 4px}.actionTile p{font-size:11px;color:var(--muted);margin:0 0 10px}.footer{display:flex;justify-content:space-between;gap:14px;flex-wrap:wrap;color:#6f877e;font-size:11px;margin-top:16px;padding:0 4px}@media(max-width:980px){.grid{grid-template-columns:1fr}.top{flex-direction:column}.badges{justify-content:flex-start}.safety{grid-template-columns:1fr 1fr}}@media(max-width:600px){.shell{padding:14px}.row,.twoActions{grid-template-columns:1fr}.heroStatus{grid-template-columns:1fr}.statusBox{text-align:left}}
-</style></head><body><div class="shell">
-<div class="top"><div class="brand"><div class="logo">AT</div><div><h1>AUTO-TRADE R6 · Control Center</h1><div class="subtitle">Operación PAPER segura · plataforma local en tu Mac</div></div></div><div class="badges"><span class="badge good">PAPER WRITE · DISABLED</span><span class="badge good">LIVE · BLOCKED</span><span class="badge good">CAPITAL · NONE</span><span class="badge">LOCALHOST ONLY</span></div></div>
-<div class="grid"><div class="stack">
-<section class="card"><div class="cardHead"><h2>Workspace operativo</h2><span id="bundleBadge" class="badge">Cargando…</span></div><div class="cardBody"><div class="field"><label>Ruta privada del workspace</label><input id="workspace" class="input" autocomplete="off" spellcheck="false"></div><div class="btnrow"><button class="btn primary" data-action="init_workspace">Crear / inicializar</button><button class="btn" data-action="doctor">Doctor</button><button class="btn" data-action="status">Actualizar estado</button><button class="btn ghost" data-action="readiness">Readiness técnico</button></div><div class="divider"></div><div class="safety"><div class="metric"><span>Source head</span><b id="sourceHead">—</b></div><div class="metric"><span>Runtime</span><b id="runtimeState">—</b></div><div class="metric"><span>Broker write</span><b class="ok">DISABLED</b></div><div class="metric"><span>LIVE</span><b class="ok">BLOCKED</b></div></div></div></section>
-<section class="card"><div class="cardHead"><h2>Conexión Alpaca PAPER · sólo GET</h2><span class="badge good">NO POST</span></div><div class="cardBody"><div class="callout"><strong>Las credenciales no se guardan.</strong> Viven sólo en esta página mientras está abierta y se pasan únicamente al proceso hijo del GET explícito que pulses.</div><div style="height:12px"></div><div class="row"><div class="field"><label>PAPER Key ID</label><input id="paperKey" class="input" type="password" autocomplete="off"></div><div class="field"><label>PAPER Secret</label><input id="paperSecret" class="input" type="password" autocomplete="off"></div></div><div class="row"><div class="field"><label>PAPER Account ID esperado</label><input id="accountId" class="input" autocomplete="off"></div><div class="field"><label>Símbolo</label><input id="symbol" class="input" value="AAPL" maxlength="16" autocomplete="off"></div></div><div class="twoActions"><div class="actionTile"><h3>1 · Account</h3><p>Un GET de cuenta PAPER.</p><button class="btn" data-action="account_preflight">Ejecutar Account GET</button></div><div class="actionTile"><h3>2 · Asset</h3><p>US equity activo y tradable.</p><button class="btn" data-action="asset_preflight">Ejecutar Asset GET</button></div><div class="actionTile"><h3>3 · Flat account</h3><p>Exige 0 posiciones y 0 órdenes abiertas.</p><button class="btn" data-action="flat_account_preflight">Verificar cuenta plana</button></div><div class="actionTile"><h3>4 · Market IEX</h3><p>Snapshot IEX del símbolo.</p><button class="btn" data-action="market_preflight">Leer mercado IEX</button></div></div><div class="btnrow" style="margin-top:10px"><button id="clearCredentials" class="btn danger">Borrar credenciales de la página</button></div></div></section>
-<section class="card"><div class="cardHead"><h2>Acciones locales certificadas</h2><span class="badge good">OFFLINE</span></div><div class="cardBody"><div class="twoActions"><div class="actionTile"><h3>Candidate</h3><p>CapitalSafetyKernel real + OMS VALIDATED; sin POST.</p><button class="btn" data-action="build_candidate">Construir candidata</button></div><div class="actionTile"><h3>Preparation</h3><p>Congela package/bracket determinista.</p><button class="btn" data-action="prepare_candidate">Preparar bracket</button></div><div class="actionTile"><h3>Review receipt</h3><p>Después de la primera decisión humana congela lo revisado.</p><button class="btn" data-action="review_receipt">Generar review receipt</button></div><div class="actionTile"><h3>Safety rehearsal</h3><p>Ensayo local del kernel.</p><button class="btn" data-action="safety_rehearsal">Probar Capital Safety</button></div></div><div class="btnrow" style="margin-top:10px"><button class="btn ghost" data-action="rehearsal">Rehearsal completo</button><a class="btn ghost" href="/runbook" target="_blank" rel="noreferrer" style="text-decoration:none">Abrir runbook</a></div></div></section>
-</div><div class="stack">
-<section class="card"><div class="cardHead"><h2>Estado pre-canary</h2><span id="statusBadge" class="badge">Sin leer</span></div><div class="cardBody"><div class="heroStatus"><div><div id="statusName" class="statusName">Workspace sin inspeccionar</div><div id="statusReason" class="statusReason">Crea o selecciona un workspace y pulsa “Actualizar estado”.</div></div><div class="statusBox"><b id="nextAction">SIN AUTORIDAD DE POST</b><span>próximo gate seguro</span></div></div><div id="timeline" class="timeline"></div></div></section>
-<section class="card"><div class="cardHead"><h2>Fronteras humanas / ejecución</h2><span class="badge warn">SEPARADAS</span></div><div class="cardBody"><div class="callout"><strong>Este dashboard se detiene antes de la autoridad de ejecución.</strong> La primera decisión humana, segunda intención receipt-bound, reviewed Final Freshness, staging y cualquier POST permanecen fuera del dashboard. READY sólo significa “listo para el gate indicado”.</div><div class="timeline"><div class="gate"><div class="dot">H1</div><div><div class="gateName">Primera decisión humana</div><div class="gateMeta">TTY interactivo y challenge exacto</div></div><span class="pill">fuera del dashboard</span></div><div class="gate"><div class="dot">H2</div><div><div class="gateName">Segunda intención humana</div><div class="gateMeta">ligada al review receipt</div></div><span class="pill">fuera del dashboard</span></div><div class="gate"><div class="dot">5G</div><div><div class="gateName">Reviewed Final Freshness</div><div class="gateMeta">cinco GETs + Safety, ventana ≤5 s</div></div><span class="pill">fuera del dashboard</span></div><div class="gate"><div class="dot">!</div><div><div class="gateName">Staging / One-shot POST</div><div class="gateMeta">UNKNOWN-before-POST + no blind retry</div></div><span class="pill">NO DISPONIBLE</span></div></div></div></section>
-<section class="card"><div class="cardHead"><h2>Actividad</h2><div id="busy" class="small"></div></div><div class="cardBody"><div id="log" class="log"><span class="muted">Control Center listo. Ninguna orden puede enviarse desde esta pantalla.</span></div></div></section>
-</div></div><div class="footer"><span>AUTO-TRADE R6 · local control plane</span><span>Connectivity ≠ profitability · PAPER evidence no promueve LIVE</span></div></div>
+:root{
+  --bg:#07100d;--panel:#0d1714;--panel2:#101d18;--line:#21352f;--line2:#315247;
+  --text:#edf5f1;--muted:#91a79f;--green:#4fe09a;--green2:#173e2e;--amber:#ffcd6a;
+  --red:#ff8b8b;--blue:#8ec5ff;--shadow:0 18px 60px rgba(0,0,0,.28)
+}
+*{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;min-height:100vh;background:radial-gradient(circle at 12% -10%,#173c2f 0,transparent 34%),var(--bg);color:var(--text);font:14px/1.48 ui-sans-serif,-apple-system,BlinkMacSystemFont,"SF Pro Text",Inter,system-ui,sans-serif}
+button,input{font:inherit}.shell{max-width:1460px;margin:auto;padding:22px}.top{display:flex;gap:18px;align-items:flex-start;justify-content:space-between;margin-bottom:16px}.brand{display:flex;gap:14px;align-items:center}.logo{width:48px;height:48px;border:1px solid #2f6551;border-radius:15px;display:grid;place-items:center;background:linear-gradient(145deg,#153d2f,#0b1713);box-shadow:var(--shadow);font-weight:900;color:var(--green)}h1{font-size:22px;line-height:1.1;margin:0 0 5px}.subtitle{color:var(--muted);font-size:13px}.badges{display:flex;gap:7px;flex-wrap:wrap;justify-content:flex-end}.badge{padding:6px 9px;border-radius:999px;border:1px solid var(--line);background:#0b1512;color:var(--muted);font-size:11px;font-weight:800}.badge.good{border-color:#276447;color:#7ef0b5;background:#0e241b}.badge.warn{border-color:#66542b;color:var(--amber);background:#211b0c}.badge.bad{border-color:#633939;color:#ff9d9d;background:#241111}
+.card{border:1px solid var(--line);border-radius:18px;background:linear-gradient(180deg,rgba(17,31,26,.97),rgba(10,19,16,.98));box-shadow:var(--shadow);overflow:hidden}.cardHead{padding:14px 17px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;gap:12px}.cardHead h2{font-size:14px;margin:0}.cardBody{padding:16px 17px}
+.start{display:grid;grid-template-columns:1.35fr .9fr;gap:16px;margin-bottom:16px}.hero{padding:21px}.eyebrow{font-size:11px;text-transform:uppercase;letter-spacing:.11em;color:#76d8aa;font-weight:900}.hero h2{font-size:28px;line-height:1.12;margin:7px 0 8px;letter-spacing:-.025em}.hero p{margin:0;color:#b4c8c0;max-width:800px}.heroActions{display:flex;gap:9px;flex-wrap:wrap;margin-top:17px}.btn{border:1px solid #2c493f;border-radius:11px;padding:9px 12px;background:#12201b;color:#dbeae4;cursor:pointer;font-weight:800}.btn:hover{transform:translateY(-1px);border-color:#3e705e;background:#162820}.btn:disabled{opacity:.38;cursor:not-allowed;transform:none}.btn.primary{background:linear-gradient(180deg,#2cbd7a,#1d9a64);border-color:#43d391;color:#03120c}.btn.ghost{background:transparent}.btn.danger{border-color:#623939;color:#ffaeae;background:#241313}.btn.big{padding:12px 15px;font-size:14px}.btn.link{display:inline-flex;text-decoration:none;align-items:center}
+.quickFacts{display:grid;gap:9px;padding:17px}.fact{border:1px solid var(--line);border-radius:13px;padding:11px 12px;background:#0a1511}.fact b{display:block;font-size:12px;margin-bottom:3px}.fact span{display:block;font-size:11px;color:var(--muted)}
+.modeGrid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}.mode{border:1px solid var(--line);border-radius:15px;background:#0a1511;padding:15px;min-height:190px;display:flex;flex-direction:column}.mode.recommended{border-color:#2f6e55;background:linear-gradient(180deg,#10271d,#0a1511)}.mode.locked{opacity:.78}.modeTag{font-size:10px;text-transform:uppercase;letter-spacing:.1em;font-weight:900;color:#78e5b1}.mode.locked .modeTag{color:var(--amber)}.mode h3{font-size:16px;margin:6px 0}.mode p{font-size:12px;color:var(--muted);margin:0 0 10px}.mode ul{padding-left:17px;margin:0 0 13px;color:#b8cbc4;font-size:11px}.mode .bottom{margin-top:auto}
+.sectionGrid{display:grid;grid-template-columns:1.05fr 1.35fr;gap:16px;margin-top:16px}.stack{display:grid;gap:16px}.small{font-size:11px;color:var(--muted)}.field{display:grid;gap:6px;margin-bottom:11px}.field label{color:#a9bdb5;font-size:11px;font-weight:750}.input{width:100%;border:1px solid #2a4038;background:#08110e;color:var(--text);border-radius:11px;padding:10px 11px;outline:none}.input:focus{border-color:#3d8a6b;box-shadow:0 0 0 3px rgba(79,224,154,.08)}.row{display:grid;grid-template-columns:1fr 1fr;gap:10px}.btnrow{display:flex;gap:8px;flex-wrap:wrap}.divider{height:1px;background:var(--line);margin:14px 0}.safety{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}.metric{padding:10px;border:1px solid var(--line);border-radius:11px;background:#0a1411}.metric span{display:block;font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:4px}.metric b{font-size:11px;color:#bfe9d6}.metric b.ok{color:var(--green)}
+.guide{display:grid;gap:9px}.step{border:1px solid var(--line);border-radius:14px;background:#0a1511;padding:12px}.step.current{border-color:#38735b;background:#10241b}.step.done{border-color:#24543e}.step.locked{opacity:.5}.stepTop{display:grid;grid-template-columns:30px 1fr auto;gap:10px;align-items:start}.stepNo{width:28px;height:28px;border-radius:9px;display:grid;place-items:center;border:1px solid #30463e;background:#111f1a;font-weight:900;color:#8aa097}.step.done .stepNo{background:#153627;color:#72efaf;border-color:#286548}.step.current .stepNo{background:var(--green);color:#04120c;border-color:var(--green)}.step h3{font-size:13px;margin:0 0 2px}.step p{font-size:11px;color:var(--muted);margin:0}.stepAction{margin-top:9px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}.why{font-size:10px;color:#7f968e}
+.callout{border:1px solid #4a4023;background:#1b170b;border-radius:12px;padding:11px 12px;color:#f2dda6;font-size:11px}.callout strong{color:#ffe7a4}.callout.green{border-color:#285844;background:#0d2118;color:#bcebd4}.callout.blue{border-color:#2d4d68;background:#0c1924;color:#c9e5ff}.plain{font-size:12px;color:#aabfb7}
+.heroStatus{display:grid;grid-template-columns:1fr auto;gap:12px;align-items:start}.statusName{font-size:22px;font-weight:850;letter-spacing:-.02em;margin-bottom:4px}.statusReason{color:var(--muted);font-size:12px}.statusBox{padding:10px 12px;border-radius:12px;border:1px solid #325745;background:#0c2017;text-align:right;max-width:310px}.statusBox b{display:block;color:var(--green);font-size:12px}.statusBox span{font-size:10px;color:var(--muted)}
+.timeline{display:grid;gap:6px;margin-top:13px}.gate{display:grid;grid-template-columns:24px 1fr auto;align-items:center;gap:9px;padding:7px 8px;border:1px solid transparent;border-radius:10px}.gate.current{border-color:#365b4c;background:#10241b}.dot{width:20px;height:20px;border-radius:7px;display:grid;place-items:center;background:#17231f;color:#72867f;font-size:10px;font-weight:900;border:1px solid #2a3934}.gate.done .dot{background:#133626;border-color:#256446;color:#72efaf}.gate.current .dot{background:#4fe09a;color:#05120d;border-color:#4fe09a}.gateName{font-size:11.5px;font-weight:750}.gateMeta{font-size:10px;color:var(--muted)}.pill{font-size:9px;padding:3px 6px;border-radius:999px;border:1px solid #2a4038;color:#91a89f}.gate.done .pill{color:#72e9ad;border-color:#24583f}.gate.current .pill{color:var(--amber);border-color:#705a28}
+.log{background:#06100c;border:1px solid #24372f;border-radius:12px;padding:12px;min-height:130px;max-height:280px;overflow:auto;font:11px/1.52 ui-monospace,SFMono-Regular,Menlo,monospace;white-space:pre-wrap;word-break:break-word;color:#b8d0c6}.log .ok{color:#67e7a8}.log .err{color:#ff9696}.log .muted{color:#738a81}.spinner{display:inline-block;width:12px;height:12px;border:2px solid #477262;border-top-color:transparent;border-radius:50%;animation:spin .75s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}
+details.tech{margin-top:10px;border-top:1px solid var(--line);padding-top:9px}details.tech summary{cursor:pointer;color:#7f968e;font-size:10px}.footer{display:flex;justify-content:space-between;gap:14px;flex-wrap:wrap;color:#6f877e;font-size:10px;margin-top:16px;padding:0 4px}
+@media(max-width:1050px){.start,.sectionGrid{grid-template-columns:1fr}.modeGrid{grid-template-columns:1fr}.badges{justify-content:flex-start}.top{flex-direction:column}.safety{grid-template-columns:1fr 1fr}}
+@media(max-width:620px){.shell{padding:12px}.row{grid-template-columns:1fr}.hero h2{font-size:23px}.heroStatus{grid-template-columns:1fr}.statusBox{text-align:left}.safety{grid-template-columns:1fr 1fr}}
+</style>
+</head>
+<body>
+<div class="shell">
+  <div class="top">
+    <div class="brand">
+      <div class="logo">AT</div>
+      <div>
+        <h1>AUTO-TRADE R6 · Control Center</h1>
+        <div class="subtitle">Ensayo guiado en tu Mac · primero entender, luego conectar, después avanzar</div>
+      </div>
+    </div>
+    <div class="badges">
+      <span class="badge good">PAPER WRITE · DISABLED</span>
+      <span class="badge good">LIVE · BLOCKED</span>
+      <span class="badge good">CAPITAL · NONE</span>
+      <span class="badge">LOCALHOST ONLY</span>
+    </div>
+  </div>
+
+  <div class="start">
+    <section class="card hero">
+      <div class="eyebrow">Empieza aquí</div>
+      <h2>No necesitas saber qué botón tocar.</h2>
+      <p>Primero comprueba que AUTO-TRADE funciona completamente <strong>sin broker</strong>. Después, si quieres, conéctalo a <strong>Alpaca PAPER</strong> en modo lectura. Esta versión todavía no es un robot de estrategia ni necesita TradingView para el ensayo actual.</p>
+      <div class="heroActions">
+        <button id="safeTour" class="btn primary big">1 · Probar la app sin broker</button>
+        <button id="goPaper" class="btn big">2 · Conectar Alpaca PAPER</button>
+        <a class="btn ghost link" href="/runbook" target="_blank" rel="noreferrer">Ver explicación técnica</a>
+      </div>
+    </section>
+    <section class="card quickFacts">
+      <div class="fact"><b>¿Dónde se ensaya ahora?</b><span>En esta app + Alpaca PAPER. TradingView no es necesario para R6.</span></div>
+      <div class="fact"><b>¿Puede enviar una orden?</b><span>No desde este Control Center. Cualquier POST permanece fuera del dashboard.</span></div>
+      <div class="fact"><b>¿Esto prueba rentabilidad?</b><span>No. Prueba instalación, Safety, broker, datos y preparación segura.</span></div>
+    </section>
+  </div>
+
+  <section class="card">
+    <div class="cardHead"><h2>Qué puedes probar hoy</h2><span class="badge good">MODO GUIADO</span></div>
+    <div class="cardBody">
+      <div class="modeGrid">
+        <div class="mode recommended">
+          <div class="modeTag">Recomendado ahora</div>
+          <h3>A · Prueba segura local</h3>
+          <p>Comprueba instalación, runtime, workspace y Capital Safety sin credenciales ni internet del broker.</p>
+          <ul><li>No usa Alpaca</li><li>No usa dinero</li><li>No crea autoridad de ejecución</li></ul>
+          <div class="bottom"><button class="btn primary" id="safeTour2">Iniciar prueba segura</button></div>
+        </div>
+        <div class="mode">
+          <div class="modeTag">Segundo ensayo</div>
+          <h3>B · Alpaca PAPER, sólo lectura</h3>
+          <p>Comprueba que la cuenta, el activo y el mercado PAPER son los correctos antes de crear una canary local.</p>
+          <ul><li>4 lecturas guiadas</li><li>Cuenta debe estar plana</li><li>Sin orden POST</li></ul>
+          <div class="bottom"><button class="btn" id="goPaper2">Ir a conexión PAPER</button></div>
+        </div>
+        <div class="mode locked">
+          <div class="modeTag">Siguiente etapa de producto</div>
+          <h3>C · Strategy Lab</h3>
+          <p>Backtest, walk-forward, holdout, shadow/forward, comparación de estrategias y promoción controlada.</p>
+          <ul><li>El motor R1–R5 existe</li><li>La experiencia Mac todavía debe integrarse</li><li>TradingView sería opcional, no autoridad de ejecución</li></ul>
+          <div class="bottom"><span class="badge warn">AÚN NO EXPUESTO EN ESTA APP</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <div class="sectionGrid">
+    <div class="stack">
+      <section class="card" id="paperSection">
+        <div class="cardHead"><h2>Ensayo B · Conexión Alpaca PAPER</h2><span class="badge good">NO POST</span></div>
+        <div class="cardBody">
+          <div class="callout green"><strong>Las credenciales no se guardan.</strong> Se usan sólo para la lectura que tú pulses y puedes borrarlas de la página en cualquier momento.</div>
+          <div style="height:12px"></div>
+          <div class="row">
+            <div class="field"><label>PAPER Key ID</label><input id="paperKey" class="input" type="password" autocomplete="off"></div>
+            <div class="field"><label>PAPER Secret</label><input id="paperSecret" class="input" type="password" autocomplete="off"></div>
+          </div>
+          <div class="row">
+            <div class="field"><label>PAPER Account ID esperado</label><input id="accountId" class="input" autocomplete="off" placeholder="Cuenta PAPER que quieres verificar"></div>
+            <div class="field"><label>Símbolo para el ensayo</label><input id="symbol" class="input" value="AAPL" maxlength="16" autocomplete="off"></div>
+          </div>
+          <div class="callout blue"><strong>Importante:</strong> estos pasos no “ponen a tradear” el sistema. Sólo prueban que la app está mirando la cuenta PAPER, el activo y el mercado correctos.</div>
+          <div class="divider"></div>
+          <div id="paperGuide" class="guide"></div>
+          <div class="btnrow" style="margin-top:11px">
+            <button id="clearCredentials" class="btn danger">Borrar credenciales</button>
+            <button class="btn ghost" data-action="status">Releer estado</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="cardHead"><h2>Workspace y diagnóstico</h2><span id="bundleBadge" class="badge">Cargando…</span></div>
+        <div class="cardBody">
+          <div class="field"><label>Workspace privado</label><input id="workspace" class="input" autocomplete="off" spellcheck="false"></div>
+          <div class="btnrow">
+            <button class="btn" data-action="init_workspace">Crear / inicializar</button>
+            <button class="btn" data-action="doctor">Doctor</button>
+            <button class="btn ghost" data-action="readiness">Readiness técnico</button>
+          </div>
+          <div class="divider"></div>
+          <div class="safety">
+            <div class="metric"><span>Source head</span><b id="sourceHead">—</b></div>
+            <div class="metric"><span>Runtime</span><b id="runtimeState">—</b></div>
+            <div class="metric"><span>Broker write</span><b class="ok">DISABLED</b></div>
+            <div class="metric"><span>LIVE</span><b class="ok">BLOCKED</b></div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <div class="stack">
+      <section class="card">
+        <div class="cardHead"><h2>Tu progreso real</h2><span id="statusBadge" class="badge">Sin leer</span></div>
+        <div class="cardBody">
+          <div class="heroStatus">
+            <div>
+              <div id="statusName" class="statusName">Preparando tu ensayo</div>
+              <div id="statusReason" class="statusReason">La app leerá el workspace y te dirá exactamente cuál es el siguiente paso.</div>
+            </div>
+            <div class="statusBox"><b id="nextAction">SIN AUTORIDAD DE POST</b><span>próximo paso seguro</span></div>
+          </div>
+          <div id="timeline" class="timeline"></div>
+        </div>
+      </section>
+
+      <section class="card" id="localActions">
+        <div class="cardHead"><h2>Después de las 4 lecturas PAPER</h2><span class="badge good">LOCAL / OFFLINE</span></div>
+        <div class="cardBody">
+          <div id="localGuide" class="guide"></div>
+          <div class="divider"></div>
+          <div class="callout"><strong>La app se detiene a propósito.</strong> La primera decisión humana, segunda intención receipt-bound, reviewed Final Freshness, staging y cualquier POST están <strong>fuera del dashboard</strong>. Ese límite no es un error: es una protección.</div>
+          <div class="timeline">
+            <div class="gate"><div class="dot">H1</div><div><div class="gateName">Primera decisión humana</div><div class="gateMeta">TTY interactivo y challenge exacto</div></div><span class="pill">fuera del dashboard</span></div>
+            <div class="gate"><div class="dot">H2</div><div><div class="gateName">Segunda intención humana</div><div class="gateMeta">ligada al review receipt</div></div><span class="pill">fuera del dashboard</span></div>
+            <div class="gate"><div class="dot">5G</div><div><div class="gateName">Reviewed Final Freshness</div><div class="gateMeta">cinco GETs + Safety, ventana ≤5 s</div></div><span class="pill">fuera del dashboard</span></div>
+            <div class="gate"><div class="dot">!</div><div><div class="gateName">Staging / One-shot POST</div><div class="gateMeta">UNKNOWN-before-POST + no blind retry</div></div><span class="pill">NO DISPONIBLE</span></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="cardHead"><h2>Actividad entendible</h2><div id="busy" class="small"></div></div>
+        <div class="cardBody">
+          <div id="log" class="log"><span class="muted">Listo. Empieza con “Probar la app sin broker”.</span></div>
+          <details class="tech"><summary>Qué significa esta versión</summary><div class="plain" style="padding-top:8px">R6 prueba la infraestructura de PAPER y las fronteras de seguridad. No es todavía la pantalla final de creación/selección de estrategias. El siguiente bloque de producto será integrar Research/Backtest/Strategy Health en un Strategy Lab usable en Mac.</div></details>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <div class="footer">
+    <span>AUTO-TRADE R6 · local control plane</span>
+    <span>Connectivity ≠ profitability · PAPER evidence no promueve LIVE</span>
+  </div>
+</div>
+
 <script>
-const CSRF="__CSRF_TOKEN__",$=id=>document.getElementById(id);const state={busy:false};const gateDefs=[["account","Account PAPER"],["asset","Asset / venue"],["flat","Cuenta plana"],["market","Market IEX"],["candidate","CONNECTIVITY_CANARY"],["preparation","Preparation / bracket"],["first_operator_decision","1ª decisión humana"],["review_receipt","Review receipt"],["second_execution_intent","2ª intención humana"],["reviewed_final_freshness","Final Freshness"]];
-function esc(v){return String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));}function setBusy(on,label=""){state.busy=on;document.querySelectorAll("button[data-action]").forEach(b=>b.disabled=on);$("busy").innerHTML=on?`<span class="spinner"></span> ${esc(label)}`:"";}function logLine(title,r){const b=$("log"),ok=r.ok,time=new Date().toLocaleTimeString(),out=(r.stdout||"").trim(),err=(r.stderr||r.error||"").trim();b.innerHTML+=`\n\n<span class="${ok?'ok':'err'}">[${esc(time)}] ${ok?'PASS':'BLOCKED'} · ${esc(title)}</span>`+(out?`\n${esc(out)}`:"")+(err?`\n<span class="err">${esc(err)}</span>`:"");b.scrollTop=b.scrollHeight;}function payload(action){return{action,workspace:$("workspace").value.trim(),paper_key:$("paperKey").value,paper_secret:$("paperSecret").value,account_id:$("accountId").value.trim(),symbol:$("symbol").value.trim().toUpperCase()||"AAPL",quantity:"0.25",limit_price:"100"};}
-async function call(action,silent=false){if(state.busy&&!silent)return;!silent&&setBusy(true,action);try{const r=await fetch("/api/action",{method:"POST",headers:{"Content-Type":"application/json","X-CSRF-Token":CSRF},body:JSON.stringify(payload(action)),cache:"no-store"}),d=await r.json();if(!silent)logLine(action,d);if(action==="status"&&d.json)render(d.json);else if(!["rehearsal","safety_rehearsal"].includes(action))await refresh(true);return d}catch(e){!silent&&logLine(action,{ok:false,error:e.message})}finally{!silent&&setBusy(false)}}async function refresh(silent=false){if(!$("workspace").value.trim())return;try{const r=await fetch("/api/action",{method:"POST",headers:{"Content-Type":"application/json","X-CSRF-Token":CSRF},body:JSON.stringify({action:"status",workspace:$("workspace").value.trim()}),cache:"no-store"}),d=await r.json();if(d.json)render(d.json);else if(!silent)logLine("status",d)}catch(e){!silent&&logLine("status",{ok:false,error:e.message})}}
-function done(s,k){const a=s.artifact_chain||{};if(k==="account")return!!s.account_attested;if(k==="asset")return!!s.asset_evidence_present;if(k==="flat")return!!s.flat_account_evidence_present&&s.flat_account_clean_for_first_canary===true;if(k==="market")return!!s.market_evidence_present;return!!a[k]}function cur(s){return({ACCOUNT_PREFLIGHT_REQUIRED:"account",ASSET_PREFLIGHT_REQUIRED:"asset",FLAT_ACCOUNT_PREFLIGHT_REQUIRED:"flat",PAPER_ACCOUNT_NOT_PROVEN_FLAT:"flat",MARKET_DATA_PREFLIGHT_REQUIRED:"market",CONNECTIVITY_CANDIDATE_REQUIRED:"candidate",OFFLINE_PREPARATION_REQUIRED:"preparation",FIRST_HUMAN_DECISION_REQUIRED:"first_operator_decision",REVIEW_RECEIPT_REQUIRED:"review_receipt",SECOND_HUMAN_EXECUTION_INTENT_REQUIRED:"second_execution_intent",REVIEWED_FINAL_FRESHNESS_REQUIRED:"reviewed_final_freshness",REVIEWED_FINAL_FRESHNESS_EXPIRED:"reviewed_final_freshness"})[s.stage_or_blocker]||null}function human(s){return String(s||"").replaceAll("_"," ")}function render(s){const st=s.status||"NOT_READY",c=cur(s);$("statusName").textContent=human(st);$("statusReason").textContent=human(s.stage_or_blocker||s.reason||"Sin detalle");$("nextAction").textContent=human(s.next_safe_action||"STOP / REVIEW");$("statusBadge").textContent=st;$("statusBadge").className="badge "+(st.startsWith("READY")?"warn":st==="RECONCILIATION_ONLY"?"bad":"");$("timeline").innerHTML=gateDefs.map(([k,n])=>{const d=done(s,k),cc=k===c,cls=d?"done":cc?"current":"";return`<div class="gate ${cls}"><div class="dot">${d?'✓':cc?'→':'·'}</div><div><div class="gateName">${esc(n)}</div><div class="gateMeta">${d?'evidencia / artifact presente':cc?'siguiente gate':'pendiente'}</div></div><span class="pill">${d?'PASS':cc?'NEXT':'WAIT'}</span></div>`}).join("")}
-async function meta(){try{const r=await fetch("/api/meta",{cache:"no-store"}),d=await r.json(),m=d.meta;$("workspace").value=m.default_workspace||"";$("sourceHead").textContent=(m.source_head||"UNKNOWN").slice(0,12);$("runtimeState").textContent=m.installed?"INSTALLED":"MISSING";$("bundleBadge").textContent=m.bundle_mode||"BUNDLE";$("bundleBadge").className="badge "+(m.bundle_mode==="FULL_STANDALONE"?"good":"warn");await refresh(true)}catch(e){logLine("meta",{ok:false,error:e.message})}}document.querySelectorAll("button[data-action]").forEach(b=>b.addEventListener("click",()=>call(b.dataset.action)));$("clearCredentials").addEventListener("click",()=>{$("paperKey").value="";$("paperSecret").value="";logLine("credenciales",{ok:true,stdout:"Credenciales PAPER borradas de esta página."})});$("symbol").addEventListener("input",e=>e.target.value=e.target.value.toUpperCase().replace(/[^A-Z0-9.\-]/g,"").slice(0,16));meta();
-</script></body></html>
+const CSRF="__CSRF_TOKEN__",$=id=>document.getElementById(id);
+const state={busy:false,status:null,localTour:false};
+const gateDefs=[
+  ["account","Cuenta PAPER"],
+  ["asset","Activo / venue"],
+  ["flat","Cuenta plana"],
+  ["market","Mercado IEX"],
+  ["candidate","Canary de conectividad"],
+  ["preparation","Preparación / bracket"],
+  ["first_operator_decision","1ª decisión humana"],
+  ["review_receipt","Review receipt"],
+  ["second_execution_intent","2ª intención humana"],
+  ["reviewed_final_freshness","Final Freshness"]
+];
+const stageMap={
+  ACCOUNT_PREFLIGHT_REQUIRED:"account",
+  ASSET_PREFLIGHT_REQUIRED:"asset",
+  FLAT_ACCOUNT_PREFLIGHT_REQUIRED:"flat",
+  PAPER_ACCOUNT_NOT_PROVEN_FLAT:"flat",
+  MARKET_DATA_PREFLIGHT_REQUIRED:"market",
+  CONNECTIVITY_CANDIDATE_REQUIRED:"candidate",
+  OFFLINE_PREPARATION_REQUIRED:"preparation",
+  FIRST_HUMAN_DECISION_REQUIRED:"first_operator_decision",
+  REVIEW_RECEIPT_REQUIRED:"review_receipt",
+  SECOND_HUMAN_EXECUTION_INTENT_REQUIRED:"second_execution_intent",
+  REVIEWED_FINAL_FRESHNESS_REQUIRED:"reviewed_final_freshness",
+  REVIEWED_FINAL_FRESHNESS_EXPIRED:"reviewed_final_freshness"
+};
+const actionForGate={
+  account:"account_preflight",asset:"asset_preflight",flat:"flat_account_preflight",market:"market_preflight",
+  candidate:"build_candidate",preparation:"prepare_candidate",review_receipt:"review_receipt"
+};
+const labels={
+  account_preflight:"Verificar cuenta PAPER",
+  asset_preflight:"Verificar activo",
+  flat_account_preflight:"Confirmar cuenta plana",
+  market_preflight:"Leer mercado IEX",
+  build_candidate:"Construir canary local",
+  prepare_candidate:"Preparar bracket",
+  review_receipt:"Generar review receipt"
+};
+function esc(v){return String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));}
+function human(v){return String(v||"").replaceAll("_"," ").toLowerCase().replace(/(^|\s)\S/g,s=>s.toUpperCase());}
+function currentGate(){return stageMap[state.status?.stage_or_blocker]||null;}
+function hasCredentials(){return $("paperKey").value.trim()!==""&&$("paperSecret").value.trim()!=="";}
+function done(s,k){
+  const a=s?.artifact_chain||{};
+  if(k==="account")return!!s?.account_attested;
+  if(k==="asset")return!!s?.asset_evidence_present;
+  if(k==="flat")return!!s?.flat_account_evidence_present&&s?.flat_account_clean_for_first_canary===true;
+  if(k==="market")return!!s?.market_evidence_present;
+  return!!a[k];
+}
+function friendlyError(action,r){
+  const text=String(r.stderr||r.error||"");
+  if(text.includes("account_attestation.json"))return"Primero debes completar el paso Cuenta PAPER. La app bloqueó correctamente el intento.";
+  if(text.includes("connectivity_candidate.json"))return"Primero debes construir la canary local. La preparación no puede adelantarse.";
+  if(text.includes("connectivity preparation must be a regular file"))return"El review receipt todavía no corresponde: antes faltan la preparación y la primera decisión humana.";
+  if(text.includes("PAPER key and secret"))return"Completa PAPER Key ID y PAPER Secret para esta lectura.";
+  if(text.includes("Expected Alpaca PAPER account ID"))return"Completa el Account ID de la cuenta PAPER que quieres verificar.";
+  if(text.includes("Workspace does not exist"))return"Primero crea el workspace privado.";
+  if(text.includes("not proven flat")||text.includes("open order")||text.includes("position"))return"El flujo exige una cuenta PAPER sin posiciones ni órdenes abiertas.";
+  if(text.trim())return"El sistema bloqueó este paso. Revisa el diagnóstico técnico si necesitas el detalle.";
+  return"El paso no pudo completarse.";
+}
+function successSummary(action,r){
+  const j=r.json||{};
+  if(action==="init_workspace")return"Workspace listo. Ya existe un lugar privado para guardar la evidencia del ensayo.";
+  if(action==="doctor")return"Doctor PASS. Runtime e instalación base están correctos.";
+  if(action==="safety_rehearsal"){
+    const d=j.risk_decision||{};
+    return`Capital Safety PASS. Resultado local: ${d.status||"OK"} · broker usado: NO · orden enviada: NO.`;
+  }
+  if(action==="rehearsal")return"Rehearsal completo PASS. La base técnica local superó sus verificaciones.";
+  if(action==="account_preflight")return"Cuenta PAPER verificada por lectura. No se envió ninguna orden.";
+  if(action==="asset_preflight")return"Activo verificado como US equity utilizable para el ensayo R6.";
+  if(action==="flat_account_preflight")return"Cuenta PAPER plana confirmada: sin posiciones ni órdenes abiertas.";
+  if(action==="market_preflight")return"Mercado IEX leído y ligado al símbolo del ensayo.";
+  if(action==="build_candidate")return"Canary de conectividad construida localmente con Capital Safety + OMS. Todavía no hay POST.";
+  if(action==="prepare_candidate")return"Bracket preparado offline. La app llegó correctamente al límite de decisión humana.";
+  if(action==="review_receipt")return"Review receipt generado. El payload revisado quedó congelado.";
+  if(action==="status"||action==="readiness")return`Estado actualizado: ${human(j.stage_or_blocker||j.phase||j.status||"OK")}.`;
+  return"Paso completado correctamente.";
+}
+function logLine(title,r){
+  const b=$("log"),ok=!!r.ok,time=new Date().toLocaleTimeString();
+  const summary=ok?successSummary(title,r):friendlyError(title,r);
+  const technical=((r.stdout||"").trim()+"\n"+(r.stderr||r.error||"").trim()).trim();
+  b.innerHTML+=`\n\n<span class="${ok?'ok':'err'}">[${esc(time)}] ${ok?'PASS':'BLOQUEADO'} · ${esc(labels[title]||title)}</span>\n${esc(summary)}`+
+    (technical?`\n<details class="tech"><summary>Diagnóstico técnico</summary>${esc(technical)}</details>`:"");
+  b.scrollTop=b.scrollHeight;
+}
+function payload(action){return{
+  action,
+  workspace:$("workspace").value.trim(),
+  paper_key:$("paperKey").value,
+  paper_secret:$("paperSecret").value,
+  account_id:$("accountId").value.trim(),
+  symbol:$("symbol").value.trim().toUpperCase()||"AAPL",
+  quantity:"0.25",
+  limit_price:"100"
+};}
+function setBusy(on,label=""){
+  state.busy=on;
+  $("busy").innerHTML=on?`<span class="spinner"></span> ${esc(label)}`:"";
+  applyGuards();
+}
+async function request(action,showLog=true){
+  try{
+    const r=await fetch("/api/action",{method:"POST",headers:{"Content-Type":"application/json","X-CSRF-Token":CSRF},body:JSON.stringify(payload(action)),cache:"no-store"});
+    const d=await r.json();
+    if(showLog)logLine(action,d);
+    if(action==="status"&&d.json)render(d.json);
+    return d;
+  }catch(e){
+    const d={ok:false,error:e.message};
+    if(showLog)logLine(action,d);
+    return d;
+  }
+}
+async function refresh(showLog=false){
+  if(!$("workspace").value.trim())return;
+  const d=await request("status",showLog);
+  if(d.json)render(d.json);
+}
+async function call(action){
+  if(state.busy)return;
+  setBusy(true,labels[action]||action);
+  try{
+    const d=await request(action,true);
+    if(d.ok&&!["rehearsal","safety_rehearsal","status"].includes(action))await refresh(false);
+    if(action==="status"&&d.json)render(d.json);
+  }finally{setBusy(false);}
+}
+async function safeTour(){
+  if(state.busy)return;
+  state.localTour=true;setBusy(true,"Prueba segura local");
+  try{
+    const steps=["init_workspace","doctor","safety_rehearsal"];
+    for(const action of steps){
+      const d=await request(action,true);
+      if(!d.ok)break;
+    }
+    await refresh(false);
+    $("log").innerHTML+=`\n\n<span class="ok">PRUEBA LOCAL TERMINADA</span>\nSi viste PASS en Workspace, Doctor y Capital Safety, la instalación funciona. El siguiente ensayo opcional es Alpaca PAPER sólo lectura.`;
+    $("log").scrollTop=$("log").scrollHeight;
+  }finally{state.localTour=false;setBusy(false);}
+}
+function render(s){
+  state.status=s;
+  const st=s.status||"NOT_READY",c=currentGate();
+  $("statusName").textContent=st==="NOT_READY"?"Todavía no está listo para el siguiente gate":human(st);
+  $("statusReason").textContent=human(s.stage_or_blocker||s.reason||"Sin detalle");
+  $("nextAction").textContent=human(s.next_safe_action||"STOP / REVIEW");
+  $("statusBadge").textContent=st;
+  $("statusBadge").className="badge "+(st.startsWith("READY")?"warn":st==="RECONCILIATION_ONLY"?"bad":"");
+  $("timeline").innerHTML=gateDefs.map(([k,n])=>{
+    const d=done(s,k),cc=k===c,cls=d?"done":cc?"current":"";
+    return`<div class="gate ${cls}"><div class="dot">${d?'✓':cc?'→':'·'}</div><div><div class="gateName">${esc(n)}</div><div class="gateMeta">${d?'completado':cc?'haz esto ahora':'espera al paso anterior'}</div></div><span class="pill">${d?'PASS':cc?'SIGUIENTE':'ESPERA'}</span></div>`;
+  }).join("");
+  renderGuides();
+  applyGuards();
+}
+function stepHtml(key,title,desc,action,needsCred=false,external=false){
+  const c=currentGate(),d=done(state.status,key),active=c===key,locked=!d&&!active;
+  const cls=d?"done":active?"current":"locked";
+  let actionHtml="";
+  if(d) actionHtml='<span class="badge good">COMPLETADO</span>';
+  else if(external) actionHtml='<span class="badge warn">SE HACE FUERA DEL DASHBOARD</span>';
+  else actionHtml=`<button class="btn ${active?'primary':''}" data-guide-action="${esc(action)}" ${locked?'disabled':''}>${esc(labels[action]||"Continuar")}</button>`+
+    (needsCred?'<span class="why">requiere credenciales PAPER sólo para esta lectura</span>':'');
+  return`<div class="step ${cls}"><div class="stepTop"><div class="stepNo">${d?'✓':key==="account"?'1':key==="asset"?'2':key==="flat"?'3':key==="market"?'4':'→'}</div><div><h3>${esc(title)}</h3><p>${esc(desc)}</p></div></div><div class="stepAction">${actionHtml}</div></div>`;
+}
+function renderGuides(){
+  $("paperGuide").innerHTML=
+    stepHtml("account","1 · Verificar la cuenta PAPER","Confirma que las credenciales corresponden exactamente a la cuenta PAPER esperada.","account_preflight",true)+
+    stepHtml("asset","2 · Verificar el activo","Comprueba que el símbolo sea US equity activo y tradable.","asset_preflight",true)+
+    stepHtml("flat","3 · Confirmar cuenta plana","Debe haber 0 posiciones y 0 órdenes abiertas.","flat_account_preflight",true)+
+    stepHtml("market","4 · Leer mercado IEX","Obtiene un snapshot PAPER de mercado para el mismo símbolo.","market_preflight",true);
+  $("localGuide").innerHTML=
+    stepHtml("candidate","5 · Construir canary local","Capital Safety real + OMS VALIDATED. Sigue siendo una preparación local.","build_candidate")+
+    stepHtml("preparation","6 · Preparar bracket","Congela el paquete y la protección determinista sin broker write.","prepare_candidate")+
+    stepHtml("first_operator_decision","7 · Primera decisión humana","Aquí la interfaz se detiene. Es una frontera deliberada de autoridad.","",false,true)+
+    stepHtml("review_receipt","8 · Review receipt","Sólo se habilita después de la primera decisión humana válida.","review_receipt");
+  document.querySelectorAll("[data-guide-action]").forEach(b=>b.addEventListener("click",()=>call(b.dataset.guideAction)));
+}
+function applyGuards(){
+  const c=currentGate();
+  document.querySelectorAll("button[data-action]").forEach(b=>{
+    const a=b.dataset.action;
+    const gate=Object.keys(actionForGate).find(k=>actionForGate[k]===a);
+    let allowed=!state.busy;
+    if(gate)allowed=allowed&&c===gate;
+    if(["account_preflight","asset_preflight","flat_account_preflight","market_preflight"].includes(a))allowed=allowed&&hasCredentials();
+    if(a==="account_preflight")allowed=allowed&&$("accountId").value.trim()!=="";
+    b.disabled=!allowed;
+    if(!allowed&&!state.busy&&gate&&c!==gate)b.title="Completa primero el paso indicado como SIGUIENTE.";
+  });
+  document.querySelectorAll("[data-guide-action]").forEach(b=>{
+    const a=b.dataset.guideAction,gate=Object.keys(actionForGate).find(k=>actionForGate[k]===a);
+    let allowed=!state.busy&&c===gate;
+    if(["account_preflight","asset_preflight","flat_account_preflight","market_preflight"].includes(a))allowed=allowed&&hasCredentials();
+    if(a==="account_preflight")allowed=allowed&&$("accountId").value.trim()!=="";
+    b.disabled=!allowed;
+  });
+  $("safeTour").disabled=state.busy;$("safeTour2").disabled=state.busy;
+}
+function goPaper(){
+  $("paperSection").scrollIntoView({behavior:"smooth",block:"start"});
+  setTimeout(()=>$(hasCredentials()?"accountId":"paperKey").focus(),350);
+}
+async function meta(){
+  try{
+    const r=await fetch("/api/meta",{cache:"no-store"}),d=await r.json(),m=d.meta;
+    $("workspace").value=m.default_workspace||"";
+    $("sourceHead").textContent=(m.source_head||"UNKNOWN").slice(0,12);
+    $("runtimeState").textContent=m.installed?"INSTALLED":"MISSING";
+    $("bundleBadge").textContent=m.bundle_mode||"BUNDLE";
+    $("bundleBadge").className="badge "+(m.bundle_mode==="FULL_STANDALONE"?"good":"warn");
+    await refresh(false);
+  }catch(e){logLine("meta",{ok:false,error:e.message});}
+}
+document.querySelectorAll("button[data-action]").forEach(b=>b.addEventListener("click",()=>call(b.dataset.action)));
+$("safeTour").addEventListener("click",safeTour);$("safeTour2").addEventListener("click",safeTour);
+$("goPaper").addEventListener("click",goPaper);$("goPaper2").addEventListener("click",goPaper);
+$("clearCredentials").addEventListener("click",()=>{$("paperKey").value="";$("paperSecret").value="";applyGuards();logLine("credenciales",{ok:true,stdout:"Credenciales PAPER borradas de esta página."});});
+["paperKey","paperSecret","accountId"].forEach(id=>$(id).addEventListener("input",applyGuards));
+$("symbol").addEventListener("input",e=>e.target.value=e.target.value.toUpperCase().replace(/[^A-Z0-9.\-]/g,"").slice(0,16));
+meta();
+</script>
+</body>
+</html>
