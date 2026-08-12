@@ -1,6 +1,40 @@
 # AUTO-TRADE R6 — LÉEME PRIMERO EN MAC
 
-Este paquete **FULL/STANDALONE** está preparado para instalar y operar el tramo seguro de AUTO-TRADE desde una interfaz local, antes de cualquier orden PAPER real.
+Este paquete **FULL/STANDALONE** está preparado para instalar y ensayar el tramo seguro de AUTO-TRADE desde una interfaz local, antes de cualquier orden PAPER real.
+
+## Qué hacer apenas se abra
+
+No empieces tocando botones técnicos al azar. El Control Center nuevo está pensado en este orden:
+
+1. **Probar la app sin broker** — crea/inicializa el workspace, ejecuta Doctor y prueba el Capital Safety Kernel localmente. No usa credenciales, no llama a Alpaca y no puede enviar órdenes.
+2. **Conectar Alpaca PAPER, sólo lectura** — completa las cuatro lecturas guiadas: Account → Asset → Flat Account → Market IEX. La interfaz mantiene bloqueados los pasos que todavía no corresponden.
+3. **Construir la connectivity canary local** — sólo cuando las cuatro lecturas anteriores estén completas; después se prepara el bracket offline.
+4. La app se detiene antes de la primera autoridad humana. Ese límite es deliberado.
+
+Si intentas adelantarte, la interfaz debe impedirlo. Si una condición cambia y el backend bloquea de todos modos, la pantalla muestra primero una explicación simple y deja el traceback como diagnóstico secundario.
+
+## ¿Alpaca PAPER o TradingView?
+
+Para **R6**, el ensayo actual se hace en **AUTO-TRADE + Alpaca PAPER**. TradingView no es necesario para probar esta etapa.
+
+TradingView puede incorporarse después como capa visual, revisión de gráficos o fuente advisory de señales, pero no debe convertirse en una vía que salte Capital Safety, OMS, reconciliación o las decisiones humanas. La ejecución segura seguirá perteneciendo al pipeline determinista de AUTO-TRADE.
+
+## Qué es y qué todavía no es esta versión
+
+La app Mac actual sí permite comprobar:
+
+- instalación/runtime;
+- workspace y estado operativo;
+- Capital Safety local;
+- conexión PAPER read-only;
+- cuenta plana;
+- asset/venue;
+- mercado IEX;
+- construcción local de la connectivity canary;
+- preparación determinista del bracket;
+- progreso de los gates.
+
+Todavía **no es la experiencia final de estrategia**. R1–R5 ya contienen motores certificados de research, backtest, walk-forward, holdout, shadow/forward y Health, pero esa capacidad aún no está integrada como un **Strategy Lab** sencillo dentro de la app Mac. Esa es la siguiente capa de producto después de estabilizar el ensayo guiado R6.
 
 ## Si vienes de un intento anterior que terminó en `Killed: 9`
 
@@ -18,6 +52,7 @@ Este flujo se prueba en CI tanto en Apple Silicon como Intel partiendo de un ZIP
 4. El instalador verifica primero los manifiestos SHA-256 y después crea una copia operativa limpia en **`~/Applications/AUTO-TRADE-R6`**.
 5. Cuando termine en `AUTO-TRADE R6 INSTALL: OK`, abre **`~/Applications/AUTO-TRADE-R6/ABRIR_AUTO_TRADE.command`**. El `ABRIR_AUTO_TRADE.command` de la carpeta descargada también redirige automáticamente a esa instalación.
 6. Se abrirá **AUTO-TRADE R6 Control Center** en tu navegador. Mantén abierta la pequeña ventana de Terminal mientras usas la plataforma.
+7. Pulsa **`1 · Probar la app sin broker`**. Sólo después de que termine PASS tiene sentido pasar a Alpaca PAPER.
 
 Si macOS bloquea un `.command` por Gatekeeper, haz clic derecho sobre él → **Abrir** → **Abrir** una sola vez. No desactives Gatekeeper globalmente.
 
@@ -54,21 +89,22 @@ El bootstrap detecta `uname -m`, verifica hashes, extrae sólo el runtime corres
 
 ## Qué puedes hacer desde el Control Center sin escribir comandos
 
+- ejecutar un primer ensayo local guiado;
 - crear/inicializar el workspace privado;
 - ejecutar Doctor, rehearsal, Capital Safety y readiness;
 - ver `pre-canary-status`, el bloqueo actual y el siguiente gate;
 - ingresar temporalmente credenciales Alpaca PAPER;
-- ejecutar con botones los cuatro preflights GET-only: Account, Asset, Flat Account e IEX Market;
+- ejecutar guiados y en orden los cuatro preflights GET-only: Account, Asset, Flat Account e IEX Market;
 - construir la candidata `CONNECTIVITY_CANARY` local;
 - ejecutar la preparación determinista del bracket;
 - generar el review receipt después de la primera decisión humana;
-- revisar el historial/log de las acciones y el progreso de la cadena.
+- revisar un historial entendible y desplegar el detalle técnico sólo cuando haga falta.
 
-Las credenciales PAPER no se escriben en `.env`, archivos, `localStorage` ni `sessionStorage`. Se conservan sólo en los campos de la página mientras está abierta y se pasan al proceso hijo del GET explícito que pulses.
+Las credenciales PAPER no se escriben en `.env` ni en archivos de la aplicación. Se conservan sólo en los campos de la página mientras está abierta y se pasan al proceso hijo del GET explícito que pulses.
 
 ## Capital Safety sigue siendo el kernel real
 
-El botón **Probar Capital Safety** es un rehearsal local. No fabrica una aprobación ni sustituye el control crítico: la decisión se obtiene mediante `CapitalSafetyKernel.evaluate(...)` con los límites fijos del ensayo.
+El ensayo **Probar la app sin broker** incluye un rehearsal local del Capital Safety Kernel. No fabrica una aprobación ni sustituye el control crítico: la decisión se obtiene mediante `CapitalSafetyKernel.evaluate(...)` con los límites fijos del ensayo.
 
 Aunque el rehearsal resulte `APPROVED`, conserva explícitamente:
 
