@@ -65,6 +65,19 @@ def test_candidate_cli_refuses_credentials(tmp_path, monkeypatch) -> None:
         main(["--workspace", str(root)])
 
 
+def test_candidate_cli_refuses_workspace_symlink_before_resolve(tmp_path, monkeypatch) -> None:
+    real = tmp_path / "real"
+    real.mkdir()
+    link = tmp_path / "workspace-link"
+    link.symlink_to(real, target_is_directory=True)
+    monkeypatch.setenv("R6_EXTERNAL_PAPER_WRITE", "DISABLED")
+    monkeypatch.delenv("APCA_API_KEY_ID", raising=False)
+    monkeypatch.delenv("APCA_API_SECRET_KEY", raising=False)
+    _, main = namespace()
+    with pytest.raises(SystemExit, match="non-symlink"):
+        main(["--workspace", str(link)])
+
+
 def test_candidate_cli_happy_path_is_sanitized_and_non_authorizing(tmp_path, monkeypatch, capsys) -> None:
     root = tmp_path / "workspace"
     root.mkdir()
