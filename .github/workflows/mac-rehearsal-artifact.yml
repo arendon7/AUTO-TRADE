@@ -59,6 +59,18 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Seed certified provenance for detached CI checkout
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > MAC_BUILD_INFO.txt <<EOF
+          AUTO-TRADE R6 MAC CI CHECKOUT
+          source_head=$(git rev-parse HEAD)
+          package_mode=CI_CHECKOUT
+          external_paper_write=DISABLED
+          live_trading=BLOCKED
+          EOF
+
       - name: Restore executable entrypoints
         run: |
           chmod +x AUTO_TRADE_MAC.command
@@ -153,7 +165,7 @@ jobs:
           source_head=${SOURCE_SHA}
           branch=${GITHUB_HEAD_REF:-${GITHUB_REF_NAME}}
           package_mode=FULL_OFFLINE
-          architecture=arm64
+          architecture=universal2_runtime
           python_runtime=3.12.10_universal2_included
           websockets_runtime=16.1.1_wheel_included
           external_paper_write=DISABLED_BY_LAUNCHER
