@@ -6,12 +6,14 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 BOOTSTRAP = ROOT / "scripts/mac_bootstrap.sh"
+INSTALLER = ROOT / "INSTALAR_AUTO_TRADE.command"
+OPENER = ROOT / "ABRIR_AUTO_TRADE.command"
 WORKFLOW = ROOT / ".github/workflows/mac-standalone-full.yml"
 
 
 def main() -> int:
     errors: list[str] = []
-    for path in (BOOTSTRAP, WORKFLOW):
+    for path in (BOOTSTRAP, INSTALLER, OPENER, WORKFLOW):
         if not path.is_file():
             errors.append(f"required standalone artifact is missing: {path.relative_to(ROOT)}")
 
@@ -31,6 +33,10 @@ def main() -> int:
             'R6_EXTERNAL_PAPER_WRITE="DISABLED"',
             'unset APCA_API_KEY_ID',
             'unset APCA_API_SECRET_KEY',
+            'EXPECTED_INSTALL_ROOT="$HOME/Applications/AUTO-TRADE-R6"',
+            'FULL/STANDALONE runtime execution is allowed only from:',
+            'PYTHON_PROBE_STATUS',
+            'installation remains fail-closed',
         )
         for anchor in required:
             if anchor not in text:
@@ -49,6 +55,57 @@ def main() -> int:
             if forbidden in standalone_region:
                 errors.append(f"standalone bootstrap may not depend on network/execute surface: {forbidden}")
 
+    if INSTALLER.is_file():
+        text = INSTALLER.read_text(encoding="utf-8")
+        required = (
+            'INSTALL_ROOT="$HOME/Applications/AUTO-TRADE-R6"',
+            'verify_standalone_assets "$SOURCE_ROOT"',
+            'ditto --norsrc --noqtn "$SOURCE_ROOT" "$STAGE_ROOT"',
+            'verify_standalone_assets "$STAGE_ROOT"',
+            'if [[ -L "$INSTALL_ROOT" ]]',
+            'rm -rf "$STAGE_ROOT/.venv"',
+            '"$STAGE_ROOT/.runtime"',
+            'mv "$STAGE_ROOT" "$INSTALL_ROOT"',
+            'standalone_install_relocated=',
+            'export R6_EXTERNAL_PAPER_WRITE=DISABLED',
+            'unset APCA_API_KEY_ID',
+            'unset APCA_API_SECRET_KEY',
+        )
+        for anchor in required:
+            if anchor not in text:
+                errors.append(f"standalone installer anchor missing: {anchor}")
+        first_verify = text.find('verify_standalone_assets "$SOURCE_ROOT"')
+        clean_copy = text.find('ditto --norsrc --noqtn "$SOURCE_ROOT" "$STAGE_ROOT"')
+        second_verify = text.find('verify_standalone_assets "$STAGE_ROOT"')
+        promote = text.find('mv "$STAGE_ROOT" "$INSTALL_ROOT"')
+        if min(first_verify, clean_copy, second_verify, promote) < 0 or not (
+            first_verify < clean_copy < second_verify < promote
+        ):
+            errors.append("standalone installer must verify source -> clean-copy -> reverify stage -> promote")
+        for forbidden in (
+            "R6_EXTERNAL_PAPER_WRITE=ENABLED",
+            "r6_execute_paper_canary.py",
+            "alpaca_paper_writer",
+            "stage_external_submission",
+            "source .env",
+        ):
+            if forbidden in text:
+                errors.append(f"standalone installer contains forbidden authority surface: {forbidden}")
+
+    if OPENER.is_file():
+        text = OPENER.read_text(encoding="utf-8")
+        for anchor in (
+            'INSTALL_ROOT="$HOME/Applications/AUTO-TRADE-R6"',
+            'EXPECTED_HEAD="$(read_source_head "$SOURCE_ROOT")"',
+            'INSTALLED_HEAD="$(read_source_head "$INSTALL_ROOT")"',
+            'bash "$SOURCE_ROOT/INSTALAR_AUTO_TRADE.command"',
+            'ROOT="$INSTALL_ROOT"',
+            'scripts/mac_dashboard.py',
+            'export R6_EXTERNAL_PAPER_WRITE=DISABLED',
+        ):
+            if anchor not in text:
+                errors.append(f"standalone opener anchor missing: {anchor}")
+
     if WORKFLOW.is_file():
         text = WORKFLOW.read_text(encoding="utf-8")
         required = (
@@ -65,6 +122,13 @@ def main() -> int:
             "system_python_required=NO",
             "pypi_required_at_first_launch=NO",
             "external_order_submitted_by_build=NO",
+            "Simulate Safari/Finder quarantine",
+            "com.apple.quarantine",
+            'INSTALL_ROOT="$HOME/Applications/AUTO-TRADE-R6"',
+            "standalone_install_relocated=YES",
+            "installed embedded runtime retained Finder quarantine",
+            "Delete downloaded source and prove installed self-heal",
+            "installed_copy_self_heal=PASS",
         )
         for anchor in required:
             if anchor not in text:
@@ -76,7 +140,8 @@ def main() -> int:
         return 1
     print(
         "AUTO-TRADE Mac FULL/STANDALONE boundary: PASS "
-        "(embedded dual-arch Python + hashed offline wheelhouse; no Homebrew/system-Python/PyPI first-launch dependency; no execution authority)"
+        "(verified clean relocation outside downloaded quarantine + embedded dual-arch Python + hashed offline wheelhouse; "
+        "no Homebrew/system-Python/PyPI first-launch dependency; no execution authority)"
     )
     return 0
 
