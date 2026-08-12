@@ -25,6 +25,9 @@ Useful commands:
 
   bash scripts/mac_start.sh doctor
   bash scripts/mac_start.sh rehearsal
+  bash scripts/mac_start.sh safety-rehearsal
+  bash scripts/mac_start.sh safety-rehearsal --symbol AAPL --quantity 0.25
+  bash scripts/mac_start.sh safety-rehearsal --kill-switch
   bash scripts/mac_start.sh init-workspace "$HOME/AUTO-TRADE-R6/workspace-001"
   bash scripts/mac_start.sh readiness <WORKSPACE>
 
@@ -35,6 +38,7 @@ GET-only PAPER network steps, only after configuring PAPER credentials:
   bash scripts/mac_start.sh market-preflight <WORKSPACE> <SYMBOL>
 
 The first-canary path requires account -> flat account -> market in that order.
+Safety rehearsal is local-only and cannot authorize or send an external order.
 Any real PAPER order remains a separate command outside this safe launcher.
 EOF
 
@@ -54,6 +58,10 @@ case "${1:-}" in
   rehearsal)
     shift
     exec .venv/bin/python scripts/mac_safe_console.py rehearsal "$@"
+    ;;
+  safety-rehearsal)
+    shift
+    exec .venv/bin/python scripts/mac_safe_console.py safety-rehearsal "$@"
     ;;
   readiness)
     shift
