@@ -8,6 +8,7 @@ on:
       - "scripts/r6_connectivity_bound_final_freshness.py"
       - "scripts/check_r6_connectivity_execution_freshness_boundary.py"
       - "tests/test_r6_connectivity_execution_freshness_binding.py"
+      - "tests/test_r6_connectivity_execution_freshness_edges.py"
       - "tests/test_r6_connectivity_bound_final_freshness_cli.py"
       - ".github/workflows/r6-connectivity-execution-freshness.yml"
   pull_request:
@@ -16,6 +17,7 @@ on:
       - "scripts/r6_connectivity_bound_final_freshness.py"
       - "scripts/check_r6_connectivity_execution_freshness_boundary.py"
       - "tests/test_r6_connectivity_execution_freshness_binding.py"
+      - "tests/test_r6_connectivity_execution_freshness_edges.py"
       - "tests/test_r6_connectivity_bound_final_freshness_cli.py"
       - ".github/workflows/r6-connectivity-execution-freshness.yml"
   workflow_dispatch:
@@ -38,4 +40,4 @@ jobs:
       - name: Execution-intent to Final Freshness boundary
         run: python scripts/check_r6_connectivity_execution_freshness_boundary.py
       - name: Execution-intent bound Final Freshness tests
-        run: pytest -q tests/test_r6_connectivity_execution_freshness_binding.py tests/test_r6_connectivity_bound_final_freshness_cli.py
+        run: pytest -q tests/test_r6_connectivity_execution_freshness_binding.py tests/test_r6_connectivity_execution_freshness_edges.py tests/test_r6_connectivity_bound_final_freshness_cli.py
