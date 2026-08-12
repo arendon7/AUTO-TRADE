@@ -55,7 +55,7 @@ def test_connectivity_preparation_happy_path_stops_before_operator_and_post(tmp_
     payload = json.loads(prepared.artifact_path.read_text(encoding="utf-8"))
     assert payload["purpose"] == "CONNECTIVITY_CANARY"
     assert payload["expected_bracket"]["order_class"] == "bracket"
-    assert payload["expected_bracket"]["quantity"] == "1"
+    assert payload["expected_bracket"]["qty"] == "1"
     assert payload["expected_bracket"]["take_profit"]["limit_price"] == "5.12"
     assert payload["expected_bracket"]["stop_loss"]["stop_price"] == "4.95"
     for key in ("normal_prepared_package_created", "normal_expected_bracket_artifact_created", "operator_context_created", "normal_manifest_created", "strategy_health_required", "strategy_health_created", "strategy_trading_authorized", "operator_authority_created", "external_post_authorized", "external_order_submitted"):
