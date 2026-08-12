@@ -37,8 +37,9 @@ def test_finder_launcher_is_write_disabled_and_broker_inert() -> None:
         assert value not in source
 
 
-def test_finder_launcher_offers_only_safe_local_actions() -> None:
+def test_finder_launcher_offers_only_safe_operator_actions() -> None:
     source = LAUNCHER.read_text(encoding="utf-8")
+    assert "run_safe init-workspace" in source
     assert "run_safe doctor" in source
     assert "run_safe rehearsal" in source
     assert "run_safe readiness" in source

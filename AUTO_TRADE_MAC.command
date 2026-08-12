@@ -57,11 +57,12 @@ Modo actual:
   • LIVE trading: BLOCKED
   • Orden real desde este launcher: IMPOSIBLE
 
-1) Doctor local
-2) Ensayo offline completo
-3) Inspeccionar readiness de un workspace
-4) Abrir runbook de Mac
-5) Mostrar pasos GET-only de Alpaca PAPER
+1) Crear workspace privado
+2) Doctor local
+3) Ensayo offline completo
+4) Inspeccionar readiness de un workspace
+5) Abrir runbook de Mac
+6) Mostrar pasos GET-only de Alpaca PAPER
 0) Salir
 EOF
 }
@@ -73,12 +74,18 @@ while true; do
   echo
   case "$choice" in
     1)
-      run_safe doctor
+      default_workspace="$HOME/AUTO-TRADE-R6/workspace-001"
+      read -r -p "Ruta del nuevo workspace [$default_workspace]: " workspace
+      workspace="${workspace:-$default_workspace}"
+      run_safe init-workspace "$workspace"
       ;;
     2)
-      run_safe rehearsal
+      run_safe doctor
       ;;
     3)
+      run_safe rehearsal
+      ;;
+    4)
       read -r -p "Ruta del workspace (ej. $HOME/AUTO-TRADE-R6/workspace-001): " workspace
       if [[ -z "$workspace" ]]; then
         echo "Ruta vacía: no se ejecutó ninguna acción."
@@ -86,11 +93,11 @@ while true; do
         run_safe readiness "$workspace"
       fi
       ;;
-    4)
+    5)
       open "$ROOT/docs/MAC_PAPER_RUNBOOK.md" >/dev/null 2>&1 || \
         echo "Runbook: $ROOT/docs/MAC_PAPER_RUNBOOK.md"
       ;;
-    5)
+    6)
       cat <<'EOF'
 Pasos de red permitidos desde el Safe Start (GET-only):
 
