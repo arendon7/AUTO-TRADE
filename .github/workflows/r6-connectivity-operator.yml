@@ -8,6 +8,7 @@ on:
       - "scripts/r6_issue_connectivity_operator_decision.py"
       - "scripts/check_r6_connectivity_operator_boundary.py"
       - "tests/test_r6_connectivity_operator_decision.py"
+      - "tests/test_r6_connectivity_operator_edges.py"
       - "tests/test_r6_connectivity_operator_cli.py"
       - ".github/workflows/r6-connectivity-operator.yml"
   pull_request:
@@ -16,6 +17,7 @@ on:
       - "scripts/r6_issue_connectivity_operator_decision.py"
       - "scripts/check_r6_connectivity_operator_boundary.py"
       - "tests/test_r6_connectivity_operator_decision.py"
+      - "tests/test_r6_connectivity_operator_edges.py"
       - "tests/test_r6_connectivity_operator_cli.py"
       - ".github/workflows/r6-connectivity-operator.yml"
   workflow_dispatch:
@@ -38,4 +40,4 @@ jobs:
       - name: Connectivity operator authority boundary
         run: python scripts/check_r6_connectivity_operator_boundary.py
       - name: Connectivity operator functional and adversarial tests
-        run: pytest -q tests/test_r6_connectivity_operator_decision.py tests/test_r6_connectivity_operator_cli.py
+        run: pytest -q tests/test_r6_connectivity_operator_decision.py tests/test_r6_connectivity_operator_edges.py tests/test_r6_connectivity_operator_cli.py
