@@ -52,6 +52,7 @@ echo "LIVE trading: BLOCKED"
 "$PY" scripts/check_r6_operational_execution_boundary.py
 "$PY" scripts/check_r6_readiness_boundary.py
 "$PY" scripts/check_mac_rehearsal_boundary.py
+"$PY" scripts/check_mac_safe_console_boundary.py
 
 "$PY" -m pytest -q \
   tests/test_r6_paper_market_data.py \
@@ -62,7 +63,9 @@ echo "LIVE trading: BLOCKED"
   tests/test_r6_paper_readiness_failclosed.py \
   tests/test_r6_operational_prepare.py \
   tests/test_r6_operational_execute_validation.py \
-  tests/test_r6_execute_paper_canary_cli.py
+  tests/test_r6_execute_paper_canary_cli.py \
+  tests/test_mac_safe_console.py \
+  tests/test_mac_create_workspace.py
 
 cat <<'EOF'
 
@@ -72,6 +75,9 @@ No broker endpoint was called.
 No PAPER order was submitted.
 LIVE trading remains BLOCKED.
 
-Optional local workspace status:
-  .venv/bin/python scripts/mac_doctor.py --workspace <WORKSPACE>
+Safe local entry point:
+  bash scripts/mac_start.sh
+
+Create a private workspace:
+  bash scripts/mac_start.sh init-workspace "$HOME/AUTO-TRADE-R6/workspace-001"
 EOF
