@@ -43,6 +43,18 @@ def _git_branch(root: Path) -> str | None:
     return branch or None
 
 
+def _build_source_head(root: Path) -> str | None:
+    path = root / "MAC_BUILD_INFO.txt"
+    if not path.is_file() or path.is_symlink():
+        return None
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if line.startswith("source_head="):
+            value = line.split("=", 1)[1].strip()
+            if len(value) == 40 and all(ch in "0123456789abcdef" for ch in value.lower()):
+                return value
+    return None
+
+
 def _env_file_mode(root: Path) -> str:
     path = root / ".env"
     if not path.exists():
@@ -57,6 +69,10 @@ def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     root = Path(__file__).resolve().parents[1]
     branch = _git_branch(root)
+    source_head = _build_source_head(root)
+    packaged = branch is None and source_head is not None
+    provenance_mode = "CERTIFIED_PACKAGE" if packaged else ("GIT_BRANCH" if branch else "DETACHED_SOURCE")
+    branch_matches_r6 = branch == EXPECTED_BRANCH or packaged
     write_enabled = os.environ.get(WRITE_ENV) == WRITE_ENABLED
 
     report: dict[str, object] = {
@@ -67,7 +83,10 @@ def main(argv: list[str] | None = None) -> int:
         "repository": str(root),
         "git_branch": branch,
         "expected_r6_branch": EXPECTED_BRANCH,
-        "branch_matches_r6": branch == EXPECTED_BRANCH,
+        "branch_matches_r6": branch_matches_r6,
+        "provenance_mode": provenance_mode,
+        "package_source_head": source_head,
+        "package_source_verified": packaged,
         "env_file": _env_file_mode(root),
         "paper_key_environment": "SET" if os.environ.get(KEY_ENV) else "NOT_SET",
         "paper_secret_environment": "SET" if os.environ.get(SECRET_ENV) else "NOT_SET",
