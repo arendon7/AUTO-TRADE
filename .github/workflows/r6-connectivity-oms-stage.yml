@@ -1,0 +1,37 @@
+name: R6 Connectivity OMS Staging Boundary
+
+on:
+  push:
+    branches: ["reconstruction/**", "work/**", "feature/**"]
+    paths:
+      - "src/autotrade/connectivity_oms_stage.py"
+      - "scripts/check_r6_connectivity_oms_stage_boundary.py"
+      - "tests/test_r6_connectivity_oms_stage.py"
+      - ".github/workflows/r6-connectivity-oms-stage.yml"
+  pull_request:
+    paths:
+      - "src/autotrade/connectivity_oms_stage.py"
+      - "scripts/check_r6_connectivity_oms_stage_boundary.py"
+      - "tests/test_r6_connectivity_oms_stage.py"
+      - ".github/workflows/r6-connectivity-oms-stage.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  connectivity-oms-stage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: python -m pip install -e '.[dev]'
+      - name: Compile
+        run: python -m compileall -q src tests scripts
+      - name: Typed connectivity OMS staging authority boundary
+        run: python scripts/check_r6_connectivity_oms_stage_boundary.py
+      - name: Typed connectivity OMS staging tests
+        run: pytest -q tests/test_r6_connectivity_oms_stage.py
