@@ -143,7 +143,16 @@ Si existe exposición o la evidencia expira, el flujo se bloquea.
 bash scripts/mac_start.sh market-preflight "$R6_WORKSPACE" AAPL
 ```
 
-Un solo GET IEX; el símbolo debe coincidir con el asset attested.
+El wrapper anterior ejecuta exclusivamente el lector auditado. Comando subyacente equivalente:
+
+```bash
+.venv/bin/python scripts/r6_external_paper_market_preflight.py \
+  --workspace "$R6_WORKSPACE" \
+  --symbol AAPL \
+  --allow-paper-market-read
+```
+
+Es un solo GET IEX; `--allow-paper-market-read` es obligatorio y el símbolo debe coincidir con el asset attested.
 
 Después:
 
@@ -189,15 +198,7 @@ Estado esperado: `OFFLINE_PREPARATION_REQUIRED`.
 bash scripts/mac_start.sh prepare-connectivity-candidate "$R6_WORKSPACE"
 ```
 
-Genera el paquete/bracket esperado y bindings durables desde el candidate. Este comando:
-
-- rechaza workspace symlink antes de `resolve()`;
-- rechaza credenciales;
-- rechaza `R6_EXTERNAL_PAPER_WRITE=ENABLED`;
-- no usa red;
-- no crea nueva autoridad humana;
-- no stagea OMS;
-- no puede hacer POST.
+Genera el paquete/bracket esperado y bindings durables desde el candidate. Este comando rechaza workspace symlink antes de `resolve()`, credenciales y `R6_EXTERNAL_PAPER_WRITE=ENABLED`; no usa red, no crea nueva autoridad humana, no stagea OMS y no puede hacer POST.
 
 Luego:
 
@@ -224,24 +225,13 @@ Requiere TTY real y escribir exactamente el challenge mostrado. No acepta pipes/
 
 ## 7 — Review receipt exacto
 
-Ahora sí puede volver al Safe Console/Finder:
-
 ```bash
 bash scripts/mac_start.sh review-receipt "$R6_WORKSPACE"
 ```
 
-El receipt congela exactamente lo revisado por la persona:
+El receipt congela symbol/side/qty, LIMIT parent, TP/SL, notional/cap, Safety version, market snapshot, flat account 0/0 y hashes/fingerprints de account, asset, flat, market y preparation. Es offline, credential-free y no autorizante.
 
-- symbol / side / qty;
-- LIMIT parent;
-- TP / SL;
-- notional y effective cap;
-- Safety version;
-- market snapshot;
-- flat account 0/0;
-- hashes/fingerprints de account, asset, flat, market y preparation.
-
-Es offline, credential-free y no autorizante. Para verlo:
+Para verlo:
 
 ```bash
 python -m json.tool "$R6_WORKSPACE/connectivity_operator_review_receipt.json"
@@ -256,8 +246,6 @@ bash scripts/mac_start.sh pre-canary-status "$R6_WORKSPACE"
 Estado esperado: `SECOND_HUMAN_EXECUTION_INTENT_REQUIRED`.
 
 ## 8 — SEGUNDA intención humana receipt-bound — terminal separada
-
-También queda fuera del Finder:
 
 ```bash
 unset APCA_API_KEY_ID APCA_API_SECRET_KEY
@@ -292,11 +280,11 @@ export APCA_API_SECRET_KEY='<PAPER_SECRET>'
   --allow-paper-final-freshness-read
 ```
 
-Hace exactamente cinco lecturas: account, asset, positions, open orders e IEX snapshot; además vuelve a evaluar Safety y liga la nueva evidencia a receipt + segunda intención humana. La ventana es deliberadamente muy corta.
+Hace exactamente cinco lecturas: account, asset, positions, open orders e IEX snapshot; además vuelve a evaluar Safety y liga la evidencia nueva a receipt + segunda intención humana. Este comando **no** stagea OMS y **no** autoriza POST.
 
-Este comando **no** stagea OMS y **no** autoriza POST. `pre-canary-status` puede mostrar `READY_FOR_SEPARATE_CERTIFIED_RUNTIME_REVIEW` sólo si la ventana sigue viva. Esa etiqueta jamás es autoridad de ejecución.
+`pre-canary-status` puede mostrar `READY_FOR_SEPARATE_CERTIFIED_RUNTIME_REVIEW` sólo si la ventana sigue viva. Esa etiqueta jamás es autoridad de ejecución.
 
-## 10 — STOP seguro antes del POST
+## STOP — antes de cualquier orden PAPER real
 
 Para pruebas locales/GET-only, detenerse aquí.
 
@@ -317,7 +305,7 @@ Antes de decidir una primera canary PAPER real deben revisarse, en ese mismo int
 
 Cualquier futura ejecución real requerirá una decisión humana explícita separada. No se hará automáticamente desde ChatGPT, CI, Finder ni Safe Console.
 
-## 11 — Semántica del one-shot ya certificado
+## Semántica del one-shot ya certificado
 
 Cuando eventualmente se autorice una canary real:
 
@@ -329,7 +317,7 @@ Cuando eventualmente se autorice una canary real:
 - reinicio implica GET-only reconciliation por `client_order_id`;
 - una orden hallada debe pasar validación estricta de parent + nested bracket antes de ACKNOWLEDGED.
 
-## 12 — Reconciliación y evidencia externa
+## Reconciliación y evidencia externa
 
 Tras un futuro intento real:
 
