@@ -29,6 +29,15 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _workspace(path: Path) -> PaperOperationalWorkspace:
+    expanded = path.expanduser()
+    if expanded.is_symlink() or not expanded.is_dir():
+        raise SystemExit(
+            "connectivity workspace must be an existing non-symlink directory"
+        )
+    return PaperOperationalWorkspace(root=expanded.resolve())
+
+
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     if os.environ.get(_WRITE_ENV) == "ENABLED":
@@ -40,16 +49,13 @@ def main(argv: list[str] | None = None) -> int:
             "Refusing connectivity candidate build while Alpaca credentials are present; this phase is deliberately credential-free."
         )
 
-    root = args.workspace.expanduser().resolve()
-    if not root.is_dir():
-        raise SystemExit("Workspace does not exist; create it and complete GET-only preflights first.")
-    workspace = PaperOperationalWorkspace(root=root)
+    workspace = _workspace(args.workspace)
     result = PaperConnectivityCandidateBuilder(workspace).build(
         now=datetime.now(timezone.utc)
     )
     output = {
         "status": "CONNECTIVITY_CANDIDATE_BUILT",
-        "workspace": str(root),
+        "workspace": str(workspace.root),
         "artifact": str(result.artifact_path),
         "order_id": result.order_id,
         "order_status": "VALIDATED",
