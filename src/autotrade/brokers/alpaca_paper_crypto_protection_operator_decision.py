@@ -77,13 +77,13 @@ class CryptoProtectionOperatorDecisionContext:
             ("limit_price", self.limit_price),
         ):
             if not isinstance(value, str) or not value or value.startswith("-"):
+                raise ValueError(f"{label} must be canonical positive decimal text")
         expected = _hash_json(
             {
                 "kind": "R6_CRYPTO_PROTECTION_OPERATOR_CONTEXT",
                 **_context_payload(self, include_hash=False),
             }
         )
-        expected = _hash_json(_context_payload(self, include_hash=False))
         if self.context_hash != expected:
             raise ValueError("protection operator context hash mismatch")
 
