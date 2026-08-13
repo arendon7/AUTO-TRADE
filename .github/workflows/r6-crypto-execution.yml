@@ -145,6 +145,7 @@ jobs:
         run: |
           pytest -q \
             tests/test_r6_paper_crypto_execution_simulation.py \
+            tests/test_r6_paper_crypto_execution_contract_adversarial.py \
             tests/test_r6_crypto_execution_simulation_boundary.py
 
       - name: Crypto durable lifecycle and adversarial recovery
