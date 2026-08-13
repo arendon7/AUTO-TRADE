@@ -22,6 +22,7 @@ WRITER_FILE = "alpaca_paper_writer.py"
 TRADE_UPDATES_FILE = "alpaca_paper_trade_updates_transport.py"
 CRYPTO_WRITER_FILE = "alpaca_paper_crypto_writer.py"
 CRYPTO_RECONCILIATION_FILE = "alpaca_paper_crypto_reconciliation.py"
+CRYPTO_PRE_IO_FILE = "alpaca_paper_crypto_pre_io.py"
 APPROVED_NETWORK_FILES = frozenset(
     {
         ATTESTATION_FILE,
@@ -94,6 +95,7 @@ def _scan(path: Path) -> list[str]:
     network_allowed = path.name in APPROVED_NETWORK_FILES
     writer_calls: list[ast.Call] = []
     crypto_writer_calls: list[ast.Call] = []
+    crypto_pre_io_delegate_calls: list[ast.Call] = []
     control_sends: list[ast.Call] = []
 
     for node in ast.walk(tree):
@@ -134,10 +136,16 @@ def _scan(path: Path) -> list[str]:
                 and name == "post"
                 and _is_crypto_transport_post(node)
             )
+            is_exact_crypto_pre_io_delegate = (
+                path.name == CRYPTO_PRE_IO_FILE
+                and name == "post"
+                and _is_crypto_pre_io_delegate_post(node)
+            )
             if (
                 name in FORBIDDEN_EXTERNAL_CALLS
                 and not is_exact_control_send
                 and not is_exact_crypto_post
+                and not is_exact_crypto_pre_io_delegate
             ):
                 errors.append(
                     f"{rel}:{node.lineno}: unaudited external write call {name} is forbidden"
@@ -147,6 +155,12 @@ def _scan(path: Path) -> list[str]:
                 if _inside_loop(tree, node):
                     errors.append(
                         f"{rel}:{node.lineno}: crypto PAPER transport POST cannot execute inside a loop"
+                    )
+            if is_exact_crypto_pre_io_delegate:
+                crypto_pre_io_delegate_calls.append(node)
+                if _inside_loop(tree, node):
+                    errors.append(
+                        f"{rel}:{node.lineno}: crypto PRE_IO delegated POST cannot execute inside a loop"
                     )
             if is_exact_control_send:
                 control_sends.append(node)
@@ -191,6 +205,10 @@ def _scan(path: Path) -> list[str]:
     if path.name == CRYPTO_WRITER_FILE and len(crypto_writer_calls) != 1:
         errors.append(
             f"{rel}: audited crypto PAPER writer must contain exactly one transport POST call"
+        )
+    if path.name == CRYPTO_PRE_IO_FILE and len(crypto_pre_io_delegate_calls) != 1:
+        errors.append(
+            f"{rel}: crypto PRE_IO interlock must contain exactly one self._delegate.post call"
         )
     if path.name == TRADE_UPDATES_FILE and len(control_sends) != 2:
         errors.append(
@@ -357,6 +375,39 @@ def _validate_network_roles() -> list[str]:
         if not 0 <= protection_unknown < transport_post:
             errors.append("crypto writer: protection UNKNOWN must precede transport POST")
 
+    crypto_pre_io = BROKER_DIR / CRYPTO_PRE_IO_FILE
+    if not crypto_pre_io.is_file():
+        errors.append("crypto PRE_IO interlock: module is missing")
+    else:
+        text = crypto_pre_io.read_text(encoding="utf-8")
+        required = (
+            "class FinalGuardedCryptoEntryTransport:",
+            "self._authorizer()",
+            "CryptoFinalWritePhase.PRE_IO",
+            "CryptoLifecycleStatus.ENTRY_SUBMISSION_UNKNOWN",
+            "attestation.entry_attempt_count != 1",
+            "attestation.client_order_id != client_order_id",
+            "self._last_attestation = attestation",
+            "self._delegate.post(",
+        )
+        for anchor in required:
+            if anchor not in text:
+                errors.append(f"crypto PRE_IO interlock: required guard anchor missing: {anchor}")
+        if text.count("self._delegate.post(") != 1:
+            errors.append("crypto PRE_IO interlock: exactly one delegated POST call site is required")
+        if "HttpsAlpacaPaperCryptoWriteTransport" in text:
+            errors.append("crypto PRE_IO interlock: direct HTTPS transport construction is forbidden")
+        authorizer = text.find("self._authorizer()")
+        phase = text.find("CryptoFinalWritePhase.PRE_IO", authorizer)
+        unknown = text.find("CryptoLifecycleStatus.ENTRY_SUBMISSION_UNKNOWN", phase)
+        attempt = text.find("attestation.entry_attempt_count != 1", unknown)
+        client = text.find("attestation.client_order_id != client_order_id", attempt)
+        delegate = text.find("self._delegate.post(", client)
+        if not 0 <= authorizer < phase < unknown < attempt < client < delegate:
+            errors.append(
+                "crypto PRE_IO interlock: ordering must be authorizer -> PRE_IO -> UNKNOWN -> one-attempt -> client binding -> delegate"
+            )
+
     crypto_reconciliation = BROKER_DIR / CRYPTO_RECONCILIATION_FILE
     if not crypto_reconciliation.is_file():
         errors.append("crypto reconciliation: module is missing")
@@ -472,6 +523,18 @@ def _is_crypto_transport_post(node: ast.Call) -> bool:
         and func.attr == "post"
         and isinstance(func.value, ast.Attribute)
         and func.value.attr == "_transport"
+    )
+
+
+def _is_crypto_pre_io_delegate_post(node: ast.Call) -> bool:
+    func = node.func
+    return (
+        isinstance(func, ast.Attribute)
+        and func.attr == "post"
+        and isinstance(func.value, ast.Attribute)
+        and isinstance(func.value.value, ast.Name)
+        and func.value.value.id == "self"
+        and func.value.attr == "_delegate"
     )
 
 
