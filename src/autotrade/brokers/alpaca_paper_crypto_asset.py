@@ -7,7 +7,6 @@ from hashlib import sha256
 import json
 import re
 from typing import Mapping
-from urllib.parse import quote
 
 from .alpaca_paper_gateway import (
     ALPACA_PAPER_TRADING_HOST,
@@ -58,7 +57,10 @@ def normalize_crypto_pair(symbol: str) -> str:
 
 def crypto_asset_path(symbol: str) -> str:
     canonical = normalize_crypto_pair(symbol)
-    return f"/v2/assets/{quote(canonical, safe='')}"
+    # The strict grammar above guarantees slash is the only character that
+    # needs path encoding. Avoid a general URL-construction helper here so the
+    # approved R6 network surface remains narrow and statically auditable.
+    return f"/v2/assets/{canonical.replace('/', '%2F')}"
 
 
 CRYPTO_ASSET_PATH = crypto_asset_path(CRYPTO_PAIR)
