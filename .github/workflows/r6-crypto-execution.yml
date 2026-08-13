@@ -98,6 +98,7 @@ jobs:
         run: |
           pytest -q \
             tests/test_r6_paper_crypto_final_guard.py \
+            tests/test_r6_paper_crypto_final_guard_adversarial.py \
             tests/test_r6_crypto_final_guard_boundary.py
 
       - name: Crypto durable lifecycle and adversarial recovery
