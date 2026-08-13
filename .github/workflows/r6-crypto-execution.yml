@@ -8,9 +8,9 @@ on:
     paths:
       - "src/autotrade/product_profile.py"
       - "src/autotrade/brokers/alpaca_paper_crypto_*.py"
-      - "scripts/check_r6_crypto_execution_boundary.py"
+      - "scripts/check_r6_crypto_*.py"
       - "scripts/check_r6_authority.py"
-      - "tests/test_r6_crypto_execution_boundary.py"
+      - "tests/test_r6_crypto_*.py"
       - "tests/test_r6_paper_crypto_*.py"
       - "skills/crypto-trading/**"
       - "skills/multi-asset-safety/**"
@@ -47,6 +47,7 @@ jobs:
             src/autotrade/brokers/alpaca_paper_crypto_market_data.py \
             src/autotrade/brokers/alpaca_paper_crypto_order.py \
             src/autotrade/brokers/alpaca_paper_crypto_lifecycle.py \
+            src/autotrade/brokers/alpaca_paper_crypto_canary_coordinator.py \
             src/autotrade/brokers/alpaca_paper_crypto_writer.py \
             src/autotrade/brokers/alpaca_paper_crypto_reconciliation.py
 
@@ -55,6 +56,9 @@ jobs:
 
       - name: Permanent crypto execution authority boundary
         run: python scripts/check_r6_crypto_execution_boundary.py
+
+      - name: Offline crypto canary coordinator boundary
+        run: python scripts/check_r6_crypto_canary_coordinator_boundary.py
 
       - name: Permanent multi-asset product boundary
         run: python scripts/check_r6_product_boundary.py
@@ -69,6 +73,12 @@ jobs:
             tests/test_r6_paper_crypto_catalog.py \
             tests/test_r6_paper_crypto_rehearsal.py \
             tests/test_r6_paper_crypto_order.py
+
+      - name: Crypto offline first-canary preparation
+        run: |
+          pytest -q \
+            tests/test_r6_paper_crypto_canary_coordinator.py \
+            tests/test_r6_crypto_canary_coordinator_boundary.py
 
       - name: Crypto durable lifecycle and adversarial recovery
         run: |
