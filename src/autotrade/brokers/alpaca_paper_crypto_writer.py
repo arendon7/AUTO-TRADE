@@ -202,6 +202,19 @@ class AlpacaPaperCryptoWriter:
         snapshot = lifecycle.snapshot(lifecycle_id)
         self._validate_binding(snapshot=snapshot, order=order)
 
+        # Finish every deterministic/local validation before durable UNKNOWN.
+        # Once UNKNOWN is committed, the only safe recovery path is broker reconciliation.
+        payload = order.to_payload()
+        body = _canonical(payload).encode("utf-8")
+        headers = {
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+            "User-Agent": "AUTO-TRADE-R6/0.28R",
+            "APCA-API-KEY-ID": credentials.key_id,
+            "APCA-API-SECRET-KEY": credentials.secret_key,
+        }
+        _validate_headers(headers)
+
         if order.role is CryptoOrderRole.ENTRY:
             if snapshot.state.status is not CryptoLifecycleStatus.ENTRY_PREPARED:
                 raise CryptoLifecycleBlocked("entry POST requires durable ENTRY_PREPARED")
@@ -213,16 +226,6 @@ class AlpacaPaperCryptoWriter:
         else:
             raise CryptoPaperWriterPolicyError("unsupported crypto order role")
 
-        payload = order.to_payload()
-        body = _canonical(payload).encode("utf-8")
-        headers = {
-            "Accept": "application/json",
-            "Content-Type": "application/json",
-            "User-Agent": "AUTO-TRADE-R6/0.28R",
-            "APCA-API-KEY-ID": credentials.key_id,
-            "APCA-API-SECRET-KEY": credentials.secret_key,
-        }
-        _validate_headers(headers)
         try:
             response = self._transport.post(
                 host=self._config.host,
@@ -232,7 +235,7 @@ class AlpacaPaperCryptoWriter:
                 timeout_seconds=self._config.timeout_seconds,
                 max_response_bytes=self._config.max_response_bytes,
             )
-        except CryptoPaperWriterError:
+        except CryptoPaperWriterAmbiguous:
             raise
         except Exception as exc:
             raise CryptoPaperWriterAmbiguous(
