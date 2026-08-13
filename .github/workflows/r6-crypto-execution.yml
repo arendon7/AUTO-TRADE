@@ -9,9 +9,11 @@ on:
       - "src/autotrade/product_profile.py"
       - "src/autotrade/brokers/alpaca_paper_crypto_*.py"
       - "scripts/check_r6_crypto_*.py"
+      - "scripts/check_r6_execution_bridge_boundary.py"
       - "scripts/check_r6_authority.py"
       - "tests/test_r6_crypto_*.py"
       - "tests/test_r6_paper_crypto_*.py"
+      - "tests/test_r6_execution_bridge_boundary.py"
       - "skills/crypto-trading/**"
       - "skills/multi-asset-safety/**"
       - "knowledge/00_CANON/debt_register_r6_multi_asset.json"
@@ -51,6 +53,7 @@ jobs:
             src/autotrade/brokers/alpaca_paper_crypto_operator_decision.py \
             src/autotrade/brokers/alpaca_paper_crypto_final_guard.py \
             src/autotrade/brokers/alpaca_paper_crypto_execution_attempt.py \
+            src/autotrade/brokers/alpaca_paper_crypto_execution_bridge.py \
             src/autotrade/brokers/alpaca_paper_crypto_pre_io.py \
             src/autotrade/brokers/alpaca_paper_crypto_execution_simulation.py \
             src/autotrade/brokers/alpaca_paper_crypto_writer.py \
@@ -73,6 +76,9 @@ jobs:
 
       - name: Crypto same-attempt checkpoint boundary
         run: python scripts/check_r6_crypto_execution_attempt_boundary.py
+
+      - name: Equity + crypto execution bridge boundary
+        run: python scripts/check_r6_execution_bridge_boundary.py
 
       - name: Guarded crypto execution simulation boundary
         run: python scripts/check_r6_crypto_execution_simulation_boundary.py
@@ -109,6 +115,12 @@ jobs:
             tests/test_r6_paper_crypto_execution_attempt.py \
             tests/test_r6_paper_crypto_execution_attempt_adversarial.py \
             tests/test_r6_crypto_execution_attempt_boundary.py
+
+      - name: Crypto checkpoint-aware OMS execution bridge
+        run: |
+          pytest -q \
+            tests/test_r6_paper_crypto_execution_bridge.py \
+            tests/test_r6_execution_bridge_boundary.py
 
       - name: Crypto final freshness and stable contract identity
         run: |
@@ -167,11 +179,13 @@ jobs:
               'alpaca_paper_crypto_operator_decision',
               'alpaca_paper_crypto_final_guard',
               'alpaca_paper_crypto_execution_attempt',
+              'alpaca_paper_crypto_execution_bridge',
               'alpaca_paper_crypto_pre_io',
               'alpaca_paper_crypto_execution_simulation',
               'CryptoPaperWriterConfig(enabled=True)',
               'record_operator_approval(',
               'record_pre_consume(',
+              'stage_after_checkpoint(',
               'submit_once(',
               'R6_CRYPTO_EXTERNAL_PAPER_WRITE=ENABLED',
           )
