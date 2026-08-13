@@ -127,7 +127,21 @@ def test_equity_asset_null_precision_fields_narrow_to_r6_whole_share_policy() ->
     assert attestation.to_dict()["whole_share_canary_supported"] is True
 
 
-def test_equity_asset_partial_null_precision_preserves_broker_values_and_narrows_only_null() -> None:
+def test_equity_asset_omitted_precision_fields_narrow_to_r6_whole_share_policy() -> None:
+    payload = asset_payload()
+    for key in ("min_order_size", "min_trade_increment", "price_increment"):
+        payload.pop(key)
+    attestation = attest(FakeTransport(payload))
+    assert attestation.min_order_size == Decimal("1")
+    assert attestation.min_trade_increment == Decimal("1")
+    assert attestation.price_increment == Decimal("0.01")
+    assert (
+        attestation.constraint_source
+        == "ALPACA_ASSET_PLUS_R6_US_EQUITY_WHOLE_SHARE_POLICY"
+    )
+
+
+def test_equity_asset_partial_null_precision_preserves_broker_values_and_narrows_only_absent() -> None:
     attestation = attest(
         FakeTransport(
             asset_payload(
@@ -208,20 +222,12 @@ def test_asset_gateway_rejects_credentials_not_bound_to_account_before_network()
         ({"min_order_size": "2"}, "whole share"),
         ({"min_trade_increment": "0.3"}, "align"),
         ({"price_increment": "0"}, "positive"),
-        ({"min_order_size": 1}, "decimal string or null"),
+        ({"min_order_size": 1}, "decimal string when provided"),
     ],
 )
 def test_asset_gateway_fails_closed_on_unsupported_or_unsafe_asset(overrides, message) -> None:
     with pytest.raises(PaperAssetIntegrityError, match=message):
         attest(FakeTransport(asset_payload(**overrides)))
-
-
-@pytest.mark.parametrize("missing", ["min_order_size", "min_trade_increment", "price_increment"])
-def test_asset_gateway_requires_precision_field_presence_even_when_null(missing) -> None:
-    payload = asset_payload()
-    payload.pop(missing)
-    with pytest.raises(PaperAssetIntegrityError, match=missing):
-        attest(FakeTransport(payload))
 
 
 def test_asset_gateway_rejects_redirect_or_final_host_drift() -> None:
