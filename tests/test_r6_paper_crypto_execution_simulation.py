@@ -6,11 +6,11 @@ import pytest
 
 from autotrade.persistence import SQLiteRuntime
 from autotrade.brokers.alpaca_paper_crypto_execution_attempt import SQLiteCryptoExecutionAttemptRegistry
+from autotrade.brokers.alpaca_paper_crypto_execution_bridge import CryptoPaperExecutionBridge
 from autotrade.brokers.alpaca_paper_crypto_execution_simulation import (
     CryptoExecutionSimulationReconcileOnly,
     CryptoExecutionSimulationTimeline,
     CryptoPaperExecutionSimulationCoordinator,
-    _simulation_handoff_id,
 )
 from autotrade.brokers.alpaca_paper_crypto_final_guard import CryptoFinalWritePhase
 from autotrade.brokers.alpaca_paper_crypto_lifecycle import CryptoLifecycleStatus
@@ -29,7 +29,7 @@ def _timeline():
 
 def _coordinator(ctx, attempts):
     return CryptoPaperExecutionSimulationCoordinator(
-        oms=ctx.oms,
+        execution_bridge=CryptoPaperExecutionBridge(oms=ctx.oms),
         final_guard=ctx.guard,
         attempt_registry=attempts,
     )
@@ -110,22 +110,16 @@ def test_restart_after_unknown_is_reconciliation_only_and_never_reposts(tmp_path
     attempts = SQLiteCryptoExecutionAttemptRegistry(SQLiteRuntime(tmp_path / "attempt.sqlite3"))
     timeline = _timeline()
     pre = _authorize_pre(ctx, now=timeline.pre_consume_at)
-    attempts.record_pre_consume(pre)
-    ctx.operator_registry.consume(
-        decision=ctx.operator_decision,
-        attempt_id=ctx.operator_decision.context.attempt_id,
-        now=timeline.consume_at,
-    )
-    handoff_id = _simulation_handoff_id(
+    checkpoint = attempts.record_pre_consume(pre)
+    CryptoPaperExecutionBridge(oms=ctx.oms).stage_after_checkpoint(
         package=ctx.package,
         operator_decision=ctx.operator_decision,
-    )
-    ctx.oms.stage_external_submission(
-        order_id=ctx.package.order_id,
-        handoff_id=handoff_id,
-        decision=ctx.decision,
+        operator_registry=ctx.operator_registry,
+        checkpoint=checkpoint,
+        risk_decision=ctx.decision,
         market=ctx.prepared_market.market,
-        now=timeline.stage_at,
+        consume_at=timeline.consume_at,
+        stage_at=timeline.stage_at,
     )
     ctx.lifecycle.mark_entry_submission_unknown(
         ctx.package.lifecycle_id,
