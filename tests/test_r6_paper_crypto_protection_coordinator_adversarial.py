@@ -175,7 +175,6 @@ def test_entry_reconciliation_validator_rejects_identity_fill_position_and_time_
         ({**base_order, "broker_order_id": "different-broker-order"}, base_position, reconciliation.observed_at, "broker order id differs"),
         ({**base_order, "status": "canceled"}, base_position, reconciliation.observed_at, "broker status differs"),
         (base_order, {**base_position, "absent": True, "quantity": Decimal("0")}, reconciliation.observed_at, "confirm existing long position"),
-        (base_order, {**base_position, "quantity": order.filled_quantity * Decimal("2")}, reconciliation.observed_at, "exceeds reconciled entry fill"),
         (base_order, base_position, now + timedelta(seconds=4), "future-dated"),
         (base_order, base_position, now - timedelta(seconds=30), "stale"),
     )
@@ -191,6 +190,29 @@ def test_entry_reconciliation_validator_rejects_identity_fill_position_and_time_
                 reconciliation=fake_reconciliation,
                 now=now,
             )
+
+    overfilled_quantity = order.filled_quantity * Decimal("2")
+    overfilled_state = SimpleNamespace(
+        status=CryptoLifecycleStatus.ENTRY_FILLED_UNPROTECTED,
+        entry_terminal=True,
+        entry_filled_quantity=state.entry_filled_quantity,
+        confirmed_net_long_quantity=overfilled_quantity,
+        entry_broker_order_id=state.entry_broker_order_id,
+        entry_broker_status=state.entry_broker_status,
+    )
+    overfilled_position = SimpleNamespace(
+        absent=False,
+        quantity=overfilled_quantity,
+        symbol=position.symbol,
+    )
+    with pytest.raises(CryptoProtectionPreparationBlocked, match="exceeds reconciled entry fill"):
+        validate(
+            binding=binding,
+            state=overfilled_state,
+            entry_order=entry_order,
+            reconciliation=_simple_reconciliation(order, overfilled_position, reconciliation.observed_at),
+            now=now,
+        )
 
 
 def _product_validation_fixture(tmp_path):
@@ -289,7 +311,7 @@ def test_product_evidence_validator_rejects_safety_binding_capability_and_stalen
     with pytest.raises(CryptoProtectionPreparationBlocked, match="positive limit price"):
         call(candidate_intent=no_limit)
 
-    denied = SimpleNamespace(status=RiskDecisionStatus.DENIED, risk_reducing=True)
+    denied = SimpleNamespace(status=RiskDecisionStatus.REJECTED, risk_reducing=True)
     with pytest.raises(CryptoProtectionPreparationBlocked, match="APPROVED risk-reducing"):
         call(candidate_decision=denied)
 
@@ -354,10 +376,10 @@ def test_product_evidence_validator_rejects_safety_binding_capability_and_stalen
         call(candidate_product=_FakeProduct(ctx, fingerprint="c" * 64))
 
     with pytest.raises(CryptoProtectionPreparationBlocked, match="CRYPTO ProductCapabilities"):
-        call(candidate_product=_FakeProduct(ctx, asset_class=AssetClass.EQUITY))
+        call(candidate_product=_FakeProduct(ctx, asset_class=AssetClass.US_EQUITY))
 
     with pytest.raises(CryptoProtectionPreparationBlocked, match="CRYPTO_STOP_LIMIT"):
-        call(candidate_product=_FakeProduct(ctx, protection_model=ProtectionModel.BROKER_NATIVE_BRACKET))
+        call(candidate_product=_FakeProduct(ctx, protection_model=ProtectionModel.EQUITY_BRACKET))
 
     with pytest.raises(CryptoProtectionPreparationBlocked, match="forbids margin/short"):
         call(candidate_product=_FakeProduct(ctx, marginable=True))
