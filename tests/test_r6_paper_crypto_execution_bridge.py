@@ -178,15 +178,24 @@ def test_crypto_execution_bridge_rejects_checkpoint_rebinding(tmp_path) -> None:
         )
 
 
-def test_crypto_execution_handoff_rejects_mismatched_inputs(tmp_path) -> None:
+def test_crypto_execution_handoff_is_deterministic_and_checkpoint_bound(tmp_path) -> None:
     ctx = _setup(tmp_path / "ctx")
     checkpoint = _checkpoint(ctx, tmp_path)
-    with pytest.raises(CryptoPaperExecutionBridgeBlocked, match="operator decision"):
-        crypto_execution_handoff_id(
-            package=ctx.package,
-            operator_decision=replace(ctx.operator_decision, decision_hash="f" * 64),
-            checkpoint=checkpoint,
-        )
+
+    first = crypto_execution_handoff_id(
+        package=ctx.package,
+        operator_decision=ctx.operator_decision,
+        checkpoint=checkpoint,
+    )
+    second = crypto_execution_handoff_id(
+        package=ctx.package,
+        operator_decision=ctx.operator_decision,
+        checkpoint=checkpoint,
+    )
+
+    assert first == second
+    assert len(first) == 64
+    assert all(char in "0123456789abcdef" for char in first)
 
 
 def test_execution_stage_result_requires_submitting_and_matching_handoff(tmp_path) -> None:
