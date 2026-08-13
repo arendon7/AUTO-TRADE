@@ -19,7 +19,7 @@ REQUIRED = (
     "class CryptoProtectionFinalWritePhase(str, Enum):",
     'PRE_CONSUME = "PRE_CONSUME"',
     'PRE_IO = "PRE_IO"',
-    "state.status is not CryptoProtectionOperatorDecisionStatus.ISSUED",
+    "decision_state.status is not CryptoProtectionOperatorDecisionStatus.ISSUED",
     "snapshot.state.status is not CryptoLifecycleStatus.PROTECTION_PREPARED",
     "snapshot.state.protection_attempt_count != 0",
     "oms_order.status is not OrderStatus.VALIDATED",
