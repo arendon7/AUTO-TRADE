@@ -42,10 +42,15 @@ jobs:
             src/autotrade/brokers/alpaca_paper_crypto_protection_coordinator.py \
             src/autotrade/brokers/alpaca_paper_crypto_protection_operator_decision.py \
             src/autotrade/brokers/alpaca_paper_crypto_protection_final_guard.py \
+            src/autotrade/brokers/alpaca_paper_crypto_protection_execution_attempt.py \
+            src/autotrade/brokers/alpaca_paper_crypto_protection_execution_bridge.py \
             tests/test_r6_paper_crypto_protection_coordinator.py \
             tests/test_r6_paper_crypto_protection_coordinator_adversarial.py \
             tests/test_r6_paper_crypto_protection_operator_decision.py \
-            tests/test_r6_paper_crypto_protection_final_guard.py
+            tests/test_r6_paper_crypto_protection_final_guard.py \
+            tests/test_r6_paper_crypto_protection_execution_attempt.py \
+            tests/test_r6_paper_crypto_protection_execution_bridge.py \
+            tests/test_r6_crypto_protection_execution_bridge_boundary.py
 
       - name: Global R6 PAPER authority boundary
         run: python scripts/check_r6_authority.py
@@ -59,6 +64,9 @@ jobs:
       - name: Last-write protection Final Guard boundary
         run: python scripts/check_r6_crypto_protection_final_guard_boundary.py
 
+      - name: Checkpoint-aware protection execution bridge boundary
+        run: python scripts/check_r6_crypto_protection_execution_bridge_boundary.py
+
       - name: Protection preparation and fail-closed coverage
         run: |
           pytest -q \
@@ -68,6 +76,13 @@ jobs:
 
       - name: Durable human authority for protection
         run: pytest -q tests/test_r6_paper_crypto_protection_operator_decision.py
+
+      - name: Durable protection checkpoint and OMS execution bridge
+        run: |
+          pytest -q \
+            tests/test_r6_paper_crypto_protection_execution_attempt.py \
+            tests/test_r6_paper_crypto_protection_execution_bridge.py \
+            tests/test_r6_crypto_protection_execution_bridge_boundary.py
 
       - name: Protective final-write interlock and exact-position coverage
         run: pytest -q tests/test_r6_paper_crypto_protection_final_guard.py
@@ -90,6 +105,8 @@ jobs:
           forbidden = (
               'alpaca_paper_crypto_protection_coordinator',
               'alpaca_paper_crypto_protection_operator_decision',
+              'alpaca_paper_crypto_protection_execution_bridge',
+              'CryptoProtectionExecutionBridge',
               'prepare_protection(',
               'record_operator_approval(',
           )
