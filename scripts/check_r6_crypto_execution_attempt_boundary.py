@@ -60,6 +60,7 @@ def main() -> int:
     if not TARGET.is_file():
         fail("durable execution-attempt registry is missing")
     source = TARGET.read_text(encoding="utf-8")
+    compact_source = " ".join(source.split())
     tree = ast.parse(source, filename=str(TARGET))
 
     if "CryptoFinalWritePhase.PRE_CONSUME" not in source:
@@ -70,7 +71,7 @@ def main() -> int:
         fail("preparation uniqueness is not durable")
     if "record_hash TEXT NOT NULL UNIQUE" not in source:
         fail("tamper-evident record hash is not durable")
-    if "network authority" not in source:
+    if "grants no network authority" not in compact_source:
         fail("registry does not document non-authorizing semantics")
 
     for node in ast.walk(tree):
