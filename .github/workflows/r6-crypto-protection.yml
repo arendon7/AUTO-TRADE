@@ -41,9 +41,11 @@ jobs:
           python -m compileall -q \
             src/autotrade/brokers/alpaca_paper_crypto_protection_coordinator.py \
             src/autotrade/brokers/alpaca_paper_crypto_protection_operator_decision.py \
+            src/autotrade/brokers/alpaca_paper_crypto_protection_final_guard.py \
             tests/test_r6_paper_crypto_protection_coordinator.py \
             tests/test_r6_paper_crypto_protection_coordinator_adversarial.py \
-            tests/test_r6_paper_crypto_protection_operator_decision.py
+            tests/test_r6_paper_crypto_protection_operator_decision.py \
+            tests/test_r6_paper_crypto_protection_final_guard.py
 
       - name: Global R6 PAPER authority boundary
         run: python scripts/check_r6_authority.py
@@ -54,6 +56,9 @@ jobs:
       - name: Separate protection human-authority boundary
         run: python scripts/check_r6_crypto_protection_operator_decision_boundary.py
 
+      - name: Last-write protection Final Guard boundary
+        run: python scripts/check_r6_crypto_protection_final_guard_boundary.py
+
       - name: Protection preparation and fail-closed coverage
         run: |
           pytest -q \
@@ -63,6 +68,9 @@ jobs:
 
       - name: Durable human authority for protection
         run: pytest -q tests/test_r6_paper_crypto_protection_operator_decision.py
+
+      - name: Protective final-write interlock and exact-position coverage
+        run: pytest -q tests/test_r6_paper_crypto_protection_final_guard.py
 
       - name: Prove protection remains disconnected from Mac
         run: |
