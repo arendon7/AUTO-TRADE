@@ -65,6 +65,16 @@ def asset() -> AlpacaPaperEquityAssetAttestation:
     )
 
 
+def fallback_asset() -> AlpacaPaperEquityAssetAttestation:
+    return replace(
+        asset(),
+        min_order_size=Decimal("1"),
+        min_trade_increment=Decimal("1"),
+        price_increment=Decimal("0.01"),
+        constraint_source="ALPACA_ASSET_PLUS_R6_US_EQUITY_WHOLE_SHARE_POLICY",
+    )
+
+
 def setup(tmp_path):
     workspace = PaperOperationalWorkspace.initialize(tmp_path / "workspace")
     workspace.write_account_attestation(account())
@@ -91,6 +101,21 @@ def test_asset_evidence_round_trips_without_secret_or_authority(tmp_path) -> Non
     assert '"capital_authority": "NONE"' in raw
     assert '"profitability_claim": false' in raw
     assert '"live_trading": "BLOCKED"' in raw
+    assert '"constraint_source": "ALPACA_ASSET"' in raw
+
+
+def test_asset_evidence_round_trips_r6_fallback_constraint_provenance(tmp_path) -> None:
+    workspace = PaperOperationalWorkspace.initialize(tmp_path / "workspace")
+    workspace.write_account_attestation(account())
+    store = PaperAssetEvidenceStore(workspace)
+    attestation = fallback_asset()
+    store.write(attestation)
+    assert store.read() == attestation
+    payload = json.loads(store.path.read_text(encoding="utf-8"))
+    assert payload["constraint_source"] == "ALPACA_ASSET_PLUS_R6_US_EQUITY_WHOLE_SHARE_POLICY"
+    assert payload["min_order_size"] == "1"
+    assert payload["min_trade_increment"] == "1"
+    assert payload["price_increment"] == "0.01"
 
 
 def test_asset_evidence_rejects_account_binding_mismatch(tmp_path) -> None:
@@ -129,6 +154,15 @@ def test_asset_evidence_rejects_business_field_tamper_via_fingerprint(tmp_path) 
     payload["price_increment"] = "0.02"
     store.path.write_text(json.dumps(payload), encoding="utf-8")
     with pytest.raises(PaperAssetEvidenceError, match="fingerprint"):
+        store.read()
+
+
+def test_asset_evidence_rejects_constraint_provenance_tamper(tmp_path) -> None:
+    _, store, _ = setup(tmp_path)
+    payload = json.loads(store.path.read_text(encoding="utf-8"))
+    payload["constraint_source"] = "UNVERIFIED_DEFAULT"
+    store.path.write_text(json.dumps(payload), encoding="utf-8")
+    with pytest.raises(PaperAssetEvidenceError, match="invalid"):
         store.read()
 
 
