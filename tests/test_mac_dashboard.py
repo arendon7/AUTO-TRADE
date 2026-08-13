@@ -167,7 +167,7 @@ def test_dashboard_discovers_account_before_explicit_attestation() -> None:
         "Confirmar y verificar esta cuenta",
         'request("account_discovery"',
         "state.accountDiscovered=true",
-        "persistent",
+        "Aún no se creó attestation",
         "BTC/cripto no está habilitado en R6",
         'value="AAPL"',
     ):
