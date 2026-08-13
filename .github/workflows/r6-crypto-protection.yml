@@ -1,0 +1,91 @@
+name: R6 Crypto PAPER Protection Authority
+
+on:
+  push:
+    branches:
+      - "work/r6-crypto-paper-execution"
+  pull_request:
+    paths:
+      - "src/autotrade/brokers/alpaca_paper_crypto_protection_*.py"
+      - "src/autotrade/brokers/alpaca_paper_crypto_lifecycle.py"
+      - "src/autotrade/brokers/alpaca_paper_crypto_order.py"
+      - "src/autotrade/brokers/alpaca_paper_crypto_reconciliation.py"
+      - "scripts/check_r6_crypto_protection*.py"
+      - "tests/test_r6_paper_crypto_protection*.py"
+      - "tests/test_r6_crypto_protection*.py"
+      - ".github/workflows/r6-crypto-protection.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  protection-authority:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout exact head
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install project
+        run: python -m pip install -e '.[dev]'
+
+      - name: Compile protection authority
+        run: |
+          python -m compileall -q \
+            src/autotrade/brokers/alpaca_paper_crypto_protection_coordinator.py \
+            src/autotrade/brokers/alpaca_paper_crypto_protection_operator_decision.py \
+            tests/test_r6_paper_crypto_protection_coordinator.py \
+            tests/test_r6_paper_crypto_protection_coordinator_adversarial.py \
+            tests/test_r6_paper_crypto_protection_operator_decision.py
+
+      - name: Global R6 PAPER authority boundary
+        run: python scripts/check_r6_authority.py
+
+      - name: Offline exact-position protection boundary
+        run: python scripts/check_r6_crypto_protection_boundary.py
+
+      - name: Separate protection human-authority boundary
+        run: python scripts/check_r6_crypto_protection_operator_decision_boundary.py
+
+      - name: Protection preparation and fail-closed coverage
+        run: |
+          pytest -q \
+            tests/test_r6_paper_crypto_protection_coordinator.py \
+            tests/test_r6_paper_crypto_protection_coordinator_adversarial.py \
+            tests/test_r6_crypto_protection_boundary.py
+
+      - name: Durable human authority for protection
+        run: pytest -q tests/test_r6_paper_crypto_protection_operator_decision.py
+
+      - name: Prove protection remains disconnected from Mac
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          root = Path('.')
+          surfaces = [
+              root / 'scripts/mac_dashboard.py',
+              root / 'scripts/mac_crypto_dashboard.py',
+              root / 'scripts/mac_crypto_paper_rehearsal.py',
+              root / 'web/mac_multi_asset.html',
+              root / 'web/mac_crypto_dashboard.html',
+              root / 'ABRIR_AUTO_TRADE.command',
+              root / 'ABRIR_CRYPTO_PAPER.command',
+          ]
+          text = '\n'.join(p.read_text(encoding='utf-8') for p in surfaces if p.is_file())
+          forbidden = (
+              'alpaca_paper_crypto_protection_coordinator',
+              'alpaca_paper_crypto_protection_operator_decision',
+              'prepare_protection(',
+              'record_operator_approval(',
+          )
+          for token in forbidden:
+              assert token not in text, f'Mac protection authority leaked: {token}'
+          print('Mac protection authority boundary: PASS')
+          PY
