@@ -5,15 +5,16 @@ import json
 
 import pytest
 
-from autotrade.brokers.alpaca_paper_gateway import AlpacaPaperCredentials
+from autotrade.brokers.alpaca_paper_gateway import (
+    AlpacaPaperCredentials,
+    AlpacaPaperHttpResponse,
+    AlpacaPaperPolicyError,
+)
 from autotrade.brokers.alpaca_paper_market_clock import (
     ALPACA_PAPER_CLOCK_PATH,
     AlpacaPaperMarketClockConfig,
     AlpacaPaperMarketClockGateway,
-    AlpacaPaperMarketClockHttpResponse,
     AlpacaPaperMarketClockIntegrityError,
-    AlpacaPaperMarketClockPolicyError,
-    AlpacaPaperMarketClockRequest,
 )
 
 
@@ -43,11 +44,14 @@ class FakeTransport:
 
     def read(self, request):
         self.requests.append(request)
-        return AlpacaPaperMarketClockHttpResponse(
+        return AlpacaPaperHttpResponse(
             status_code=self.status_code,
             body=self.body,
             final_url=self.final_url,
-            headers={"x-request-id": "req-clock-001"},
+            headers={
+                "content-type": "application/json",
+                "x-request-id": "req-clock-001",
+            },
         )
 
 
@@ -67,6 +71,7 @@ def test_clock_is_exact_one_get_and_preserves_open_state() -> None:
     assert request.method == "GET"
     assert request.url == URL
     assert request.headers["APCA-API-KEY-ID"] == CREDS.key_id
+    assert request.headers["User-Agent"] == "AUTO-TRADE-R6/0.28R"
     assert "paper-secret" not in repr(request)
 
 
@@ -77,22 +82,9 @@ def test_clock_closed_is_valid_read_only_state() -> None:
     assert result.next_open > result.timestamp
 
 
-def test_clock_policy_rejects_post_live_drift_query_and_redirect() -> None:
-    subject = gateway(FakeTransport())
-    headers = {
-        "APCA-API-KEY-ID": "k",
-        "APCA-API-SECRET-KEY": "s",
-        "Accept": "application/json",
-    }
-    for request in (
-        AlpacaPaperMarketClockRequest("POST", URL, 5, headers),
-        AlpacaPaperMarketClockRequest("GET", "https://api.alpaca.markets/v2/clock", 5, headers),
-        AlpacaPaperMarketClockRequest("GET", URL + "?x=1", 5, headers),
-    ):
-        with pytest.raises(AlpacaPaperMarketClockPolicyError):
-            subject._validate_request(request)
+def test_clock_rejects_final_url_drift_through_shared_policy() -> None:
     redirected = gateway(FakeTransport(final_url="https://api.alpaca.markets/v2/clock"))
-    with pytest.raises(AlpacaPaperMarketClockPolicyError):
+    with pytest.raises(AlpacaPaperPolicyError):
         redirected.read_clock(credentials=CREDS, now=NOW)
 
 
@@ -109,7 +101,7 @@ def test_clock_rejects_stale_future_or_malformed_response() -> None:
         gateway(FakeTransport(b"not-json")).read_clock(credentials=CREDS, now=NOW)
 
 
-def test_clock_requires_credentials_and_disabled_by_default() -> None:
+def test_clock_is_disabled_by_default_before_transport() -> None:
     fake = FakeTransport()
     disabled = AlpacaPaperMarketClockGateway(transport=fake)
     with pytest.raises(Exception, match="disabled"):
