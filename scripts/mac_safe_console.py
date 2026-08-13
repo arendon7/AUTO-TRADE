@@ -23,7 +23,7 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
             "Safe Mac operator console for AUTO-TRADE R6. This console exposes only "
-            "local setup/diagnostics/rehearsal, explicit GET-only PAPER preflights, "
+            "local setup/diagnostics/rehearsal, explicit GET-only PAPER discovery/preflights, "
             "credential-free candidate/preparation/review artifacts and read-only pre-canary status. "
             "It has no order execution command."
         )
@@ -68,6 +68,16 @@ def _parser() -> argparse.ArgumentParser:
         ),
     )
     pre_status.add_argument("--workspace", required=True, type=Path)
+
+    discovery = sub.add_parser(
+        "account-discovery",
+        help=(
+            "Identify the PAPER account behind the supplied PAPER credentials with one GET /v2/account. "
+            "Creates no durable attestation and never writes an order."
+        ),
+    )
+    discovery.add_argument("--workspace", required=True, type=Path)
+    discovery.add_argument("--allow-paper-account-discovery-read", action="store_true")
 
     account = sub.add_parser(
         "account-preflight",
@@ -202,6 +212,19 @@ def main(argv: list[str] | None = None) -> int:
             [str(PYTHON), "scripts/r6_precanary_status.py", "--workspace", str(args.workspace)],
             credential_free=True,
         )
+    if args.command == "account-discovery":
+        if not args.allow_paper_account_discovery_read:
+            print(
+                "SAFE CONSOLE BLOCKED: account discovery GET requires "
+                "--allow-paper-account-discovery-read",
+                file=sys.stderr,
+            )
+            return 2
+        return _run([
+            str(PYTHON), "scripts/r6_external_paper_account_discovery.py",
+            "--workspace", str(args.workspace),
+            "--allow-paper-account-discovery-read",
+        ])
     if args.command == "account-preflight":
         if not args.allow_paper_account_read:
             print("SAFE CONSOLE BLOCKED: account GET requires --allow-paper-account-read", file=sys.stderr)
