@@ -345,6 +345,10 @@ def test_preconsume_rejects_safety_change_or_authoritative_portfolio_exposure(tm
         gross_exposure=Decimal("10"),
         net_exposure=Decimal("10"),
         signed_position_notional_by_symbol={"BTC/USD": Decimal("10")},
+        strategy_gross_exposure={"R6_CRYPTO_FIRST_CANARY": Decimal("10")},
+        strategy_signed_position_notional_by_symbol={
+            "R6_CRYPTO_FIRST_CANARY": {"BTC/USD": Decimal("10")}
+        },
     )
     current = ctx2.portfolio.get()
     assert ctx2.portfolio.compare_and_set(
