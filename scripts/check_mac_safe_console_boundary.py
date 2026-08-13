@@ -20,6 +20,7 @@ _ALLOWED_TARGETS = {
     "scripts/mac_safety_rehearsal.py",
     "scripts/r6_inspect_paper_readiness.py",
     "scripts/r6_precanary_status.py",
+    "scripts/r6_external_paper_account_discovery.py",
     "scripts/r6_external_paper_preflight.py",
     "scripts/r6_external_paper_asset_preflight.py",
     "scripts/r6_external_paper_flat_account_preflight.py",
@@ -56,6 +57,8 @@ def main() -> int:
             'env[WRITE_ENV] = "DISABLED"',
             "env.pop(KEY_ENV, None)",
             "env.pop(SECRET_ENV, None)",
+            '"account-discovery"',
+            '"--allow-paper-account-discovery-read"',
             '"pre-canary-status"',
             '"scripts/r6_precanary_status.py"',
             '"build-connectivity-candidate"',
@@ -106,7 +109,7 @@ def main() -> int:
         return 1
     print(
         "AUTO-TRADE Mac safe console boundary: PASS "
-        "(write-disabled; credential stripping on local phases; GET-only broker reads; "
+        "(write-disabled; credential stripping on local phases; GET-only account discovery/preflights; "
         "read-only pre-canary status + offline preparation/review; no order execution command)"
     )
     return 0

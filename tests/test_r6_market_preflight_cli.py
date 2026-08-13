@@ -19,6 +19,7 @@ from autotrade.brokers.alpaca_paper_gateway import (
     AlpacaPaperAccountAttestation,
     AlpacaPaperCredentials,
 )
+from autotrade.brokers.alpaca_paper_market_clock import AlpacaPaperMarketClock
 from autotrade.brokers.alpaca_paper_market_data import AlpacaPaperEquityMarketAttestation
 from autotrade.brokers.alpaca_paper_market_evidence import PaperMarketEvidenceStore
 from autotrade.brokers.alpaca_paper_operational import PaperOperationalWorkspace
@@ -113,6 +114,17 @@ def market() -> AlpacaPaperEquityMarketAttestation:
     )
 
 
+def clock(*, is_open: bool) -> AlpacaPaperMarketClock:
+    return AlpacaPaperMarketClock(
+        timestamp=NOW,
+        is_open=is_open,
+        next_open=NOW + timedelta(hours=17),
+        next_close=NOW + timedelta(hours=23, minutes=30),
+        received_at=NOW,
+        request_id="req-clock-001",
+    )
+
+
 class FakeGateway:
     def __init__(self) -> None:
         self.calls = []
@@ -120,6 +132,16 @@ class FakeGateway:
     def attest_snapshot(self, *, credentials, symbol, now):
         self.calls.append((credentials, symbol, now))
         return market()
+
+
+class FakeClockGateway:
+    def __init__(self, *, is_open: bool) -> None:
+        self.is_open = is_open
+        self.calls = []
+
+    def read_clock(self, *, credentials, now):
+        self.calls.append((credentials, now))
+        return clock(is_open=self.is_open)
 
 
 def namespace():
@@ -206,17 +228,44 @@ def test_market_preflight_rejects_symbol_not_bound_to_asset(tmp_path, monkeypatc
     assert fake.calls == []
 
 
-def test_market_preflight_happy_path_is_one_get_and_sanitized_artifact(tmp_path, monkeypatch, capsys) -> None:
+def test_market_preflight_closed_market_stops_before_iex_snapshot(tmp_path, monkeypatch, capsys) -> None:
+    workspace = setup_workspace(tmp_path)
+    monkeypatch.setenv("APCA_API_KEY_ID", KEY)
+    monkeypatch.setenv("APCA_API_SECRET_KEY", SECRET)
+    monkeypatch.setenv("R6_EXTERNAL_PAPER_WRITE", "DISABLED")
+    _, main = namespace()
+    fake_clock = FakeClockGateway(is_open=False)
+    fake_market = FakeGateway()
+    main.__globals__["AlpacaPaperMarketClockGateway"] = lambda config: fake_clock
+    main.__globals__["AlpacaPaperEquityMarketDataGateway"] = lambda config: fake_market
+
+    assert main(["--workspace", str(workspace.root), "--symbol", "AAPL", "--allow-paper-market-read"]) == 0
+    assert len(fake_clock.calls) == 1
+    assert fake_market.calls == []
+    assert not (workspace.root / "market_snapshot.json").exists()
+    output = json.loads(capsys.readouterr().out)
+    assert output["status"] == "PAPER_MARKET_CLOSED_WAIT"
+    assert output["market_is_open"] is False
+    assert output["market_snapshot_performed"] is False
+    assert output["market_evidence_persisted"] is False
+    assert output["broker_write_authorized"] is False
+    assert output["capital_authority"] == "NONE"
+
+
+def test_market_preflight_happy_path_is_clock_plus_iex_get_and_sanitized_artifact(tmp_path, monkeypatch, capsys) -> None:
     workspace = setup_workspace(tmp_path)
     persisted_asset = PaperAssetEvidenceStore(workspace).read()
     monkeypatch.setenv("APCA_API_KEY_ID", KEY)
     monkeypatch.setenv("APCA_API_SECRET_KEY", SECRET)
     monkeypatch.setenv("R6_EXTERNAL_PAPER_WRITE", "DISABLED")
     _, main = namespace()
+    fake_clock = FakeClockGateway(is_open=True)
     fake = FakeGateway()
+    main.__globals__["AlpacaPaperMarketClockGateway"] = lambda config: fake_clock
     main.__globals__["AlpacaPaperEquityMarketDataGateway"] = lambda config: fake
 
     assert main(["--workspace", str(workspace.root), "--symbol", "AAPL", "--allow-paper-market-read"]) == 0
+    assert len(fake_clock.calls) == 1
     assert len(fake.calls) == 1
     credentials, symbol, _ = fake.calls[0]
     assert credentials.credential_reference == CREDS.credential_reference
@@ -227,6 +276,8 @@ def test_market_preflight_happy_path_is_one_get_and_sanitized_artifact(tmp_path,
     output = json.loads(capsys.readouterr().out)
     assert output["status"] == "PAPER_MARKET_PREFLIGHT_COMPLETE"
     assert output["asset_attestation_fingerprint"] == persisted_asset.fingerprint
+    assert output["network_reads_performed"] == 2
+    assert output["market_is_open"] is True
     assert output["network_method"] == "GET"
     assert output["network_host"] == "data.alpaca.markets"
     assert output["broker_write_authorized"] is False

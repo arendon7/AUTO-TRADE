@@ -1,0 +1,9 @@
+interface=MAC_GUIDED_UAT_V1
+flow=LOCAL_SAFE_THEN_PAPER_GET_ONLY
+out_of_order_actions=UI_BLOCKED
+tradingview_required_for_r6=NO
+strategy_lab=NEXT_AFTER_R6_GUIDED_UAT
+external_paper_write=DISABLED
+capital_authority=NONE
+live_trading=BLOCKED
+canon_sync_parent=73da14788a0523dec4784b4c4386da8c9cfc8647

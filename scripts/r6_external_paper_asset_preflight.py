@@ -105,6 +105,7 @@ def main(argv: list[str] | None = None) -> int:
         "min_order_size": str(attestation.min_order_size),
         "min_trade_increment": str(attestation.min_trade_increment),
         "price_increment": str(attestation.price_increment),
+        "constraint_source": attestation.constraint_source,
         "attributes": list(attestation.attributes),
         "whole_share_canary_supported": True,
         "attestation_fingerprint": attestation.fingerprint,

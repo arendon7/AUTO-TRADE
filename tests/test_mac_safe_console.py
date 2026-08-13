@@ -28,7 +28,7 @@ def test_safe_console_has_no_execution_subcommand() -> None:
     help_text = console._parser().format_help()
     assert "execute" not in help_text.lower()
     for command in (
-        "init-workspace", "safety-rehearsal", "account-preflight", "asset-preflight",
+        "init-workspace", "safety-rehearsal", "account-discovery", "account-preflight", "asset-preflight",
         "flat-account-preflight", "market-preflight", "build-connectivity-candidate",
         "prepare-connectivity-candidate", "review-receipt", "pre-canary-status",
     ):
@@ -98,6 +98,7 @@ def test_safe_console_local_actions_are_credential_free(monkeypatch) -> None:
 def test_get_preflights_require_explicit_opt_in(monkeypatch) -> None:
     monkeypatch.setattr(console, "_require_safe_shell", lambda: None)
     cases = (
+        ["account-discovery", "--workspace", "/tmp/w"],
         ["account-preflight", "--workspace", "/tmp/w", "--expected-account-id", "paper"],
         ["asset-preflight", "--workspace", "/tmp/w", "--symbol", "AAPL"],
         ["flat-account-preflight", "--workspace", "/tmp/w"],
@@ -112,6 +113,7 @@ def test_get_preflights_require_explicit_opt_in(monkeypatch) -> None:
 def test_get_preflights_route_only_to_read_scripts(monkeypatch) -> None:
     monkeypatch.setattr(console, "_require_safe_shell", lambda: None)
     cases = (
+        (["account-discovery", "--workspace", "/tmp/w", "--allow-paper-account-discovery-read"], "r6_external_paper_account_discovery.py"),
         (["account-preflight", "--workspace", "/tmp/w", "--expected-account-id", "paper", "--allow-paper-account-read"], "r6_external_paper_preflight.py"),
         (["asset-preflight", "--workspace", "/tmp/w", "--symbol", "AAPL", "--allow-paper-asset-read"], "r6_external_paper_asset_preflight.py"),
         (["flat-account-preflight", "--workspace", "/tmp/w", "--allow-paper-flat-account-read"], "r6_external_paper_flat_account_preflight.py"),

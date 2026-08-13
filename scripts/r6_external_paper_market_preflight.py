@@ -11,6 +11,10 @@ from autotrade.brokers.alpaca_paper_asset_evidence import (
     PaperAssetEvidenceStore,
 )
 from autotrade.brokers.alpaca_paper_gateway import AlpacaPaperCredentials
+from autotrade.brokers.alpaca_paper_market_clock import (
+    AlpacaPaperMarketClockConfig,
+    AlpacaPaperMarketClockGateway,
+)
 from autotrade.brokers.alpaca_paper_market_data import (
     AlpacaPaperEquityMarketDataGateway,
     AlpacaPaperMarketDataConfig,
@@ -35,7 +39,7 @@ _WRITE_ENV = "R6_EXTERNAL_PAPER_WRITE"
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
-            "Explicit GET-only Alpaca IEX market-data preflight for one R6 PAPER workspace. "
+            "Explicit GET-only Alpaca market-clock + IEX market-data preflight for one R6 PAPER workspace. "
             "Requires account-bound asset evidence plus clean first-canary account evidence and exposes no order API."
         )
     )
@@ -44,7 +48,10 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--allow-paper-market-read",
         action="store_true",
-        help="Required explicit opt-in to the single IEX snapshot GET.",
+        help=(
+            "Required explicit opt-in to the PAPER /v2/clock GET and, only while the regular market is open, "
+            "the IEX stock snapshot GET."
+        ),
     )
     return parser
 
@@ -53,7 +60,7 @@ def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     if not args.allow_paper_market_read:
         raise SystemExit(
-            "Refusing network access: pass --allow-paper-market-read for the explicit GET-only IEX snapshot."
+            "Refusing network access: pass --allow-paper-market-read for the explicit GET-only market preflight."
         )
     if os.environ.get(_WRITE_ENV) == "ENABLED":
         raise SystemExit(
@@ -96,6 +103,31 @@ def main(argv: list[str] | None = None) -> int:
             f"Market symbol {symbol} does not match attested PAPER asset {asset.symbol}."
         )
 
+    clock = AlpacaPaperMarketClockGateway(
+        AlpacaPaperMarketClockConfig(enabled=True)
+    ).read_clock(credentials=credentials, now=now)
+    if not clock.is_open:
+        result = {
+            "status": "PAPER_MARKET_CLOSED_WAIT",
+            "symbol": symbol,
+            "market_is_open": False,
+            "clock_timestamp": clock.timestamp.astimezone(timezone.utc).isoformat(),
+            "next_open": clock.next_open.astimezone(timezone.utc).isoformat(),
+            "next_close": clock.next_close.astimezone(timezone.utc).isoformat(),
+            "network_reads_performed": 1,
+            "market_snapshot_performed": False,
+            "market_evidence_persisted": False,
+            "credentials_persisted": False,
+            "broker_write_authorized": False,
+            "external_order_submitted": False,
+            "capital_authority": "NONE",
+            "profitability_claim": False,
+            "live_trading": "BLOCKED",
+            "next_action": "WAIT_FOR_REGULAR_US_EQUITY_MARKET_OPEN_THEN_REPEAT_FRESH_PREFLIGHT_WINDOW",
+        }
+        print(json.dumps(result, indent=2, sort_keys=True))
+        return 0
+
     gateway = AlpacaPaperEquityMarketDataGateway(
         AlpacaPaperMarketDataConfig(enabled=True)
     )
@@ -118,6 +150,10 @@ def main(argv: list[str] | None = None) -> int:
         "currency": attestation.currency,
         "market_fingerprint": payload["market_fingerprint"],
         "attestation_fingerprint": attestation.fingerprint,
+        "market_is_open": True,
+        "clock_timestamp": clock.timestamp.astimezone(timezone.utc).isoformat(),
+        "next_close": clock.next_close.astimezone(timezone.utc).isoformat(),
+        "network_reads_performed": 2,
         "network_method": "GET",
         "network_host": attestation.source_host,
         "network_path": payload["source_path"],
