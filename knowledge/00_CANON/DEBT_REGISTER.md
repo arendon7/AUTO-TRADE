@@ -1,10 +1,10 @@
 # DEBT REGISTER — v0.28R
 
-Fecha: 2026-08-11
+Fecha: 2026-08-12
 Estado: **R0–R5 CERTIFIED; R6 ACTIVE**
 
 ## Authority
-La autoridad machine-readable es `knowledge/00_CANON/debt_register.json`. Si esta vista humana discrepa, manda el JSON + CI.
+La autoridad machine-readable es la composición validada por CI de `knowledge/00_CANON/debt_register.json` + sus extensiones `knowledge/00_CANON/debt_register_*.json`. Si esta vista humana discrepa, manda el registro machine-readable compuesto + CI.
 
 ## Regla
 Ningún track puede certificarse con deuda conocida P0/P1/P2 asignada a ese track. Deuda nueva se registra antes de implementar y no se rebaja para satisfacer una release.
@@ -35,8 +35,16 @@ Post-merge R5: Core Safety `31466198629` PASS, Knowledge Contract `31466198624` 
 | `TD-R6-011` | P1 | human final PAPER execution decision | **CLOSED** — exact prepared package → durable human-only one-shot decision → no-network execution bridge → OMS SUBMITTING → human-gated single POST writer |
 | `TD-R6-012` | P1 | crash-safe same-attempt resume | **CLOSED** — only PREPARED + zero attempts + same-attempt CONSUMED may resume; UNKNOWN/different/stale remain fail-closed |
 | `TD-R6-013` | P1 | operational external PAPER lifecycle harness | **CLOSED** — certified sanitized preflight + same-core preparation/provenance + separate human decision + triple-gated restart-safe single-shot execution + separate evidence capture; no real POST required for structural closure |
+| `TD-R6-014` | P1 | native multi-asset ProductCapabilities | explicit asset class/venue profile bound to broker attestation; crypto/equity order/TIF/market-hours/protection semantics cannot cross; permanent cross-product CI |
+| `TD-R6-015` | P1 | crypto protective lifecycle | entry reconciliation → confirmed filled qty → protective stop-limit ≤ position; partial fills, trigger/non-fill, disconnect, restart, cancel/replace and PROTECTION_AT_RISK fail-closed |
+| `TD-R6-016` | P1 | crypto PAPER writer/idempotency/reconciliation | exact PAPER crypto order payload + durable client_order_id + UNKNOWN-before-I/O + no blind retry + exact ACK/fill reconciliation + zero LIVE authority |
+| `TD-R6-017` | P1 | crypto 24/7 qualification evidence | repeated PAPER evidence across liquidity/time/weekend conditions; fills, spread/slippage, protection, reconciliation and residual stop-limit risk captured; no profitability claim from connectivity |
+| `TD-R6-018` | P1 | native Multi-Asset Mac Control Center | one localhost Hub exposing Equities + Crypto with ephemeral credentials, machine-readable product status, reliable macOS browser open, no hidden POST path and dual-arch UAT |
 
-R6 P0/P1/P2 OPEN: **6**. R6 cannot certify until all close with evidence.
+R6 P0/P1/P2 OPEN: **11**. R6 cannot certify until all close with evidence.
+
+### Multi-asset boundary
+`TD-R6-014`–`018` were added before enabling any crypto broker write. The crypto PAPER route remains rehearsal/read-only while these debts are open. ADR-0009 defines the durable architecture; `skills/crypto-trading/SKILL.md` and `skills/multi-asset-safety/SKILL.md` are mandatory for this workstream.
 
 ## Deuda no bloqueante fuera de R6
 | ID | Sev | Track | Área |
@@ -45,4 +53,4 @@ R6 P0/P1/P2 OPEN: **6**. R6 cannot certify until all close with evidence.
 
 ## Capital
 **LIVE TRADING: BLOQUEADO.**
-R6 may qualify bounded external PAPER only; no R6 artifact may authorize LIVE.
+R6 may qualify bounded external PAPER only; crypto broker writes remain disabled until their product-specific lifecycle is certified; no R6 artifact may authorize LIVE.

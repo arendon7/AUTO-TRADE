@@ -9,7 +9,7 @@ import re
 
 from autotrade.domain import MarketSnapshot, market_fingerprint
 
-from .alpaca_paper_crypto_asset import CRYPTO_PAIR
+from .alpaca_paper_crypto_asset import CRYPTO_PAIR, normalize_crypto_pair
 from .alpaca_paper_gateway import AlpacaPaperCredentials
 from .alpaca_paper_market_data import (
     ALPACA_MARKET_DATA_HOST,
@@ -24,7 +24,6 @@ from .alpaca_paper_market_data import (
 CRYPTO_LOCATION = "us"
 ORDERBOOK_PATH = "/v1beta3/crypto/us/latest/orderbooks"
 LATEST_TRADE_PATH = "/v1beta3/crypto/us/latest/trades"
-EXACT_QUERY = f"symbols={CRYPTO_PAIR}"
 _HASH_RE = re.compile(r"^[0-9a-f]{64}$")
 
 
@@ -42,6 +41,13 @@ class AlpacaPaperCryptoMarketDataPolicyError(AlpacaPaperCryptoMarketDataError):
 
 class AlpacaPaperCryptoMarketDataIntegrityError(AlpacaPaperCryptoMarketDataError):
     pass
+
+
+def crypto_exact_query(symbol: str) -> str:
+    return f"symbols={normalize_crypto_pair(symbol)}"
+
+
+EXACT_QUERY = crypto_exact_query(CRYPTO_PAIR)
 
 
 @dataclass(frozen=True, slots=True)
@@ -78,8 +84,9 @@ class AlpacaPaperCryptoMarketAttestation:
     source_host: str = ALPACA_MARKET_DATA_HOST
 
     def __post_init__(self) -> None:
-        if self.market.symbol != CRYPTO_PAIR or self.location != CRYPTO_LOCATION:
-            raise ValueError("crypto market attestation must be exact BTC/USD on Alpaca US")
+        normalize_crypto_pair(self.market.symbol)
+        if self.location != CRYPTO_LOCATION:
+            raise ValueError("crypto market attestation must use the exact Alpaca US location")
         if self.source_host != ALPACA_MARKET_DATA_HOST:
             raise ValueError("crypto market-data source host mismatch")
         for value in (self.orderbook_observed_at, self.trade_observed_at, self.received_at):
@@ -111,7 +118,7 @@ class AlpacaPaperCryptoMarketAttestation:
 
 
 class AlpacaPaperCryptoMarketDataGateway:
-    """Two exact GETs for BTC/USD top-of-book and latest trade; no write surface."""
+    """Two exact GETs for one canonical crypto pair top-of-book/latest trade; no write surface."""
 
     def __init__(
         self,
@@ -129,6 +136,7 @@ class AlpacaPaperCryptoMarketDataGateway:
         *,
         credentials: AlpacaPaperCredentials,
         now: datetime,
+        symbol: str = CRYPTO_PAIR,
     ) -> AlpacaPaperCryptoMarketAttestation:
         if not self._config.enabled:
             raise AlpacaPaperCryptoMarketDataDisabled("PAPER crypto market-data gateway is disabled")
@@ -136,11 +144,12 @@ class AlpacaPaperCryptoMarketDataGateway:
             raise TypeError("Alpaca PAPER credentials are required")
         if now.tzinfo is None or now.utcoffset() is None:
             raise ValueError("now must be timezone-aware")
+        canonical = normalize_crypto_pair(symbol)
         received_at = now.astimezone(timezone.utc)
-        orderbook = self._read(credentials=credentials, path=ORDERBOOK_PATH)
-        trade = self._read(credentials=credentials, path=LATEST_TRADE_PATH)
-        bid, ask, orderbook_time = self._parse_orderbook(orderbook.body)
-        last, trade_time = self._parse_trade(trade.body)
+        orderbook = self._read(credentials=credentials, path=ORDERBOOK_PATH, symbol=canonical)
+        trade = self._read(credentials=credentials, path=LATEST_TRADE_PATH, symbol=canonical)
+        bid, ask, orderbook_time = self._parse_orderbook(orderbook.body, symbol=canonical)
+        last, trade_time = self._parse_trade(trade.body, symbol=canonical)
         self._validate_time(orderbook_time, received_at, "crypto orderbook")
         self._validate_time(trade_time, received_at, "crypto latest trade")
         if abs((orderbook_time - trade_time).total_seconds()) > self._config.max_component_skew_seconds:
@@ -148,7 +157,7 @@ class AlpacaPaperCryptoMarketDataGateway:
         if bid > ask:
             raise AlpacaPaperCryptoMarketDataIntegrityError("crypto bid exceeds ask")
         market = MarketSnapshot(
-            symbol=CRYPTO_PAIR,
+            symbol=canonical,
             bid=bid,
             ask=ask,
             last=last,
@@ -164,8 +173,15 @@ class AlpacaPaperCryptoMarketDataGateway:
             trade_response_sha256=sha256(trade.body).hexdigest(),
         )
 
-    def _read(self, *, credentials: AlpacaPaperCredentials, path: str) -> AlpacaPaperMarketDataHttpResponse:
-        url = "https" + "://" + ALPACA_MARKET_DATA_HOST + path + "?" + EXACT_QUERY
+    def _read(
+        self,
+        *,
+        credentials: AlpacaPaperCredentials,
+        path: str,
+        symbol: str,
+    ) -> AlpacaPaperMarketDataHttpResponse:
+        query = crypto_exact_query(symbol)
+        url = "https" + "://" + ALPACA_MARKET_DATA_HOST + path + "?" + query
         request = AlpacaPaperMarketDataRequest(
             method="GET",
             url=url,
@@ -176,9 +192,9 @@ class AlpacaPaperCryptoMarketDataGateway:
                 "Accept": "application/json",
             },
         )
-        self._validate_request(request, path=path)
+        self._validate_request(request, path=path, symbol=symbol)
         response = self._transport.read(request)
-        self._validate_final_url(response.final_url, path=path)
+        self._validate_final_url(response.final_url, path=path, symbol=symbol)
         if response.status_code != 200:
             raise AlpacaPaperMarketDataUnavailable(
                 f"Alpaca crypto market-data returned HTTP {response.status_code}"
@@ -187,8 +203,8 @@ class AlpacaPaperCryptoMarketDataGateway:
             raise AlpacaPaperCryptoMarketDataIntegrityError("crypto market-data body exceeds limit")
         return response
 
-    def _validate_request(self, request: AlpacaPaperMarketDataRequest, *, path: str) -> None:
-        expected = "https" + "://" + ALPACA_MARKET_DATA_HOST + path + "?" + EXACT_QUERY
+    def _validate_request(self, request: AlpacaPaperMarketDataRequest, *, path: str, symbol: str) -> None:
+        expected = "https" + "://" + ALPACA_MARKET_DATA_HOST + path + "?" + crypto_exact_query(symbol)
         if request.method != "GET" or request.url != expected:
             raise AlpacaPaperCryptoMarketDataPolicyError("crypto market-data request is not exact GET allowlist")
         if set(request.headers) != {
@@ -198,38 +214,38 @@ class AlpacaPaperCryptoMarketDataGateway:
         } or request.headers.get("Accept") != "application/json":
             raise AlpacaPaperCryptoMarketDataPolicyError("crypto market-data headers are non-canonical")
 
-    def _validate_final_url(self, url: str, *, path: str) -> None:
-        expected = "https" + "://" + ALPACA_MARKET_DATA_HOST + path + "?" + EXACT_QUERY
+    def _validate_final_url(self, url: str, *, path: str, symbol: str) -> None:
+        expected = "https" + "://" + ALPACA_MARKET_DATA_HOST + path + "?" + crypto_exact_query(symbol)
         if url != expected:
             raise AlpacaPaperCryptoMarketDataPolicyError("crypto market-data final URL changed")
 
-    def _parse_orderbook(self, body: bytes) -> tuple[Decimal, Decimal, datetime]:
+    def _parse_orderbook(self, body: bytes, *, symbol: str) -> tuple[Decimal, Decimal, datetime]:
         root = _json_object(body, "crypto orderbook")
         books = root.get("orderbooks")
         if not isinstance(books, dict):
             raise AlpacaPaperCryptoMarketDataIntegrityError("crypto orderbooks object is required")
-        book = books.get(CRYPTO_PAIR)
+        book = books.get(symbol)
         if not isinstance(book, dict):
-            raise AlpacaPaperCryptoMarketDataIntegrityError("BTC/USD orderbook is missing")
+            raise AlpacaPaperCryptoMarketDataIntegrityError(f"{symbol} orderbook is missing")
         asks, bids = book.get("a"), book.get("b")
         if not isinstance(asks, list) or not asks or not isinstance(bids, list) or not bids:
-            raise AlpacaPaperCryptoMarketDataIntegrityError("BTC/USD orderbook requires bid and ask levels")
+            raise AlpacaPaperCryptoMarketDataIntegrityError(f"{symbol} orderbook requires bid and ask levels")
         ask0, bid0 = asks[0], bids[0]
         if not isinstance(ask0, dict) or not isinstance(bid0, dict):
-            raise AlpacaPaperCryptoMarketDataIntegrityError("BTC/USD top-of-book levels are invalid")
+            raise AlpacaPaperCryptoMarketDataIntegrityError(f"{symbol} top-of-book levels are invalid")
         ask = _positive_decimal(ask0.get("p"), "crypto ask")
         bid = _positive_decimal(bid0.get("p"), "crypto bid")
         observed = _rfc3339(book.get("t"), "crypto orderbook timestamp")
         return bid, ask, observed
 
-    def _parse_trade(self, body: bytes) -> tuple[Decimal, datetime]:
+    def _parse_trade(self, body: bytes, *, symbol: str) -> tuple[Decimal, datetime]:
         root = _json_object(body, "crypto latest trade")
         trades = root.get("trades")
         if not isinstance(trades, dict):
             raise AlpacaPaperCryptoMarketDataIntegrityError("crypto trades object is required")
-        trade = trades.get(CRYPTO_PAIR)
+        trade = trades.get(symbol)
         if not isinstance(trade, dict):
-            raise AlpacaPaperCryptoMarketDataIntegrityError("BTC/USD latest trade is missing")
+            raise AlpacaPaperCryptoMarketDataIntegrityError(f"{symbol} latest trade is missing")
         return (
             _positive_decimal(trade.get("p"), "crypto latest trade price"),
             _rfc3339(trade.get("t"), "crypto latest trade timestamp"),
@@ -285,4 +301,5 @@ __all__ = [
     "AlpacaPaperCryptoMarketDataConfig",
     "AlpacaPaperCryptoMarketDataError",
     "AlpacaPaperCryptoMarketDataGateway",
+    "crypto_exact_query",
 ]

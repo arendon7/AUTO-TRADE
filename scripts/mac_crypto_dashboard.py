@@ -9,9 +9,12 @@ import os
 from pathlib import Path
 import secrets
 import subprocess
+import sys
 import time
 from urllib.parse import urlparse
 import webbrowser
+
+from autotrade.brokers.alpaca_paper_crypto_asset import CRYPTO_PAIR, normalize_crypto_pair
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -29,7 +32,7 @@ class CryptoDashboardError(RuntimeError):
 
 
 def _parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Local BTC/USD PAPER rehearsal dashboard; no broker write surface.")
+    parser = argparse.ArgumentParser(description="Local crypto-pair PAPER rehearsal dashboard; no broker write surface.")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8766)
     parser.add_argument("--no-browser", action="store_true")
@@ -51,6 +54,13 @@ def _workspace(payload: dict[str, object]) -> str:
     if path.is_symlink() or not path.is_dir():
         raise CryptoDashboardError("workspace not found; verify the PAPER account once in the main Control Center first")
     return str(path.resolve())
+
+
+def _symbol(payload: dict[str, object]) -> str:
+    try:
+        return normalize_crypto_pair(str(payload.get("symbol") or CRYPTO_PAIR))
+    except (TypeError, ValueError) as exc:
+        raise CryptoDashboardError(str(exc)) from exc
 
 
 def _credentials(payload: dict[str, object]) -> tuple[str, str]:
@@ -99,11 +109,13 @@ def _extract_json(text: str) -> dict[str, object] | None:
 
 def _run(payload: dict[str, object]) -> dict[str, object]:
     workspace = _workspace(payload)
+    symbol = _symbol(payload)
     credentials = _credentials(payload)
     command = [
         str(PYTHON),
         "scripts/mac_crypto_paper_rehearsal.py",
         "--workspace", workspace,
+        "--symbol", symbol,
         "--allow-paper-crypto-read",
     ]
     started = time.monotonic()
@@ -148,7 +160,8 @@ def _meta() -> dict[str, object]:
     return {
         "source_head": build.get("source_head", "UNKNOWN"),
         "default_workspace": str(DEFAULT_WORKSPACE),
-        "symbol": "BTC/USD",
+        "symbol": CRYPTO_PAIR,
+        "pair_input": "BASE/QUOTE",
         "paper_write": "DISABLED",
         "capital_authority": "NONE",
         "live_trading": "BLOCKED",
@@ -218,7 +231,7 @@ class CryptoHandler(BaseHTTPRequestHandler):
                 raise CryptoDashboardError("request must be a JSON object")
             result = _run(payload)
         except subprocess.TimeoutExpired:
-            self._json(HTTPStatus.REQUEST_TIMEOUT, {"ok": False, "error": "BTC/USD rehearsal timed out"})
+            self._json(HTTPStatus.REQUEST_TIMEOUT, {"ok": False, "error": "crypto rehearsal timed out"})
             return
         except (CryptoDashboardError, OSError, ValueError, UnicodeDecodeError, json.JSONDecodeError) as exc:
             self._json(HTTPStatus.BAD_REQUEST, {"ok": False, "error": str(exc)})
@@ -242,15 +255,36 @@ def _start_server(host: str, port: int) -> CryptoServer:
     return CryptoServer((host, port), secrets.token_urlsafe(32))
 
 
+def _open_browser(url: str) -> bool:
+    if sys.platform == "darwin":
+        try:
+            completed = subprocess.run(
+                ["/usr/bin/open", url],
+                text=True,
+                capture_output=True,
+                timeout=5,
+                check=False,
+            )
+            if completed.returncode == 0:
+                return True
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+    try:
+        return bool(webbrowser.open(url, new=1, autoraise=True))
+    except (OSError, webbrowser.Error):
+        return False
+
+
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     _require_runtime()
     server = _start_server(args.host, args.port)
     url = f"http://127.0.0.1:{server.server_port}/"
     print(f"AUTO-TRADE Crypto PAPER Lab: {url}")
-    print("BTC/USD 24/7 read + Capital Safety + local OMS only. Broker POST: DISABLED. LIVE: BLOCKED.")
+    print("Crypto pair 24/7 read + ProductCapabilities + Capital Safety + local OMS only. Broker POST: DISABLED. LIVE: BLOCKED.")
     if not args.no_browser:
-        webbrowser.open(url, new=1, autoraise=True)
+        if not _open_browser(url):
+            print(f"Browser did not open automatically. Open this URL manually: {url}")
     try:
         server.serve_forever(poll_interval=0.25)
     except KeyboardInterrupt:

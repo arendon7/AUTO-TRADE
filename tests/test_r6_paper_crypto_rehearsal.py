@@ -11,8 +11,11 @@ import pytest
 from autotrade.brokers.alpaca_paper_crypto_asset import (
     CRYPTO_ASSET_PATH,
     CRYPTO_PAIR,
+    CURRENT_TRADING_API_CRYPTO_EXCHANGE,
     AlpacaPaperCryptoAssetGateway,
     PaperCryptoAssetIntegrityError,
+    crypto_asset_path,
+    normalize_crypto_pair,
 )
 from autotrade.brokers.alpaca_paper_crypto_market_data import (
     LATEST_TRADE_PATH,
@@ -53,12 +56,12 @@ class AssetTransport:
         )
 
 
-def asset_payload(**overrides: object) -> dict[str, object]:
+def asset_payload(symbol: str = "BTC/USD", **overrides: object) -> dict[str, object]:
     payload: dict[str, object] = {
         "id": "276e2673-764b-4ab6-a611-caf665ca6340",
         "class": "crypto",
-        "exchange": "ALPACA",
-        "symbol": "BTC/USD",
+        "exchange": CURRENT_TRADING_API_CRYPTO_EXCHANGE,
+        "symbol": symbol,
         "status": "active",
         "tradable": True,
         "marginable": False,
@@ -70,6 +73,15 @@ def asset_payload(**overrides: object) -> dict[str, object]:
     }
     payload.update(overrides)
     return payload
+
+
+def test_crypto_pair_normalization_and_asset_path_are_injection_safe() -> None:
+    assert normalize_crypto_pair(" eth/usd ") == "ETH/USD"
+    assert crypto_asset_path("BTC/USD") == "/v2/assets/BTC%2FUSD"
+    assert CRYPTO_ASSET_PATH == "/v2/assets/BTC%2FUSD"
+    for value in ("BTCUSD", "BTC/USD?x=1", "../BTC/USD", "BTC//USD", "BTC/BTC", "B/USD"):
+        with pytest.raises((TypeError, ValueError)):
+            normalize_crypto_pair(value)
 
 
 def test_crypto_asset_is_exact_get_only_and_preserves_broker_constraints() -> None:
@@ -85,7 +97,7 @@ def test_crypto_asset_is_exact_get_only_and_preserves_broker_constraints() -> No
     )
     assert result.symbol == CRYPTO_PAIR
     assert result.asset_class == "crypto"
-    assert result.exchange == "ALPACA"
+    assert result.exchange == "CRYPTO"
     assert result.min_order_size == Decimal("0.0001")
     assert result.min_trade_increment == Decimal("0.0001")
     assert result.price_increment == Decimal("1")
@@ -93,6 +105,47 @@ def test_crypto_asset_is_exact_get_only_and_preserves_broker_constraints() -> No
     request = transport.requests[0]
     assert request.method == "GET"
     assert request.url == f"https://{ALPACA_PAPER_TRADING_HOST}{CRYPTO_ASSET_PATH}"
+
+
+def test_crypto_asset_supports_generic_pair_and_url_encoded_slash() -> None:
+    transport = AssetTransport(asset_payload("ETH/USD", min_order_size="0.001", price_increment="0.01"))
+    result = AlpacaPaperCryptoAssetGateway(
+        config=AlpacaPaperGatewayConfig(enabled=True), transport=transport
+    ).attest_asset(
+        credentials=CREDS,
+        account_attestation_fingerprint=HASH_A,
+        expected_credential_reference=CREDS.credential_reference,
+        now=NOW,
+        symbol="eth/usd",
+    )
+    assert result.symbol == "ETH/USD"
+    assert result.source_path == "/v2/assets/ETH%2FUSD"
+    assert transport.requests[0].url.endswith("/v2/assets/ETH%2FUSD")
+
+
+def test_crypto_asset_rejects_requested_response_pair_mismatch_and_stale_exchange_enum() -> None:
+    mismatch = AlpacaPaperCryptoAssetGateway(
+        config=AlpacaPaperGatewayConfig(enabled=True), transport=AssetTransport(asset_payload("BTC/USD"))
+    )
+    with pytest.raises(PaperCryptoAssetIntegrityError, match="does not match"):
+        mismatch.attest_asset(
+            credentials=CREDS,
+            account_attestation_fingerprint=HASH_A,
+            expected_credential_reference=CREDS.credential_reference,
+            now=NOW,
+            symbol="ETH/USD",
+        )
+    stale = AlpacaPaperCryptoAssetGateway(
+        config=AlpacaPaperGatewayConfig(enabled=True),
+        transport=AssetTransport(asset_payload(exchange="ALPACA")),
+    )
+    with pytest.raises(ValueError, match="CRYPTO enum"):
+        stale.attest_asset(
+            credentials=CREDS,
+            account_attestation_fingerprint=HASH_A,
+            expected_credential_reference=CREDS.credential_reference,
+            now=NOW,
+        )
 
 
 @pytest.mark.parametrize(
@@ -122,8 +175,19 @@ def test_crypto_asset_fails_closed_on_wrong_product_or_constraints(field: str, v
 
 
 class CryptoMarketTransport:
-    def __init__(self, *, ask: object = "100001", observed_at: datetime | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        symbol: str = "BTC/USD",
+        bid: object = "99999",
+        ask: object = "100001",
+        last: object = "100000",
+        observed_at: datetime | None = None,
+    ) -> None:
+        self.symbol = symbol
+        self.bid = bid
         self.ask = ask
+        self.last = last
         self.observed_at = observed_at or (NOW - timedelta(seconds=1))
         self.requests = []
 
@@ -133,15 +197,15 @@ class CryptoMarketTransport:
         if ORDERBOOK_PATH in request.url:
             payload = {
                 "orderbooks": {
-                    "BTC/USD": {
+                    self.symbol: {
                         "a": [{"p": self.ask, "s": "0.5"}],
-                        "b": [{"p": "99999", "s": "0.4"}],
+                        "b": [{"p": self.bid, "s": "0.4"}],
                         "t": timestamp,
                     }
                 }
             }
         elif LATEST_TRADE_PATH in request.url:
-            payload = {"trades": {"BTC/USD": {"p": "100000", "s": "0.001", "t": timestamp}}}
+            payload = {"trades": {self.symbol: {"p": self.last, "s": "0.001", "t": timestamp}}}
         else:
             raise AssertionError(request.url)
         return AlpacaPaperMarketDataHttpResponse(
@@ -169,6 +233,22 @@ def test_crypto_market_uses_exact_two_gets_and_builds_fresh_snapshot() -> None:
     assert all("symbols=BTC/USD" in request.url for request in transport.requests)
 
 
+def test_crypto_market_supports_second_pair_without_cross_pair_data() -> None:
+    transport = CryptoMarketTransport(symbol="ETH/USD", bid="4999", ask="5001", last="5000")
+    result = AlpacaPaperCryptoMarketDataGateway(
+        AlpacaPaperCryptoMarketDataConfig(enabled=True), transport=transport
+    ).attest_snapshot(credentials=CREDS, now=NOW, symbol="eth/usd")
+    assert result.market.symbol == "ETH/USD"
+    assert result.market.last == Decimal("5000")
+    assert all("symbols=ETH/USD" in request.url for request in transport.requests)
+
+    wrong = CryptoMarketTransport(symbol="BTC/USD")
+    with pytest.raises(AlpacaPaperCryptoMarketDataIntegrityError, match="ETH/USD"):
+        AlpacaPaperCryptoMarketDataGateway(
+            AlpacaPaperCryptoMarketDataConfig(enabled=True), transport=wrong
+        ).attest_snapshot(credentials=CREDS, now=NOW, symbol="ETH/USD")
+
+
 def test_crypto_market_rejects_zero_or_stale_prices() -> None:
     with pytest.raises(AlpacaPaperCryptoMarketDataIntegrityError, match="positive"):
         AlpacaPaperCryptoMarketDataGateway(
@@ -182,7 +262,7 @@ def test_crypto_market_rejects_zero_or_stale_prices() -> None:
         ).attest_snapshot(credentials=CREDS, now=NOW)
 
 
-def test_crypto_rehearsal_runs_safety_and_oms_without_broker_write(monkeypatch, tmp_path: Path) -> None:
+def test_crypto_rehearsal_runs_profile_safety_and_oms_without_broker_write(monkeypatch, tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     (workspace / "account_attestation.json").write_text(
@@ -203,11 +283,15 @@ def test_crypto_rehearsal_runs_safety_and_oms_without_broker_write(monkeypatch, 
         credential_reference=CREDS.credential_reference,
     )
     asset = SimpleNamespace(
+        symbol="ETH/USD",
         asset_class="crypto",
-        exchange="ALPACA",
-        min_order_size=Decimal("0.0001"),
-        min_trade_increment=Decimal("0.0001"),
-        price_increment=Decimal("1"),
+        exchange="CRYPTO",
+        fractionable=True,
+        marginable=False,
+        shortable=False,
+        min_order_size=Decimal("0.001"),
+        min_trade_increment=Decimal("0.001"),
+        price_increment=Decimal("0.01"),
         fingerprint=HASH_B,
         response_sha256=HASH_B,
         observed_at=NOW,
@@ -215,10 +299,10 @@ def test_crypto_rehearsal_runs_safety_and_oms_without_broker_write(monkeypatch, 
     flat = SimpleNamespace(clean_for_first_canary=True, position_count=0, open_order_count=0)
     market_attestation = SimpleNamespace(
         market=MarketSnapshot(
-            symbol="BTC/USD",
-            bid=Decimal("99999"),
-            ask=Decimal("100001"),
-            last=Decimal("100000"),
+            symbol="ETH/USD",
+            bid=Decimal("4999"),
+            ask=Decimal("5001"),
+            last=Decimal("5000"),
             observed_at=NOW - timedelta(seconds=1),
         ),
         fingerprint="c" * 64,
@@ -231,7 +315,9 @@ def test_crypto_rehearsal_runs_safety_and_oms_without_broker_write(monkeypatch, 
 
     class AssetGateway:
         def __init__(self, *args, **kwargs): pass
-        def attest_asset(self, **kwargs): return asset
+        def attest_asset(self, **kwargs):
+            assert kwargs["symbol"] == "ETH/USD"
+            return asset
 
     class FlatGateway:
         def __init__(self, *args, **kwargs): pass
@@ -239,7 +325,9 @@ def test_crypto_rehearsal_runs_safety_and_oms_without_broker_write(monkeypatch, 
 
     class MarketGateway:
         def __init__(self, *args, **kwargs): pass
-        def attest_snapshot(self, **kwargs): return market_attestation
+        def attest_snapshot(self, **kwargs):
+            assert kwargs["symbol"] == "ETH/USD"
+            return market_attestation
 
     monkeypatch.setattr(rehearsal, "AlpacaPaperAccountGateway", AccountGateway)
     monkeypatch.setattr(rehearsal, "AlpacaPaperCryptoAssetGateway", AssetGateway)
@@ -247,8 +335,13 @@ def test_crypto_rehearsal_runs_safety_and_oms_without_broker_write(monkeypatch, 
     monkeypatch.setattr(rehearsal, "AlpacaPaperCryptoMarketDataGateway", MarketGateway)
     monkeypatch.delenv(rehearsal.WRITE_ENV, raising=False)
 
-    result = rehearsal.run(workspace_path=workspace, credentials=CREDS, now=NOW)
+    result = rehearsal.run(workspace_path=workspace, credentials=CREDS, now=NOW, symbol="eth/usd")
     assert result["status"] == "CRYPTO_PAPER_REHEARSAL_PASS"
+    assert result["symbol"] == "ETH/USD"
+    assert result["exchange"] == "CRYPTO"
+    assert result["market_hours_model"] == "CONTINUOUS_24_7"
+    assert result["product_protection_model"] == "CRYPTO_STOP_LIMIT"
+    assert len(result["product_profile_fingerprint"]) == 64
     assert result["capital_safety"] == "APPROVED"
     assert result["oms_status"] == "VALIDATED"
     assert result["broker_reads"] == 6
