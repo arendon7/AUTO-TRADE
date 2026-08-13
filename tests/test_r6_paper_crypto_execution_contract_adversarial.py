@@ -79,7 +79,10 @@ def test_execution_stage_result_rejects_order_handoff_identity_drift(tmp_path) -
     ctx = _setup(tmp_path / "ctx")
     checkpoint = _checkpoint(ctx, tmp_path)
     good = _stage(ctx, checkpoint)
-    mismatched_handoff = replace(good.handoff, order_id="other-order")
+    # The upstream ExternalSubmissionHandoff is itself hash-bound. Use the
+    # minimal interface consumed by the bridge result so this test reaches the
+    # bridge's own identity check rather than failing in the upstream fixture.
+    mismatched_handoff = SimpleNamespace(order_id="other-order")
 
     with pytest.raises(ValueError, match="order/handoff mismatch"):
         CryptoPaperExecutionStageResult(
@@ -88,7 +91,7 @@ def test_execution_stage_result_rejects_order_handoff_identity_drift(tmp_path) -
             attempt_id=good.attempt_id,
             checkpoint_hash=good.checkpoint_hash,
             order=good.order,
-            handoff=mismatched_handoff,
+            handoff=mismatched_handoff,  # type: ignore[arg-type]
         )
 
 
@@ -114,14 +117,20 @@ def test_simulation_binding_validator_rejects_role_and_each_operator_binding_dri
         client_order_id=ctx.broker_order.client_order_id,
         fingerprint=ctx.broker_order.fingerprint,
     )
+    base_context = {
+        "prepared_package_hash": context.prepared_package_hash,
+        "lifecycle_id": context.lifecycle_id,
+        "order_id": context.order_id,
+        "client_order_id": context.client_order_id,
+    }
     context_cases = (
-        (replace(context, prepared_package_hash="f" * 64), "package hash mismatch"),
-        (replace(context, lifecycle_id="different-life"), "package identity mismatch"),
-        (replace(context, order_id="different-order"), "package identity mismatch"),
-        (replace(context, client_order_id="different-client-order"), "client_order_id mismatch"),
+        ({**base_context, "prepared_package_hash": "f" * 64}, "package hash mismatch"),
+        ({**base_context, "lifecycle_id": "different-life"}, "package identity mismatch"),
+        ({**base_context, "order_id": "different-order"}, "package identity mismatch"),
+        ({**base_context, "client_order_id": "different-client-order"}, "client_order_id mismatch"),
     )
-    for changed_context, message in context_cases:
-        fake_decision = SimpleNamespace(context=changed_context)
+    for values, message in context_cases:
+        fake_decision = SimpleNamespace(context=SimpleNamespace(**values))
         with pytest.raises(CryptoExecutionSimulationBlocked, match=message):
             validator(
                 package=ctx.package,
