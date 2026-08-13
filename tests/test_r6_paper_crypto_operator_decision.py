@@ -123,7 +123,6 @@ def test_operator_decision_cannot_predate_or_outlive_prepared_package(tmp_path) 
 
 def test_operator_decision_ttl_is_bounded_to_two_minutes(tmp_path) -> None:
     _prepared, context, _registry, _runtime = _setup(tmp_path)
-    # TTL is evaluated before package deadline; a >2m decision is invalid under all packages.
     with pytest.raises(ValueError, match="<=2 minutes"):
         CryptoOperatorDecision(
             context=context,
@@ -248,5 +247,7 @@ def test_registry_previous_hash_tamper_is_detected_after_consumption(tmp_path) -
         )
     finally:
         conn.close()
-    with pytest.raises(CryptoOperatorDecisionIntegrityError, match="previous-hash mismatch"):
+    # previous_event_hash is included in the event hash, so corruption is detected
+    # at the earliest cryptographic check before the later chain-link comparison.
+    with pytest.raises(CryptoOperatorDecisionIntegrityError, match="event hash mismatch"):
         SQLiteCryptoOperatorDecisionRegistry(runtime).get(context.preparation_hash)
