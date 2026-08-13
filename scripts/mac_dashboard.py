@@ -19,7 +19,9 @@ import webbrowser
 
 ROOT = Path(__file__).resolve().parents[1]
 PYTHON = ROOT / ".venv/bin/python"
+HUB_HTML_PATH = ROOT / "web/mac_multi_asset.html"
 HTML_PATH = ROOT / "web/mac_dashboard.html"
+CRYPTO_HTML_PATH = ROOT / "web/mac_crypto_dashboard.html"
 WRITE_ENV = "R6_EXTERNAL_PAPER_WRITE"
 KEY_ENV = "APCA_API_KEY_ID"
 SECRET_ENV = "APCA_API_SECRET_KEY"
@@ -53,13 +55,14 @@ SAFE_ACTIONS: dict[str, ActionSpec] = {
     "build_candidate": ActionSpec("none"),
     "prepare_candidate": ActionSpec("none"),
     "review_receipt": ActionSpec("none"),
+    "crypto_rehearsal": ActionSpec("paper", 60),
 }
 
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
-            "Local browser control center for AUTO-TRADE R6 safe/PAPER-read operations. "
+            "Local native multi-asset Control Center for AUTO-TRADE R6 safe/PAPER-read operations. "
             "No staging, Final Freshness, order POST or LIVE action is exposed."
         )
     )
@@ -74,8 +77,9 @@ def _require_safe_runtime() -> None:
         raise DashboardError("Refusing dashboard while R6_EXTERNAL_PAPER_WRITE=ENABLED")
     if not PYTHON.is_file():
         raise DashboardError("AUTO-TRADE runtime is not installed; run INSTALAR_AUTO_TRADE.command")
-    if not HTML_PATH.is_file():
-        raise DashboardError("Missing local dashboard asset: web/mac_dashboard.html")
+    for path in (HUB_HTML_PATH, HTML_PATH, CRYPTO_HTML_PATH):
+        if not path.is_file():
+            raise DashboardError(f"Missing local dashboard asset: {path.relative_to(ROOT)}")
 
 
 def _workspace(payload: dict[str, object], *, allow_missing: bool = False) -> str:
@@ -120,8 +124,18 @@ def _safe_env(*, paper_credentials: tuple[str, str] | None = None) -> dict[str, 
 def _command(action: str, payload: dict[str, object]) -> tuple[list[str], tuple[str, str] | None]:
     if action not in SAFE_ACTIONS:
         raise DashboardError("Action is not in the certified dashboard allowlist")
-    base = [str(PYTHON), "scripts/mac_safe_console.py"]
 
+    if action == "crypto_rehearsal":
+        workspace = _workspace(payload)
+        credentials = _paper_credentials(payload)
+        return [
+            str(PYTHON),
+            "scripts/mac_crypto_paper_rehearsal.py",
+            "--workspace", workspace,
+            "--allow-paper-crypto-read",
+        ], credentials
+
+    base = [str(PYTHON), "scripts/mac_safe_console.py"]
     if action == "rehearsal":
         return base + ["rehearsal"], None
     if action == "safety_rehearsal":
@@ -262,6 +276,13 @@ def _build_meta() -> dict[str, object]:
         "embedded_python": standalone.get("python_version") or "host",
         "installed": PYTHON.is_file(),
         "default_workspace": str(DEFAULT_WORKSPACE),
+        "native_multi_asset_control_center": True,
+        "asset_classes": ["US_EQUITY", "CRYPTO"],
+        "equity_route": "/equities",
+        "crypto_route": "/crypto",
+        "crypto_rehearsal_available": True,
+        "equity_execution_from_dashboard": False,
+        "crypto_execution_from_dashboard": False,
         "external_paper_write": "DISABLED",
         "capital_authority": "NONE",
         "live_trading": "BLOCKED",
@@ -269,8 +290,12 @@ def _build_meta() -> dict[str, object]:
     }
 
 
+def _page(path: Path, token: str) -> bytes:
+    return path.read_text(encoding="utf-8").replace("__CSRF_TOKEN__", token).encode("utf-8")
+
+
 class DashboardHandler(BaseHTTPRequestHandler):
-    server_version = "AUTO-TRADE-R6-LocalDashboard"
+    server_version = "AUTO-TRADE-R6-MultiAssetDashboard"
 
     @property
     def dashboard_server(self) -> "DashboardServer":
@@ -322,10 +347,14 @@ class DashboardHandler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:  # noqa: N802
         parsed = urlparse(self.path)
-        if parsed.path == "/":
-            html = HTML_PATH.read_text(encoding="utf-8").replace("__CSRF_TOKEN__", self.dashboard_server.csrf_token)
+        pages = {
+            "/": HUB_HTML_PATH,
+            "/equities": HTML_PATH,
+            "/crypto": CRYPTO_HTML_PATH,
+        }
+        if parsed.path in pages:
             self._headers(HTTPStatus.OK, "text/html; charset=utf-8")
-            self.wfile.write(html.encode("utf-8"))
+            self.wfile.write(_page(pages[parsed.path], self.dashboard_server.csrf_token))
             return
         if parsed.path == "/api/meta":
             self._json(HTTPStatus.OK, {"ok": True, "meta": _build_meta()})
@@ -347,7 +376,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
         self._json(HTTPStatus.NOT_FOUND, {"ok": False, "error": "not found"})
 
     def do_POST(self) -> None:  # noqa: N802
-        if self.path != "/api/action":
+        if self.path not in {"/api/action", "/api/rehearsal"}:
             self._json(HTTPStatus.NOT_FOUND, {"ok": False, "error": "not found"})
             return
         if not self._require_local_origin():
@@ -358,7 +387,8 @@ class DashboardHandler(BaseHTTPRequestHandler):
             return
         try:
             payload = self._read_payload()
-            result = _run_action(str(payload.get("action") or ""), payload)
+            action = "crypto_rehearsal" if self.path == "/api/rehearsal" else str(payload.get("action") or "")
+            result = _run_action(action, payload)
         except subprocess.TimeoutExpired:
             self._json(HTTPStatus.REQUEST_TIMEOUT, {"ok": False, "error": "safe action timed out"})
             return
@@ -395,6 +425,27 @@ def _enable_line_buffered_console() -> None:
             reconfigure(line_buffering=True)
 
 
+def _open_browser(url: str) -> bool:
+    """Open localhost reliably on macOS without making GUI launch a server dependency."""
+    if sys.platform == "darwin":
+        try:
+            completed = subprocess.run(
+                ["/usr/bin/open", url],
+                text=True,
+                capture_output=True,
+                timeout=5,
+                check=False,
+            )
+            if completed.returncode == 0:
+                return True
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+    try:
+        return bool(webbrowser.open(url, new=1, autoraise=True))
+    except (OSError, webbrowser.Error):
+        return False
+
+
 def main(argv: list[str] | None = None) -> int:
     _enable_line_buffered_console()
     args = _parser().parse_args(argv)
@@ -406,14 +457,16 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     url = f"http://127.0.0.1:{server.server_port}/"
-    print("AUTO-TRADE R6 — LOCAL CONTROL CENTER")
-    print(f"Dashboard: {url}")
+    print("AUTO-TRADE R6 — NATIVE MULTI-ASSET CONTROL CENTER")
+    print(f"Hub: {url}")
+    print(f"Equities: {url}equities")
+    print(f"Crypto: {url}crypto")
     print("External PAPER write: DISABLED")
     print("LIVE trading: BLOCKED")
     print("Order execution from dashboard: UNAVAILABLE")
     print("Keep this terminal open while using the dashboard. Ctrl+C closes it.")
     if not args.no_browser:
-        threading.Timer(0.35, lambda: webbrowser.open(url, new=1)).start()
+        threading.Timer(0.35, lambda: _open_browser(url)).start()
     try:
         server.serve_forever(poll_interval=0.25)
     except KeyboardInterrupt:
