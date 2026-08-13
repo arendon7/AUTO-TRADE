@@ -28,6 +28,7 @@ SECRET_ENV = "APCA_API_SECRET_KEY"
 MAX_BODY_BYTES = 64 * 1024
 DEFAULT_WORKSPACE = Path.home() / "AUTO-TRADE-R6/workspace-001"
 SYMBOL_RE = re.compile(r"^[A-Z0-9.\-]{1,16}$")
+CRYPTO_PAIR_RE = re.compile(r"^[A-Z0-9]{2,16}/[A-Z0-9]{2,16}$")
 ACCOUNT_ID_RE = re.compile(r"^[0-9a-fA-F-]{16,64}$")
 
 
@@ -101,6 +102,16 @@ def _symbol(payload: dict[str, object]) -> str:
     return value
 
 
+def _crypto_symbol(payload: dict[str, object]) -> str:
+    value = str(payload.get("symbol") or "BTC/USD").strip().upper()
+    if not CRYPTO_PAIR_RE.fullmatch(value):
+        raise DashboardError("Crypto pair must use strict BASE/QUOTE form")
+    base, quote = value.split("/", 1)
+    if base == quote:
+        raise DashboardError("Crypto base and quote currency must differ")
+    return value
+
+
 def _paper_credentials(payload: dict[str, object]) -> tuple[str, str]:
     key = str(payload.get("paper_key") or "").strip()
     secret = str(payload.get("paper_secret") or "").strip()
@@ -132,6 +143,7 @@ def _command(action: str, payload: dict[str, object]) -> tuple[list[str], tuple[
             str(PYTHON),
             "scripts/mac_crypto_paper_rehearsal.py",
             "--workspace", workspace,
+            "--symbol", _crypto_symbol(payload),
             "--allow-paper-crypto-read",
         ], credentials
 
@@ -280,6 +292,8 @@ def _build_meta() -> dict[str, object]:
         "asset_classes": ["US_EQUITY", "CRYPTO"],
         "equity_route": "/equities",
         "crypto_route": "/crypto",
+        "crypto_default_symbol": "BTC/USD",
+        "crypto_pair_input": "BASE/QUOTE",
         "crypto_rehearsal_available": True,
         "equity_execution_from_dashboard": False,
         "crypto_execution_from_dashboard": False,
