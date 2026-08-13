@@ -372,18 +372,18 @@ def test_preio_requires_correct_attempt_and_preconsume_attestation(tmp_path) -> 
     ctx.operator_registry.consume(
         decision=ctx.operator_decision,
         attempt_id=ctx.operator_decision.context.attempt_id,
-        now=NOW + timedelta(seconds=4, milliseconds=20),
+        now=NOW + timedelta(seconds=4, milliseconds=250),
     )
     ctx.oms.stage_external_submission(
         order_id=ctx.package.order_id,
         handoff_id="d" * 64,
         decision=ctx.decision,
         market=ctx.prepared_market.market,
-        now=NOW + timedelta(seconds=4, milliseconds=40),
+        now=NOW + timedelta(seconds=4, milliseconds=300),
     )
     ctx.lifecycle.mark_entry_submission_unknown(
         ctx.package.lifecycle_id,
-        at=NOW + timedelta(seconds=4, milliseconds=60),
+        at=NOW + timedelta(seconds=4, milliseconds=350),
     )
     with pytest.raises(CryptoFinalWriteBlocked) as exc:
         _call(
@@ -391,7 +391,7 @@ def test_preio_requires_correct_attempt_and_preconsume_attestation(tmp_path) -> 
             phase=CryptoFinalWritePhase.PRE_IO,
             expected_attempt_id="wrong-attempt",
             previous_attestation=None,
-            now=NOW + timedelta(seconds=4, milliseconds=100),
+            now=NOW + timedelta(seconds=4, milliseconds=400),
         )
     assert "expected attempt_id" in str(exc.value)
     assert "requires actual PRE_CONSUME" in str(exc.value)
@@ -401,7 +401,7 @@ def test_preio_requires_correct_attempt_and_preconsume_attestation(tmp_path) -> 
         phase=CryptoFinalWritePhase.PRE_IO,
         expected_attempt_id=ctx.operator_decision.context.attempt_id,
         previous_attestation=pre,
-        now=NOW + timedelta(seconds=4, milliseconds=100),
+        now=NOW + timedelta(seconds=4, milliseconds=400),
     )
     assert final.phase is CryptoFinalWritePhase.PRE_IO
 
@@ -412,18 +412,18 @@ def test_preio_detects_fresh_market_race_between_phases(tmp_path) -> None:
     ctx.operator_registry.consume(
         decision=ctx.operator_decision,
         attempt_id=ctx.operator_decision.context.attempt_id,
-        now=NOW + timedelta(seconds=4, milliseconds=20),
+        now=NOW + timedelta(seconds=4, milliseconds=250),
     )
     ctx.oms.stage_external_submission(
         order_id=ctx.package.order_id,
         handoff_id="e" * 64,
         decision=ctx.decision,
         market=ctx.prepared_market.market,
-        now=NOW + timedelta(seconds=4, milliseconds=40),
+        now=NOW + timedelta(seconds=4, milliseconds=300),
     )
     ctx.lifecycle.mark_entry_submission_unknown(
         ctx.package.lifecycle_id,
-        at=NOW + timedelta(seconds=4, milliseconds=60),
+        at=NOW + timedelta(seconds=4, milliseconds=350),
     )
     raced_market = replace(ctx.fresh_market, market=replace(ctx.fresh_market.market, last=Decimal("99998")))
     with pytest.raises(CryptoFinalWriteBlocked, match="fresh market evidence changed"):
@@ -433,7 +433,7 @@ def test_preio_detects_fresh_market_race_between_phases(tmp_path) -> None:
             phase=CryptoFinalWritePhase.PRE_IO,
             expected_attempt_id=ctx.operator_decision.context.attempt_id,
             previous_attestation=pre,
-            now=NOW + timedelta(seconds=4, milliseconds=100),
+            now=NOW + timedelta(seconds=4, milliseconds=400),
         )
 
 
