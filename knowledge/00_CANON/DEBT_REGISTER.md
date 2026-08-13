@@ -4,7 +4,7 @@ Fecha: 2026-08-12
 Estado: **R0–R5 CERTIFIED; R6 ACTIVE**
 
 ## Authority
-La autoridad machine-readable es `knowledge/00_CANON/debt_register.json`. Si esta vista humana discrepa, manda el JSON + CI.
+La autoridad machine-readable es la composición validada por CI de `knowledge/00_CANON/debt_register.json` + sus extensiones `knowledge/00_CANON/debt_register_*.json`. Si esta vista humana discrepa, manda el registro machine-readable compuesto + CI.
 
 ## Regla
 Ningún track puede certificarse con deuda conocida P0/P1/P2 asignada a ese track. Deuda nueva se registra antes de implementar y no se rebaja para satisfacer una release.
@@ -44,7 +44,7 @@ Post-merge R5: Core Safety `31466198629` PASS, Knowledge Contract `31466198624` 
 R6 P0/P1/P2 OPEN: **11**. R6 cannot certify until all close with evidence.
 
 ### Multi-asset boundary
-`TD-R6-014`–`018` were added before enabling any crypto broker write. The BTC/USD Crypto PAPER Lab remains rehearsal/read-only while these debts are open. ADR-0009 defines the durable architecture; `skills/crypto-trading/SKILL.md` and `skills/multi-asset-safety/SKILL.md` are mandatory for this workstream.
+`TD-R6-014`–`018` were added before enabling any crypto broker write. The crypto PAPER route remains rehearsal/read-only while these debts are open. ADR-0009 defines the durable architecture; `skills/crypto-trading/SKILL.md` and `skills/multi-asset-safety/SKILL.md` are mandatory for this workstream.
 
 ## Deuda no bloqueante fuera de R6
 | ID | Sev | Track | Área |
