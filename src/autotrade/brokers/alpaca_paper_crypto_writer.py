@@ -83,8 +83,18 @@ class AlpacaPaperCryptoWriteTransport(Protocol):
         ...
 
 
+class GuardedAlpacaPaperCryptoWriteTransport:
+    """Nominal capability reserved for role-bound Final-Guard transports."""
+
+    role: CryptoOrderRole
+
+
 class HttpsAlpacaPaperCryptoWriteTransport:
-    """Narrow TLS transport: one HTTPS POST to the exact PAPER host/path."""
+    """Narrow TLS delegate: one HTTPS POST to the exact PAPER host/path.
+
+    This raw transport is intentionally not a guarded capability. An enabled
+    writer can only receive it behind a role-specific Final-Guard transport.
+    """
 
     def post(
         self,
@@ -170,11 +180,12 @@ class CryptoPaperWriteReceipt:
 
 
 class AlpacaPaperCryptoWriter:
-    """One-shot crypto PAPER writer.
+    """One-shot crypto PAPER writer behind a role-specific Final Guard.
 
     It owns the durable transition to *_SUBMISSION_UNKNOWN immediately before
-    network I/O. A second call after UNKNOWN is rejected; ambiguity is recovered
-    only through broker reconciliation, never by repeating the POST.
+    the guarded transport call. A second call after UNKNOWN is rejected;
+    ambiguity is recovered only through broker reconciliation, never by
+    repeating the POST.
     """
 
     def __init__(
@@ -197,6 +208,14 @@ class AlpacaPaperCryptoWriter:
     ) -> CryptoPaperWriteReceipt:
         if not self._config.enabled:
             raise CryptoPaperWriterDisabled("crypto PAPER writer is disabled")
+        if not isinstance(self._transport, GuardedAlpacaPaperCryptoWriteTransport):
+            raise CryptoPaperWriterPolicyError(
+                "enabled crypto writer requires role-bound Final-Guard transport"
+            )
+        if getattr(self._transport, "role", None) is not order.role:
+            raise CryptoPaperWriterPolicyError(
+                "guarded crypto transport role does not match broker order role"
+            )
         if now.tzinfo is None or now.utcoffset() is None:
             raise ValueError("now must be timezone-aware")
         snapshot = lifecycle.snapshot(lifecycle_id)
@@ -405,6 +424,7 @@ def _canonical(value: object) -> str:
 
 __all__ = [
     "AlpacaPaperCryptoWriteResponse",
+    "AlpacaPaperCryptoWriteTransport",
     "AlpacaPaperCryptoWriter",
     "AlpacaPaperCryptoWriterConfig",
     "CryptoPaperWriteReceipt",
@@ -414,4 +434,6 @@ __all__ = [
     "CryptoPaperWriterIntegrityError",
     "CryptoPaperWriterPolicyError",
     "CRYPTO_ORDERS_PATH",
+    "GuardedAlpacaPaperCryptoWriteTransport",
+    "HttpsAlpacaPaperCryptoWriteTransport",
 ]
