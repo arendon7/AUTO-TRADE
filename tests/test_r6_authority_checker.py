@@ -82,6 +82,18 @@ def test_checker_rejects_crypto_networking_outside_dedicated_writer(tmp_path) ->
     assert any("networking is forbidden" in error for error in errors)
 
 
+def test_checker_rejects_networking_inside_crypto_preio_interlock(tmp_path) -> None:
+    errors = scan(
+        tmp_path,
+        "import http.client\n"
+        "def go(self, **kwargs):\n"
+        "    return self._delegate.post(**kwargs)\n",
+        filename="alpaca_paper_crypto_pre_io.py",
+    )
+    assert any("networking is forbidden" in error for error in errors)
+    assert not any("unaudited external write call post" in error for error in errors)
+
+
 def test_checker_rejects_unaudited_post_send_or_submit_calls_even_in_writer(tmp_path) -> None:
     errors = scan(
         tmp_path,
@@ -92,6 +104,58 @@ def test_checker_rejects_unaudited_post_send_or_submit_calls_even_in_writer(tmp_
         filename="alpaca_paper_writer.py",
     )
     assert sum("unaudited external write call" in error for error in errors) == 3
+
+
+def test_checker_allows_exactly_one_named_crypto_preio_delegate_post(tmp_path) -> None:
+    errors = scan(
+        tmp_path,
+        "def go(self, **kwargs):\n"
+        "    return self._delegate.post(**kwargs)\n",
+        filename="alpaca_paper_crypto_pre_io.py",
+    )
+    assert not any("unaudited external write call post" in error for error in errors)
+    assert not any("exactly one self._delegate.post" in error for error in errors)
+
+
+def test_checker_rejects_second_or_arbitrary_post_in_crypto_preio_interlock(tmp_path) -> None:
+    duplicate = scan(
+        tmp_path / "duplicate",
+        "def go(self, **kwargs):\n"
+        "    self._delegate.post(**kwargs)\n"
+        "    return self._delegate.post(**kwargs)\n",
+        filename="alpaca_paper_crypto_pre_io.py",
+    )
+    assert any("exactly one self._delegate.post" in error for error in duplicate)
+
+    arbitrary = scan(
+        tmp_path / "arbitrary",
+        "def go(self, client, **kwargs):\n"
+        "    self._delegate.post(**kwargs)\n"
+        "    return client.post('/v2/orders')\n",
+        filename="alpaca_paper_crypto_pre_io.py",
+    )
+    assert any("unaudited external write call post" in error for error in arbitrary)
+
+
+def test_checker_rejects_crypto_preio_delegate_post_inside_loop(tmp_path) -> None:
+    errors = scan(
+        tmp_path,
+        "def go(self, **kwargs):\n"
+        "    while True:\n"
+        "        return self._delegate.post(**kwargs)\n",
+        filename="alpaca_paper_crypto_pre_io.py",
+    )
+    assert any("PRE_IO delegated POST cannot execute inside a loop" in error for error in errors)
+
+
+def test_checker_rejects_post_in_crypto_execution_simulation(tmp_path) -> None:
+    errors = scan(
+        tmp_path,
+        "def go(client):\n"
+        "    return client.post('/v2/orders')\n",
+        filename="alpaca_paper_crypto_execution_simulation.py",
+    )
+    assert any("unaudited external write call post" in error for error in errors)
 
 
 def test_checker_allows_only_named_socket_control_send_in_trade_updates_module(tmp_path) -> None:
