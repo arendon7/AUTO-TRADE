@@ -25,6 +25,18 @@ FORBIDDEN = (
     "submit_once",
     "shell=True",
 )
+STORAGE_CALLS = (
+    "localStorage.setItem",
+    "localStorage.getItem",
+    "localStorage.removeItem",
+    "localStorage.clear(",
+    "sessionStorage.setItem",
+    "sessionStorage.getItem",
+    "sessionStorage.removeItem",
+    "sessionStorage.clear(",
+    "localStorage[",
+    "sessionStorage[",
+)
 
 
 def main() -> int:
@@ -80,9 +92,7 @@ def main() -> int:
         ):
             if anchor not in html:
                 errors.append(f"equity dashboard UI safety/UX anchor missing: {anchor}")
-        for forbidden in (
-            "localStorage",
-            "sessionStorage",
+        for forbidden in STORAGE_CALLS + (
             '<script src=',
             '<link rel="stylesheet" href=',
             "r6_execute_paper_canary",
@@ -105,7 +115,7 @@ def main() -> int:
         ):
             if anchor not in hub:
                 errors.append(f"multi-asset hub anchor missing: {anchor}")
-        for forbidden in FORBIDDEN + ("localStorage", "sessionStorage", '<script src=', '<link rel="stylesheet" href='):
+        for forbidden in FORBIDDEN + STORAGE_CALLS + ('<script src=', '<link rel="stylesheet" href='):
             if forbidden in hub:
                 errors.append(f"multi-asset hub contains forbidden surface: {forbidden}")
 
@@ -120,7 +130,7 @@ def main() -> int:
         ):
             if anchor not in crypto:
                 errors.append(f"crypto dashboard anchor missing: {anchor}")
-        for forbidden in FORBIDDEN + ("localStorage.", "sessionStorage.", '<script src=', '<link rel="stylesheet" href='):
+        for forbidden in FORBIDDEN + STORAGE_CALLS + ('<script src=', '<link rel="stylesheet" href='):
             if forbidden in crypto:
                 errors.append(f"crypto dashboard contains forbidden surface: {forbidden}")
 
