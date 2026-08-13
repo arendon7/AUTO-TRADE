@@ -102,6 +102,7 @@ jobs:
         run: |
           pytest -q \
             tests/test_r6_paper_crypto_execution_attempt.py \
+            tests/test_r6_paper_crypto_execution_attempt_adversarial.py \
             tests/test_r6_crypto_execution_attempt_boundary.py
 
       - name: Crypto final freshness and stable contract identity
@@ -112,7 +113,7 @@ jobs:
             tests/test_r6_crypto_final_guard_boundary.py
 
       - name: Upload final freshness JUnit diagnostics
-        if: always()
+        if: ${{ always() && hashFiles('crypto-final-freshness-junit.xml') != '' }}
         uses: actions/upload-artifact@v4
         with:
           name: r6-crypto-final-freshness-junit
