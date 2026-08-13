@@ -50,6 +50,7 @@ jobs:
             src/autotrade/brokers/alpaca_paper_crypto_canary_coordinator.py \
             src/autotrade/brokers/alpaca_paper_crypto_operator_decision.py \
             src/autotrade/brokers/alpaca_paper_crypto_final_guard.py \
+            src/autotrade/brokers/alpaca_paper_crypto_execution_attempt.py \
             src/autotrade/brokers/alpaca_paper_crypto_writer.py \
             src/autotrade/brokers/alpaca_paper_crypto_reconciliation.py
 
@@ -67,6 +68,9 @@ jobs:
 
       - name: Crypto final freshness boundary
         run: python scripts/check_r6_crypto_final_guard_boundary.py
+
+      - name: Crypto same-attempt checkpoint boundary
+        run: python scripts/check_r6_crypto_execution_attempt_boundary.py
 
       - name: Permanent multi-asset product boundary
         run: python scripts/check_r6_product_boundary.py
@@ -93,6 +97,12 @@ jobs:
           pytest -q \
             tests/test_r6_paper_crypto_operator_decision.py \
             tests/test_r6_crypto_operator_decision_boundary.py
+
+      - name: Crypto durable same-attempt checkpoint and restart recovery
+        run: |
+          pytest -q \
+            tests/test_r6_paper_crypto_execution_attempt.py \
+            tests/test_r6_crypto_execution_attempt_boundary.py
 
       - name: Crypto final freshness and stable contract identity
         run: |
@@ -144,8 +154,10 @@ jobs:
               'alpaca_paper_crypto_writer',
               'alpaca_paper_crypto_operator_decision',
               'alpaca_paper_crypto_final_guard',
+              'alpaca_paper_crypto_execution_attempt',
               'CryptoPaperWriterConfig(enabled=True)',
               'record_operator_approval(',
+              'record_pre_consume(',
               'submit_once(',
               'R6_CRYPTO_EXTERNAL_PAPER_WRITE=ENABLED',
           )
