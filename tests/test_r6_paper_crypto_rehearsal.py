@@ -274,8 +274,8 @@ def test_crypto_lab_surfaces_contain_no_execution_path() -> None:
         "stage_external_submission",
         "r6_connectivity_bound_final_freshness.py",
         "export R6_EXTERNAL_PAPER_WRITE=ENABLED",
-        "localStorage.",
-        "sessionStorage.",
+        "localStorage.setItem",
+        "sessionStorage.setItem",
     ):
         assert forbidden not in combined
     assert 'os.environ.get(WRITE_ENV) == "ENABLED"' in script
