@@ -1,0 +1,77 @@
+{
+  "registry_version": 1,
+  "certified_tracks": [],
+  "items": [
+    {
+      "id": "TD-R6-014",
+      "track": "R6",
+      "area": "Native multi-asset ProductCapabilities and cross-product authority boundary",
+      "severity": "P1",
+      "status": "OPEN",
+      "evidence": [
+        "src/autotrade/product_profile.py",
+        "tests/test_r6_multi_asset_product_profile.py",
+        "skills/crypto-trading/SKILL.md",
+        "skills/multi-asset-safety/SKILL.md",
+        "knowledge/30_DECISIONES/ADR-0009-native-multi-asset-equity-crypto.md"
+      ],
+      "next_action": "Bind a fresh exact ProductCapabilities fingerprint into the durable crypto candidate, prepared package and final write guard, then add permanent cross-product CI proving equity market-clock/bracket semantics cannot enter crypto and crypto 24/7/fractional semantics cannot enter equities. Close only after exact-head CI evidence."
+    },
+    {
+      "id": "TD-R6-015",
+      "track": "R6",
+      "area": "Crypto protective lifecycle after confirmed entry fills",
+      "severity": "P1",
+      "status": "OPEN",
+      "evidence": [
+        "skills/crypto-trading/SKILL.md",
+        "knowledge/20_ARQUITECTURA/R6_MULTI_ASSET_CRYPTO_ARCHITECTURE.md",
+        "knowledge/30_DECISIONES/ADR-0009-native-multi-asset-equity-crypto.md"
+      ],
+      "next_action": "Implement a crypto-specific protection state machine that reconciles confirmed entry fills before creating a protective stop-limit for no more than confirmed net position. Certify partial fills, trigger-without-fill, stale/canceled protection, disconnect, crash/restart, cancel/replace and PROTECTION_AT_RISK behavior without reusing equity bracket authority."
+    },
+    {
+      "id": "TD-R6-016",
+      "track": "R6",
+      "area": "Crypto PAPER writer idempotency, UNKNOWN-before-I/O and reconciliation",
+      "severity": "P1",
+      "status": "OPEN",
+      "evidence": [
+        "skills/crypto-trading/SKILL.md",
+        "knowledge/20_ARQUITECTURA/R6_MULTI_ASSET_CRYPTO_ARCHITECTURE.md",
+        "knowledge/30_DECISIONES/ADR-0009-native-multi-asset-equity-crypto.md"
+      ],
+      "next_action": "Implement a dedicated crypto PAPER writer restricted to exact paper-api host and exact supported payload schema, with durable deterministic client_order_id, UNKNOWN persisted before network I/O, zero blind retry, exact ACK/fill reconciliation and explicit LIVE denial. No broker POST is allowed before this item and TD-R6-015 are structurally certified."
+    },
+    {
+      "id": "TD-R6-017",
+      "track": "R6",
+      "area": "Crypto 24/7 PAPER qualification and residual-risk evidence",
+      "severity": "P1",
+      "status": "OPEN",
+      "evidence": [
+        "skills/crypto-trading/SKILL.md",
+        "knowledge/20_ARQUITECTURA/R6_MULTI_ASSET_CRYPTO_ARCHITECTURE.md"
+      ],
+      "next_action": "After writer and protection certification, run bounded human-approved PAPER canaries across multiple UTC/liquidity/weekend conditions and persist fills, fees, spread, slippage, protection acknowledgements/outcomes, reconciliation and stop-limit residual-risk evidence. Connectivity/rehearsal success alone cannot close this debt or support profitability claims."
+    },
+    {
+      "id": "TD-R6-018",
+      "track": "R6",
+      "area": "Native Multi-Asset Mac Control Center and operator UAT",
+      "severity": "P1",
+      "status": "OPEN",
+      "evidence": [
+        "web/mac_multi_asset.html",
+        "web/mac_dashboard.html",
+        "web/mac_crypto_dashboard.html",
+        "scripts/mac_dashboard.py",
+        "scripts/mac_crypto_dashboard.py",
+        "tests/test_mac_dashboard.py",
+        "scripts/check_mac_dashboard_boundary.py",
+        "knowledge/60_EVIDENCE/R6_MAC_UAT_2026-08-12.md"
+      ],
+      "next_action": "Certify one localhost Multi-Asset Hub with Equities and Crypto first-class routes, ephemeral credentials, machine-readable product authority state, reliable direct macOS browser open with safe fallback, no hidden crypto/equity POST path, and dual-architecture Mac FULL UAT on the final exact head."
+    }
+  ]
+}
