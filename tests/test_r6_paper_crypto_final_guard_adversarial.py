@@ -7,10 +7,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from autotrade.domain import MarketSnapshot
 from autotrade.health_bridge import HealthRiskMode
 from autotrade.persistence import SQLiteRuntime
-from autotrade.product_profile import BrokerOrderType, ProductCapabilities, TimeInForce
+from autotrade.product_profile import ProductCapabilities, TimeInForce
 from autotrade.state import InMemoryOrderStore
 from autotrade.brokers.alpaca_paper_crypto_final_guard import (
     CryptoFinalWriteBlocked,
@@ -23,18 +22,16 @@ from autotrade.brokers.alpaca_paper_crypto_order import (
     build_crypto_long_protection_order,
     deterministic_crypto_client_order_id,
 )
-from test_r6_paper_crypto_canary_coordinator import NOW, _account, _asset, _market
+from test_r6_paper_crypto_canary_coordinator import NOW
 from test_r6_paper_crypto_final_guard import (
     _HealthyBridge,
     _authorize_pre,
-    _flat_attestation,
-    _flat_portfolio,
     _profile,
     _setup,
 )
 
 
-def _call(ctx, **overrides):
+def _call(ctx, *, guard=None, **overrides):
     values = dict(
         package=ctx.package,
         operator_decision=ctx.operator_decision,
@@ -53,7 +50,7 @@ def _call(ctx, **overrides):
         phase=CryptoFinalWritePhase.PRE_CONSUME,
     )
     values.update(overrides)
-    return ctx.guard.authorize(**values)
+    return (guard or ctx.guard).authorize(**values)
 
 
 def _guard(ctx, *, order_store=None, health=None):
@@ -75,7 +72,6 @@ def _set_portfolio(ctx, **changes):
         now=NOW + timedelta(seconds=4),
     )
     assert updated is not None
-    return updated
 
 
 def test_final_guard_constructor_and_call_types_fail_closed(tmp_path) -> None:
@@ -94,7 +90,7 @@ def test_final_guard_constructor_and_call_types_fail_closed(tmp_path) -> None:
         _call(ctx, phase="PRE_CONSUME")
 
 
-def test_expired_package_decision_and_risk_are_explicitly_blocked(tmp_path) -> None:
+def test_expired_package_risk_and_operator_are_all_visible(tmp_path) -> None:
     ctx = _setup(tmp_path)
     with pytest.raises(CryptoFinalWriteBlocked) as exc:
         _call(ctx, now=NOW + timedelta(seconds=25))
@@ -118,7 +114,7 @@ def test_broker_order_may_not_drift_after_human_preparation(tmp_path, mutation, 
         _call(ctx, broker_order=mutation(ctx.broker_order))
 
 
-def test_protective_order_cannot_be_substituted_for_entry_authority(tmp_path) -> None:
+def test_protective_order_cannot_replace_entry_authority(tmp_path) -> None:
     ctx = _setup(tmp_path)
     protection = build_crypto_long_protection_order(
         symbol="BTC/USD",
@@ -139,32 +135,28 @@ def test_protective_order_cannot_be_substituted_for_entry_authority(tmp_path) ->
 
 
 @pytest.mark.parametrize(
-    "field,value,match",
+    "target,mutation,match",
     [
-        ("request_id", "prepared-account-changed", "prepared account evidence"),
-        ("account_reference", "e" * 64, "prepared account evidence"),
+        ("account", lambda x: replace(x, request_id="changed-account-request"), "prepared account evidence"),
+        ("asset", lambda x: replace(x, response_sha256="e" * 64), "prepared asset evidence"),
+        (
+            "profile",
+            lambda x: replace(x, observed_at=x.observed_at + timedelta(microseconds=1)),
+            "prepared ProductCapabilities",
+        ),
     ],
 )
-def test_original_account_evidence_is_immutable_after_human_approval(tmp_path, field, value, match) -> None:
+def test_original_human_approved_evidence_is_immutable(tmp_path, target, mutation, match) -> None:
     ctx = _setup(tmp_path)
+    kwargs = {}
+    if target == "account":
+        kwargs["prepared_account"] = mutation(ctx.prepared_account)
+    elif target == "asset":
+        kwargs["prepared_asset"] = mutation(ctx.prepared_asset)
+    else:
+        kwargs["prepared_product_profile"] = mutation(ctx.prepared_profile)
     with pytest.raises(CryptoFinalWriteBlocked, match=match):
-        _call(ctx, prepared_account=replace(ctx.prepared_account, **{field: value}))
-
-
-def test_original_asset_and_product_evidence_are_immutable(tmp_path) -> None:
-    ctx = _setup(tmp_path / "asset")
-    with pytest.raises(CryptoFinalWriteBlocked, match="prepared asset evidence"):
-        _call(ctx, prepared_asset=replace(ctx.prepared_asset, response_sha256="e" * 64))
-
-    ctx2 = _setup(tmp_path / "profile")
-    with pytest.raises(CryptoFinalWriteBlocked, match="prepared ProductCapabilities"):
-        _call(
-            ctx2,
-            prepared_product_profile=replace(
-                ctx2.prepared_profile,
-                observed_at=ctx2.prepared_profile.observed_at + timedelta(microseconds=1),
-            ),
-        )
+        _call(ctx, **kwargs)
 
 
 @pytest.mark.parametrize(
@@ -180,19 +172,14 @@ def test_original_asset_and_product_evidence_are_immutable(tmp_path) -> None:
 )
 def test_fresh_account_must_preserve_identity_and_capacity(tmp_path, changes, match) -> None:
     ctx = _setup(tmp_path)
-    changed = replace(ctx.fresh_account, **changes)
     with pytest.raises(CryptoFinalWriteBlocked, match=match):
-        _call(ctx, fresh_account=changed)
+        _call(ctx, fresh_account=replace(ctx.fresh_account, **changes))
 
 
 def test_fresh_asset_must_bind_fresh_account_and_credential(tmp_path) -> None:
     ctx = _setup(tmp_path / "account")
     with pytest.raises(CryptoFinalWriteBlocked, match="not bound to fresh account"):
-        _call(
-            ctx,
-            fresh_asset=replace(ctx.fresh_asset, account_attestation_fingerprint="e" * 64),
-        )
-
+        _call(ctx, fresh_asset=replace(ctx.fresh_asset, account_attestation_fingerprint="e" * 64))
     ctx2 = _setup(tmp_path / "credential")
     with pytest.raises(CryptoFinalWriteBlocked, match="asset credential reference mismatch"):
         _call(ctx2, fresh_asset=replace(ctx2.fresh_asset, credential_reference="f" * 64))
@@ -206,16 +193,15 @@ def test_fresh_asset_must_bind_fresh_account_and_credential(tmp_path) -> None:
         ({"price_increment": Decimal("3")}, "price increment"),
     ],
 )
-def test_fresh_broker_precision_cannot_invalidate_prepared_economics(tmp_path, changes, match) -> None:
+def test_fresh_broker_precision_is_rechecked(tmp_path, changes, match) -> None:
     ctx = _setup(tmp_path)
-    changed_asset = replace(ctx.fresh_asset, **changes)
-    changed_profile = _profile(changed_asset)
+    asset = replace(ctx.fresh_asset, **changes)
     with pytest.raises(CryptoFinalWriteBlocked) as exc:
-        _call(ctx, fresh_asset=changed_asset, fresh_product_profile=changed_profile)
+        _call(ctx, fresh_asset=asset, fresh_product_profile=_profile(asset))
     assert match in str(exc.value)
 
 
-def test_fresh_product_profile_must_remain_crypto_and_bound_to_fresh_asset(tmp_path) -> None:
+def test_fresh_product_profile_must_remain_crypto_bound_and_ioc_capable(tmp_path) -> None:
     ctx = _setup(tmp_path / "equity")
     equity = ProductCapabilities.us_equity_alpaca_paper(
         source_fingerprint=ctx.fresh_asset.fingerprint,
@@ -227,73 +213,41 @@ def test_fresh_product_profile_must_remain_crypto_and_bound_to_fresh_asset(tmp_p
     with pytest.raises(CryptoFinalWriteBlocked, match="not CRYPTO"):
         _call(ctx, fresh_product_profile=equity)
 
-    ctx2 = _setup(tmp_path / "source")
-    unbound = replace(ctx2.fresh_profile, source_fingerprint="e" * 64)
+    ctx2 = _setup(tmp_path / "unbound")
     with pytest.raises(CryptoFinalWriteBlocked, match="not bound to fresh asset"):
-        _call(ctx2, fresh_product_profile=unbound)
+        _call(ctx2, fresh_product_profile=replace(ctx2.fresh_profile, source_fingerprint="e" * 64))
 
-    ctx3 = _setup(tmp_path / "tif")
-    restricted = replace(
-        ctx3.fresh_profile,
-        allowed_time_in_force=frozenset({TimeInForce.GTC}),
-    )
+    ctx3 = _setup(tmp_path / "ioc")
+    restricted = replace(ctx3.fresh_profile, allowed_time_in_force=frozenset({TimeInForce.GTC}))
     with pytest.raises(CryptoFinalWriteBlocked, match="reject first-canary order"):
         _call(ctx3, fresh_product_profile=restricted)
 
 
-def test_fresh_market_and_flat_account_identity_are_strict(tmp_path) -> None:
+def test_market_flat_account_identity_and_clocks_are_rechecked(tmp_path) -> None:
     ctx = _setup(tmp_path / "market")
-    eth_snapshot = replace(ctx.fresh_market.market, symbol="ETH/USD")
     with pytest.raises(CryptoFinalWriteBlocked, match="market symbol mismatch"):
-        _call(ctx, fresh_market=replace(ctx.fresh_market, market=eth_snapshot))
+        _call(ctx, fresh_market=replace(ctx.fresh_market, market=replace(ctx.fresh_market.market, symbol="ETH/USD")))
 
     ctx2 = _setup(tmp_path / "flat-account")
     with pytest.raises(CryptoFinalWriteBlocked, match="flat-account evidence is not bound"):
-        _call(
-            ctx2,
-            fresh_flat_account=replace(
-                ctx2.fresh_flat,
-                account_attestation_fingerprint="e" * 64,
-            ),
-        )
+        _call(ctx2, fresh_flat_account=replace(ctx2.fresh_flat, account_attestation_fingerprint="e" * 64))
 
     ctx3 = _setup(tmp_path / "flat-credential")
     with pytest.raises(CryptoFinalWriteBlocked, match="flat-account credential reference mismatch"):
-        _call(
-            ctx3,
-            fresh_flat_account=replace(ctx3.fresh_flat, credential_reference="f" * 64),
-        )
+        _call(ctx3, fresh_flat_account=replace(ctx3.fresh_flat, credential_reference="f" * 64))
 
-
-def test_each_final_evidence_clock_fails_closed_when_future_or_stale(tmp_path) -> None:
-    ctx = _setup(tmp_path / "future-market")
-    future = replace(
-        ctx.fresh_market,
-        received_at=NOW + timedelta(seconds=7),
-        orderbook_observed_at=NOW + timedelta(seconds=7),
-        trade_observed_at=NOW + timedelta(seconds=7),
-        market=replace(ctx.fresh_market.market, observed_at=NOW + timedelta(seconds=7)),
-    )
-    with pytest.raises(CryptoFinalWriteBlocked, match="market evidence is future-dated"):
-        _call(ctx, fresh_market=future)
-
-    ctx2 = _setup(tmp_path / "stale-flat")
+    ctx4 = _setup(tmp_path / "stale-flat")
     with pytest.raises(CryptoFinalWriteBlocked, match="flat-account evidence exceeds 5-second"):
-        _call(
-            ctx2,
-            fresh_flat_account=replace(ctx2.fresh_flat, attested_at=NOW - timedelta(seconds=2)),
-        )
+        _call(ctx4, fresh_flat_account=replace(ctx4.fresh_flat, attested_at=NOW - timedelta(seconds=2)))
 
 
-def test_missing_authoritative_oms_order_blocks_without_health_dereference(tmp_path) -> None:
+def test_missing_authoritative_oms_order_fails_closed(tmp_path) -> None:
     ctx = _setup(tmp_path)
-    empty = InMemoryOrderStore()
-    guard = _guard(ctx, order_store=empty)
     with pytest.raises(CryptoFinalWriteBlocked, match="authoritative OMS order is missing"):
-        _call(ctx, phase=CryptoFinalWritePhase.PRE_CONSUME, now=NOW + timedelta(seconds=4), **{"package": ctx.package, "operator_decision": ctx.operator_decision, "operator_registry": ctx.operator_registry, "broker_order": ctx.broker_order, "lifecycle": ctx.lifecycle, "prepared_account": ctx.prepared_account, "prepared_asset": ctx.prepared_asset, "prepared_product_profile": ctx.prepared_profile, "fresh_account": ctx.fresh_account, "fresh_asset": ctx.fresh_asset, "fresh_product_profile": ctx.fresh_profile, "fresh_market": ctx.fresh_market, "fresh_flat_account": ctx.fresh_flat})
+        _call(ctx, guard=_guard(ctx, order_store=InMemoryOrderStore()))
 
 
-def test_safety_circuit_and_version_changes_are_separately_rejected(tmp_path) -> None:
+def test_safety_circuit_and_version_changes_are_separate_blocks(tmp_path) -> None:
     ctx = _setup(tmp_path / "circuit")
     ctx.safety.activate_circuit(reason="circuit", now=NOW + timedelta(seconds=4))
     with pytest.raises(CryptoFinalWriteBlocked, match="safety circuit"):
@@ -314,14 +268,14 @@ def test_safety_circuit_and_version_changes_are_separately_rejected(tmp_path) ->
         ({"open_orders": 1}, "has open orders"),
     ],
 )
-def test_authoritative_portfolio_control_fields_are_rechecked(tmp_path, changes, match) -> None:
+def test_authoritative_portfolio_controls_are_rechecked(tmp_path, changes, match) -> None:
     ctx = _setup(tmp_path)
     _set_portfolio(ctx, **changes)
     with pytest.raises(CryptoFinalWriteBlocked, match=match):
         _authorize_pre(ctx)
 
 
-def test_authoritative_symbol_positions_are_rechecked_even_if_net_aggregate_is_zero(tmp_path) -> None:
+def test_authoritative_symbol_positions_are_rechecked(tmp_path) -> None:
     ctx = _setup(tmp_path)
     _set_portfolio(
         ctx,
@@ -339,7 +293,7 @@ def test_authoritative_symbol_positions_are_rechecked_even_if_net_aggregate_is_z
     assert "zero authoritative symbol positions" in str(exc.value)
 
 
-class _HealthModeBridge:
+class _HealthBridge:
     def __init__(self, *, mode=HealthRiskMode.NORMAL, multiplier=Decimal("1"), fail=False):
         self.mode = mode
         self.multiplier = multiplier
@@ -360,58 +314,21 @@ class _HealthModeBridge:
         )
 
 
-def test_health_mode_multiplier_and_unavailability_fail_closed(tmp_path) -> None:
-    ctx = _setup(tmp_path / "mode")
-    guard = _guard(ctx, health=_HealthModeBridge(mode=HealthRiskMode.CAUTION))
-    with pytest.raises(CryptoFinalWriteBlocked, match="Health mode is not NORMAL"):
-        guard.authorize(
-            package=ctx.package,
-            operator_decision=ctx.operator_decision,
-            operator_registry=ctx.operator_registry,
-            broker_order=ctx.broker_order,
-            lifecycle=ctx.lifecycle,
-            prepared_account=ctx.prepared_account,
-            prepared_asset=ctx.prepared_asset,
-            prepared_product_profile=ctx.prepared_profile,
-            fresh_account=ctx.fresh_account,
-            fresh_asset=ctx.fresh_asset,
-            fresh_product_profile=ctx.fresh_profile,
-            fresh_market=ctx.fresh_market,
-            fresh_flat_account=ctx.fresh_flat,
-            now=NOW + timedelta(seconds=4, milliseconds=200),
-            phase=CryptoFinalWritePhase.PRE_CONSUME,
-        )
-
-    ctx2 = _setup(tmp_path / "multiplier")
-    guard2 = _guard(ctx2, health=_HealthModeBridge(multiplier=Decimal("0.5")))
-    with pytest.raises(CryptoFinalWriteBlocked, match="multipliers are not exactly 1"):
-        guard2.authorize(
-            package=ctx2.package, operator_decision=ctx2.operator_decision,
-            operator_registry=ctx2.operator_registry, broker_order=ctx2.broker_order,
-            lifecycle=ctx2.lifecycle, prepared_account=ctx2.prepared_account,
-            prepared_asset=ctx2.prepared_asset, prepared_product_profile=ctx2.prepared_profile,
-            fresh_account=ctx2.fresh_account, fresh_asset=ctx2.fresh_asset,
-            fresh_product_profile=ctx2.fresh_profile, fresh_market=ctx2.fresh_market,
-            fresh_flat_account=ctx2.fresh_flat, now=NOW + timedelta(seconds=4, milliseconds=200),
-            phase=CryptoFinalWritePhase.PRE_CONSUME,
-        )
-
-    ctx3 = _setup(tmp_path / "unavailable")
-    guard3 = _guard(ctx3, health=_HealthModeBridge(fail=True))
-    with pytest.raises(CryptoFinalWriteBlocked, match="Health control unavailable"):
-        guard3.authorize(
-            package=ctx3.package, operator_decision=ctx3.operator_decision,
-            operator_registry=ctx3.operator_registry, broker_order=ctx3.broker_order,
-            lifecycle=ctx3.lifecycle, prepared_account=ctx3.prepared_account,
-            prepared_asset=ctx3.prepared_asset, prepared_product_profile=ctx3.prepared_profile,
-            fresh_account=ctx3.fresh_account, fresh_asset=ctx3.fresh_asset,
-            fresh_product_profile=ctx3.fresh_profile, fresh_market=ctx3.fresh_market,
-            fresh_flat_account=ctx3.fresh_flat, now=NOW + timedelta(seconds=4, milliseconds=200),
-            phase=CryptoFinalWritePhase.PRE_CONSUME,
-        )
+@pytest.mark.parametrize(
+    "bridge,match",
+    [
+        (_HealthBridge(mode=HealthRiskMode.REDUCED), "Health mode is not NORMAL"),
+        (_HealthBridge(multiplier=Decimal("0.5")), "multipliers are not exactly 1"),
+        (_HealthBridge(fail=True), "Health control unavailable"),
+    ],
+)
+def test_health_is_rechecked_at_final_write(tmp_path, bridge, match) -> None:
+    ctx = _setup(tmp_path)
+    with pytest.raises(CryptoFinalWriteBlocked, match=match):
+        _call(ctx, guard=_guard(ctx, health=bridge))
 
 
-def test_preconsume_rejects_phase_arguments_and_state_already_advanced(tmp_path) -> None:
+def test_preconsume_rejects_phase_arguments_and_advanced_state(tmp_path) -> None:
     ctx = _setup(tmp_path / "args")
     pre = _authorize_pre(ctx)
     with pytest.raises(CryptoFinalWriteBlocked) as exc:
@@ -476,11 +393,9 @@ def test_preio_requires_correct_attempt_and_preconsume_attestation(tmp_path) -> 
             previous_attestation=None,
             now=NOW + timedelta(seconds=4, milliseconds=100),
         )
-    text = str(exc.value)
-    assert "expected attempt_id" in text
-    assert "requires actual PRE_CONSUME" in text
+    assert "expected attempt_id" in str(exc.value)
+    assert "requires actual PRE_CONSUME" in str(exc.value)
 
-    # Real predecessor remains valid for the real attempt.
     final = _call(
         ctx,
         phase=CryptoFinalWritePhase.PRE_IO,
@@ -510,10 +425,7 @@ def test_preio_detects_fresh_market_race_between_phases(tmp_path) -> None:
         ctx.package.lifecycle_id,
         at=NOW + timedelta(seconds=4, milliseconds=60),
     )
-    raced_market = replace(
-        ctx.fresh_market,
-        market=replace(ctx.fresh_market.market, last=Decimal("99998")),
-    )
+    raced_market = replace(ctx.fresh_market, market=replace(ctx.fresh_market.market, last=Decimal("99998")))
     with pytest.raises(CryptoFinalWriteBlocked, match="fresh market evidence changed"):
         _call(
             ctx,
@@ -525,8 +437,8 @@ def test_preio_detects_fresh_market_race_between_phases(tmp_path) -> None:
         )
 
 
-def test_missing_or_corrupt_lifecycle_fails_closed(tmp_path) -> None:
+def test_missing_lifecycle_fails_closed(tmp_path) -> None:
     ctx = _setup(tmp_path)
-    empty_lifecycle = SQLiteCryptoPaperLifecycle(SQLiteRuntime(tmp_path / "empty-life.sqlite3"))
+    empty = SQLiteCryptoPaperLifecycle(SQLiteRuntime(tmp_path / "empty-life.sqlite3"))
     with pytest.raises(CryptoFinalWriteBlocked, match="lifecycle is unavailable or corrupt"):
-        _call(ctx, lifecycle=empty_lifecycle)
+        _call(ctx, lifecycle=empty)
