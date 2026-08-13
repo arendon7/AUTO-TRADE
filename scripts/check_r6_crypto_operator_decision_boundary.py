@@ -8,6 +8,7 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 MODULE = ROOT / "src/autotrade/brokers/alpaca_paper_crypto_operator_decision.py"
 PRODUCTION_ROOTS = (ROOT / "src", ROOT / "scripts")
+CRYPTO_OPERATOR_MODULE_FRAGMENT = "alpaca_paper_crypto_operator_decision"
 
 FORBIDDEN_IMPORT_FRAGMENTS = (
     "alpaca_paper_crypto_writer",
@@ -81,7 +82,8 @@ def main() -> int:
     print(
         "AUTO-TRADE R6 crypto operator decision boundary: PASS "
         "(HUMAN_OPERATOR only; exact package+attempt binding; <=2m and package-bounded TTL; "
-        "tamper-evident ISSUED->CONSUMED; no production approval caller; no credentials/network/writer/POST authority)"
+        "tamper-evident ISSUED->CONSUMED; no production crypto approval caller; "
+        "no credentials/network/writer/POST authority)"
     )
     return 0
 
@@ -99,11 +101,16 @@ def _scan_for_unauthorized_issuance_calls() -> list[str]:
             except (OSError, SyntaxError) as exc:
                 errors.append(f"cannot inspect production approval surface {path.relative_to(ROOT)}: {exc}")
                 continue
+            imports = _imports(tree)
+            # The existing equity operator script uses the same method name.
+            # Only a production surface that imports the crypto operator authority
+            # can issue a crypto approval and is therefore blocked at this phase.
+            if not any(CRYPTO_OPERATOR_MODULE_FRAGMENT in module for module in imports):
+                continue
             for node in ast.walk(tree):
                 if not isinstance(node, ast.Call):
                     continue
-                name = _call_name(node.func)
-                if name == "record_operator_approval":
+                if _call_name(node.func) == "record_operator_approval":
                     errors.append(
                         f"{path.relative_to(ROOT)}:{node.lineno}: crypto operator approval issuance is not authorized from production surfaces yet"
                     )
