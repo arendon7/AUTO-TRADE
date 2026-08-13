@@ -170,9 +170,9 @@ class CryptoPaperProtectionFinalGuard:
         snapshot = lifecycle.snapshot(package.lifecycle_id)
         if snapshot.binding.fingerprint != package.lifecycle_binding_hash:
             raise CryptoProtectionFinalGuardBlocked("protection lifecycle binding drifted")
-        if snapshot.binding.protection_client_order_id != package.client_order_id:
+        if snapshot.state.protection_client_order_id != package.client_order_id:
             raise CryptoProtectionFinalGuardBlocked("lifecycle protection client_order_id drifted")
-        if snapshot.binding.protection_order_fingerprint != package.crypto_order_fingerprint:
+        if snapshot.state.protection_order_fingerprint != package.crypto_order_fingerprint:
             raise CryptoProtectionFinalGuardBlocked("lifecycle protection order fingerprint drifted")
         if snapshot.state.protection_quantity != package.confirmed_net_long_quantity:
             raise CryptoProtectionFinalGuardBlocked("lifecycle protection quantity drifted")
