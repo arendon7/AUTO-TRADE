@@ -1,10 +1,17 @@
 from datetime import datetime, timezone
 from decimal import Decimal
+from pathlib import Path
+import sys
 
 import pytest
 
 from autotrade.domain import MarketSnapshot, OrderIntent, OrderType, PortfolioSnapshot, Side
 from autotrade.safety import SafetyLimits
+
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.append(str(ROOT))
 
 
 @pytest.fixture
