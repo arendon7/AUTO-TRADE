@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 import secrets
 import subprocess
+import sys
 import time
 from urllib.parse import urlparse
 import webbrowser
@@ -242,6 +243,26 @@ def _start_server(host: str, port: int) -> CryptoServer:
     return CryptoServer((host, port), secrets.token_urlsafe(32))
 
 
+def _open_browser(url: str) -> bool:
+    if sys.platform == "darwin":
+        try:
+            completed = subprocess.run(
+                ["/usr/bin/open", url],
+                text=True,
+                capture_output=True,
+                timeout=5,
+                check=False,
+            )
+            if completed.returncode == 0:
+                return True
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+    try:
+        return bool(webbrowser.open(url, new=1, autoraise=True))
+    except (OSError, webbrowser.Error):
+        return False
+
+
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     _require_runtime()
@@ -250,7 +271,8 @@ def main(argv: list[str] | None = None) -> int:
     print(f"AUTO-TRADE Crypto PAPER Lab: {url}")
     print("BTC/USD 24/7 read + Capital Safety + local OMS only. Broker POST: DISABLED. LIVE: BLOCKED.")
     if not args.no_browser:
-        webbrowser.open(url, new=1, autoraise=True)
+        if not _open_browser(url):
+            print(f"Browser did not open automatically. Open this URL manually: {url}")
     try:
         server.serve_forever(poll_interval=0.25)
     except KeyboardInterrupt:
