@@ -76,7 +76,9 @@ def test_full_simulation_orders_authority_unknown_preio_then_one_inmemory_post(t
     assert operator_state.status.value == "CONSUMED"
     assert operator_state.consumed_attempt_id == ctx.operator_decision.context.attempt_id
     assert ctx.lifecycle.snapshot(ctx.package.lifecycle_id).state.status is CryptoLifecycleStatus.ENTRY_SUBMISSION_UNKNOWN
-    assert ctx.order_store.get(ctx.package.order_id).status.value == "SUBMITTING"
+    order = ctx.order_store.get_by_order_id(ctx.package.order_id)
+    assert order is not None
+    assert order.status.value == "SUBMITTING"
 
 
 def test_restart_after_human_consumption_recovers_checkpoint_and_finishes_same_attempt(tmp_path) -> None:
@@ -152,7 +154,9 @@ def test_consumed_decision_without_checkpoint_fails_closed_before_writer(tmp_pat
     with pytest.raises(Exception, match="no durable PRE_CONSUME checkpoint"):
         _execute(ctx, attempts, timeline=timeline)
     assert ctx.lifecycle.snapshot(ctx.package.lifecycle_id).state.status is CryptoLifecycleStatus.ENTRY_PREPARED
-    assert ctx.order_store.get(ctx.package.order_id).status.value == "VALIDATED"
+    order = ctx.order_store.get_by_order_id(ctx.package.order_id)
+    assert order is not None
+    assert order.status.value == "VALIDATED"
 
 
 def test_timeline_rejects_non_monotonic_or_naive_authority_order() -> None:
