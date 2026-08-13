@@ -102,7 +102,7 @@ def _advance_to_preio(setup, pre):
     )
     ctx.oms.stage_external_submission(
         order_id=prepared.package.order_id,
-        handoff_id="r6c-protection-handoff-001",
+        handoff_id="1" * 64,
         decision=decision,
         market=market.market,
         now=NOW + timedelta(seconds=7, milliseconds=200),
@@ -240,7 +240,7 @@ def test_protection_preio_rejects_previous_attestation_rebinding(tmp_path) -> No
     )
     ctx.oms.stage_external_submission(
         order_id=prepared.package.order_id,
-        handoff_id="r6c-protection-handoff-002",
+        handoff_id="2" * 64,
         decision=decision,
         market=market.market,
         now=NOW + timedelta(seconds=7, milliseconds=200),
