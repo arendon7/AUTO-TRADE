@@ -48,6 +48,7 @@ jobs:
             src/autotrade/brokers/alpaca_paper_crypto_order.py \
             src/autotrade/brokers/alpaca_paper_crypto_lifecycle.py \
             src/autotrade/brokers/alpaca_paper_crypto_canary_coordinator.py \
+            src/autotrade/brokers/alpaca_paper_crypto_operator_decision.py \
             src/autotrade/brokers/alpaca_paper_crypto_writer.py \
             src/autotrade/brokers/alpaca_paper_crypto_reconciliation.py
 
@@ -59,6 +60,9 @@ jobs:
 
       - name: Offline crypto canary coordinator boundary
         run: python scripts/check_r6_crypto_canary_coordinator_boundary.py
+
+      - name: Human crypto operator decision boundary
+        run: python scripts/check_r6_crypto_operator_decision_boundary.py
 
       - name: Permanent multi-asset product boundary
         run: python scripts/check_r6_product_boundary.py
@@ -79,6 +83,12 @@ jobs:
           pytest -q \
             tests/test_r6_paper_crypto_canary_coordinator.py \
             tests/test_r6_crypto_canary_coordinator_boundary.py
+
+      - name: Crypto durable human operator authority
+        run: |
+          pytest -q \
+            tests/test_r6_paper_crypto_operator_decision.py \
+            tests/test_r6_crypto_operator_decision_boundary.py
 
       - name: Crypto durable lifecycle and adversarial recovery
         run: |
@@ -112,11 +122,13 @@ jobs:
           text = '\n'.join(p.read_text(encoding='utf-8') for p in surfaces if p.is_file())
           forbidden = (
               'alpaca_paper_crypto_writer',
+              'alpaca_paper_crypto_operator_decision',
               'CryptoPaperWriterConfig(enabled=True)',
+              'record_operator_approval(',
               'submit_once(',
               'R6_CRYPTO_EXTERNAL_PAPER_WRITE=ENABLED',
           )
           for token in forbidden:
               assert token not in text, f'user-facing crypto execution surface leaked: {token}'
-          print('Mac crypto user-facing NO-POST boundary: PASS')
+          print('Mac crypto user-facing NO-POST/NO-APPROVAL boundary: PASS')
           PY
