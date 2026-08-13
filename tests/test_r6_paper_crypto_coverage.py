@@ -144,13 +144,11 @@ def test_crypto_market_config_and_disabled_gateway_fail_closed() -> None:
 
 
 class MarketShapeTransport:
-    def __init__(self, orderbooks: object, trades: object, *, observed_at: datetime | None = None):
+    def __init__(self, orderbooks: object, trades: object):
         self.orderbooks = orderbooks
         self.trades = trades
-        self.observed_at = observed_at or NOW
 
     def read(self, request):
-        stamp = self.observed_at.isoformat().replace("+00:00", "Z")
         if "orderbooks" in request.url:
             body = json.dumps({"orderbooks": self.orderbooks}).encode()
         else:
@@ -206,10 +204,12 @@ def test_crypto_market_rejects_malformed_shapes(books: object, trades: object) -
 
 
 def test_crypto_market_rejects_future_and_naive_now() -> None:
+    future_stamp = (NOW + timedelta(seconds=4)).isoformat().replace("+00:00", "Z")
     gateway = AlpacaPaperCryptoMarketDataGateway(
         AlpacaPaperCryptoMarketDataConfig(enabled=True),
         transport=MarketShapeTransport(
-            _book(), _trades(), observed_at=NOW + timedelta(seconds=4)
+            _book(timestamp=future_stamp),
+            _trades(timestamp=future_stamp),
         ),
     )
     with pytest.raises(AlpacaPaperCryptoMarketDataIntegrityError, match="future"):
