@@ -50,6 +50,7 @@ jobs:
             src/autotrade/brokers/alpaca_paper_crypto_order.py \
             src/autotrade/brokers/alpaca_paper_crypto_lifecycle.py \
             src/autotrade/brokers/alpaca_paper_crypto_canary_coordinator.py \
+            src/autotrade/brokers/alpaca_paper_crypto_protection_coordinator.py \
             src/autotrade/brokers/alpaca_paper_crypto_operator_decision.py \
             src/autotrade/brokers/alpaca_paper_crypto_final_guard.py \
             src/autotrade/brokers/alpaca_paper_crypto_execution_attempt.py \
@@ -67,6 +68,9 @@ jobs:
 
       - name: Offline crypto canary coordinator boundary
         run: python scripts/check_r6_crypto_canary_coordinator_boundary.py
+
+      - name: Offline crypto protection coordinator boundary
+        run: python scripts/check_r6_crypto_protection_boundary.py
 
       - name: Human crypto operator decision boundary
         run: python scripts/check_r6_crypto_operator_decision_boundary.py
@@ -102,6 +106,12 @@ jobs:
           pytest -q \
             tests/test_r6_paper_crypto_canary_coordinator.py \
             tests/test_r6_crypto_canary_coordinator_boundary.py
+
+      - name: Crypto reconciliation-bound offline protection preparation
+        run: |
+          pytest -q \
+            tests/test_r6_paper_crypto_protection_coordinator.py \
+            tests/test_r6_crypto_protection_boundary.py
 
       - name: Crypto durable human operator authority
         run: |
@@ -186,10 +196,12 @@ jobs:
               'alpaca_paper_crypto_execution_bridge',
               'alpaca_paper_crypto_pre_io',
               'alpaca_paper_crypto_execution_simulation',
+              'alpaca_paper_crypto_protection_coordinator',
               'CryptoPaperWriterConfig(enabled=True)',
               'record_operator_approval(',
               'record_pre_consume(',
               'stage_after_checkpoint(',
+              'prepare_protection(',
               'submit_once(',
               'R6_CRYPTO_EXTERNAL_PAPER_WRITE=ENABLED',
           )
