@@ -74,7 +74,8 @@ class CryptoPaperExecutionBridge:
         checkpoint: CryptoExecutionAttemptCheckpoint,
         risk_decision: RiskDecision,
         market: MarketSnapshot,
-        now: datetime,
+        consume_at: datetime,
+        stage_at: datetime,
     ) -> CryptoPaperExecutionStageResult:
         if not isinstance(package, PreparedCryptoPaperCanaryPackage):
             raise CryptoPaperExecutionBridgeBlocked("prepared crypto PAPER canary package is required")
@@ -88,8 +89,12 @@ class CryptoPaperExecutionBridge:
             raise CryptoPaperExecutionBridgeBlocked("RiskDecision is required")
         if not isinstance(market, MarketSnapshot):
             raise CryptoPaperExecutionBridgeBlocked("MarketSnapshot is required")
-        _require_aware(now)
-        instant = now.astimezone(timezone.utc)
+        _require_aware(consume_at, "consume_at")
+        _require_aware(stage_at, "stage_at")
+        consume_instant = consume_at.astimezone(timezone.utc)
+        stage_instant = stage_at.astimezone(timezone.utc)
+        if consume_instant > stage_instant:
+            raise CryptoPaperExecutionBridgeBlocked("operator consumption cannot occur after OMS staging")
 
         if package.network_write_authorized is not False:
             raise CryptoPaperExecutionBridgeBlocked("prepared crypto package cannot carry network authority")
@@ -97,7 +102,7 @@ class CryptoPaperExecutionBridge:
             raise CryptoPaperExecutionBridgeBlocked("prepared crypto package action is not operator decision")
         if package.order_status != OrderStatus.VALIDATED.value:
             raise CryptoPaperExecutionBridgeBlocked("crypto execution bridge requires prepared VALIDATED state")
-        if instant < package.prepared_at or instant >= package.execution_deadline:
+        if consume_instant < package.prepared_at or stage_instant >= package.execution_deadline:
             raise CryptoPaperExecutionBridgeBlocked("prepared crypto package execution deadline is not valid")
 
         attempt_id = operator_decision.context.attempt_id
@@ -150,7 +155,7 @@ class CryptoPaperExecutionBridge:
             if durable.consumed_attempt_id != attempt_id or durable.consumed_at is None:
                 raise CryptoPaperExecutionBridgeBlocked("crypto operator decision was consumed by another attempt")
         elif durable.status is CryptoOperatorDecisionStatus.ISSUED:
-            if not operator_decision.is_valid_at(instant):
+            if not operator_decision.is_valid_at(consume_instant):
                 raise CryptoPaperExecutionBridgeBlocked("crypto operator decision is expired or not yet valid")
         else:
             raise CryptoPaperExecutionBridgeBlocked("crypto operator decision state is not resumable")
@@ -161,7 +166,7 @@ class CryptoPaperExecutionBridge:
             consumed = operator_registry.consume(
                 decision=operator_decision,
                 attempt_id=attempt_id,
-                now=instant,
+                now=consume_instant,
             )
         except Exception as exc:
             raise CryptoPaperExecutionBridgeBlocked("crypto operator decision consumption failed") from exc
@@ -182,7 +187,7 @@ class CryptoPaperExecutionBridge:
                 handoff_id=handoff_id,
                 decision=risk_decision,
                 market=market,
-                now=instant,
+                now=stage_instant,
             )
         except Exception as exc:
             raise CryptoPaperExecutionBridgeBlocked("OMS crypto external staging failed after human decision") from exc
@@ -237,9 +242,9 @@ def crypto_execution_handoff_id(
     return sha256(raw.encode("utf-8")).hexdigest()
 
 
-def _require_aware(now: datetime) -> None:
+def _require_aware(now: datetime, label: str) -> None:
     if now.tzinfo is None or now.utcoffset() is None:
-        raise ValueError("crypto execution bridge time must be timezone-aware")
+        raise ValueError(f"crypto execution bridge {label} must be timezone-aware")
 
 
 __all__ = [
