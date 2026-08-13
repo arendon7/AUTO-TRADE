@@ -314,16 +314,10 @@ def test_protection_package_hash_detects_rebinding(tmp_path) -> None:
 
 def test_protection_package_rejects_overclose_even_with_recomputed_shape(tmp_path) -> None:
     _, _, result = _prepare(tmp_path)
-    payload = result.package.canonical_payload()
-    payload.pop("package_hash")
-    payload["quantity"] = format(result.package.quantity * Decimal("2"), "f")
+    values = {
+        field: getattr(result.package, field)
+        for field in result.package.__dataclass_fields__
+    }
+    values["quantity"] = result.package.quantity * Decimal("2")
     with pytest.raises(ValueError, match="protective quantity must equal confirmed net long exactly"):
-        PreparedCryptoProtectionPackage(
-            **{
-                **result.package.__dict__ if hasattr(result.package, "__dict__") else {
-                    field: getattr(result.package, field)
-                    for field in result.package.__dataclass_fields__
-                },
-                "quantity": result.package.quantity * Decimal("2"),
-            }
-        )
+        PreparedCryptoProtectionPackage(**values)
