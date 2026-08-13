@@ -82,7 +82,6 @@ def _advance_entry_to_unprotected(ctx, reconciliation):
         broker_order_id=reconciliation.order.broker_order_id,
         broker_status=reconciliation.order.status,
         filled_quantity=reconciliation.order.filled_quantity,
-        terminal=reconciliation.order.terminal,
         confirmed_net_long_quantity=reconciliation.position.quantity,
         at=reconciliation.observed_at,
     )
