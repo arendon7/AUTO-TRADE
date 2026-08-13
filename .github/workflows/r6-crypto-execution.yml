@@ -138,6 +138,9 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+      - name: Crypto guarded PRE_IO interlock adversarial coverage
+        run: pytest -q tests/test_r6_paper_crypto_pre_io_adversarial.py
+
       - name: Crypto guarded end-to-end execution simulation
         run: |
           pytest -q \
