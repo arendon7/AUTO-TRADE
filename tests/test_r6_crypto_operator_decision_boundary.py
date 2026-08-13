@@ -19,5 +19,5 @@ def test_crypto_operator_decision_boundary_passes_repository() -> None:
     assert "crypto operator decision boundary: PASS" in result.stdout
     assert "HUMAN_OPERATOR only" in result.stdout
     assert "tamper-evident ISSUED->CONSUMED" in result.stdout
-    assert "no production approval caller" in result.stdout
+    assert "no production crypto approval caller" in result.stdout
     assert "no credentials/network/writer/POST authority" in result.stdout
