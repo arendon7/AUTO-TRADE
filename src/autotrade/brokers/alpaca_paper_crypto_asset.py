@@ -66,22 +66,27 @@ CRYPTO_ASSET_PATH = crypto_asset_path(CRYPTO_PAIR)
 
 @dataclass(frozen=True, slots=True)
 class PaperCryptoAssetReadPolicy:
+    symbol: str = CRYPTO_PAIR
     allowed_host: str = ALPACA_PAPER_TRADING_HOST
 
-    def validate(self, request: AlpacaPaperReadRequest, *, symbol: str = CRYPTO_PAIR) -> None:
-        canonical = normalize_crypto_pair(symbol)
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "symbol", normalize_crypto_pair(self.symbol))
+
+    @property
+    def expected_url(self) -> str:
+        return "https" + "://" + self.allowed_host + crypto_asset_path(self.symbol)
+
+    def validate(self, request: AlpacaPaperReadRequest) -> None:
         if request.method != "GET":
             raise AlpacaPaperPolicyError("PAPER crypto asset preflight is GET-only")
         if not 0 < request.timeout_seconds <= 15:
             raise AlpacaPaperPolicyError("PAPER crypto asset timeout is invalid")
-        expected = "https" + "://" + self.allowed_host + crypto_asset_path(canonical)
-        if request.url != expected:
+        if request.url != self.expected_url:
             raise AlpacaPaperPolicyError("PAPER crypto asset URL is not exact pair allowlist")
         _validate_auth_headers(request.headers)
 
-    def validate_final_url(self, url: str, *, symbol: str = CRYPTO_PAIR) -> None:
-        expected = "https" + "://" + self.allowed_host + crypto_asset_path(symbol)
-        if url != expected:
+    def validate_final_url(self, url: str) -> None:
+        if url != self.expected_url:
             raise AlpacaPaperPolicyError("PAPER crypto asset final URL changed")
 
 
@@ -184,11 +189,8 @@ class AlpacaPaperCryptoAssetGateway:
         policy: PaperCryptoAssetReadPolicy | None = None,
     ) -> None:
         self._config = config or AlpacaPaperGatewayConfig()
-        self._policy = policy or PaperCryptoAssetReadPolicy()
-        self._transport = transport or UrllibAlpacaPaperReadTransport(
-            policy=self._policy,  # type: ignore[arg-type]
-            max_response_bytes=self._config.max_response_bytes,
-        )
+        self._policy = policy
+        self._transport = transport
 
     def attest_asset(
         self,
@@ -208,11 +210,17 @@ class AlpacaPaperCryptoAssetGateway:
             raise PaperCryptoAssetIntegrityError("PAPER credentials do not match account evidence")
         if now.tzinfo is None or now.utcoffset() is None:
             raise ValueError("now must be timezone-aware")
+        policy = self._policy or PaperCryptoAssetReadPolicy(symbol=canonical)
+        if policy.symbol != canonical:
+            raise AlpacaPaperPolicyError("crypto asset policy pair does not match requested pair")
+        transport = self._transport or UrllibAlpacaPaperReadTransport(
+            policy=policy,  # type: ignore[arg-type]
+            max_response_bytes=self._config.max_response_bytes,
+        )
         path = crypto_asset_path(canonical)
-        url = "https" + "://" + self._policy.allowed_host + path
         request = AlpacaPaperReadRequest(
             method="GET",
-            url=url,
+            url=policy.expected_url,
             timeout_seconds=self._config.timeout_seconds,
             headers={
                 "Accept": "application/json",
@@ -221,9 +229,9 @@ class AlpacaPaperCryptoAssetGateway:
                 "APCA-API-SECRET-KEY": credentials.secret_key,
             },
         )
-        self._policy.validate(request, symbol=canonical)
-        response = self._transport.read(request)
-        self._policy.validate_final_url(response.final_url, symbol=canonical)
+        policy.validate(request)
+        response = transport.read(request)
+        policy.validate_final_url(response.final_url)
         return _parse_asset(
             response=response,
             expected_symbol=canonical,
@@ -316,6 +324,7 @@ __all__ = [
     "AlpacaPaperCryptoAssetGateway",
     "PaperCryptoAssetError",
     "PaperCryptoAssetIntegrityError",
+    "PaperCryptoAssetReadPolicy",
     "crypto_asset_path",
     "normalize_crypto_pair",
 ]
