@@ -26,9 +26,15 @@
       "evidence": [
         "skills/crypto-trading/SKILL.md",
         "knowledge/20_ARQUITECTURA/R6_MULTI_ASSET_CRYPTO_ARCHITECTURE.md",
-        "knowledge/30_DECISIONES/ADR-0009-native-multi-asset-equity-crypto.md"
+        "knowledge/30_DECISIONES/ADR-0009-native-multi-asset-equity-crypto.md",
+        "src/autotrade/brokers/alpaca_paper_crypto_protection_coordinator.py",
+        "src/autotrade/brokers/alpaca_paper_crypto_protection_operator_decision.py",
+        "src/autotrade/brokers/alpaca_paper_crypto_protection_final_guard.py",
+        "src/autotrade/brokers/alpaca_paper_crypto_protection_execution_attempt.py",
+        "tests/test_r6_paper_crypto_protection_final_guard.py",
+        "tests/test_r6_paper_crypto_protection_execution_attempt.py"
       ],
-      "next_action": "Implement a crypto-specific protection state machine that reconciles confirmed entry fills before creating a protective stop-limit for no more than confirmed net position. Certify partial fills, trigger-without-fill, stale/canceled protection, disconnect, crash/restart, cancel/replace and PROTECTION_AT_RISK behavior without reusing equity bracket authority."
+      "next_action": "Wire the durable protection PRE_CONSUME checkpoint through a dedicated no-network protection execution bridge that consumes only the same human-approved attempt and stages the exact protective OMS order as SUBMITTING. Then require the protection PRE_IO Final Guard at the last-write boundary before any broker transport call. Certify crash/restart after PRE_CONSUME and after human-authority consumption, exact-position rebinding denial, UNKNOWN=>RECONCILE_ONLY, zero duplicate POST, partial/trigger-without-fill outcomes and PROTECTION_AT_RISK without reusing equity bracket authority."
     },
     {
       "id": "TD-R6-016",
@@ -39,9 +45,17 @@
       "evidence": [
         "skills/crypto-trading/SKILL.md",
         "knowledge/20_ARQUITECTURA/R6_MULTI_ASSET_CRYPTO_ARCHITECTURE.md",
-        "knowledge/30_DECISIONES/ADR-0009-native-multi-asset-equity-crypto.md"
+        "knowledge/30_DECISIONES/ADR-0009-native-multi-asset-equity-crypto.md",
+        "src/autotrade/brokers/alpaca_paper_crypto_writer.py",
+        "src/autotrade/brokers/alpaca_paper_crypto_pre_io.py",
+        "src/autotrade/brokers/alpaca_paper_crypto_execution_bridge.py",
+        "src/autotrade/brokers/alpaca_paper_crypto_execution_attempt.py",
+        "src/autotrade/brokers/alpaca_paper_crypto_final_guard.py",
+        "src/autotrade/brokers/alpaca_paper_crypto_reconciliation.py",
+        "tests/test_r6_paper_crypto_writer.py",
+        "tests/test_r6_paper_crypto_execution_simulation.py"
       ],
-      "next_action": "Implement a dedicated crypto PAPER writer restricted to exact paper-api host and exact supported payload schema, with durable deterministic client_order_id, UNKNOWN persisted before network I/O, zero blind retry, exact ACK/fill reconciliation and explicit LIVE denial. No broker POST is allowed before this item and TD-R6-015 are structurally certified."
+      "next_action": "Remove the direct enabled-writer bypass found in the exact-head audit: no raw AlpacaPaperCryptoWriter(enabled=True) call may reach a transport using only ENTRY_PREPARED/PROTECTION_PREPARED lifecycle state. The writer/last-write boundary must require role-specific, self-consistent PRE_IO authority bound to the exact client_order_id, durable UNKNOWN attempt, OMS SUBMITTING state and human-approved attempt for ENTRY and PROTECTION. Preserve exact PAPER host/path, UNKNOWN-before-I/O, zero blind retry and GET-only reconciliation; add CI that fails if any production caller can bypass the guarded last-write path. No broker POST is allowed before TD-R6-015 and TD-R6-016 are exact-head green under this stronger contract."
     },
     {
       "id": "TD-R6-017",
