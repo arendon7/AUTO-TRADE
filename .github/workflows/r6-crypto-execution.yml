@@ -1,0 +1,107 @@
+name: R6 Crypto PAPER Execution Authority
+
+on:
+  push:
+    branches:
+      - "work/r6-crypto-paper-execution"
+  pull_request:
+    paths:
+      - "src/autotrade/product_profile.py"
+      - "src/autotrade/brokers/alpaca_paper_crypto_*.py"
+      - "scripts/check_r6_crypto_execution_boundary.py"
+      - "tests/test_r6_crypto_execution_boundary.py"
+      - "tests/test_r6_paper_crypto_*.py"
+      - "skills/crypto-trading/**"
+      - "skills/multi-asset-safety/**"
+      - "knowledge/00_CANON/debt_register_r6_multi_asset.json"
+      - ".github/workflows/r6-crypto-execution.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  crypto-execution-authority:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout exact head
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install project
+        run: python -m pip install -e '.[dev]'
+
+      - name: Compile crypto execution surface
+        run: |
+          python -m compileall -q \
+            src/autotrade/product_profile.py \
+            src/autotrade/brokers/alpaca_paper_crypto_asset.py \
+            src/autotrade/brokers/alpaca_paper_crypto_catalog.py \
+            src/autotrade/brokers/alpaca_paper_crypto_market_data.py \
+            src/autotrade/brokers/alpaca_paper_crypto_order.py \
+            src/autotrade/brokers/alpaca_paper_crypto_lifecycle.py \
+            src/autotrade/brokers/alpaca_paper_crypto_writer.py \
+            src/autotrade/brokers/alpaca_paper_crypto_reconciliation.py
+
+      - name: Permanent crypto execution authority boundary
+        run: python scripts/check_r6_crypto_execution_boundary.py
+
+      - name: Permanent multi-asset product boundary
+        run: python scripts/check_r6_product_boundary.py
+
+      - name: Machine-readable debt contract
+        run: python scripts/check_debt_register.py
+
+      - name: Crypto ProductCapabilities and pair contracts
+        run: |
+          pytest -q \
+            tests/test_r6_multi_asset_product_profile.py \
+            tests/test_r6_paper_crypto_catalog.py \
+            tests/test_r6_paper_crypto_rehearsal.py \
+            tests/test_r6_paper_crypto_order.py
+
+      - name: Crypto durable lifecycle and adversarial recovery
+        run: |
+          pytest -q \
+            tests/test_r6_paper_crypto_lifecycle.py \
+            tests/test_r6_paper_crypto_lifecycle_adversarial.py
+
+      - name: Crypto one-shot writer and reconciliation
+        run: |
+          pytest -q \
+            tests/test_r6_paper_crypto_writer.py \
+            tests/test_r6_paper_crypto_reconciliation.py \
+            tests/test_r6_crypto_execution_boundary.py
+
+      - name: Prove user-facing Mac crypto remains NO-POST
+        run: |
+          python scripts/check_mac_dashboard_boundary.py
+          python - <<'PY'
+          from pathlib import Path
+          root = Path('.')
+          surfaces = [
+              root / 'scripts/mac_dashboard.py',
+              root / 'scripts/mac_crypto_dashboard.py',
+              root / 'scripts/mac_crypto_paper_rehearsal.py',
+              root / 'web/mac_multi_asset.html',
+              root / 'web/mac_crypto_dashboard.html',
+              root / 'ABRIR_AUTO_TRADE.command',
+              root / 'ABRIR_CRYPTO_PAPER.command',
+          ]
+          text = '\n'.join(p.read_text(encoding='utf-8') for p in surfaces if p.is_file())
+          forbidden = (
+              'alpaca_paper_crypto_writer',
+              'CryptoPaperWriterConfig(enabled=True)',
+              'submit_once(',
+              'R6_CRYPTO_EXTERNAL_PAPER_WRITE=ENABLED',
+          )
+          for token in forbidden:
+              assert token not in text, f'user-facing crypto execution surface leaked: {token}'
+          print('Mac crypto user-facing NO-POST boundary: PASS')
+          PY
