@@ -2,13 +2,17 @@ from __future__ import annotations
 
 import argparse
 from datetime import datetime, timedelta, timezone
-from decimal import Decimal, InvalidOperation, ROUND_CEILING
+from decimal import Decimal, ROUND_CEILING
 import json
 import os
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from autotrade.brokers.alpaca_paper_crypto_asset import CRYPTO_PAIR, AlpacaPaperCryptoAssetGateway
+from autotrade.brokers.alpaca_paper_crypto_asset import (
+    CRYPTO_PAIR,
+    AlpacaPaperCryptoAssetGateway,
+    normalize_crypto_pair,
+)
 from autotrade.brokers.alpaca_paper_crypto_market_data import (
     AlpacaPaperCryptoMarketDataConfig,
     AlpacaPaperCryptoMarketDataGateway,
@@ -30,6 +34,7 @@ from autotrade.persistence import (
     SQLiteRuntime,
     SQLiteSafetyStateStore,
 )
+from autotrade.product_profile import BrokerOrderType, ProductCapabilities, TimeInForce
 from autotrade.safety import CapitalSafetyKernel, SafetyLimits
 
 
@@ -53,12 +58,13 @@ class _NoBrokerSurface:
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
-            "24/7 BTC/USD PAPER connectivity rehearsal. It refreshes the verified PAPER account, "
-            "reads BTC/USD asset metadata, proves the account flat, reads live crypto market data, "
-            "then runs Capital Safety + OMS validation locally. No broker order is sent."
+            "24/7 canonical crypto-pair PAPER connectivity rehearsal. It refreshes the verified PAPER account, "
+            "reads exact pair asset metadata, proves the account flat, reads live crypto market data, binds a "
+            "ProductCapabilities profile, then runs Capital Safety + OMS validation locally. No broker order is sent."
         )
     )
     parser.add_argument("--workspace", required=True, type=Path)
+    parser.add_argument("--symbol", default=CRYPTO_PAIR)
     parser.add_argument("--allow-paper-crypto-read", action="store_true")
     return parser
 
@@ -67,7 +73,7 @@ def _credentials() -> AlpacaPaperCredentials:
     key = os.environ.get(KEY_ENV, "")
     secret = os.environ.get(SECRET_ENV, "")
     if not key or not secret:
-        raise CryptoPaperRehearsalError("PAPER Key + Secret are required for BTC/USD rehearsal")
+        raise CryptoPaperRehearsalError("PAPER Key + Secret are required for crypto rehearsal")
     return AlpacaPaperCredentials(key_id=key, secret_key=secret)
 
 
@@ -96,11 +102,18 @@ def _ceil(value: Decimal, increment: Decimal) -> Decimal:
     return units * increment
 
 
-def run(*, workspace_path: Path, credentials: AlpacaPaperCredentials, now: datetime) -> dict[str, object]:
+def run(
+    *,
+    workspace_path: Path,
+    credentials: AlpacaPaperCredentials,
+    now: datetime,
+    symbol: str = CRYPTO_PAIR,
+) -> dict[str, object]:
     if os.environ.get(WRITE_ENV) == "ENABLED":
         raise CryptoPaperRehearsalError("crypto rehearsal refuses R6_EXTERNAL_PAPER_WRITE=ENABLED")
     if now.tzinfo is None or now.utcoffset() is None:
         raise ValueError("now must be timezone-aware")
+    canonical = normalize_crypto_pair(symbol)
     path = workspace_path.expanduser()
     if path.is_symlink() or not path.is_dir():
         raise CryptoPaperRehearsalError("existing non-symlink workspace is required")
@@ -119,7 +132,19 @@ def run(*, workspace_path: Path, credentials: AlpacaPaperCredentials, now: datet
         account_attestation_fingerprint=account.fingerprint,
         expected_credential_reference=account.credential_reference,
         now=instant,
+        symbol=canonical,
     )
+    product_profile = ProductCapabilities.crypto_alpaca_paper(
+        source_fingerprint=asset.fingerprint,
+        observed_at=asset.observed_at,
+        fractionable=asset.fractionable,
+        marginable=asset.marginable,
+        shortable=asset.shortable,
+    )
+    product_profile.require_order(order_type=BrokerOrderType.LIMIT, time_in_force=TimeInForce.GTC)
+    product_profile.require_margin(uses_margin=False)
+    product_profile.require_opening_short(opening_short=False)
+
     flat = AlpacaPaperFlatAccountGateway(config=gateway_config).attest_flatness(
         credentials=credentials,
         account_attestation_fingerprint=account.fingerprint,
@@ -132,8 +157,10 @@ def run(*, workspace_path: Path, credentials: AlpacaPaperCredentials, now: datet
         )
     market_attestation = AlpacaPaperCryptoMarketDataGateway(
         AlpacaPaperCryptoMarketDataConfig(enabled=True)
-    ).attest_snapshot(credentials=credentials, now=instant)
+    ).attest_snapshot(credentials=credentials, now=instant, symbol=canonical)
     market = market_attestation.market
+    if market.symbol != asset.symbol:
+        raise CryptoPaperRehearsalError("crypto asset and market-data pair identity mismatch")
 
     portfolio_value = account.portfolio_value
     buying_power = account.buying_power
@@ -145,13 +172,14 @@ def run(*, workspace_path: Path, credentials: AlpacaPaperCredentials, now: datet
     notional = quantity * limit_price
     if notional > effective_cap:
         raise CryptoPaperRehearsalError(
-            f"minimum BTC/USD notional {notional} exceeds conservative rehearsal cap {effective_cap}"
+            f"minimum {canonical} notional {notional} exceeds conservative rehearsal cap {effective_cap}"
         )
     if quantity % asset.min_trade_increment != 0:
-        raise CryptoPaperRehearsalError("minimum BTC/USD quantity violates Alpaca trade increment")
+        raise CryptoPaperRehearsalError(f"minimum {canonical} quantity violates Alpaca trade increment")
 
+    base_currency, quote_currency = canonical.split("/", 1)
     snapshot = PortfolioSnapshot(
-        snapshot_id=f"crypto-paper-rehearsal:{account.account_id[:12]}",
+        snapshot_id=f"crypto-paper-rehearsal:{account.account_id[:12]}:{canonical}",
         equity=portfolio_value,
         gross_exposure=Decimal("0"),
         net_exposure=Decimal("0"),
@@ -165,10 +193,13 @@ def run(*, workspace_path: Path, credentials: AlpacaPaperCredentials, now: datet
         broker_state_known=True,
     )
     intent = OrderIntent(
-        intent_id=f"crypto-paper-rehearsal:{int(instant.timestamp() * 1000)}",
-        idempotency_key=f"crypto-paper-rehearsal:{asset.fingerprint}:{market_attestation.fingerprint}",
+        intent_id=f"crypto-paper-rehearsal:{canonical}:{int(instant.timestamp() * 1000)}",
+        idempotency_key=(
+            f"crypto-paper-rehearsal:{canonical}:{product_profile.fingerprint}:"
+            f"{market_attestation.fingerprint}"
+        ),
         strategy_id=STRATEGY_ID,
-        symbol=CRYPTO_PAIR,
+        symbol=canonical,
         side=Side.BUY,
         quantity=quantity,
         order_type=OrderType.LIMIT,
@@ -182,10 +213,10 @@ def run(*, workspace_path: Path, credentials: AlpacaPaperCredentials, now: datet
         safety_state = SQLiteSafetyStateStore(runtime)
         versioned = SQLitePortfolioStore(runtime).initialize(snapshot, now=instant)
         rules = AuthoritativeInstrumentRules(
-            venue="ALPACA_PAPER_CRYPTO_US",
-            symbol=CRYPTO_PAIR,
-            base_currency="BTC",
-            quote_currency="USD",
+            venue=product_profile.venue,
+            symbol=canonical,
+            base_currency=base_currency,
+            quote_currency=quote_currency,
             version=1,
             price_tick=asset.price_increment,
             quantity_step=asset.min_trade_increment,
@@ -195,7 +226,7 @@ def run(*, workspace_path: Path, credentials: AlpacaPaperCredentials, now: datet
             max_notional=effective_cap,
             trading_status=InstrumentTradingStatus.TRADING,
             source="ALPACA_PAPER_CRYPTO_ASSET",
-            source_version=f"asset:{asset.fingerprint}:btc-rehearsal-v1",
+            source_version=f"asset:{asset.fingerprint}:profile:{product_profile.fingerprint}:rehearsal-v2",
             source_payload_sha256=asset.response_sha256,
             observed_at=asset.observed_at,
             valid_until=instant + timedelta(minutes=5),
@@ -203,8 +234,8 @@ def run(*, workspace_path: Path, credentials: AlpacaPaperCredentials, now: datet
         rules.validate_candidate(quantity=quantity, price=limit_price)
         SQLiteInstrumentMaster(runtime).publish(rules, now=instant)
         limits = SafetyLimits(
-            limits_version="r6-crypto-paper-rehearsal-v1",
-            allowed_symbols=frozenset({CRYPTO_PAIR}),
+            limits_version="r6-crypto-paper-rehearsal-v2",
+            allowed_symbols=frozenset({canonical}),
             allowed_order_types=frozenset({OrderType.LIMIT}),
             max_order_notional=effective_cap,
             max_position_notional=effective_cap,
@@ -227,7 +258,7 @@ def run(*, workspace_path: Path, credentials: AlpacaPaperCredentials, now: datet
         )
         if decision.status is not RiskDecisionStatus.APPROVED:
             raise CryptoPaperRehearsalError(
-                f"Capital Safety rejected BTC/USD rehearsal: {decision.reason_code}: {decision.reason_detail}"
+                f"Capital Safety rejected {canonical} rehearsal: {decision.reason_code}: {decision.reason_detail}"
             )
         order = OrderManagementSystem(
             broker=_NoBrokerSurface(),
@@ -248,10 +279,13 @@ def run(*, workspace_path: Path, credentials: AlpacaPaperCredentials, now: datet
     return {
         "status": "CRYPTO_PAPER_REHEARSAL_PASS",
         "environment": "PAPER",
-        "symbol": CRYPTO_PAIR,
+        "symbol": canonical,
         "asset_class": asset.asset_class,
         "exchange": asset.exchange,
         "market_location": market_attestation.location,
+        "product_profile_fingerprint": product_profile.fingerprint,
+        "product_protection_model": product_profile.protection_model.value,
+        "market_hours_model": product_profile.market_hours_model.value,
         "bid": str(market.bid),
         "ask": str(market.ask),
         "last": str(market.last),
@@ -271,18 +305,19 @@ def run(*, workspace_path: Path, credentials: AlpacaPaperCredentials, now: datet
         "capital_authority": "NONE",
         "profitability_claim": False,
         "live_trading": "BLOCKED",
-        "next_action": "DESIGN_SEPARATE_CRYPTO_CANARY_PROTECTION_BEFORE_ANY_POST",
+        "next_action": "CERTIFY_CRYPTO_WRITER_AND_PROTECTION_LIFECYCLE_BEFORE_ANY_POST",
     }
 
 
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     if not args.allow_paper_crypto_read:
-        raise SystemExit("BTC/USD rehearsal requires explicit --allow-paper-crypto-read")
+        raise SystemExit("crypto rehearsal requires explicit --allow-paper-crypto-read")
     result = run(
         workspace_path=args.workspace,
         credentials=_credentials(),
         now=datetime.now(timezone.utc),
+        symbol=args.symbol,
     )
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0
