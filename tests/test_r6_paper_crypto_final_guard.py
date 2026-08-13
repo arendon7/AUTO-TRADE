@@ -43,6 +43,7 @@ class _HealthyBridge:
         return SimpleNamespace(
             mode=HealthRiskMode.NORMAL,
             reason="healthy",
+            blocks_new_risk=False,
             order_multiplier=Decimal("1"),
             strategy_multiplier=Decimal("1"),
             portfolio_multiplier=Decimal("1"),
@@ -477,6 +478,4 @@ def test_fresh_market_price_can_change_without_increasing_fixed_limit_economics(
     )
     pre = _authorize_pre(ctx, fresh_market=changed_market)
     assert pre.phase is CryptoFinalWritePhase.PRE_CONSUME
-    # Human/Safety approved the fixed LIMIT/qty, so a fresh market move cannot
-    # raise maximum order notional above package.quantity * package.limit_price.
     assert ctx.package.notional == ctx.package.quantity * ctx.package.limit_price
