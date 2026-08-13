@@ -51,19 +51,23 @@ def _entry_reconciliation(ctx, *, status="filled", filled=None, position=None, o
         filled_quantity=filled,
         limit_price=ctx.broker_order.limit_price,
         stop_price=ctx.broker_order.stop_price,
+        request_id="entry-reconcile-order-001",
+        response_sha256="1" * 64,
+        observed_at=observed,
     )
     pos = CryptoBrokerPositionSnapshot(
         symbol=ctx.broker_order.symbol,
         quantity=position,
+        market_value=None,
+        average_entry_price=None,
+        request_id="entry-reconcile-position-001",
+        response_sha256="2" * 64,
+        observed_at=observed,
         absent=False,
     )
     return CryptoBrokerReconciliation(
         order=broker,
         position=pos,
-        order_request_id="entry-reconcile-order-001",
-        position_request_id="entry-reconcile-position-001",
-        order_response_sha256="1" * 64,
-        position_response_sha256="2" * 64,
         observed_at=observed,
     )
 
@@ -112,7 +116,11 @@ def _protection_decision(intent, market, *, risk_reducing=True, approved_notiona
         limits_version="r6-crypto-protection-v1",
         intent_fingerprint=intent_fingerprint(intent),
         market_fingerprint=market_fingerprint(market.market),
-        approved_notional=approved_notional if approved_notional is not None else intent.quantity * intent.limit_price,
+        approved_notional=(
+            approved_notional
+            if approved_notional is not None
+            else intent.quantity * intent.limit_price
+        ),
         risk_reducing=risk_reducing,
         safety_state_version=0,
     )
@@ -124,7 +132,10 @@ def _prepare(tmp_path, **overrides):
     if overrides.pop("advance_entry", True):
         _advance_entry_to_unprotected(ctx, reconciliation)
     market = overrides.pop("market_attestation", _market(observed=NOW + timedelta(seconds=5)))
-    intent = overrides.pop("intent", _protection_intent(ctx, quantity=reconciliation.position.quantity))
+    intent = overrides.pop(
+        "intent",
+        _protection_intent(ctx, quantity=reconciliation.position.quantity),
+    )
     decision = overrides.pop("decision", _protection_decision(intent, market))
     result = CryptoPaperProtectionCoordinator(oms=ctx.oms).prepare_protection(
         lifecycle=ctx.lifecycle,
@@ -228,7 +239,10 @@ def test_protection_intent_must_equal_confirmed_net_long_exactly(tmp_path) -> No
     reconciliation = _entry_reconciliation(ctx)
     _advance_entry_to_unprotected(ctx, reconciliation)
     market = _market(observed=NOW + timedelta(seconds=5))
-    intent = _protection_intent(ctx, quantity=reconciliation.position.quantity * Decimal("0.5"))
+    intent = _protection_intent(
+        ctx,
+        quantity=reconciliation.position.quantity * Decimal("0.5"),
+    )
     decision = _protection_decision(intent, market)
 
     with pytest.raises(CryptoProtectionPreparationBlocked, match="quantity must equal confirmed net long exactly"):
@@ -291,7 +305,11 @@ def test_protection_rejects_stale_entry_reconciliation(tmp_path) -> None:
     _advance_entry_to_unprotected(ctx, reconciliation)
     market = _market(observed=NOW + timedelta(seconds=34))
     intent = _protection_intent(ctx)
-    decision = _protection_decision(intent, market, valid_until=NOW + timedelta(seconds=50))
+    decision = _protection_decision(
+        intent,
+        market,
+        valid_until=NOW + timedelta(seconds=50),
+    )
 
     with pytest.raises(CryptoProtectionPreparationBlocked, match="entry reconciliation is stale"):
         _prepare(
