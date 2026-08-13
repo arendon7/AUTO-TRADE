@@ -88,6 +88,7 @@ class PaperAssetEvidenceStore:
                 min_order_size=_decimal(raw, "min_order_size"),
                 min_trade_increment=_decimal(raw, "min_trade_increment"),
                 price_increment=_decimal(raw, "price_increment"),
+                constraint_source=_string(raw, "constraint_source"),
                 attributes=tuple(attributes),
                 account_attestation_fingerprint=_string(
                     raw, "account_attestation_fingerprint"
