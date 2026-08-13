@@ -9,6 +9,7 @@ on:
       - "src/autotrade/product_profile.py"
       - "src/autotrade/brokers/alpaca_paper_crypto_*.py"
       - "scripts/check_r6_crypto_execution_boundary.py"
+      - "scripts/check_r6_authority.py"
       - "tests/test_r6_crypto_execution_boundary.py"
       - "tests/test_r6_paper_crypto_*.py"
       - "skills/crypto-trading/**"
@@ -49,6 +50,9 @@ jobs:
             src/autotrade/brokers/alpaca_paper_crypto_writer.py \
             src/autotrade/brokers/alpaca_paper_crypto_reconciliation.py
 
+      - name: Global R6 PAPER authority boundary
+        run: python scripts/check_r6_authority.py
+
       - name: Permanent crypto execution authority boundary
         run: python scripts/check_r6_crypto_execution_boundary.py
 
@@ -76,6 +80,7 @@ jobs:
         run: |
           pytest -q \
             tests/test_r6_paper_crypto_writer.py \
+            tests/test_r6_paper_crypto_writer_ambiguity.py \
             tests/test_r6_paper_crypto_reconciliation.py \
             tests/test_r6_crypto_execution_boundary.py
 
