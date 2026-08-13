@@ -51,9 +51,10 @@ class ProductCapabilityError(ValueError):
 class ProductCapabilities:
     """Broker-observed capability envelope for one asset class/venue.
 
-    This object is intentionally separate from strategy intent and broker write
-    authority. It answers only what a product is allowed to express. A valid
-    profile never grants capital authority by itself.
+    `fingerprint` binds the exact observation and its evidence source.
+    `contract_fingerprint` binds only the stable product semantics so a later
+    fresh observation can prove "same product contract, fresher evidence".
+    Neither fingerprint grants capital authority by itself.
     """
 
     asset_class: AssetClass
@@ -109,9 +110,8 @@ class ProductCapabilities:
             if self.protection_model is not ProtectionModel.EQUITY_BRACKET:
                 raise ProductCapabilityError("R6 US-equity canary requires the certified bracket model")
 
-    @property
-    def fingerprint(self) -> str:
-        payload = {
+    def _contract_payload(self) -> dict[str, object]:
+        return {
             "asset_class": self.asset_class.value,
             "venue": self.venue,
             "market_hours_model": self.market_hours_model.value,
@@ -122,6 +122,21 @@ class ProductCapabilities:
             "shortable": self.shortable,
             "protection_model": self.protection_model.value,
             "source": self.source,
+        }
+
+    @property
+    def contract_fingerprint(self) -> str:
+        encoded = json.dumps(
+            self._contract_payload(),
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        return sha256(encoded).hexdigest()
+
+    @property
+    def fingerprint(self) -> str:
+        payload = {
+            **self._contract_payload(),
             "source_fingerprint": self.source_fingerprint,
             "observed_at": self.observed_at.isoformat(),
         }
