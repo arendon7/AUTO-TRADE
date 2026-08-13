@@ -7,6 +7,7 @@ from hashlib import sha256
 import json
 import re
 from typing import Mapping
+from urllib.parse import quote
 
 from .alpaca_paper_gateway import (
     ALPACA_PAPER_TRADING_HOST,
@@ -23,10 +24,10 @@ from .alpaca_paper_gateway import (
 
 
 CRYPTO_PAIR = "BTC/USD"
-CRYPTO_ASSET_LOOKUP = "BTCUSD"
-CRYPTO_ASSET_PATH = f"/v2/assets/{CRYPTO_ASSET_LOOKUP}"
+_CRYPTO_LEG_RE = re.compile(r"^[A-Z0-9]{2,16}$")
 _REQUEST_ID_RE = re.compile(r"^[\x21-\x7e]{1,256}$")
 _HASH_RE = re.compile(r"^[0-9a-f]{64}$")
+CURRENT_TRADING_API_CRYPTO_EXCHANGE = "CRYPTO"
 
 
 class PaperCryptoAssetError(RuntimeError):
@@ -41,22 +42,45 @@ class PaperCryptoAssetIntegrityError(PaperCryptoAssetError):
     pass
 
 
+def normalize_crypto_pair(symbol: str) -> str:
+    if not isinstance(symbol, str):
+        raise TypeError("crypto pair must be string")
+    text = symbol.strip().upper()
+    if text.count("/") != 1:
+        raise ValueError("crypto pair must use canonical BASE/QUOTE form")
+    base, quote_currency = text.split("/", 1)
+    if not _CRYPTO_LEG_RE.fullmatch(base) or not _CRYPTO_LEG_RE.fullmatch(quote_currency):
+        raise ValueError("crypto pair contains unsupported characters or length")
+    if base == quote_currency:
+        raise ValueError("crypto base and quote currency must differ")
+    return f"{base}/{quote_currency}"
+
+
+def crypto_asset_path(symbol: str) -> str:
+    canonical = normalize_crypto_pair(symbol)
+    return f"/v2/assets/{quote(canonical, safe='')}"
+
+
+CRYPTO_ASSET_PATH = crypto_asset_path(CRYPTO_PAIR)
+
+
 @dataclass(frozen=True, slots=True)
 class PaperCryptoAssetReadPolicy:
     allowed_host: str = ALPACA_PAPER_TRADING_HOST
 
-    def validate(self, request: AlpacaPaperReadRequest) -> None:
+    def validate(self, request: AlpacaPaperReadRequest, *, symbol: str = CRYPTO_PAIR) -> None:
+        canonical = normalize_crypto_pair(symbol)
         if request.method != "GET":
             raise AlpacaPaperPolicyError("PAPER crypto asset preflight is GET-only")
         if not 0 < request.timeout_seconds <= 15:
             raise AlpacaPaperPolicyError("PAPER crypto asset timeout is invalid")
-        expected = "https" + "://" + self.allowed_host + CRYPTO_ASSET_PATH
+        expected = "https" + "://" + self.allowed_host + crypto_asset_path(canonical)
         if request.url != expected:
-            raise AlpacaPaperPolicyError("PAPER crypto asset URL is not exact BTC/USD allowlist")
+            raise AlpacaPaperPolicyError("PAPER crypto asset URL is not exact pair allowlist")
         _validate_auth_headers(request.headers)
 
-    def validate_final_url(self, url: str) -> None:
-        expected = "https" + "://" + self.allowed_host + CRYPTO_ASSET_PATH
+    def validate_final_url(self, url: str, *, symbol: str = CRYPTO_PAIR) -> None:
+        expected = "https" + "://" + self.allowed_host + crypto_asset_path(symbol)
         if url != expected:
             raise AlpacaPaperPolicyError("PAPER crypto asset final URL changed")
 
@@ -80,18 +104,25 @@ class AlpacaPaperCryptoAssetAttestation:
     observed_at: datetime
     request_id: str
     response_sha256: str
+    source_path: str
     source_host: str = ALPACA_PAPER_TRADING_HOST
-    source_path: str = CRYPTO_ASSET_PATH
 
     def __post_init__(self) -> None:
-        if self.symbol != CRYPTO_PAIR:
-            raise ValueError("crypto rehearsal is pinned to BTC/USD")
-        if self.asset_class != "crypto" or self.exchange != "ALPACA":
-            raise ValueError("crypto rehearsal requires exact Alpaca crypto asset")
+        canonical = normalize_crypto_pair(self.symbol)
+        if self.symbol != canonical:
+            raise ValueError("crypto asset symbol must be canonical BASE/QUOTE")
+        if not self.asset_id.strip():
+            raise ValueError("crypto asset id is required")
+        if self.asset_class != "crypto":
+            raise ValueError("crypto attestation requires asset class crypto")
+        # Alpaca Trading API changed its crypto asset exchange enum to CRYPTO in July 2026.
+        # Fail closed on stale/other exchange values so provider drift is visible immediately.
+        if self.exchange != CURRENT_TRADING_API_CRYPTO_EXCHANGE:
+            raise ValueError("crypto asset exchange must match current Alpaca Trading API CRYPTO enum")
         if self.status != "active" or self.tradable is not True or self.fractionable is not True:
-            raise ValueError("BTC/USD must be active, tradable and fractionable")
+            raise ValueError("crypto pair must be active, tradable and fractionable")
         if self.marginable is not False or self.shortable is not False:
-            raise ValueError("crypto rehearsal forbids margin and shorting")
+            raise ValueError("R6 crypto policy forbids margin and opening short exposure")
         for label, value in (
             ("min_order_size", self.min_order_size),
             ("min_trade_increment", self.min_trade_increment),
@@ -110,8 +141,8 @@ class AlpacaPaperCryptoAssetAttestation:
             raise ValueError("observed_at must be timezone-aware")
         if not _REQUEST_ID_RE.fullmatch(self.request_id):
             raise ValueError("crypto asset request id is invalid")
-        if self.source_host != ALPACA_PAPER_TRADING_HOST or self.source_path != CRYPTO_ASSET_PATH:
-            raise ValueError("crypto asset source is not exact PAPER BTC/USD endpoint")
+        if self.source_host != ALPACA_PAPER_TRADING_HOST or self.source_path != crypto_asset_path(canonical):
+            raise ValueError("crypto asset source is not exact PAPER pair endpoint")
 
     @property
     def fingerprint(self) -> str:
@@ -143,7 +174,7 @@ class AlpacaPaperCryptoAssetAttestation:
 
 
 class AlpacaPaperCryptoAssetGateway:
-    """One exact GET for BTC/USD metadata; no mutation or order surface."""
+    """One exact GET for a canonical crypto pair metadata record; no mutation/order surface."""
 
     def __init__(
         self,
@@ -166,16 +197,19 @@ class AlpacaPaperCryptoAssetGateway:
         account_attestation_fingerprint: str,
         expected_credential_reference: str,
         now: datetime,
+        symbol: str = CRYPTO_PAIR,
     ) -> AlpacaPaperCryptoAssetAttestation:
         if not self._config.enabled:
             raise PaperCryptoAssetDisabled("PAPER crypto asset preflight is disabled")
+        canonical = normalize_crypto_pair(symbol)
         if not _HASH_RE.fullmatch(account_attestation_fingerprint):
             raise ValueError("account attestation fingerprint must be SHA-256")
         if credentials.credential_reference != expected_credential_reference:
             raise PaperCryptoAssetIntegrityError("PAPER credentials do not match account evidence")
         if now.tzinfo is None or now.utcoffset() is None:
             raise ValueError("now must be timezone-aware")
-        url = "https" + "://" + self._policy.allowed_host + CRYPTO_ASSET_PATH
+        path = crypto_asset_path(canonical)
+        url = "https" + "://" + self._policy.allowed_host + path
         request = AlpacaPaperReadRequest(
             method="GET",
             url=url,
@@ -187,11 +221,13 @@ class AlpacaPaperCryptoAssetGateway:
                 "APCA-API-SECRET-KEY": credentials.secret_key,
             },
         )
-        self._policy.validate(request)
+        self._policy.validate(request, symbol=canonical)
         response = self._transport.read(request)
-        self._policy.validate_final_url(response.final_url)
+        self._policy.validate_final_url(response.final_url, symbol=canonical)
         return _parse_asset(
             response=response,
+            expected_symbol=canonical,
+            source_path=path,
             account_attestation_fingerprint=account_attestation_fingerprint,
             credential_reference=credentials.credential_reference,
             now=now,
@@ -201,6 +237,8 @@ class AlpacaPaperCryptoAssetGateway:
 def _parse_asset(
     *,
     response: AlpacaPaperHttpResponse,
+    expected_symbol: str,
+    source_path: str,
     account_attestation_fingerprint: str,
     credential_reference: str,
     now: datetime,
@@ -219,8 +257,11 @@ def _parse_asset(
         raise PaperCryptoAssetIntegrityError("PAPER crypto asset response is invalid JSON") from exc
     if not isinstance(payload, dict):
         raise PaperCryptoAssetIntegrityError("PAPER crypto asset response root must be object")
+    actual_symbol = normalize_crypto_pair(_string(payload, "symbol"))
+    if actual_symbol != expected_symbol:
+        raise PaperCryptoAssetIntegrityError("PAPER crypto asset response symbol does not match requested pair")
     return AlpacaPaperCryptoAssetAttestation(
-        symbol=_string(payload, "symbol"),
+        symbol=actual_symbol,
         asset_id=_string(payload, "id"),
         asset_class=_string(payload, "class").lower(),
         exchange=_string(payload, "exchange").upper(),
@@ -237,6 +278,7 @@ def _parse_asset(
         observed_at=now.astimezone(timezone.utc),
         request_id=request_id,
         response_sha256=sha256(response.body).hexdigest(),
+        source_path=source_path,
     )
 
 
@@ -268,8 +310,12 @@ def _positive_decimal(value: object, label: str) -> Decimal:
 
 __all__ = [
     "CRYPTO_PAIR",
+    "CRYPTO_ASSET_PATH",
+    "CURRENT_TRADING_API_CRYPTO_EXCHANGE",
     "AlpacaPaperCryptoAssetAttestation",
     "AlpacaPaperCryptoAssetGateway",
     "PaperCryptoAssetError",
     "PaperCryptoAssetIntegrityError",
+    "crypto_asset_path",
+    "normalize_crypto_pair",
 ]
