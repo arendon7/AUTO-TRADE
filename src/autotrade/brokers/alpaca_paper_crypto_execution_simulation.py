@@ -2,10 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from hashlib import sha256
 
 from autotrade.domain import RiskDecision
-from autotrade.oms import OrderManagementSystem
 from autotrade.product_profile import ProductCapabilities
 
 from .alpaca_paper_crypto_asset import AlpacaPaperCryptoAssetAttestation
@@ -14,6 +12,7 @@ from .alpaca_paper_crypto_execution_attempt import (
     CryptoExecutionAttemptCheckpoint,
     SQLiteCryptoExecutionAttemptRegistry,
 )
+from .alpaca_paper_crypto_execution_bridge import CryptoPaperExecutionBridge
 from .alpaca_paper_crypto_final_guard import (
     CryptoFinalWriteAttestation,
     CryptoFinalWritePhase,
@@ -105,27 +104,28 @@ class CryptoPaperExecutionSimulationCoordinator:
 
     This coordinator proves the real authority ordering while delegating only to
     an in-memory deterministic transport:
-      PRE_CONSUME -> durable checkpoint -> human CONSUMED -> OMS SUBMITTING ->
-      writer persists ENTRY_SUBMISSION_UNKNOWN -> PRE_IO -> one simulated POST.
+      PRE_CONSUME -> durable checkpoint -> execution bridge consumes human
+      decision -> OMS SUBMITTING -> writer persists ENTRY_SUBMISSION_UNKNOWN ->
+      PRE_IO -> one simulated POST.
 
-    It never reads environment credentials, never constructs the HTTPS transport
-    and is intentionally disconnected from Mac/UI surfaces.
+    It never stages OMS directly, reads environment credentials, constructs the
+    HTTPS transport, or exposes this authority to Mac/UI surfaces.
     """
 
     def __init__(
         self,
         *,
-        oms: OrderManagementSystem,
+        execution_bridge: CryptoPaperExecutionBridge,
         final_guard: CryptoPaperFinalWriteGuard,
         attempt_registry: SQLiteCryptoExecutionAttemptRegistry,
     ) -> None:
-        if not isinstance(oms, OrderManagementSystem):
-            raise TypeError("simulation coordinator requires authoritative OMS")
+        if not isinstance(execution_bridge, CryptoPaperExecutionBridge):
+            raise TypeError("simulation coordinator requires crypto execution bridge")
         if not isinstance(final_guard, CryptoPaperFinalWriteGuard):
             raise TypeError("simulation coordinator requires crypto Final Freshness guard")
         if not isinstance(attempt_registry, SQLiteCryptoExecutionAttemptRegistry):
             raise TypeError("simulation coordinator requires durable execution-attempt registry")
-        self._oms = oms
+        self._execution_bridge = execution_bridge
         self._guard = final_guard
         self._attempts = attempt_registry
 
@@ -178,11 +178,6 @@ class CryptoPaperExecutionSimulationCoordinator:
                 phase=CryptoFinalWritePhase.PRE_CONSUME,
             )
             checkpoint = self._attempts.record_pre_consume(pre_consume)
-            operator_registry.consume(
-                decision=operator_decision,
-                attempt_id=attempt_id,
-                now=timeline.consume_at,
-            )
         elif state.status is CryptoOperatorDecisionStatus.CONSUMED:
             if state.consumed_attempt_id != attempt_id:
                 raise CryptoExecutionSimulationBlocked("operator decision was consumed by another attempt")
@@ -201,18 +196,6 @@ class CryptoPaperExecutionSimulationCoordinator:
         else:
             raise CryptoExecutionSimulationBlocked("unsupported operator decision state")
 
-        handoff_id = _simulation_handoff_id(
-            package=package,
-            operator_decision=operator_decision,
-        )
-        self._oms.stage_external_submission(
-            order_id=package.order_id,
-            handoff_id=handoff_id,
-            decision=risk_decision,
-            market=prepared_market.market,
-            now=timeline.stage_at,
-        )
-
         lifecycle_state = lifecycle.snapshot(package.lifecycle_id).state
         if lifecycle_state.status is CryptoLifecycleStatus.ENTRY_SUBMISSION_UNKNOWN:
             raise CryptoExecutionSimulationReconcileOnly(
@@ -220,6 +203,18 @@ class CryptoPaperExecutionSimulationCoordinator:
             )
         if lifecycle_state.status is not CryptoLifecycleStatus.ENTRY_PREPARED:
             raise CryptoExecutionSimulationBlocked("entry simulation requires durable ENTRY_PREPARED")
+
+        stage_result = self._execution_bridge.stage_after_checkpoint(
+            package=package,
+            operator_decision=operator_decision,
+            operator_registry=operator_registry,
+            checkpoint=checkpoint,
+            risk_decision=risk_decision,
+            market=prepared_market.market,
+            consume_at=timeline.consume_at,
+            stage_at=timeline.stage_at,
+        )
+        handoff_id = stage_result.handoff.handoff_id
 
         latest_pre_io: CryptoFinalWriteAttestation | None = None
 
@@ -321,23 +316,6 @@ class CryptoPaperExecutionSimulationCoordinator:
             raise CryptoExecutionSimulationBlocked("checkpoint order mismatch")
         if checkpoint.client_order_id != broker_order.client_order_id:
             raise CryptoExecutionSimulationBlocked("checkpoint client_order_id mismatch")
-
-
-def _simulation_handoff_id(
-    *,
-    package: PreparedCryptoPaperCanaryPackage,
-    operator_decision: CryptoOperatorDecision,
-) -> str:
-    raw = "|".join(
-        (
-            "R6_CRYPTO_SIMULATION_HANDOFF",
-            package.package_hash,
-            operator_decision.decision_hash,
-            operator_decision.context.attempt_id,
-            package.order_id,
-        )
-    )
-    return sha256(raw.encode("utf-8")).hexdigest()
 
 
 __all__ = [
