@@ -31,8 +31,10 @@ Never invent missing historical source/APIs from reports. Rebuild capabilities w
 4. Read `knowledge/00_CANON/RECONSTRUCTION_V028R_MATRIX.md`.
 5. Read `knowledge/00_CANON/DEBT_REGISTER.md`.
 6. Read latest relevant ADR and `knowledge/40_HANDOFF/HANDOFF_ACTUAL.md`.
-7. If `graphify-out/graph.json` exists and `SOURCE_SHA` matches the relevant tree, query Graphify before broad source reads.
-8. Inspect only impacted files and graph/source neighbors.
+7. If the change touches crypto, read `skills/crypto-trading/SKILL.md` before design or code.
+8. If the change crosses asset classes, product routing, shared portfolio risk, or the operator Control Center, also read `skills/multi-asset-safety/SKILL.md`.
+9. If `graphify-out/graph.json` exists and `SOURCE_SHA` matches the relevant tree, query Graphify before broad source reads.
+10. Inspect only impacted files and graph/source neighbors.
 
 ## Mandatory close sequence
 1. Run relevant positive/negative tests and safety contracts.
@@ -62,6 +64,15 @@ Never invent missing historical source/APIs from reports. Rebuild capabilities w
 - Emergency/defensive controls may reduce or block risk; automatic processes may not autonomously increase risk or clear a stricter restriction.
 - Promotion to PAPER/LIVE requires the relevant future track and explicit approval; v0.28R reconstruction itself is not promotion.
 
+## Native multi-asset invariants
+- Asset class is explicit and provenance-bound; never infer executable product semantics from symbol shape.
+- Shared Capital Safety/OMS/Ledger/reconciliation does not imply shared broker order semantics.
+- Every broker-facing order must be constrained by a fresh `ProductCapabilities` profile for the exact asset class/venue.
+- US-equity market clock and bracket protection may not be reused for crypto.
+- Crypto 24/7 assumptions, fractional precision and crypto order capabilities may not leak into the equity execution path.
+- Unknown product, capability mismatch or wrong product adapter fails closed before broker I/O.
+- Product-specific limits add constraints; they never replace portfolio-wide capital limits.
+
 ## Research integrity
 - No look-ahead leakage.
 - Protected HOLDOUT is not used for iterative tuning.
@@ -70,6 +81,7 @@ Never invent missing historical source/APIs from reports. Rebuild capabilities w
 - Prefer diversified independent/reasonably independent edges over one fragile strategy.
 - Track OOS behavior, turnover, capacity, drawdown, regime sensitivity and forward evidence.
 - A Strategy DSL stop is not broker-side protection.
+- Crypto research additionally models 24/7/weekend chronology, liquidity/spread regimes, fractional constraints and jump/gap/liquidity risk before promotion.
 
 ## Change discipline
 - Small reversible changes with explicit state migrations when needed.
