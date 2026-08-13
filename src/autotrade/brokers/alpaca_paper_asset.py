@@ -292,14 +292,13 @@ def _attestation_from_response(
 def _equity_execution_constraints(
     payload: Mapping[str, object],
 ) -> tuple[Decimal, Decimal, Decimal, str]:
-    """Resolve current Alpaca Asset precision into stricter R6 whole-share rules.
+    """Resolve optional Alpaca Asset precision into stricter R6 whole-share rules.
 
-    Alpaca's current Asset schema can expose the three precision fields as null for
-    US equities. R6 never interprets null as broker permission. Instead, only for an
-    already-proven ``us_equity`` asset, null quantity precision is narrowed to one
-    whole share and null price precision is narrowed to a conservative $0.01 limit
-    grid. Missing fields, malformed strings, zero/negative values, or values that
-    make one share invalid still fail closed.
+    For an already-proven ``us_equity`` asset, an omitted or null precision field is
+    treated only as absence of broker precision metadata, never as broker permission.
+    R6 narrows quantity to one whole share and price to a conservative $0.01 limit
+    grid. Any explicit malformed, zero/negative, or incompatible value still fails
+    closed and an explicit broker value is always preserved instead of widened.
     """
 
     values: list[Decimal] = []
@@ -310,10 +309,8 @@ def _equity_execution_constraints(
         ("price_increment", _R6_EQUITY_LIMIT_PRICE_GRID),
     )
     for key, fallback in defaults:
-        if key not in payload:
-            raise PaperAssetIntegrityError(f"PAPER asset field {key} is required even when null")
-        raw = payload[key]
-        if raw is None:
+        raw = payload.get(key)
+        if key not in payload or raw is None:
             used_fallback = True
             values.append(fallback)
         else:
@@ -393,7 +390,7 @@ def _attributes(value: object) -> tuple[str, ...]:
 
 def _positive_decimal(value: object, label: str) -> Decimal:
     if not isinstance(value, str) or not value:
-        raise PaperAssetIntegrityError(f"PAPER asset {label} must be a decimal string or null")
+        raise PaperAssetIntegrityError(f"PAPER asset {label} must be a decimal string when provided")
     try:
         parsed = Decimal(value)
     except InvalidOperation as exc:
