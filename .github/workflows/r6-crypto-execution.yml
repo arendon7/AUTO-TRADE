@@ -51,6 +51,8 @@ jobs:
             src/autotrade/brokers/alpaca_paper_crypto_operator_decision.py \
             src/autotrade/brokers/alpaca_paper_crypto_final_guard.py \
             src/autotrade/brokers/alpaca_paper_crypto_execution_attempt.py \
+            src/autotrade/brokers/alpaca_paper_crypto_pre_io.py \
+            src/autotrade/brokers/alpaca_paper_crypto_execution_simulation.py \
             src/autotrade/brokers/alpaca_paper_crypto_writer.py \
             src/autotrade/brokers/alpaca_paper_crypto_reconciliation.py
 
@@ -71,6 +73,9 @@ jobs:
 
       - name: Crypto same-attempt checkpoint boundary
         run: python scripts/check_r6_crypto_execution_attempt_boundary.py
+
+      - name: Guarded crypto execution simulation boundary
+        run: python scripts/check_r6_crypto_execution_simulation_boundary.py
 
       - name: Permanent multi-asset product boundary
         run: python scripts/check_r6_product_boundary.py
@@ -121,6 +126,12 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+      - name: Crypto guarded end-to-end execution simulation
+        run: |
+          pytest -q \
+            tests/test_r6_paper_crypto_execution_simulation.py \
+            tests/test_r6_crypto_execution_simulation_boundary.py
+
       - name: Crypto durable lifecycle and adversarial recovery
         run: |
           pytest -q \
@@ -156,6 +167,8 @@ jobs:
               'alpaca_paper_crypto_operator_decision',
               'alpaca_paper_crypto_final_guard',
               'alpaca_paper_crypto_execution_attempt',
+              'alpaca_paper_crypto_pre_io',
+              'alpaca_paper_crypto_execution_simulation',
               'CryptoPaperWriterConfig(enabled=True)',
               'record_operator_approval(',
               'record_pre_consume(',
