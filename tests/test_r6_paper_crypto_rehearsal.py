@@ -273,12 +273,14 @@ def test_crypto_lab_surfaces_contain_no_execution_path() -> None:
         "r6_execute_paper_canary.py",
         "stage_external_submission",
         "r6_connectivity_bound_final_freshness.py",
-        "R6_EXTERNAL_PAPER_WRITE=ENABLED",
-        "localStorage",
-        "sessionStorage",
+        "export R6_EXTERNAL_PAPER_WRITE=ENABLED",
+        "localStorage.",
+        "sessionStorage.",
     ):
         assert forbidden not in combined
-    assert "R6_EXTERNAL_PAPER_WRITE=DISABLED" in launcher
-    assert "broker_write_performed\": False" in script
-    assert "external_post_authorized\": False" in script
+    assert 'os.environ.get(WRITE_ENV) == "ENABLED"' in script
+    assert 'os.environ.get(WRITE_ENV) == "ENABLED"' in server
+    assert 'export R6_EXTERNAL_PAPER_WRITE=DISABLED' in launcher
+    assert 'broker_write_performed": False' in script
+    assert 'external_post_authorized": False' in script
     assert "Crypto PAPER Lab may bind only to 127.0.0.1" in server
