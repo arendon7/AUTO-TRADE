@@ -30,6 +30,11 @@ _DENIED_FIRST_CANARY_ATTRIBUTES = frozenset({"ipo", "ptp_no_exception", "ptp_wit
 _SYMBOL_RE = re.compile(r"^[A-Z][A-Z0-9.\-]{0,15}$")
 _REQUEST_ID_RE = re.compile(r"^[\x21-\x7e]{1,256}$")
 _HASH_RE = re.compile(r"^[0-9a-f]{64}$")
+_ALPACA_CONSTRAINT_SOURCE = "ALPACA_ASSET"
+_R6_FALLBACK_CONSTRAINT_SOURCE = "ALPACA_ASSET_PLUS_R6_US_EQUITY_WHOLE_SHARE_POLICY"
+_R6_WHOLE_SHARE_MIN_ORDER_SIZE = Decimal("1")
+_R6_WHOLE_SHARE_INCREMENT = Decimal("1")
+_R6_EQUITY_LIMIT_PRICE_GRID = Decimal("0.01")
 
 
 class PaperAssetError(RuntimeError):
@@ -82,6 +87,7 @@ class AlpacaPaperEquityAssetAttestation:
     response_sha256: str
     source_host: str = ALPACA_PAPER_TRADING_HOST
     source_path: str = ""
+    constraint_source: str = _ALPACA_CONSTRAINT_SOURCE
 
     def __post_init__(self) -> None:
         if not _SYMBOL_RE.fullmatch(self.symbol):
@@ -109,6 +115,11 @@ class AlpacaPaperEquityAssetAttestation:
             raise ValueError("first PAPER canary requires one whole share to satisfy min_order_size")
         if Decimal("1") % self.min_trade_increment != 0:
             raise ValueError("first PAPER canary requires one whole share to align to min_trade_increment")
+        if self.constraint_source not in {
+            _ALPACA_CONSTRAINT_SOURCE,
+            _R6_FALLBACK_CONSTRAINT_SOURCE,
+        }:
+            raise ValueError("asset constraint_source is not an approved R6 provenance")
         if tuple(sorted(set(self.attributes))) != self.attributes:
             raise ValueError("asset attributes must be sorted and unique")
         if any(not isinstance(value, str) or not value for value in self.attributes):
@@ -151,6 +162,7 @@ class AlpacaPaperEquityAssetAttestation:
             "min_order_size": str(self.min_order_size),
             "min_trade_increment": str(self.min_trade_increment),
             "price_increment": str(self.price_increment),
+            "constraint_source": self.constraint_source,
             "attributes": list(self.attributes),
             "account_attestation_fingerprint": self.account_attestation_fingerprint,
             "credential_reference": self.credential_reference,
@@ -244,21 +256,26 @@ def _attestation_from_response(
     payload = _strict_json_object(response.body)
     if _string(payload, "symbol").upper() != symbol:
         raise PaperAssetIntegrityError("PAPER asset symbol does not match explicit request")
+    asset_class = _string(payload, "class")
+    if asset_class != "us_equity":
+        raise PaperAssetIntegrityError("first PAPER canary requires exact us_equity asset class")
+    min_order_size, min_trade_increment, price_increment, constraint_source = (
+        _equity_execution_constraints(payload)
+    )
     path = _exact_path_from_url(response.final_url, allowed_host=ALPACA_PAPER_TRADING_HOST)
     try:
         return AlpacaPaperEquityAssetAttestation(
             symbol=symbol,
             asset_id=_string(payload, "id"),
-            asset_class=_string(payload, "class"),
+            asset_class=asset_class,
             exchange=_string(payload, "exchange").upper(),
             status=_string(payload, "status").lower(),
             tradable=_boolean(payload, "tradable"),
             fractionable=_boolean(payload, "fractionable"),
-            min_order_size=_positive_decimal(payload.get("min_order_size"), "min_order_size"),
-            min_trade_increment=_positive_decimal(
-                payload.get("min_trade_increment"), "min_trade_increment"
-            ),
-            price_increment=_positive_decimal(payload.get("price_increment"), "price_increment"),
+            min_order_size=min_order_size,
+            min_trade_increment=min_trade_increment,
+            price_increment=price_increment,
+            constraint_source=constraint_source,
             attributes=_attributes(payload.get("attributes")),
             account_attestation_fingerprint=account_attestation_fingerprint,
             credential_reference=credential_reference,
@@ -270,6 +287,43 @@ def _attestation_from_response(
         )
     except ValueError as exc:
         raise PaperAssetIntegrityError(str(exc)) from exc
+
+
+def _equity_execution_constraints(
+    payload: Mapping[str, object],
+) -> tuple[Decimal, Decimal, Decimal, str]:
+    """Resolve current Alpaca Asset precision into stricter R6 whole-share rules.
+
+    Alpaca's current Asset schema can expose the three precision fields as null for
+    US equities. R6 never interprets null as broker permission. Instead, only for an
+    already-proven ``us_equity`` asset, null quantity precision is narrowed to one
+    whole share and null price precision is narrowed to a conservative $0.01 limit
+    grid. Missing fields, malformed strings, zero/negative values, or values that
+    make one share invalid still fail closed.
+    """
+
+    values: list[Decimal] = []
+    used_fallback = False
+    defaults = (
+        ("min_order_size", _R6_WHOLE_SHARE_MIN_ORDER_SIZE),
+        ("min_trade_increment", _R6_WHOLE_SHARE_INCREMENT),
+        ("price_increment", _R6_EQUITY_LIMIT_PRICE_GRID),
+    )
+    for key, fallback in defaults:
+        if key not in payload:
+            raise PaperAssetIntegrityError(f"PAPER asset field {key} is required even when null")
+        raw = payload[key]
+        if raw is None:
+            used_fallback = True
+            values.append(fallback)
+        else:
+            values.append(_positive_decimal(raw, key))
+    return (
+        values[0],
+        values[1],
+        values[2],
+        _R6_FALLBACK_CONSTRAINT_SOURCE if used_fallback else _ALPACA_CONSTRAINT_SOURCE,
+    )
 
 
 def _exact_path_from_url(url: str, *, allowed_host: str) -> str:
@@ -339,7 +393,7 @@ def _attributes(value: object) -> tuple[str, ...]:
 
 def _positive_decimal(value: object, label: str) -> Decimal:
     if not isinstance(value, str) or not value:
-        raise PaperAssetIntegrityError(f"PAPER asset {label} must be a decimal string")
+        raise PaperAssetIntegrityError(f"PAPER asset {label} must be a decimal string or null")
     try:
         parsed = Decimal(value)
     except InvalidOperation as exc:
