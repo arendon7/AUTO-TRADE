@@ -26,6 +26,7 @@ SECRET_ENV = "APCA_API_SECRET_KEY"
 MAX_BODY_BYTES = 64 * 1024
 DEFAULT_WORKSPACE = Path.home() / "AUTO-TRADE-R6/workspace-001"
 SYMBOL_RE = re.compile(r"^[A-Z0-9.\-]{1,16}$")
+ACCOUNT_ID_RE = re.compile(r"^[0-9a-fA-F-]{16,64}$")
 
 
 class DashboardError(RuntimeError):
@@ -44,6 +45,7 @@ SAFE_ACTIONS: dict[str, ActionSpec] = {
     "safety_rehearsal": ActionSpec("none"),
     "readiness": ActionSpec("none"),
     "status": ActionSpec("none"),
+    "account_discovery": ActionSpec("paper"),
     "account_preflight": ActionSpec("paper"),
     "asset_preflight": ActionSpec("paper"),
     "flat_account_preflight": ActionSpec("paper"),
@@ -144,10 +146,17 @@ def _command(action: str, payload: dict[str, object]) -> tuple[list[str], tuple[
         return base + ["pre-canary-status", "--workspace", workspace], None
 
     credentials = _paper_credentials(payload) if SAFE_ACTIONS[action].credential_mode == "paper" else None
+    if action == "account_discovery":
+        return base + [
+            "account-discovery", "--workspace", workspace,
+            "--allow-paper-account-discovery-read",
+        ], credentials
     if action == "account_preflight":
         account_id = str(payload.get("account_id") or "").strip()
-        if not account_id or len(account_id) > 256:
-            raise DashboardError("Expected Alpaca PAPER account ID is required")
+        if not ACCOUNT_ID_RE.fullmatch(account_id):
+            raise DashboardError(
+                "Expected Alpaca PAPER account ID must be the UUID-like internal account id, not an email or login"
+            )
         return base + [
             "account-preflight", "--workspace", workspace,
             "--expected-account-id", account_id,
