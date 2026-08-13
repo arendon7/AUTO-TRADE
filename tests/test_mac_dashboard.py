@@ -20,7 +20,7 @@ def test_dashboard_allowlist_has_no_execution_or_final_freshness_surface() -> No
     names = set(dashboard.SAFE_ACTIONS)
     assert names == {
         "init_workspace", "doctor", "rehearsal", "safety_rehearsal", "readiness", "status",
-        "account_preflight", "asset_preflight", "flat_account_preflight", "market_preflight",
+        "account_discovery", "account_preflight", "asset_preflight", "flat_account_preflight", "market_preflight",
         "build_candidate", "prepare_candidate", "review_receipt",
     }
     joined = " ".join(sorted(names)).lower()
@@ -93,6 +93,38 @@ def test_get_actions_require_ephemeral_paper_credentials(monkeypatch, tmp_path) 
     assert "--allow-paper-asset-read" in command
 
 
+def test_account_discovery_is_get_only_and_needs_no_expected_id(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(dashboard, "PYTHON", tmp_path / "python")
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    command, credentials = dashboard._command(
+        "account_discovery",
+        {"workspace": str(workspace), "paper_key": "paper-key", "paper_secret": "paper-secret"},
+    )
+    joined = " ".join(command)
+    assert credentials == ("paper-key", "paper-secret")
+    assert "account-discovery" in joined
+    assert "--allow-paper-account-discovery-read" in joined
+    assert "--expected-account-id" not in joined
+    assert "post" not in joined.lower()
+
+
+def test_account_attestation_rejects_email_before_child_process(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(dashboard, "PYTHON", tmp_path / "python")
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    with pytest.raises(dashboard.DashboardError, match="not an email"):
+        dashboard._command(
+            "account_preflight",
+            {
+                "workspace": str(workspace),
+                "paper_key": "paper-key",
+                "paper_secret": "paper-secret",
+                "account_id": "person@example.com",
+            },
+        )
+
+
 def test_redaction_removes_credentials_from_captured_output() -> None:
     redacted = dashboard._redact("key=abc secret=xyz", ("abc", "xyz"))
     assert "abc" not in redacted
@@ -124,6 +156,23 @@ def test_dashboard_guides_first_use_and_prevents_out_of_order_clicks() -> None:
     assert 'const steps=["init_workspace","doctor","safety_rehearsal"]' in html
     assert 'currentGate()' in html
     assert 'c===gate' in html
+
+
+def test_dashboard_discovers_account_before_explicit_attestation() -> None:
+    html = HTML_PATH.read_text(encoding="utf-8")
+    for anchor in (
+        "Identificar mi cuenta PAPER",
+        "ID interno de cuenta PAPER detectado",
+        "No pongas tu correo aquí",
+        "Confirmar y verificar esta cuenta",
+        'request("account_discovery"',
+        "state.accountDiscovered=true",
+        "persistent",
+        "BTC/cripto no está habilitado en R6",
+        'value="AAPL"',
+    ):
+        assert anchor in html
+    assert 'id="accountId" class="input" readonly' in html
 
 
 def test_dashboard_keeps_technical_diagnostics_secondary_and_safe() -> None:
