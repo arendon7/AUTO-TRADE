@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from decimal import Decimal
 import json
 
 import pytest
@@ -100,9 +101,49 @@ def test_asset_preflight_happy_path_is_exact_one_get_and_whole_share_safe() -> N
     assert attestation.min_order_size < 1
     assert attestation.min_trade_increment < 1
     assert attestation.price_increment == attestation.price_increment.copy_abs()
+    assert attestation.constraint_source == "ALPACA_ASSET"
     assert attestation.attributes == ("has_options",)
     assert attestation.source_host == "paper-api.alpaca.markets"
     assert attestation.source_path == "/v2/assets/AAPL"
+
+
+def test_equity_asset_null_precision_fields_narrow_to_r6_whole_share_policy() -> None:
+    attestation = attest(
+        FakeTransport(
+            asset_payload(
+                min_order_size=None,
+                min_trade_increment=None,
+                price_increment=None,
+            )
+        )
+    )
+    assert attestation.min_order_size == Decimal("1")
+    assert attestation.min_trade_increment == Decimal("1")
+    assert attestation.price_increment == Decimal("0.01")
+    assert (
+        attestation.constraint_source
+        == "ALPACA_ASSET_PLUS_R6_US_EQUITY_WHOLE_SHARE_POLICY"
+    )
+    assert attestation.to_dict()["whole_share_canary_supported"] is True
+
+
+def test_equity_asset_partial_null_precision_preserves_broker_values_and_narrows_only_null() -> None:
+    attestation = attest(
+        FakeTransport(
+            asset_payload(
+                min_order_size=None,
+                min_trade_increment="0.5",
+                price_increment="0.005",
+            )
+        )
+    )
+    assert attestation.min_order_size == Decimal("1")
+    assert attestation.min_trade_increment == Decimal("0.5")
+    assert attestation.price_increment == Decimal("0.005")
+    assert (
+        attestation.constraint_source
+        == "ALPACA_ASSET_PLUS_R6_US_EQUITY_WHOLE_SHARE_POLICY"
+    )
 
 
 def test_asset_policy_rejects_live_post_query_and_noncanonical_symbol() -> None:
@@ -167,6 +208,7 @@ def test_asset_gateway_rejects_credentials_not_bound_to_account_before_network()
         ({"min_order_size": "2"}, "whole share"),
         ({"min_trade_increment": "0.3"}, "align"),
         ({"price_increment": "0"}, "positive"),
+        ({"min_order_size": 1}, "decimal string or null"),
     ],
 )
 def test_asset_gateway_fails_closed_on_unsupported_or_unsafe_asset(overrides, message) -> None:
@@ -174,10 +216,11 @@ def test_asset_gateway_fails_closed_on_unsupported_or_unsafe_asset(overrides, me
         attest(FakeTransport(asset_payload(**overrides)))
 
 
-def test_asset_gateway_requires_new_increment_fields() -> None:
+@pytest.mark.parametrize("missing", ["min_order_size", "min_trade_increment", "price_increment"])
+def test_asset_gateway_requires_precision_field_presence_even_when_null(missing) -> None:
     payload = asset_payload()
-    payload.pop("price_increment")
-    with pytest.raises(PaperAssetIntegrityError, match="price_increment"):
+    payload.pop(missing)
+    with pytest.raises(PaperAssetIntegrityError, match=missing):
         attest(FakeTransport(payload))
 
 
