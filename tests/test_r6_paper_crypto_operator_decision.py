@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from dataclasses import replace
 from datetime import timedelta
 
 import pytest
@@ -122,17 +121,12 @@ def test_operator_decision_cannot_predate_or_outlive_prepared_package(tmp_path) 
         )
 
 
-def test_operator_decision_ttl_is_bounded_even_if_package_deadline_is_longer(tmp_path) -> None:
+def test_operator_decision_ttl_is_bounded_to_two_minutes(tmp_path) -> None:
     _prepared, context, _registry, _runtime = _setup(tmp_path)
-    # Build a structurally valid direct decision with a >2 minute window to prove the object rejects it.
+    # TTL is evaluated before package deadline; a >2m decision is invalid under all packages.
     with pytest.raises(ValueError, match="<=2 minutes"):
         CryptoOperatorDecision(
-            context=replace(
-                context,
-                execution_deadline=NOW + timedelta(minutes=4),
-                risk_decision_valid_until=NOW + timedelta(minutes=4),
-                preparation_hash="0" * 64,
-            ),
+            context=context,
             operator_id="operator-001",
             source="HUMAN_OPERATOR",
             action="APPROVE_SINGLE_CRYPTO_PAPER_CANARY_ENTRY",
@@ -186,13 +180,73 @@ def test_operator_decision_cannot_be_consumed_before_issue_or_after_expiry(tmp_p
         )
 
 
-def test_operator_context_changes_produce_distinct_authority_identity(tmp_path) -> None:
-    _prepared, context, _registry, _runtime = _setup(tmp_path)
-    other_attempt = CryptoOperatorDecisionContext.from_dict(
-        {
-            **context.to_dict(),
-            "attempt_id": "crypto-attempt-002",
-            # Deliberately stale hash must be rejected rather than silently rebinding.
-        }
+def test_attempt_change_requires_distinct_preparation_and_approval_identity(tmp_path) -> None:
+    prepared, context, _registry, _runtime = _setup(tmp_path)
+    second = CryptoOperatorDecisionContext.from_prepared_package(
+        prepared.package,
+        attempt_id="crypto-attempt-002",
     )
-    assert other_attempt is None  # pragma: no cover
+    assert second.prepared_package_hash == context.prepared_package_hash
+    assert second.attempt_id != context.attempt_id
+    assert second.preparation_hash != context.preparation_hash
+
+    stale_payload = context.to_dict()
+    stale_payload["attempt_id"] = "crypto-attempt-002"
+    with pytest.raises(ValueError, match="preparation_hash mismatch"):
+        CryptoOperatorDecisionContext.from_dict(stale_payload)
+
+
+def test_registry_get_missing_decision_fails_closed(tmp_path) -> None:
+    _prepared, _context, registry, _runtime = _setup(tmp_path)
+    with pytest.raises(KeyError):
+        registry.get("e" * 64)
+
+
+def test_registry_control_hash_tamper_is_detected(tmp_path) -> None:
+    _prepared, context, registry, runtime = _setup(tmp_path)
+    _issue(registry, context)
+    conn = runtime.connect()
+    try:
+        conn.execute(
+            "UPDATE alpaca_crypto_operator_decision_control SET control_hash = ? WHERE singleton = 1",
+            ("0" * 64,),
+        )
+    finally:
+        conn.close()
+    with pytest.raises(CryptoOperatorDecisionIntegrityError, match="control hash mismatch"):
+        SQLiteCryptoOperatorDecisionRegistry(runtime).get(context.preparation_hash)
+
+
+def test_registry_event_hash_tamper_is_detected(tmp_path) -> None:
+    _prepared, context, registry, runtime = _setup(tmp_path)
+    _issue(registry, context)
+    conn = runtime.connect()
+    try:
+        conn.execute(
+            "UPDATE alpaca_crypto_operator_decision_events SET event_hash = ? WHERE sequence = 1",
+            ("0" * 64,),
+        )
+    finally:
+        conn.close()
+    with pytest.raises(CryptoOperatorDecisionIntegrityError, match="event hash mismatch"):
+        SQLiteCryptoOperatorDecisionRegistry(runtime).get(context.preparation_hash)
+
+
+def test_registry_previous_hash_tamper_is_detected_after_consumption(tmp_path) -> None:
+    _prepared, context, registry, runtime = _setup(tmp_path)
+    issued = _issue(registry, context)
+    registry.consume(
+        decision=issued.decision,
+        attempt_id=context.attempt_id,
+        now=NOW + timedelta(seconds=4),
+    )
+    conn = runtime.connect()
+    try:
+        conn.execute(
+            "UPDATE alpaca_crypto_operator_decision_events SET previous_event_hash = ? WHERE sequence = 2",
+            ("f" * 64,),
+        )
+    finally:
+        conn.close()
+    with pytest.raises(CryptoOperatorDecisionIntegrityError, match="previous-hash mismatch"):
+        SQLiteCryptoOperatorDecisionRegistry(runtime).get(context.preparation_hash)
