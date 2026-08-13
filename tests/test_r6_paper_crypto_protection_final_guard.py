@@ -6,6 +6,7 @@ from datetime import timedelta
 import pytest
 
 from autotrade.persistence import SQLiteRuntime
+import autotrade.brokers.alpaca_paper_crypto_protection_final_guard as protection_final_guard_module
 from autotrade.brokers.alpaca_paper_crypto_protection_coordinator import CryptoPaperProtectionCoordinator
 from autotrade.brokers.alpaca_paper_crypto_protection_final_guard import (
     CryptoPaperProtectionFinalGuard,
@@ -249,8 +250,14 @@ def test_protection_preio_rejects_previous_attestation_rebinding(tmp_path) -> No
         prepared.package.lifecycle_id,
         at=NOW + timedelta(seconds=7, milliseconds=300),
     )
-    forged = replace(pre, attempt_id="different-attempt")
-    with pytest.raises((ValueError, CryptoProtectionFinalGuardBlocked)):
+    forged_payload = protection_final_guard_module._attestation_payload(pre, include_hash=False)
+    forged_payload["attempt_id"] = "different-attempt"
+    forged = replace(
+        pre,
+        attempt_id="different-attempt",
+        attestation_hash=protection_final_guard_module._hash_json(forged_payload),
+    )
+    with pytest.raises(CryptoProtectionFinalGuardBlocked, match="previous attempt mismatch"):
         guard.authorize(
             package=prepared.package,
             operator_decision=operator_decision,
