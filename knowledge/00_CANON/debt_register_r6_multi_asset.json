@@ -27,7 +27,7 @@
       "track": "R6",
       "area": "Crypto protective lifecycle after confirmed entry fills",
       "severity": "P1",
-      "status": "OPEN",
+      "status": "CLOSED",
       "evidence": [
         "skills/crypto-trading/SKILL.md",
         "knowledge/20_ARQUITECTURA/R6_MULTI_ASSET_CRYPTO_ARCHITECTURE.md",
@@ -36,17 +36,23 @@
         "src/autotrade/brokers/alpaca_paper_crypto_protection_operator_decision.py",
         "src/autotrade/brokers/alpaca_paper_crypto_protection_final_guard.py",
         "src/autotrade/brokers/alpaca_paper_crypto_protection_execution_attempt.py",
+        "src/autotrade/brokers/alpaca_paper_crypto_protection_execution_bridge.py",
+        "src/autotrade/brokers/alpaca_paper_crypto_pre_io.py",
         "tests/test_r6_paper_crypto_protection_final_guard.py",
-        "tests/test_r6_paper_crypto_protection_execution_attempt.py"
+        "tests/test_r6_paper_crypto_protection_execution_attempt.py",
+        "tests/test_r6_paper_crypto_protection_execution_bridge.py",
+        "tests/test_r6_paper_crypto_protection_pre_io.py",
+        "scripts/check_r6_crypto_protection_final_guard_boundary.py",
+        "scripts/check_r6_crypto_protection_execution_bridge_boundary.py"
       ],
-      "next_action": "Wire the durable protection PRE_CONSUME checkpoint through a dedicated no-network protection execution bridge that consumes only the same human-approved attempt and stages the exact protective OMS order as SUBMITTING. Then require the protection PRE_IO Final Guard at the last-write boundary before any broker transport call. Certify crash/restart after PRE_CONSUME and after human-authority consumption, exact-position rebinding denial, UNKNOWN=>RECONCILE_ONLY, zero duplicate POST, partial/trigger-without-fill outcomes and PROTECTION_AT_RISK without reusing equity bracket authority."
+      "resolution": "Closed after exact-head 7/7 certification on 392dd22beea2571681aa7582a8c6408ecd8a5776: protective SELL authority is bound to the exact confirmed net-long exposure and separate risk-reducing Safety decision; PRE_CONSUME is durably checkpointed before human-authority consumption; the same attempt is then bound through OMS SUBMITTING, durable PROTECTION_SUBMISSION_UNKNOWN and role-specific Final Guard PRE_IO before exactly one delegated PAPER transport call. Fresh protection evidence is additionally bound to the same stable PAPER account_reference and credential_reference, and those identities plus fresh-account/position fingerprints survive crash/restart inside the tamper-evident checkpoint. No equity bracket authority, blind retry, Mac execution surface or LIVE authority is introduced."
     },
     {
       "id": "TD-R6-016",
       "track": "R6",
       "area": "Crypto PAPER writer idempotency, UNKNOWN-before-I/O and reconciliation",
       "severity": "P1",
-      "status": "OPEN",
+      "status": "CLOSED",
       "evidence": [
         "skills/crypto-trading/SKILL.md",
         "knowledge/20_ARQUITECTURA/R6_MULTI_ASSET_CRYPTO_ARCHITECTURE.md",
@@ -57,10 +63,16 @@
         "src/autotrade/brokers/alpaca_paper_crypto_execution_attempt.py",
         "src/autotrade/brokers/alpaca_paper_crypto_final_guard.py",
         "src/autotrade/brokers/alpaca_paper_crypto_reconciliation.py",
+        "src/autotrade/brokers/alpaca_paper_crypto_unknown_recovery.py",
         "tests/test_r6_paper_crypto_writer.py",
-        "tests/test_r6_paper_crypto_execution_simulation.py"
+        "tests/test_r6_paper_crypto_writer_ambiguity.py",
+        "tests/test_r6_paper_crypto_execution_simulation.py",
+        "tests/test_r6_paper_crypto_reconciliation.py",
+        "tests/test_r6_paper_crypto_unknown_recovery.py",
+        "tests/test_r6_paper_crypto_unknown_recovery_adversarial.py",
+        "scripts/check_r6_crypto_execution_boundary.py"
       ],
-      "next_action": "Remove the direct enabled-writer bypass found in the exact-head audit: no raw AlpacaPaperCryptoWriter(enabled=True) call may reach a transport using only ENTRY_PREPARED/PROTECTION_PREPARED lifecycle state. The writer/last-write boundary must require role-specific, self-consistent PRE_IO authority bound to the exact client_order_id, durable UNKNOWN attempt, OMS SUBMITTING state and human-approved attempt for ENTRY and PROTECTION. Preserve exact PAPER host/path, UNKNOWN-before-I/O, zero blind retry and GET-only reconciliation; add CI that fails if any production caller can bypass the guarded last-write path. No broker POST is allowed before TD-R6-015 and TD-R6-016 are exact-head green under this stronger contract."
+      "resolution": "Closed after exact-head 7/7 certification on 392dd22beea2571681aa7582a8c6408ecd8a5776: enabled crypto writes reject raw/default or role-mismatched transports before lifecycle mutation or I/O, with ENTRY and PROTECTION as the only sanctioned nominal Final-Guard transports. The exact PAPER /v2/orders write remains one-shot with durable UNKNOWN-before-I/O and no blind retry. GET-only reconciliation is bound to the durable client_order_id, exact position truth and credential provenance. If the exact order lookup is HTTP 404, the original POST outcome remains unresolved, the gateway still performs the exact position GET, and a separate tamper-evident UNKNOWN recovery path can only HALT remaining exposure or reach FLAT_RECONCILED after fresh same-account all-account evidence proves zero positions and zero open orders. The original attempt_count=1 and client_order_id are preserved and retry_authorized remains false."
     },
     {
       "id": "TD-R6-017",
@@ -72,7 +84,7 @@
         "skills/crypto-trading/SKILL.md",
         "knowledge/20_ARQUITECTURA/R6_MULTI_ASSET_CRYPTO_ARCHITECTURE.md"
       ],
-      "next_action": "After writer and protection certification, run bounded human-approved PAPER canaries across multiple UTC/liquidity/weekend conditions and persist fills, fees, spread, slippage, protection acknowledgements/outcomes, reconciliation and stop-limit residual-risk evidence. Connectivity/rehearsal success alone cannot close this debt or support profitability claims."
+      "next_action": "Structural writer, protection and UNKNOWN/reconciliation authority is now certified. Next, only under explicit human approval, run a bounded PAPER qualification campaign across multiple UTC/liquidity/weekend conditions and persist fills, fees, spread, slippage, protection acknowledgements/outcomes, reconciliation, stop-limit residual-risk evidence and any PROTECTION_AT_RISK behavior. Connectivity or structural certification alone cannot close this debt or support profitability claims, and no LIVE authority may be introduced."
     },
     {
       "id": "TD-R6-018",
@@ -90,7 +102,7 @@
         "scripts/check_mac_dashboard_boundary.py",
         "knowledge/60_EVIDENCE/R6_MAC_UAT_2026-08-12.md"
       ],
-      "next_action": "Certify one localhost Multi-Asset Hub with Equities and Crypto first-class routes, ephemeral credentials, machine-readable product authority state, reliable direct macOS browser open with safe fallback, no hidden crypto/equity POST path, and dual-architecture Mac FULL UAT on the final exact head."
+      "next_action": "Code and dual-architecture Mac FULL artifacts now certify the localhost Multi-Asset Hub, first-class Equities/Crypto routes, ephemeral credentials, direct /usr/bin/open browser handoff with safe fallback, no hidden crypto/equity POST path and ARM64/x86_64 install/self-heal. Keep this debt OPEN until the operator performs a final real-Mac UAT on the final installable head and records the corrected browser handoff and primary user flow as observed evidence."
     }
   ]
 }
