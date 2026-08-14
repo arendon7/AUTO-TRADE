@@ -18,8 +18,8 @@ from autotrade.brokers.alpaca_paper_crypto_asset import (
     normalize_crypto_pair,
 )
 from autotrade.brokers.alpaca_paper_crypto_market_data import (
+    LATEST_QUOTE_PATH,
     LATEST_TRADE_PATH,
-    ORDERBOOK_PATH,
     AlpacaPaperCryptoMarketDataConfig,
     AlpacaPaperCryptoMarketDataGateway,
     AlpacaPaperCryptoMarketDataIntegrityError,
@@ -194,12 +194,14 @@ class CryptoMarketTransport:
     def read(self, request):
         self.requests.append(request)
         timestamp = self.observed_at.isoformat().replace("+00:00", "Z")
-        if ORDERBOOK_PATH in request.url:
+        if LATEST_QUOTE_PATH in request.url:
             payload = {
-                "orderbooks": {
+                "quotes": {
                     self.symbol: {
-                        "a": [{"p": self.ask, "s": "0.5"}],
-                        "b": [{"p": self.bid, "s": "0.4"}],
+                        "bp": self.bid,
+                        "bs": "0.4",
+                        "ap": self.ask,
+                        "as": "0.5",
                         "t": timestamp,
                     }
                 }
@@ -216,7 +218,7 @@ class CryptoMarketTransport:
         )
 
 
-def test_crypto_market_uses_exact_two_gets_and_builds_fresh_snapshot() -> None:
+def test_crypto_market_uses_exact_latest_quote_and_trade_gets_and_builds_fresh_snapshot() -> None:
     transport = CryptoMarketTransport()
     gateway = AlpacaPaperCryptoMarketDataGateway(
         AlpacaPaperCryptoMarketDataConfig(enabled=True), transport=transport
@@ -226,11 +228,28 @@ def test_crypto_market_uses_exact_two_gets_and_builds_fresh_snapshot() -> None:
     assert result.market.bid == Decimal("99999")
     assert result.market.ask == Decimal("100001")
     assert result.market.last == Decimal("100000")
+    assert result.quote_observed_at == NOW - timedelta(seconds=1)
+    assert len(result.quote_response_sha256) == 64
     assert len(transport.requests) == 2
     assert all(request.method == "GET" for request in transport.requests)
-    assert ORDERBOOK_PATH in transport.requests[0].url
+    assert LATEST_QUOTE_PATH in transport.requests[0].url
     assert LATEST_TRADE_PATH in transport.requests[1].url
     assert all("symbols=BTC/USD" in request.url for request in transport.requests)
+
+
+def test_crypto_market_contract_does_not_use_orderbook_as_quote_freshness_proxy() -> None:
+    source = (
+        Path(__file__).resolve().parents[1]
+        / "src/autotrade/brokers/alpaca_paper_crypto_market_data.py"
+    ).read_text(encoding="utf-8")
+    assert 'LATEST_QUOTE_PATH = "/v1beta3/crypto/us/latest/quotes"' in source
+    assert 'LATEST_TRADE_PATH = "/v1beta3/crypto/us/latest/trades"' in source
+    assert "/latest/orderbooks" not in source
+    assert 'root.get("quotes")' in source
+    assert 'quote.get("bp")' in source
+    assert 'quote.get("ap")' in source
+    assert 'quote.get("t")' in source
+    assert '"crypto latest quote"' in source
 
 
 def test_crypto_market_supports_second_pair_without_cross_pair_data() -> None:
