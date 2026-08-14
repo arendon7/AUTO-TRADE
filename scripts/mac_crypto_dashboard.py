@@ -137,12 +137,19 @@ def _run_child(
     )
     stdout = _redact(completed.stdout, credentials)
     stderr = _redact(completed.stderr, credentials)
+    parsed = _extract_json(stdout)
+    structured_reason = ""
+    if completed.returncode != 0 and isinstance(parsed, dict):
+        raw_reason = parsed.get("reason")
+        if isinstance(raw_reason, str):
+            structured_reason = raw_reason[:1000]
     return {
         "ok": completed.returncode == 0,
         "returncode": completed.returncode,
         "stdout": stdout,
         "stderr": stderr,
-        "json": _extract_json(stdout),
+        "error": structured_reason,
+        "json": parsed,
         "elapsed_ms": int((time.monotonic() - started) * 1000),
         "broker_write_performed": False,
         "external_post_authorized": False,
@@ -187,6 +194,7 @@ def _meta() -> dict[str, object]:
         "qualification_preview_available": True,
         "qualification_preview_symbol": CRYPTO_PAIR,
         "qualification_preview_max_notional_usd": "5",
+        "qualification_preview_target_notional_usd": "2",
         "qualification_preview_write_authority": False,
     }
 
