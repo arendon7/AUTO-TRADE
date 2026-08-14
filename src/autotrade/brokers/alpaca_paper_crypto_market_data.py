@@ -22,7 +22,7 @@ from .alpaca_paper_market_data import (
 
 
 CRYPTO_LOCATION = "us"
-ORDERBOOK_PATH = "/v1beta3/crypto/us/latest/orderbooks"
+LATEST_QUOTE_PATH = "/v1beta3/crypto/us/latest/quotes"
 LATEST_TRADE_PATH = "/v1beta3/crypto/us/latest/trades"
 _HASH_RE = re.compile(r"^[0-9a-f]{64}$")
 
@@ -76,10 +76,10 @@ class AlpacaPaperCryptoMarketDataConfig:
 class AlpacaPaperCryptoMarketAttestation:
     market: MarketSnapshot
     location: str
-    orderbook_observed_at: datetime
+    quote_observed_at: datetime
     trade_observed_at: datetime
     received_at: datetime
-    orderbook_response_sha256: str
+    quote_response_sha256: str
     trade_response_sha256: str
     source_host: str = ALPACA_MARKET_DATA_HOST
 
@@ -89,14 +89,14 @@ class AlpacaPaperCryptoMarketAttestation:
             raise ValueError("crypto market attestation must use the exact Alpaca US location")
         if self.source_host != ALPACA_MARKET_DATA_HOST:
             raise ValueError("crypto market-data source host mismatch")
-        for value in (self.orderbook_observed_at, self.trade_observed_at, self.received_at):
+        for value in (self.quote_observed_at, self.trade_observed_at, self.received_at):
             if value.tzinfo is None or value.utcoffset() is None:
                 raise ValueError("crypto market timestamps must be timezone-aware")
-        for value in (self.orderbook_response_sha256, self.trade_response_sha256):
+        for value in (self.quote_response_sha256, self.trade_response_sha256):
             if not _HASH_RE.fullmatch(value):
                 raise ValueError("crypto market response hash must be SHA-256")
         expected = min(
-            self.orderbook_observed_at.astimezone(timezone.utc),
+            self.quote_observed_at.astimezone(timezone.utc),
             self.trade_observed_at.astimezone(timezone.utc),
         )
         if self.market.observed_at.astimezone(timezone.utc) != expected:
@@ -107,10 +107,10 @@ class AlpacaPaperCryptoMarketAttestation:
         payload = {
             "market_fingerprint": market_fingerprint(self.market),
             "location": self.location,
-            "orderbook_observed_at": self.orderbook_observed_at.astimezone(timezone.utc).isoformat(),
+            "quote_observed_at": self.quote_observed_at.astimezone(timezone.utc).isoformat(),
             "trade_observed_at": self.trade_observed_at.astimezone(timezone.utc).isoformat(),
             "received_at": self.received_at.astimezone(timezone.utc).isoformat(),
-            "orderbook_response_sha256": self.orderbook_response_sha256,
+            "quote_response_sha256": self.quote_response_sha256,
             "trade_response_sha256": self.trade_response_sha256,
             "source_host": self.source_host,
         }
@@ -118,7 +118,7 @@ class AlpacaPaperCryptoMarketAttestation:
 
 
 class AlpacaPaperCryptoMarketDataGateway:
-    """Two exact GETs for one canonical crypto pair top-of-book/latest trade; no write surface."""
+    """Two exact GETs for one canonical crypto pair latest quote/latest trade; no write surface."""
 
     def __init__(
         self,
@@ -146,13 +146,13 @@ class AlpacaPaperCryptoMarketDataGateway:
             raise ValueError("now must be timezone-aware")
         canonical = normalize_crypto_pair(symbol)
         received_at = now.astimezone(timezone.utc)
-        orderbook = self._read(credentials=credentials, path=ORDERBOOK_PATH, symbol=canonical)
+        quote = self._read(credentials=credentials, path=LATEST_QUOTE_PATH, symbol=canonical)
         trade = self._read(credentials=credentials, path=LATEST_TRADE_PATH, symbol=canonical)
-        bid, ask, orderbook_time = self._parse_orderbook(orderbook.body, symbol=canonical)
+        bid, ask, quote_time = self._parse_quote(quote.body, symbol=canonical)
         last, trade_time = self._parse_trade(trade.body, symbol=canonical)
-        self._validate_time(orderbook_time, received_at, "crypto orderbook")
+        self._validate_time(quote_time, received_at, "crypto latest quote")
         self._validate_time(trade_time, received_at, "crypto latest trade")
-        if abs((orderbook_time - trade_time).total_seconds()) > self._config.max_component_skew_seconds:
+        if abs((quote_time - trade_time).total_seconds()) > self._config.max_component_skew_seconds:
             raise AlpacaPaperCryptoMarketDataIntegrityError("crypto quote/trade skew exceeds policy")
         if bid > ask:
             raise AlpacaPaperCryptoMarketDataIntegrityError("crypto bid exceeds ask")
@@ -161,15 +161,15 @@ class AlpacaPaperCryptoMarketDataGateway:
             bid=bid,
             ask=ask,
             last=last,
-            observed_at=min(orderbook_time, trade_time),
+            observed_at=min(quote_time, trade_time),
         )
         return AlpacaPaperCryptoMarketAttestation(
             market=market,
             location=CRYPTO_LOCATION,
-            orderbook_observed_at=orderbook_time,
+            quote_observed_at=quote_time,
             trade_observed_at=trade_time,
             received_at=received_at,
-            orderbook_response_sha256=sha256(orderbook.body).hexdigest(),
+            quote_response_sha256=sha256(quote.body).hexdigest(),
             trade_response_sha256=sha256(trade.body).hexdigest(),
         )
 
@@ -219,23 +219,17 @@ class AlpacaPaperCryptoMarketDataGateway:
         if url != expected:
             raise AlpacaPaperCryptoMarketDataPolicyError("crypto market-data final URL changed")
 
-    def _parse_orderbook(self, body: bytes, *, symbol: str) -> tuple[Decimal, Decimal, datetime]:
-        root = _json_object(body, "crypto orderbook")
-        books = root.get("orderbooks")
-        if not isinstance(books, dict):
-            raise AlpacaPaperCryptoMarketDataIntegrityError("crypto orderbooks object is required")
-        book = books.get(symbol)
-        if not isinstance(book, dict):
-            raise AlpacaPaperCryptoMarketDataIntegrityError(f"{symbol} orderbook is missing")
-        asks, bids = book.get("a"), book.get("b")
-        if not isinstance(asks, list) or not asks or not isinstance(bids, list) or not bids:
-            raise AlpacaPaperCryptoMarketDataIntegrityError(f"{symbol} orderbook requires bid and ask levels")
-        ask0, bid0 = asks[0], bids[0]
-        if not isinstance(ask0, dict) or not isinstance(bid0, dict):
-            raise AlpacaPaperCryptoMarketDataIntegrityError(f"{symbol} top-of-book levels are invalid")
-        ask = _positive_decimal(ask0.get("p"), "crypto ask")
-        bid = _positive_decimal(bid0.get("p"), "crypto bid")
-        observed = _rfc3339(book.get("t"), "crypto orderbook timestamp")
+    def _parse_quote(self, body: bytes, *, symbol: str) -> tuple[Decimal, Decimal, datetime]:
+        root = _json_object(body, "crypto latest quote")
+        quotes = root.get("quotes")
+        if not isinstance(quotes, dict):
+            raise AlpacaPaperCryptoMarketDataIntegrityError("crypto quotes object is required")
+        quote = quotes.get(symbol)
+        if not isinstance(quote, dict):
+            raise AlpacaPaperCryptoMarketDataIntegrityError(f"{symbol} latest quote is missing")
+        bid = _positive_decimal(quote.get("bp"), "crypto bid")
+        ask = _positive_decimal(quote.get("ap"), "crypto ask")
+        observed = _rfc3339(quote.get("t"), "crypto latest quote timestamp")
         return bid, ask, observed
 
     def _parse_trade(self, body: bytes, *, symbol: str) -> tuple[Decimal, datetime]:
@@ -301,5 +295,7 @@ __all__ = [
     "AlpacaPaperCryptoMarketDataConfig",
     "AlpacaPaperCryptoMarketDataError",
     "AlpacaPaperCryptoMarketDataGateway",
+    "LATEST_QUOTE_PATH",
+    "LATEST_TRADE_PATH",
     "crypto_exact_query",
 ]
