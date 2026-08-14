@@ -1,4 +1,5 @@
 from pathlib import Path
+import ast
 import runpy
 import subprocess
 import sys
@@ -18,6 +19,7 @@ def test_crypto_execution_authority_checker_passes_repository() -> None:
     )
     assert result.returncode == 0, result.stderr
     assert "crypto execution authority boundary: PASS" in result.stdout
+    assert "nominal role-bound ENTRY/PROTECTION Final Guards" in result.stdout
     assert "UNKNOWN-before-I/O" in result.stdout
     assert "GET-only client-id + position reconciliation" in result.stdout
 
@@ -36,9 +38,8 @@ def test_checker_rejects_direct_network_stack_outside_writer(tmp_path) -> None:
     order.write_text("VALUE = 1\n", encoding="utf-8")
     lifecycle.write_text("VALUE = 1\n", encoding="utf-8")
 
-    # Exercise only the import-scanning rule with a synthetic crypto module set.
     imports = namespace["_imports"]
-    tree = __import__("ast").parse(reconciliation.read_text())
+    tree = ast.parse(reconciliation.read_text())
     modules = imports(tree)
     roots = {module.split(".", 1)[0] for module in modules if module}
     assert roots & namespace["NETWORK_IMPORT_ROOTS"] == {"socket"}
@@ -52,3 +53,27 @@ def test_checker_forbidden_cross_product_list_covers_equity_execution_authority(
     assert "alpaca_paper_final_guard" in forbidden
     assert "connectivity_final_freshness" in forbidden
     assert "connectivity_workspace_post" in forbidden
+
+
+def test_checker_allows_exactly_two_production_guarded_transport_subclasses() -> None:
+    namespace = runpy.run_path(str(CHECKER))
+    expected = namespace["EXPECTED_GUARDED_SUBCLASSES"]
+    assert expected == {
+        ("alpaca_paper_crypto_pre_io.py", "FinalGuardedCryptoEntryTransport"),
+        ("alpaca_paper_crypto_pre_io.py", "FinalGuardedCryptoProtectionTransport"),
+    }
+
+
+def test_guarded_subclass_scanner_detects_direct_and_qualified_subclasses() -> None:
+    namespace = runpy.run_path(str(CHECKER))
+    scanner = namespace["_subclasses_of"]
+    tree = ast.parse(
+        "\n".join(
+            [
+                "class Good(GuardedAlpacaPaperCryptoWriteTransport): pass",
+                "class AlsoGood(writer.GuardedAlpacaPaperCryptoWriteTransport): pass",
+                "class Unrelated(object): pass",
+            ]
+        )
+    )
+    assert scanner(tree, "GuardedAlpacaPaperCryptoWriteTransport") == {"Good", "AlsoGood"}
