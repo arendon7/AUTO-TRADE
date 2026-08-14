@@ -10,6 +10,7 @@ BROKERS = ROOT / "src/autotrade/brokers"
 WRITER = BROKERS / "alpaca_paper_crypto_writer.py"
 PRE_IO = BROKERS / "alpaca_paper_crypto_pre_io.py"
 RECONCILIATION = BROKERS / "alpaca_paper_crypto_reconciliation.py"
+UNKNOWN_RECOVERY = BROKERS / "alpaca_paper_crypto_unknown_recovery.py"
 ORDER = BROKERS / "alpaca_paper_crypto_order.py"
 LIFECYCLE = BROKERS / "alpaca_paper_crypto_lifecycle.py"
 CRYPTO_MODULES = tuple(sorted(BROKERS.glob("alpaca_paper_crypto_*.py")))
@@ -31,7 +32,7 @@ EXPECTED_GUARDED_SUBCLASSES = {
 
 def main() -> int:
     errors: list[str] = []
-    for path in (WRITER, PRE_IO, RECONCILIATION, ORDER, LIFECYCLE):
+    for path in (WRITER, PRE_IO, RECONCILIATION, UNKNOWN_RECOVERY, ORDER, LIFECYCLE):
         if not path.is_file():
             errors.append(f"missing crypto execution contract file: {path.relative_to(ROOT)}")
 
@@ -87,33 +88,81 @@ def main() -> int:
         required = {
             'ORDER_BY_CLIENT_PATH = "/v2/orders:by_client_order_id"': "client-order reconciliation endpoint is missing",
             'POSITION_PATH_PREFIX = "/v2/positions/"': "position reconciliation endpoint is missing",
+            "class CryptoBrokerOrderAbsenceEvidence:": "tamper-evident order-404 absence type is missing",
+            "class CryptoBrokerUnknownReconciliation:": "discriminated UNKNOWN reconciliation type is missing",
             "client_order_id=": "durable client_order_id lookup binding is missing",
             "UrllibAlpacaPaperReadTransport": "reconciliation must use certified read transport",
             'method="GET"': "reconciliation GET-only request is missing",
-            "POST outcome remains unresolved": "not-found ambiguity handling is missing",
-            "confirmed_net_long_quantity=reconciliation.position.quantity": "position truth is not applied to lifecycle",
+            "credentials.credential_reference": "reconciliation evidence is not credential-bound",
+            "retry remains forbidden": "order-404 result does not explicitly preserve no-retry contract",
+            "confirmed_net_long_quantity=reconciliation.position.quantity": "position truth is not applied to normal lifecycle reconciliation",
         }
         for needle, reason in required.items():
             if needle not in text:
                 errors.append(f"reconciliation: {reason}")
+        order_404 = text.find("if order_response.status_code == 404:")
+        position_read = text.find("position_response = position_transport.read(")
+        absence_return = text.find("return CryptoBrokerUnknownReconciliation(")
+        if not 0 <= order_404 < position_read < absence_return:
+            errors.append("reconciliation: exact order 404 must continue to position GET before returning UNKNOWN evidence")
         for forbidden in ("http.client", ".post(", 'method="POST"'):
             if forbidden in text:
                 errors.append(f"reconciliation contains forbidden write marker: {forbidden}")
 
+    if UNKNOWN_RECOVERY.is_file():
+        text = UNKNOWN_RECOVERY.read_text(encoding="utf-8")
+        required = {
+            "class CryptoPaperUnknownRecoveryCoordinator:": "UNKNOWN recovery coordinator is missing",
+            "CryptoExecutionAttemptCheckpoint": "ENTRY durable checkpoint binding is missing",
+            "CryptoProtectionExecutionAttemptCheckpoint": "PROTECTION durable checkpoint binding is missing",
+            "CryptoBrokerUnknownReconciliation": "order-404 evidence binding is missing",
+            "fresh_account: AlpacaPaperAccountAttestation": "fresh same-account evidence is missing",
+            "PaperFlatAccountAttestation": "all-account flatness evidence is missing",
+            "if position.quantity > 0:": "remaining-long fail-closed branch is missing",
+            "CryptoLifecycleStatus.HALTED_RECONCILIATION_REQUIRED": "remaining-long HALT state is missing",
+            "clean_for_first_canary": "zero-position branch does not require complete account flatness",
+            "CryptoLifecycleStatus.FLAT_RECONCILED": "strong-flat terminal state is missing",
+            '"retry_authorized": False': "UNKNOWN recovery does not permanently deny retry",
+            "attempt_count != 1": "UNKNOWN recovery does not preserve one-shot attempt count",
+            "lifecycle._mutate(": "UNKNOWN recovery is not persisted through lifecycle event chain",
+            '"order_absence_fingerprint"': "order-absence evidence is not persisted in event payload",
+            '"position_fingerprint"': "position evidence is not persisted in event payload",
+            '"fresh_account_fingerprint"': "account evidence is not persisted in event payload",
+            '"flat_account_fingerprint"': "flat-account evidence is not persisted in event payload",
+        }
+        for needle, reason in required.items():
+            if needle not in text:
+                errors.append(f"unknown recovery: {reason}")
+        for forbidden in (
+            "http.client",
+            "urllib",
+            "socket",
+            "requests",
+            "httpx",
+            ".post(",
+            "submit_once(",
+            "stage_external_submission(",
+            "mark_entry_submission_unknown(",
+            "mark_protection_submission_unknown(",
+        ):
+            if forbidden in text:
+                errors.append(f"unknown recovery contains forbidden new-write/network marker: {forbidden}")
+
     guarded_subclasses: set[tuple[str, str]] = set()
     for path in CRYPTO_MODULES:
-        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        source = path.read_text(encoding="utf-8")
+        tree = ast.parse(source, filename=str(path))
         imports = _imports(tree)
         for module in imports:
             if any(fragment in module for fragment in FORBIDDEN_CROSS_PRODUCT):
-                errors.append(
-                    f"{path.name}: imports forbidden equity/write authority {module}"
-                )
+                errors.append(f"{path.name}: imports forbidden equity/write authority {module}")
         network_roots = {module.split(".", 1)[0] for module in imports if module}
         if path != WRITER and network_roots & NETWORK_IMPORT_ROOTS:
             errors.append(
                 f"{path.name}: only dedicated crypto writer may import direct network stack; found {sorted(network_roots & NETWORK_IMPORT_ROOTS)}"
             )
+        if path not in {LIFECYCLE, UNKNOWN_RECOVERY} and "._mutate(" in source:
+            errors.append(f"{path.name}: direct lifecycle transaction primitive is reserved for lifecycle/UNKNOWN recovery")
         for class_name in _subclasses_of(tree, GUARDED_CAPABILITY):
             guarded_subclasses.add((path.name, class_name))
 
@@ -142,9 +191,10 @@ def main() -> int:
         return 1
     print(
         "AUTO-TRADE R6 crypto execution authority boundary: PASS "
-        "(dedicated disabled-by-default PAPER writer; nominal role-bound ENTRY/PROTECTION Final Guards; "
+        "(disabled-by-default PAPER writer; nominal role-bound ENTRY/PROTECTION Final Guards; "
         "UNKNOWN-before-I/O; exact /v2/orders POST; GET-only client-id + position reconciliation; "
-        "no equity bracket/LIVE cross-authority)"
+        "order-404 always continues to position truth and can only HALT or strongly FLAT-reconcile; "
+        "zero blind retry; no equity bracket/LIVE cross-authority)"
     )
     return 0
 
