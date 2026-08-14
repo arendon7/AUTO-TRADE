@@ -97,10 +97,10 @@ def _market(*, observed: datetime = NOW):
     return AlpacaPaperCryptoMarketAttestation(
         market=snapshot,
         location="us",
-        orderbook_observed_at=observed - timedelta(seconds=1),
+        quote_observed_at=observed - timedelta(seconds=1),
         trade_observed_at=observed - timedelta(seconds=1),
         received_at=observed,
-        orderbook_response_sha256="c" * 64,
+        quote_response_sha256="c" * 64,
         trade_response_sha256="d" * 64,
     )
 
