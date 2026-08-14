@@ -103,8 +103,16 @@ class AlpacaPaperCryptoMarketAttestation:
         for value in (self.quote_response_sha256, self.trade_response_sha256):
             if not _HASH_RE.fullmatch(value):
                 raise ValueError("crypto market response hash must be SHA-256")
-        if self.market.observed_at.astimezone(timezone.utc) != self.received_at.astimezone(timezone.utc):
-            raise ValueError("crypto MarketSnapshot observed_at must equal fresh REST receipt time")
+        observed = self.market.observed_at.astimezone(timezone.utc)
+        received = self.received_at.astimezone(timezone.utc)
+        oldest_component = min(
+            self.quote_observed_at.astimezone(timezone.utc),
+            self.trade_observed_at.astimezone(timezone.utc),
+        )
+        if observed not in (received, oldest_component):
+            raise ValueError(
+                "crypto MarketSnapshot observed_at must equal fresh REST receipt time or the conservative oldest component"
+            )
 
     @property
     def quote_age_seconds(self) -> Decimal:
