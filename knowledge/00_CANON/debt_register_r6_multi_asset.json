@@ -7,15 +7,20 @@
       "track": "R6",
       "area": "Native multi-asset ProductCapabilities and cross-product authority boundary",
       "severity": "P1",
-      "status": "OPEN",
+      "status": "CLOSED",
       "evidence": [
         "src/autotrade/product_profile.py",
+        "src/autotrade/brokers/alpaca_paper_crypto_canary_coordinator.py",
+        "src/autotrade/brokers/alpaca_paper_crypto_final_guard.py",
+        "scripts/check_r6_product_boundary.py",
+        "scripts/check_r6_crypto_execution_boundary.py",
         "tests/test_r6_multi_asset_product_profile.py",
+        "tests/test_r6_unsupported_products_boundary.py",
         "skills/crypto-trading/SKILL.md",
         "skills/multi-asset-safety/SKILL.md",
         "knowledge/30_DECISIONES/ADR-0009-native-multi-asset-equity-crypto.md"
       ],
-      "next_action": "Bind a fresh exact ProductCapabilities fingerprint into the durable crypto candidate, prepared package and final write guard, then add permanent cross-product CI proving equity market-clock/bracket semantics cannot enter crypto and crypto 24/7/fractional semantics cannot enter equities. Close only after exact-head CI evidence."
+      "resolution": "Closed after exact-head certification on f9ec065302a798a48a51b092fd6835a46416a2af: crypto ProductCapabilities is bound to exact broker asset evidence, its fingerprint is persisted in the durable lifecycle and prepared package, the last-write Final Guard requires fresh CRYPTO ProductCapabilities bound to fresh asset evidence and the same stable product contract, and permanent execution/product CI scans the complete alpaca_paper_crypto_*.py production family for cross-product authority leakage while preserving the certified US-equity session/bracket contract."
     },
     {
       "id": "TD-R6-015",
