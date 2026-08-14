@@ -86,7 +86,9 @@ def test_checker_rejects_networking_inside_crypto_preio_interlock(tmp_path) -> N
     errors = scan(
         tmp_path,
         "import http.client\n"
-        "def go(self, **kwargs):\n"
+        "def entry(self, **kwargs):\n"
+        "    self._delegate.post(**kwargs)\n"
+        "def protection(self, **kwargs):\n"
         "    return self._delegate.post(**kwargs)\n",
         filename="alpaca_paper_crypto_pre_io.py",
     )
@@ -106,32 +108,46 @@ def test_checker_rejects_unaudited_post_send_or_submit_calls_even_in_writer(tmp_
     assert sum("unaudited external write call" in error for error in errors) == 3
 
 
-def test_checker_allows_exactly_one_named_crypto_preio_delegate_post(tmp_path) -> None:
+def test_checker_allows_exactly_two_named_crypto_preio_delegate_posts(tmp_path) -> None:
     errors = scan(
         tmp_path,
-        "def go(self, **kwargs):\n"
+        "def entry(self, **kwargs):\n"
+        "    self._delegate.post(**kwargs)\n"
+        "def protection(self, **kwargs):\n"
         "    return self._delegate.post(**kwargs)\n",
         filename="alpaca_paper_crypto_pre_io.py",
     )
     assert not any("unaudited external write call post" in error for error in errors)
-    assert not any("exactly one self._delegate.post" in error for error in errors)
+    assert not any("exactly two role-bound self._delegate.post" in error for error in errors)
 
 
-def test_checker_rejects_second_or_arbitrary_post_in_crypto_preio_interlock(tmp_path) -> None:
-    duplicate = scan(
-        tmp_path / "duplicate",
+def test_checker_rejects_wrong_delegate_count_or_arbitrary_post_in_crypto_preio_interlock(tmp_path) -> None:
+    one_only = scan(
+        tmp_path / "one-only",
         "def go(self, **kwargs):\n"
-        "    self._delegate.post(**kwargs)\n"
         "    return self._delegate.post(**kwargs)\n",
         filename="alpaca_paper_crypto_pre_io.py",
     )
-    assert any("exactly one self._delegate.post" in error for error in duplicate)
+    assert any("exactly two role-bound self._delegate.post" in error for error in one_only)
+
+    duplicate_extra = scan(
+        tmp_path / "duplicate-extra",
+        "def entry(self, **kwargs):\n"
+        "    self._delegate.post(**kwargs)\n"
+        "    self._delegate.post(**kwargs)\n"
+        "def protection(self, **kwargs):\n"
+        "    return self._delegate.post(**kwargs)\n",
+        filename="alpaca_paper_crypto_pre_io.py",
+    )
+    assert any("exactly two role-bound self._delegate.post" in error for error in duplicate_extra)
 
     arbitrary = scan(
         tmp_path / "arbitrary",
-        "def go(self, client, **kwargs):\n"
+        "def entry(self, client, **kwargs):\n"
         "    self._delegate.post(**kwargs)\n"
-        "    return client.post('/v2/orders')\n",
+        "    client.post('/v2/orders')\n"
+        "def protection(self, **kwargs):\n"
+        "    return self._delegate.post(**kwargs)\n",
         filename="alpaca_paper_crypto_pre_io.py",
     )
     assert any("unaudited external write call post" in error for error in arbitrary)
@@ -140,9 +156,11 @@ def test_checker_rejects_second_or_arbitrary_post_in_crypto_preio_interlock(tmp_
 def test_checker_rejects_crypto_preio_delegate_post_inside_loop(tmp_path) -> None:
     errors = scan(
         tmp_path,
-        "def go(self, **kwargs):\n"
+        "def entry(self, **kwargs):\n"
         "    while True:\n"
-        "        return self._delegate.post(**kwargs)\n",
+        "        self._delegate.post(**kwargs)\n"
+        "def protection(self, **kwargs):\n"
+        "    return self._delegate.post(**kwargs)\n",
         filename="alpaca_paper_crypto_pre_io.py",
     )
     assert any("PRE_IO delegated POST cannot execute inside a loop" in error for error in errors)
