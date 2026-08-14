@@ -150,7 +150,10 @@ jobs:
           retention-days: 7
 
       - name: Crypto guarded PRE_IO interlock adversarial coverage
-        run: pytest -q tests/test_r6_paper_crypto_pre_io_adversarial.py
+        run: |
+          pytest -q \
+            tests/test_r6_paper_crypto_pre_io_adversarial.py \
+            tests/test_r6_paper_crypto_protection_pre_io.py
 
       - name: Crypto guarded end-to-end execution simulation
         run: |
