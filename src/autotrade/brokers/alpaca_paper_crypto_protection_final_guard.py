@@ -22,10 +22,16 @@ from .alpaca_paper_crypto_protection_operator_decision import (
     SQLiteCryptoProtectionOperatorDecisionRegistry,
 )
 from .alpaca_paper_crypto_reconciliation import CryptoBrokerPositionSnapshot
+from .alpaca_paper_gateway import (
+    ALPACA_PAPER_ACCOUNT_PATH,
+    ALPACA_PAPER_TRADING_HOST,
+    AlpacaPaperAccountAttestation,
+)
 
 
 _HASH_RE = re.compile(r"^[0-9a-f]{64}$")
 POSITION_FRESHNESS_TTL = timedelta(seconds=10)
+ACCOUNT_FRESHNESS_TTL = timedelta(seconds=10)
 
 
 class CryptoProtectionFinalWritePhase(str, Enum):
@@ -50,12 +56,16 @@ class CryptoProtectionFinalWriteAttestation:
     lifecycle_id: str
     order_id: str
     client_order_id: str
+    account_reference: str
+    credential_reference: str
+    fresh_account_fingerprint: str
     lifecycle_status: CryptoLifecycleStatus
     lifecycle_control_hash: str
     lifecycle_event_head_hash: str
     protection_attempt_count: int
     oms_order_status: OrderStatus
     position_quantity: Decimal
+    position_credential_reference: str
     position_request_id: str
     position_response_sha256: str
     position_observed_at: datetime
@@ -69,8 +79,12 @@ class CryptoProtectionFinalWriteAttestation:
         for label, value in (
             ("package_hash", self.package_hash),
             ("operator_decision_hash", self.operator_decision_hash),
+            ("account_reference", self.account_reference),
+            ("credential_reference", self.credential_reference),
+            ("fresh_account_fingerprint", self.fresh_account_fingerprint),
             ("lifecycle_control_hash", self.lifecycle_control_hash),
             ("lifecycle_event_head_hash", self.lifecycle_event_head_hash),
+            ("position_credential_reference", self.position_credential_reference),
             ("position_response_sha256", self.position_response_sha256),
             ("attestation_hash", self.attestation_hash),
         ):
@@ -78,6 +92,8 @@ class CryptoProtectionFinalWriteAttestation:
                 raise ValueError(f"{label} must be lowercase SHA-256")
         if self.previous_attestation_hash is not None and not _HASH_RE.fullmatch(self.previous_attestation_hash):
             raise ValueError("previous_attestation_hash must be lowercase SHA-256")
+        if self.position_credential_reference != self.credential_reference:
+            raise ValueError("protection final position credential must equal write credential reference")
         if not isinstance(self.lifecycle_status, CryptoLifecycleStatus):
             raise TypeError("protection lifecycle status is invalid")
         if not isinstance(self.oms_order_status, OrderStatus):
@@ -95,11 +111,12 @@ class CryptoProtectionFinalWriteAttestation:
 class CryptoPaperProtectionFinalGuard:
     """Last fail-closed guard for a protective SELL before authority consumption/I/O.
 
-    This module performs no network I/O. A caller must supply a fresh GET-only
-    broker position snapshot. PRE_CONSUME is only valid while the protective OMS
-    order is VALIDATED and human authority is ISSUED. PRE_IO is only valid after
-    the exact authority has been consumed, OMS is SUBMITTING, and lifecycle has
-    crossed durable PROTECTION_SUBMISSION_UNKNOWN exactly once.
+    This module performs no network I/O. A caller must supply both a fresh
+    same-account PAPER attestation and a fresh GET-only broker position snapshot.
+    PRE_CONSUME is only valid while the protective OMS order is VALIDATED and
+    human authority is ISSUED. PRE_IO is only valid after the exact authority has
+    been consumed, OMS is SUBMITTING, and lifecycle has crossed durable
+    PROTECTION_SUBMISSION_UNKNOWN exactly once.
     """
 
     def __init__(self, *, order_store) -> None:
@@ -115,6 +132,7 @@ class CryptoPaperProtectionFinalGuard:
         operator_registry: SQLiteCryptoProtectionOperatorDecisionRegistry,
         broker_order: AlpacaPaperCryptoOrderRequest,
         lifecycle: SQLiteCryptoPaperLifecycle,
+        fresh_account: AlpacaPaperAccountAttestation,
         fresh_position: CryptoBrokerPositionSnapshot,
         now: datetime,
         phase: CryptoProtectionFinalWritePhase,
@@ -133,6 +151,8 @@ class CryptoPaperProtectionFinalGuard:
             raise CryptoProtectionFinalGuardBlocked("exact PROTECTION broker request is required")
         if not isinstance(lifecycle, SQLiteCryptoPaperLifecycle):
             raise CryptoProtectionFinalGuardBlocked("authoritative crypto lifecycle is required")
+        if not isinstance(fresh_account, AlpacaPaperAccountAttestation):
+            raise CryptoProtectionFinalGuardBlocked("fresh PAPER account attestation is required")
         if not isinstance(fresh_position, CryptoBrokerPositionSnapshot):
             raise CryptoProtectionFinalGuardBlocked("fresh GET-only broker position snapshot is required")
         if not isinstance(phase, CryptoProtectionFinalWritePhase):
@@ -183,7 +203,13 @@ class CryptoPaperProtectionFinalGuard:
         if oms_order is None:
             raise CryptoProtectionFinalGuardBlocked("protective OMS order is missing")
 
-        self._validate_position(package=package, position=fresh_position, now=instant)
+        self._validate_account(package=package, account=fresh_account, now=instant)
+        self._validate_position(
+            package=package,
+            account=fresh_account,
+            position=fresh_position,
+            now=instant,
+        )
 
         if phase is CryptoProtectionFinalWritePhase.PRE_CONSUME:
             if previous_attestation is not None:
@@ -232,12 +258,16 @@ class CryptoPaperProtectionFinalGuard:
             "lifecycle_id": package.lifecycle_id,
             "order_id": package.order_id,
             "client_order_id": package.client_order_id,
+            "account_reference": fresh_account.account_reference,
+            "credential_reference": fresh_account.credential_reference,
+            "fresh_account_fingerprint": fresh_account.fingerprint,
             "lifecycle_status": snapshot.state.status,
             "lifecycle_control_hash": snapshot.state.control_hash,
             "lifecycle_event_head_hash": snapshot.state.event_head_hash,
             "protection_attempt_count": snapshot.state.protection_attempt_count,
             "oms_order_status": oms_order.status,
             "position_quantity": fresh_position.quantity,
+            "position_credential_reference": fresh_position.credential_reference,
             "position_request_id": fresh_position.request_id,
             "position_response_sha256": fresh_position.response_sha256,
             "position_observed_at": fresh_position.observed_at,
@@ -250,12 +280,38 @@ class CryptoPaperProtectionFinalGuard:
         )
 
     @staticmethod
+    def _validate_account(
+        *,
+        package: PreparedCryptoProtectionPackage,
+        account: AlpacaPaperAccountAttestation,
+        now: datetime,
+    ) -> None:
+        if account.account_reference != package.account_reference:
+            raise CryptoProtectionFinalGuardBlocked("fresh PAPER account reference differs from protection package")
+        if account.credential_reference != package.credential_reference:
+            raise CryptoProtectionFinalGuardBlocked("fresh PAPER credential reference differs from protection package")
+        if account.status != "ACTIVE" or account.currency != "USD":
+            raise CryptoProtectionFinalGuardBlocked("fresh PAPER account is not ACTIVE USD")
+        if account.source_host != ALPACA_PAPER_TRADING_HOST or account.source_path != ALPACA_PAPER_ACCOUNT_PATH:
+            raise CryptoProtectionFinalGuardBlocked("fresh PAPER account provenance is not exact account endpoint")
+        if account.attested_at > now + timedelta(seconds=3):
+            raise CryptoProtectionFinalGuardBlocked("fresh PAPER account is future-dated")
+        age = now - account.attested_at.astimezone(timezone.utc)
+        if age < timedelta(seconds=-3) or age >= ACCOUNT_FRESHNESS_TTL:
+            raise CryptoProtectionFinalGuardBlocked("fresh PAPER account is stale")
+
+    @staticmethod
     def _validate_position(
         *,
         package: PreparedCryptoProtectionPackage,
+        account: AlpacaPaperAccountAttestation,
         position: CryptoBrokerPositionSnapshot,
         now: datetime,
     ) -> None:
+        if position.credential_reference != package.credential_reference:
+            raise CryptoProtectionFinalGuardBlocked("fresh broker position credential differs from protection package")
+        if position.credential_reference != account.credential_reference:
+            raise CryptoProtectionFinalGuardBlocked("fresh broker position is not bound to fresh PAPER account credential")
         if position.symbol != package.symbol:
             raise CryptoProtectionFinalGuardBlocked("fresh broker position symbol differs from protection package")
         if position.absent or position.quantity <= 0:
@@ -288,6 +344,12 @@ class CryptoPaperProtectionFinalGuard:
             raise CryptoProtectionFinalGuardBlocked("PRE_IO previous attempt mismatch")
         if previous.client_order_id != package.client_order_id:
             raise CryptoProtectionFinalGuardBlocked("PRE_IO previous client_order_id mismatch")
+        if previous.account_reference != package.account_reference:
+            raise CryptoProtectionFinalGuardBlocked("PRE_IO previous account reference mismatch")
+        if previous.credential_reference != package.credential_reference:
+            raise CryptoProtectionFinalGuardBlocked("PRE_IO previous credential reference mismatch")
+        if previous.position_credential_reference != package.credential_reference:
+            raise CryptoProtectionFinalGuardBlocked("PRE_IO previous position credential mismatch")
         if previous.lifecycle_status is not CryptoLifecycleStatus.PROTECTION_PREPARED:
             raise CryptoProtectionFinalGuardBlocked("PRE_IO previous lifecycle phase is invalid")
         if previous.protection_attempt_count != 0:
@@ -312,12 +374,16 @@ def _attestation_payload(
             "lifecycle_id": value.lifecycle_id,
             "order_id": value.order_id,
             "client_order_id": value.client_order_id,
+            "account_reference": value.account_reference,
+            "credential_reference": value.credential_reference,
+            "fresh_account_fingerprint": value.fresh_account_fingerprint,
             "lifecycle_status": value.lifecycle_status,
             "lifecycle_control_hash": value.lifecycle_control_hash,
             "lifecycle_event_head_hash": value.lifecycle_event_head_hash,
             "protection_attempt_count": value.protection_attempt_count,
             "oms_order_status": value.oms_order_status,
             "position_quantity": value.position_quantity,
+            "position_credential_reference": value.position_credential_reference,
             "position_request_id": value.position_request_id,
             "position_response_sha256": value.position_response_sha256,
             "position_observed_at": value.position_observed_at,
@@ -356,6 +422,7 @@ def _hash_json(payload: object) -> str:
 
 
 __all__ = [
+    "ACCOUNT_FRESHNESS_TTL",
     "CryptoPaperProtectionFinalGuard",
     "CryptoProtectionFinalGuardBlocked",
     "CryptoProtectionFinalGuardError",
