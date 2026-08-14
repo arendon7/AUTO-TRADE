@@ -23,10 +23,11 @@ from autotrade.brokers.alpaca_paper_crypto_writer import (
     AlpacaPaperCryptoWriteResponse,
     AlpacaPaperCryptoWriter,
     AlpacaPaperCryptoWriterConfig,
+    CRYPTO_ORDERS_PATH,
     CryptoPaperWriterAmbiguous,
     CryptoPaperWriterDisabled,
     CryptoPaperWriterPolicyError,
-    CRYPTO_ORDERS_PATH,
+    GuardedAlpacaPaperCryptoWriteTransport,
     HttpsAlpacaPaperCryptoWriteTransport,
 )
 from autotrade.brokers.alpaca_paper_gateway import (
@@ -147,6 +148,14 @@ class RecordingTransport:
         return self.response
 
 
+class GuardedRecordingTransport(RecordingTransport, GuardedAlpacaPaperCryptoWriteTransport):
+    """Test-only nominal capability; production subclasses are statically restricted."""
+
+    def __init__(self, response=None, *, role=CryptoOrderRole.ENTRY, error=None, before=None) -> None:
+        super().__init__(response, error=error, before=before)
+        self.role = role
+
+
 def test_crypto_writer_is_disabled_by_default_and_performs_zero_io(tmp_path) -> None:
     lifecycle, _asset_value, _profile_value, entry, binding = _setup(tmp_path)
     transport = RecordingTransport(_ack(entry))
@@ -162,6 +171,50 @@ def test_crypto_writer_is_disabled_by_default_and_performs_zero_io(tmp_path) -> 
     assert lifecycle.snapshot(binding.lifecycle_id).state.status is CryptoLifecycleStatus.ENTRY_PREPARED
 
 
+def test_enabled_writer_rejects_raw_default_and_role_mismatch_before_state_or_io(tmp_path) -> None:
+    lifecycle, _asset_value, _profile_value, entry, binding = _setup(tmp_path)
+    raw = RecordingTransport(_ack(entry))
+    writer = AlpacaPaperCryptoWriter(
+        config=AlpacaPaperCryptoWriterConfig(enabled=True),
+        transport=raw,
+    )
+    with pytest.raises(CryptoPaperWriterPolicyError, match="role-bound Final-Guard transport"):
+        writer.submit_once(
+            lifecycle=lifecycle,
+            lifecycle_id=binding.lifecycle_id,
+            order=entry,
+            credentials=CREDS,
+            now=NOW + timedelta(seconds=1),
+        )
+    assert raw.calls == []
+    assert lifecycle.snapshot(binding.lifecycle_id).state.status is CryptoLifecycleStatus.ENTRY_PREPARED
+
+    with pytest.raises(CryptoPaperWriterPolicyError, match="role-bound Final-Guard transport"):
+        AlpacaPaperCryptoWriter(config=AlpacaPaperCryptoWriterConfig(enabled=True)).submit_once(
+            lifecycle=lifecycle,
+            lifecycle_id=binding.lifecycle_id,
+            order=entry,
+            credentials=CREDS,
+            now=NOW + timedelta(seconds=1),
+        )
+    assert lifecycle.snapshot(binding.lifecycle_id).state.status is CryptoLifecycleStatus.ENTRY_PREPARED
+
+    wrong_role = GuardedRecordingTransport(_ack(entry), role=CryptoOrderRole.PROTECTION)
+    with pytest.raises(CryptoPaperWriterPolicyError, match="role does not match"):
+        AlpacaPaperCryptoWriter(
+            config=AlpacaPaperCryptoWriterConfig(enabled=True),
+            transport=wrong_role,
+        ).submit_once(
+            lifecycle=lifecycle,
+            lifecycle_id=binding.lifecycle_id,
+            order=entry,
+            credentials=CREDS,
+            now=NOW + timedelta(seconds=1),
+        )
+    assert wrong_role.calls == []
+    assert lifecycle.snapshot(binding.lifecycle_id).state.status is CryptoLifecycleStatus.ENTRY_PREPARED
+
+
 def test_entry_writer_persists_unknown_before_network_and_never_blind_retries(tmp_path) -> None:
     lifecycle, _asset_value, _profile_value, entry, binding = _setup(tmp_path)
 
@@ -171,7 +224,7 @@ def test_entry_writer_persists_unknown_before_network_and_never_blind_retries(tm
         assert state.entry_attempt_count == 1
         assert state.restart_action == "RECONCILE_ONLY"
 
-    transport = RecordingTransport(_ack(entry), before=assert_unknown_before_io)
+    transport = GuardedRecordingTransport(_ack(entry), before=assert_unknown_before_io)
     writer = AlpacaPaperCryptoWriter(
         config=AlpacaPaperCryptoWriterConfig(enabled=True),
         transport=transport,
@@ -210,7 +263,7 @@ def test_entry_writer_persists_unknown_before_network_and_never_blind_retries(tm
 
 def test_network_exception_leaves_entry_unknown_and_requires_reconciliation(tmp_path) -> None:
     lifecycle, _asset_value, _profile_value, entry, binding = _setup(tmp_path)
-    transport = RecordingTransport(error=TimeoutError("simulated timeout"))
+    transport = GuardedRecordingTransport(error=TimeoutError("simulated timeout"))
     writer = AlpacaPaperCryptoWriter(
         config=AlpacaPaperCryptoWriterConfig(enabled=True),
         transport=transport,
@@ -250,7 +303,7 @@ def test_untrusted_entry_ack_is_ambiguous_not_success(tmp_path, overrides) -> No
     )
     writer = AlpacaPaperCryptoWriter(
         config=AlpacaPaperCryptoWriterConfig(enabled=True),
-        transport=RecordingTransport(_ack(entry, overrides=overrides)),
+        transport=GuardedRecordingTransport(_ack(entry, overrides=overrides)),
     )
     with pytest.raises(CryptoPaperWriterAmbiguous, match="reconcile"):
         writer.submit_once(
@@ -265,7 +318,7 @@ def test_untrusted_entry_ack_is_ambiguous_not_success(tmp_path, overrides) -> No
 
 def test_writer_binding_mismatch_fails_before_unknown_or_io(tmp_path) -> None:
     lifecycle, _asset_value, _profile_value, entry, binding = _setup(tmp_path)
-    transport = RecordingTransport(_ack(entry))
+    transport = GuardedRecordingTransport(_ack(entry))
     writer = AlpacaPaperCryptoWriter(
         config=AlpacaPaperCryptoWriterConfig(enabled=True),
         transport=transport,
@@ -331,7 +384,11 @@ def test_protection_writer_uses_exact_sell_stop_limit_and_unknown_before_io(tmp_
         assert state.status is CryptoLifecycleStatus.PROTECTION_SUBMISSION_UNKNOWN
         assert state.protection_attempt_count == 1
 
-    transport = RecordingTransport(_ack(protection), before=assert_unknown_before_io)
+    transport = GuardedRecordingTransport(
+        _ack(protection),
+        role=CryptoOrderRole.PROTECTION,
+        before=assert_unknown_before_io,
+    )
     receipt = AlpacaPaperCryptoWriter(
         config=AlpacaPaperCryptoWriterConfig(enabled=True),
         transport=transport,
