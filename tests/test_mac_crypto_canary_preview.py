@@ -42,11 +42,14 @@ def test_preview_source_has_no_operator_issuance_or_writer_path() -> None:
         "record_operator_approval(",
         ".consume(",
         "stage_external_submission",
-        "R6_EXTERNAL_PAPER_WRITE=ENABLED",
+        'os.environ[WRITE_ENV] = "ENABLED"',
+        'env[WRITE_ENV] = "ENABLED"',
     ):
         assert forbidden not in source
     for required in (
         'PREVIEW_MAX_NOTIONAL = Decimal("5")',
+        'os.environ.get(WRITE_ENV) == "ENABLED"',
+        'raise CryptoPaperCanaryPreviewError("canary preview refuses R6_EXTERNAL_PAPER_WRITE=ENABLED")',
         '"mode": "DRY_RUN_NO_POST"',
         '"broker_write_performed": False',
         '"external_post_authorized": False',
