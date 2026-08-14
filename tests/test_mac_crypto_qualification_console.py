@@ -24,6 +24,7 @@ def test_crypto_dashboard_meta_exposes_preview_but_zero_write_authority() -> Non
     assert meta["qualification_preview_available"] is True
     assert meta["qualification_preview_symbol"] == "BTC/USD"
     assert meta["qualification_preview_max_notional_usd"] == "5"
+    assert meta["qualification_preview_target_notional_usd"] == "2"
     assert meta["qualification_preview_write_authority"] is False
     assert meta["paper_write"] == "DISABLED"
     assert meta["capital_authority"] == "NONE"
@@ -70,6 +71,37 @@ def test_crypto_dashboard_preview_routes_only_to_read_only_preview_child(monkeyp
     assert result["operator_approval_authority"] == "NONE"
     assert result["capital_authority"] == "NONE"
     assert result["live_trading"] == "BLOCKED"
+
+
+def test_crypto_dashboard_promotes_structured_preview_block_reason(monkeypatch, tmp_path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+
+    def fake_run(command, **kwargs):
+        payload = {
+            "status": "CRYPTO_PAPER_QUALIFICATION_PREVIEW_BLOCKED",
+            "reason": "coordinator preparation blocked: example",
+            "broker_write_performed": False,
+            "external_post_authorized": False,
+            "capital_authority": "NONE",
+            "live_trading": "BLOCKED",
+        }
+        return SimpleNamespace(returncode=2, stdout=json.dumps(payload), stderr="")
+
+    monkeypatch.setattr(dashboard.subprocess, "run", fake_run)
+    result = dashboard._run_canary_preview(
+        {
+            "workspace": str(workspace),
+            "symbol": "BTC/USD",
+            "paper_key": "paper-key",
+            "paper_secret": "paper-secret",
+        }
+    )
+    assert result["ok"] is False
+    assert result["error"] == "coordinator preparation blocked: example"
+    assert result["json"]["status"] == "CRYPTO_PAPER_QUALIFICATION_PREVIEW_BLOCKED"
+    assert result["broker_write_performed"] is False
+    assert result["external_post_authorized"] is False
 
 
 def test_crypto_dashboard_preview_rejects_eth_before_child_process(monkeypatch, tmp_path) -> None:
