@@ -206,9 +206,9 @@ def _scan(path: Path) -> list[str]:
         errors.append(
             f"{rel}: audited crypto PAPER writer must contain exactly one transport POST call"
         )
-    if path.name == CRYPTO_PRE_IO_FILE and len(crypto_pre_io_delegate_calls) != 1:
+    if path.name == CRYPTO_PRE_IO_FILE and len(crypto_pre_io_delegate_calls) != 2:
         errors.append(
-            f"{rel}: crypto PRE_IO interlock must contain exactly one self._delegate.post call"
+            f"{rel}: crypto PRE_IO interlock must contain exactly two role-bound self._delegate.post call sites"
         )
     if path.name == TRADE_UPDATES_FILE and len(control_sends) != 2:
         errors.append(
@@ -350,6 +350,9 @@ def _validate_network_roles() -> list[str]:
             "if self.host != ALPACA_PAPER_TRADING_HOST:",
             "http.client.HTTPSConnection(host",
             'connection.request("POST", path',
+            "class GuardedAlpacaPaperCryptoWriteTransport:",
+            "if not isinstance(self._transport, GuardedAlpacaPaperCryptoWriteTransport):",
+            'getattr(self._transport, "role", None) is not order.role',
             "lifecycle.mark_entry_submission_unknown",
             "lifecycle.mark_protection_submission_unknown",
             "self._transport.post(",
@@ -381,11 +384,16 @@ def _validate_network_roles() -> list[str]:
     else:
         text = crypto_pre_io.read_text(encoding="utf-8")
         required = (
-            "class FinalGuardedCryptoEntryTransport:",
-            "self._authorizer()",
+            "class FinalGuardedCryptoEntryTransport(GuardedAlpacaPaperCryptoWriteTransport):",
+            "role = CryptoOrderRole.ENTRY",
+            "class FinalGuardedCryptoProtectionTransport(GuardedAlpacaPaperCryptoWriteTransport):",
+            "role = CryptoOrderRole.PROTECTION",
             "CryptoFinalWritePhase.PRE_IO",
+            "CryptoProtectionFinalWritePhase.PRE_IO",
             "CryptoLifecycleStatus.ENTRY_SUBMISSION_UNKNOWN",
+            "CryptoLifecycleStatus.PROTECTION_SUBMISSION_UNKNOWN",
             "attestation.entry_attempt_count != 1",
+            "attestation.protection_attempt_count != 1",
             "attestation.client_order_id != client_order_id",
             "self._last_attestation = attestation",
             "self._delegate.post(",
@@ -393,19 +401,34 @@ def _validate_network_roles() -> list[str]:
         for anchor in required:
             if anchor not in text:
                 errors.append(f"crypto PRE_IO interlock: required guard anchor missing: {anchor}")
-        if text.count("self._delegate.post(") != 1:
-            errors.append("crypto PRE_IO interlock: exactly one delegated POST call site is required")
+        if text.count("self._delegate.post(") != 2:
+            errors.append("crypto PRE_IO interlock: exactly two role-bound delegated POST call sites are required")
         if "HttpsAlpacaPaperCryptoWriteTransport" in text:
             errors.append("crypto PRE_IO interlock: direct HTTPS transport construction is forbidden")
-        authorizer = text.find("self._authorizer()")
-        phase = text.find("CryptoFinalWritePhase.PRE_IO", authorizer)
-        unknown = text.find("CryptoLifecycleStatus.ENTRY_SUBMISSION_UNKNOWN", phase)
-        attempt = text.find("attestation.entry_attempt_count != 1", unknown)
-        client = text.find("attestation.client_order_id != client_order_id", attempt)
-        delegate = text.find("self._delegate.post(", client)
-        if not 0 <= authorizer < phase < unknown < attempt < client < delegate:
-            errors.append(
-                "crypto PRE_IO interlock: ordering must be authorizer -> PRE_IO -> UNKNOWN -> one-attempt -> client binding -> delegate"
+
+        entry_start = text.find("class FinalGuardedCryptoEntryTransport(")
+        protection_start = text.find("class FinalGuardedCryptoProtectionTransport(")
+        simulation_start = text.find("class DeterministicCryptoPaperSimulationTransport", protection_start)
+        if not 0 <= entry_start < protection_start < simulation_start:
+            errors.append("crypto PRE_IO interlock: ENTRY/PROTECTION class boundaries are invalid")
+        else:
+            entry_text = text[entry_start:protection_start]
+            protection_text = text[protection_start:simulation_start]
+            _validate_crypto_pre_io_role(
+                entry_text,
+                label="ENTRY",
+                phase="CryptoFinalWritePhase.PRE_IO",
+                unknown="CryptoLifecycleStatus.ENTRY_SUBMISSION_UNKNOWN",
+                attempt="attestation.entry_attempt_count != 1",
+                errors=errors,
+            )
+            _validate_crypto_pre_io_role(
+                protection_text,
+                label="PROTECTION",
+                phase="CryptoProtectionFinalWritePhase.PRE_IO",
+                unknown="CryptoLifecycleStatus.PROTECTION_SUBMISSION_UNKNOWN",
+                attempt="attestation.protection_attempt_count != 1",
+                errors=errors,
             )
 
     crypto_reconciliation = BROKER_DIR / CRYPTO_RECONCILIATION_FILE
@@ -470,6 +493,29 @@ def _validate_network_roles() -> list[str]:
                 errors.append("trade_updates: post-handshake session exposes forbidden send/subscribe")
 
     return errors
+
+
+def _validate_crypto_pre_io_role(
+    text: str,
+    *,
+    label: str,
+    phase: str,
+    unknown: str,
+    attempt: str,
+    errors: list[str],
+) -> None:
+    authorizer = text.find("self._authorizer()")
+    phase_pos = text.find(phase, authorizer)
+    unknown_pos = text.find(unknown, phase_pos)
+    attempt_pos = text.find(attempt, unknown_pos)
+    client = text.find("attestation.client_order_id != client_order_id", attempt_pos)
+    delegate = text.find("self._delegate.post(", client)
+    if text.count("self._delegate.post(") != 1:
+        errors.append(f"crypto PRE_IO interlock: {label} must contain exactly one delegated POST call site")
+    if not 0 <= authorizer < phase_pos < unknown_pos < attempt_pos < client < delegate:
+        errors.append(
+            f"crypto PRE_IO interlock: {label} ordering must be authorizer -> PRE_IO -> UNKNOWN -> one-attempt -> client binding -> delegate"
+        )
 
 
 def _require_disabled_get_surface(
