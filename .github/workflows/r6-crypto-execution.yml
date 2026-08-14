@@ -176,6 +176,7 @@ jobs:
             tests/test_r6_paper_crypto_writer_ambiguity.py \
             tests/test_r6_paper_crypto_reconciliation.py \
             tests/test_r6_paper_crypto_unknown_recovery.py \
+            tests/test_r6_paper_crypto_unknown_recovery_adversarial.py \
             tests/test_r6_crypto_execution_boundary.py
 
       - name: Prove user-facing Mac crypto remains NO-POST
