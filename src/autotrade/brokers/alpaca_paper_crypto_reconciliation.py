@@ -29,6 +29,7 @@ ORDER_BY_CLIENT_PATH = "/v2/orders:by_client_order_id"
 POSITION_PATH_PREFIX = "/v2/positions/"
 _CLIENT_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 _REQUEST_ID_RE = re.compile(r"^[\x21-\x7e]{1,256}$")
+_HASH_RE = re.compile(r"^[0-9a-f]{64}$")
 _TERMINAL_ORDER_STATUSES = {"filled", "canceled", "expired", "rejected"}
 _OPEN_ORDER_STATUSES = {"accepted", "pending_new", "new", "partially_filled"}
 
@@ -116,10 +117,15 @@ class CryptoBrokerPositionSnapshot:
     quantity: Decimal
     market_value: Decimal | None
     average_entry_price: Decimal | None
+    credential_reference: str
     request_id: str
     response_sha256: str
     observed_at: datetime
     absent: bool = False
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.credential_reference, str) or not _HASH_RE.fullmatch(self.credential_reference):
+            raise ValueError("crypto position credential_reference must be lowercase SHA-256")
 
 
 @dataclass(frozen=True, slots=True)
@@ -137,6 +143,7 @@ class CryptoBrokerReconciliation:
                     "symbol": self.position.symbol,
                     "position_quantity": _decimal_text(self.position.quantity),
                     "position_absent": self.position.absent,
+                    "position_credential_reference": self.position.credential_reference,
                     "position_response_sha256": self.position.response_sha256,
                     "observed_at": self.observed_at.astimezone(timezone.utc).isoformat(),
                 },
@@ -211,6 +218,7 @@ class AlpacaPaperCryptoReconciliationGateway:
         position = _parse_position(
             response=position_response,
             expected_symbol=symbol,
+            credential_reference=credentials.credential_reference,
             observed_at=observed_at,
         )
         return CryptoBrokerReconciliation(
@@ -321,14 +329,18 @@ def _parse_position(
     *,
     response: AlpacaPaperHttpResponse,
     expected_symbol: str,
+    credential_reference: str,
     observed_at: datetime,
 ) -> CryptoBrokerPositionSnapshot:
+    if not isinstance(credential_reference, str) or not _HASH_RE.fullmatch(credential_reference):
+        raise CryptoPaperReconciliationIntegrityError("crypto position credential reference is invalid")
     if response.status_code == 404:
         return CryptoBrokerPositionSnapshot(
             symbol=expected_symbol,
             quantity=Decimal("0"),
             market_value=None,
             average_entry_price=None,
+            credential_reference=credential_reference,
             request_id=_request_id(response),
             response_sha256=sha256(response.body).hexdigest(),
             observed_at=observed_at,
@@ -351,6 +363,7 @@ def _parse_position(
         quantity=quantity,
         market_value=market_value,
         average_entry_price=average_entry_price,
+        credential_reference=credential_reference,
         request_id=request_id,
         response_sha256=sha256(response.body).hexdigest(),
         observed_at=observed_at,
