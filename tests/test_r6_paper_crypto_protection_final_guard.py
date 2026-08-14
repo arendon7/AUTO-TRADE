@@ -87,6 +87,7 @@ def _preconsume(tmp_path):
         operator_registry=registry,
         broker_order=prepared.broker_order,
         lifecycle=ctx.lifecycle,
+        fresh_account=ctx.prepared_account,
         fresh_position=_position(entry_reconciliation, observed_at=NOW + timedelta(seconds=6, milliseconds=900)),
         now=NOW + timedelta(seconds=7),
         phase=CryptoProtectionFinalWritePhase.PRE_CONSUME,
@@ -118,6 +119,7 @@ def _advance_to_preio(setup, pre):
         operator_registry=registry,
         broker_order=prepared.broker_order,
         lifecycle=ctx.lifecycle,
+        fresh_account=ctx.prepared_account,
         fresh_position=_position(
             entry_reconciliation,
             observed_at=NOW + timedelta(seconds=7, milliseconds=350),
@@ -137,6 +139,10 @@ def test_protection_preconsume_requires_issued_human_authority_validated_oms_and
     assert pre.phase is CryptoProtectionFinalWritePhase.PRE_CONSUME
     assert pre.package_hash == prepared.package.package_hash
     assert pre.operator_decision_hash == operator_decision.decision_hash
+    assert pre.account_reference == prepared.package.account_reference
+    assert pre.credential_reference == prepared.package.credential_reference
+    assert pre.fresh_account_fingerprint == ctx.prepared_account.fingerprint
+    assert pre.position_credential_reference == ctx.prepared_account.credential_reference
     assert pre.lifecycle_status.value == "PROTECTION_PREPARED"
     assert pre.protection_attempt_count == 0
     assert pre.oms_order_status.value == "VALIDATED"
@@ -153,10 +159,43 @@ def test_protection_preio_requires_consumed_same_attempt_unknown_submitting_and_
     assert final.phase is CryptoProtectionFinalWritePhase.PRE_IO
     assert final.previous_attestation_hash == pre.attestation_hash
     assert final.attempt_id == pre.attempt_id
+    assert final.account_reference == pre.account_reference
+    assert final.credential_reference == pre.credential_reference
+    assert final.position_credential_reference == pre.position_credential_reference
     assert final.lifecycle_status.value == "PROTECTION_SUBMISSION_UNKNOWN"
     assert final.protection_attempt_count == 1
     assert final.oms_order_status.value == "SUBMITTING"
     assert final.position_quantity == pre.position_quantity
+
+
+def test_protection_preconsume_rejects_other_account_credential_or_position_credential(tmp_path) -> None:
+    ctx, entry_reconciliation, _, _, prepared, registry, operator_decision, guard = _protection_setup(tmp_path)
+    position = _position(entry_reconciliation, observed_at=NOW + timedelta(seconds=6, milliseconds=900))
+    base = dict(
+        package=prepared.package,
+        operator_decision=operator_decision,
+        operator_registry=registry,
+        broker_order=prepared.broker_order,
+        lifecycle=ctx.lifecycle,
+        fresh_position=position,
+        now=NOW + timedelta(seconds=7),
+        phase=CryptoProtectionFinalWritePhase.PRE_CONSUME,
+    )
+
+    other_account = replace(ctx.prepared_account, account_reference="f" * 64)
+    with pytest.raises(CryptoProtectionFinalGuardBlocked, match="account reference differs"):
+        guard.authorize(**base, fresh_account=other_account)
+
+    other_credential = replace(ctx.prepared_account, credential_reference="e" * 64)
+    with pytest.raises(CryptoProtectionFinalGuardBlocked, match="credential reference differs"):
+        guard.authorize(**base, fresh_account=other_credential)
+
+    other_position = replace(position, credential_reference="d" * 64)
+    with pytest.raises(CryptoProtectionFinalGuardBlocked, match="position credential differs"):
+        guard.authorize(
+            **{**base, "fresh_position": other_position},
+            fresh_account=ctx.prepared_account,
+        )
 
 
 def test_protection_preconsume_rejects_position_drift_flat_or_stale(tmp_path) -> None:
@@ -167,6 +206,7 @@ def test_protection_preconsume_rejects_position_drift_flat_or_stale(tmp_path) ->
         operator_registry=registry,
         broker_order=prepared.broker_order,
         lifecycle=ctx.lifecycle,
+        fresh_account=ctx.prepared_account,
         now=NOW + timedelta(seconds=7),
         phase=CryptoProtectionFinalWritePhase.PRE_CONSUME,
     )
@@ -219,6 +259,7 @@ def test_protection_preio_fails_closed_without_previous_or_without_unknown(tmp_p
         operator_registry=registry,
         broker_order=prepared.broker_order,
         lifecycle=ctx.lifecycle,
+        fresh_account=ctx.prepared_account,
         fresh_position=position,
         now=NOW + timedelta(seconds=7, milliseconds=200),
         phase=CryptoProtectionFinalWritePhase.PRE_IO,
@@ -264,6 +305,7 @@ def test_protection_preio_rejects_previous_attestation_rebinding(tmp_path) -> No
             operator_registry=registry,
             broker_order=prepared.broker_order,
             lifecycle=ctx.lifecycle,
+            fresh_account=ctx.prepared_account,
             fresh_position=_position(entry_reconciliation, observed_at=NOW + timedelta(seconds=7, milliseconds=350)),
             now=NOW + timedelta(seconds=7, milliseconds=400),
             phase=CryptoProtectionFinalWritePhase.PRE_IO,
