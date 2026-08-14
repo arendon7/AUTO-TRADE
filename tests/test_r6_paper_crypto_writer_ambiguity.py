@@ -11,7 +11,7 @@ from autotrade.brokers.alpaca_paper_crypto_writer import (
     CryptoPaperWriterAmbiguous,
     CryptoPaperWriterIntegrityError,
 )
-from test_r6_paper_crypto_writer import CREDS, NOW, RecordingTransport, _setup
+from test_r6_paper_crypto_writer import CREDS, NOW, GuardedRecordingTransport, _setup
 
 
 def test_transport_integrity_failure_after_unknown_is_ambiguous_and_reconciliation_only(tmp_path) -> None:
@@ -26,7 +26,7 @@ def test_transport_integrity_failure_after_unknown_is_ambiguous_and_reconciliati
         assert state.entry_attempt_count == 1
         assert state.restart_action == "RECONCILE_ONLY"
 
-    transport = RecordingTransport(
+    transport = GuardedRecordingTransport(
         error=CryptoPaperWriterIntegrityError("simulated oversized/untrusted response"),
         before=assert_unknown_before_fault,
     )
