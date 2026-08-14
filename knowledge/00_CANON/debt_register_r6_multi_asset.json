@@ -7,41 +7,72 @@
       "track": "R6",
       "area": "Native multi-asset ProductCapabilities and cross-product authority boundary",
       "severity": "P1",
-      "status": "OPEN",
+      "status": "CLOSED",
       "evidence": [
         "src/autotrade/product_profile.py",
+        "src/autotrade/brokers/alpaca_paper_crypto_canary_coordinator.py",
+        "src/autotrade/brokers/alpaca_paper_crypto_final_guard.py",
+        "scripts/check_r6_product_boundary.py",
+        "scripts/check_r6_crypto_execution_boundary.py",
         "tests/test_r6_multi_asset_product_profile.py",
+        "tests/test_r6_unsupported_products_boundary.py",
         "skills/crypto-trading/SKILL.md",
         "skills/multi-asset-safety/SKILL.md",
         "knowledge/30_DECISIONES/ADR-0009-native-multi-asset-equity-crypto.md"
       ],
-      "next_action": "Bind a fresh exact ProductCapabilities fingerprint into the durable crypto candidate, prepared package and final write guard, then add permanent cross-product CI proving equity market-clock/bracket semantics cannot enter crypto and crypto 24/7/fractional semantics cannot enter equities. Close only after exact-head CI evidence."
+      "resolution": "Closed after exact-head certification on f9ec065302a798a48a51b092fd6835a46416a2af: crypto ProductCapabilities is bound to exact broker asset evidence, its fingerprint is persisted in the durable lifecycle and prepared package, the last-write Final Guard requires fresh CRYPTO ProductCapabilities bound to fresh asset evidence and the same stable product contract, and permanent execution/product CI scans the complete alpaca_paper_crypto_*.py production family for cross-product authority leakage while preserving the certified US-equity session/bracket contract."
     },
     {
       "id": "TD-R6-015",
       "track": "R6",
       "area": "Crypto protective lifecycle after confirmed entry fills",
       "severity": "P1",
-      "status": "OPEN",
+      "status": "CLOSED",
       "evidence": [
         "skills/crypto-trading/SKILL.md",
         "knowledge/20_ARQUITECTURA/R6_MULTI_ASSET_CRYPTO_ARCHITECTURE.md",
-        "knowledge/30_DECISIONES/ADR-0009-native-multi-asset-equity-crypto.md"
+        "knowledge/30_DECISIONES/ADR-0009-native-multi-asset-equity-crypto.md",
+        "src/autotrade/brokers/alpaca_paper_crypto_protection_coordinator.py",
+        "src/autotrade/brokers/alpaca_paper_crypto_protection_operator_decision.py",
+        "src/autotrade/brokers/alpaca_paper_crypto_protection_final_guard.py",
+        "src/autotrade/brokers/alpaca_paper_crypto_protection_execution_attempt.py",
+        "src/autotrade/brokers/alpaca_paper_crypto_protection_execution_bridge.py",
+        "src/autotrade/brokers/alpaca_paper_crypto_pre_io.py",
+        "tests/test_r6_paper_crypto_protection_final_guard.py",
+        "tests/test_r6_paper_crypto_protection_execution_attempt.py",
+        "tests/test_r6_paper_crypto_protection_execution_bridge.py",
+        "tests/test_r6_paper_crypto_protection_pre_io.py",
+        "scripts/check_r6_crypto_protection_final_guard_boundary.py",
+        "scripts/check_r6_crypto_protection_execution_bridge_boundary.py"
       ],
-      "next_action": "Implement a crypto-specific protection state machine that reconciles confirmed entry fills before creating a protective stop-limit for no more than confirmed net position. Certify partial fills, trigger-without-fill, stale/canceled protection, disconnect, crash/restart, cancel/replace and PROTECTION_AT_RISK behavior without reusing equity bracket authority."
+      "resolution": "Closed after exact-head 7/7 certification on 392dd22beea2571681aa7582a8c6408ecd8a5776: protective SELL authority is bound to the exact confirmed net-long exposure and separate risk-reducing Safety decision; PRE_CONSUME is durably checkpointed before human-authority consumption; the same attempt is then bound through OMS SUBMITTING, durable PROTECTION_SUBMISSION_UNKNOWN and role-specific Final Guard PRE_IO before exactly one delegated PAPER transport call. Fresh protection evidence is additionally bound to the same stable PAPER account_reference and credential_reference, and those identities plus fresh-account/position fingerprints survive crash/restart inside the tamper-evident checkpoint. No equity bracket authority, blind retry, Mac execution surface or LIVE authority is introduced."
     },
     {
       "id": "TD-R6-016",
       "track": "R6",
       "area": "Crypto PAPER writer idempotency, UNKNOWN-before-I/O and reconciliation",
       "severity": "P1",
-      "status": "OPEN",
+      "status": "CLOSED",
       "evidence": [
         "skills/crypto-trading/SKILL.md",
         "knowledge/20_ARQUITECTURA/R6_MULTI_ASSET_CRYPTO_ARCHITECTURE.md",
-        "knowledge/30_DECISIONES/ADR-0009-native-multi-asset-equity-crypto.md"
+        "knowledge/30_DECISIONES/ADR-0009-native-multi-asset-equity-crypto.md",
+        "src/autotrade/brokers/alpaca_paper_crypto_writer.py",
+        "src/autotrade/brokers/alpaca_paper_crypto_pre_io.py",
+        "src/autotrade/brokers/alpaca_paper_crypto_execution_bridge.py",
+        "src/autotrade/brokers/alpaca_paper_crypto_execution_attempt.py",
+        "src/autotrade/brokers/alpaca_paper_crypto_final_guard.py",
+        "src/autotrade/brokers/alpaca_paper_crypto_reconciliation.py",
+        "src/autotrade/brokers/alpaca_paper_crypto_unknown_recovery.py",
+        "tests/test_r6_paper_crypto_writer.py",
+        "tests/test_r6_paper_crypto_writer_ambiguity.py",
+        "tests/test_r6_paper_crypto_execution_simulation.py",
+        "tests/test_r6_paper_crypto_reconciliation.py",
+        "tests/test_r6_paper_crypto_unknown_recovery.py",
+        "tests/test_r6_paper_crypto_unknown_recovery_adversarial.py",
+        "scripts/check_r6_crypto_execution_boundary.py"
       ],
-      "next_action": "Implement a dedicated crypto PAPER writer restricted to exact paper-api host and exact supported payload schema, with durable deterministic client_order_id, UNKNOWN persisted before network I/O, zero blind retry, exact ACK/fill reconciliation and explicit LIVE denial. No broker POST is allowed before this item and TD-R6-015 are structurally certified."
+      "resolution": "Closed after exact-head 7/7 certification on 392dd22beea2571681aa7582a8c6408ecd8a5776: enabled crypto writes reject raw/default or role-mismatched transports before lifecycle mutation or I/O, with ENTRY and PROTECTION as the only sanctioned nominal Final-Guard transports. The exact PAPER /v2/orders write remains one-shot with durable UNKNOWN-before-I/O and no blind retry. GET-only reconciliation is bound to the durable client_order_id, exact position truth and credential provenance. If the exact order lookup is HTTP 404, the original POST outcome remains unresolved, the gateway still performs the exact position GET, and a separate tamper-evident UNKNOWN recovery path can only HALT remaining exposure or reach FLAT_RECONCILED after fresh same-account all-account evidence proves zero positions and zero open orders. The original attempt_count=1 and client_order_id are preserved and retry_authorized remains false."
     },
     {
       "id": "TD-R6-017",
@@ -51,16 +82,17 @@
       "status": "OPEN",
       "evidence": [
         "skills/crypto-trading/SKILL.md",
-        "knowledge/20_ARQUITECTURA/R6_MULTI_ASSET_CRYPTO_ARCHITECTURE.md"
+        "knowledge/20_ARQUITECTURA/R6_MULTI_ASSET_CRYPTO_ARCHITECTURE.md",
+        "knowledge/60_EVIDENCE/R6_MAC_UAT_2026-08-14.md"
       ],
-      "next_action": "After writer and protection certification, run bounded human-approved PAPER canaries across multiple UTC/liquidity/weekend conditions and persist fills, fees, spread, slippage, protection acknowledgements/outcomes, reconciliation and stop-limit residual-risk evidence. Connectivity/rehearsal success alone cannot close this debt or support profitability claims."
+      "next_action": "Structural writer, protection and UNKNOWN/reconciliation authority is certified and the final real-Mac read-only UAT now passes for BTC/USD and ETH/USD. Next, only under explicit human approval, run a bounded PAPER qualification campaign across multiple UTC/liquidity/weekend conditions and persist fills, fees, spread, slippage, protection acknowledgements/outcomes, reconciliation, stop-limit residual-risk evidence and any PROTECTION_AT_RISK behavior. The successful Mac rehearsal is not broker-write qualification or profitability evidence, and no LIVE authority may be introduced."
     },
     {
       "id": "TD-R6-018",
       "track": "R6",
       "area": "Native Multi-Asset Mac Control Center and operator UAT",
       "severity": "P1",
-      "status": "OPEN",
+      "status": "CLOSED",
       "evidence": [
         "web/mac_multi_asset.html",
         "web/mac_dashboard.html",
@@ -69,9 +101,10 @@
         "scripts/mac_crypto_dashboard.py",
         "tests/test_mac_dashboard.py",
         "scripts/check_mac_dashboard_boundary.py",
-        "knowledge/60_EVIDENCE/R6_MAC_UAT_2026-08-12.md"
+        "knowledge/60_EVIDENCE/R6_MAC_UAT_2026-08-12.md",
+        "knowledge/60_EVIDENCE/R6_MAC_UAT_2026-08-14.md"
       ],
-      "next_action": "Certify one localhost Multi-Asset Hub with Equities and Crypto first-class routes, ephemeral credentials, machine-readable product authority state, reliable direct macOS browser open with safe fallback, no hidden crypto/equity POST path, and dual-architecture Mac FULL UAT on the final exact head."
+      "resolution": "Closed after final operator UAT on the actual Mac using the structurally certified FULL build from source head e756b4bad6ceadf94d719f347655cfd586cdddb6 (Mac FULL run 31810758675, artifact 9223065435, SHA-256 9f0dfaab1a9f2748bf6bfd11ecdbb7e6561c60ba422a590be0a1ac7c19d4d50e). The operator installed/opened the corrected Mac flow and observed successful BTC/USD and ETH/USD rehearsals with fresh PAPER account, exact asset/exchange, flat-account proof, quote+trade crypto evidence, ProductCapabilities PASS, Capital Safety APPROVED and OMS VALIDATED. Both runs explicitly reported Broker POST: NO, Capital authority: NONE, LIVE: BLOCKED and PASS · NO POST. Earlier UAT defects involving browser handoff, stale cross-pair UI results, orderbook-as-quote freshness and latest-event timestamp semantics were corrected before this final pass. This closure is Mac usability/read-only rehearsal evidence only and does not authorize PAPER POST, profitability claims or LIVE trading."
     }
   ]
 }

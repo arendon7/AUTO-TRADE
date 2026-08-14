@@ -13,6 +13,8 @@ from autotrade.brokers.alpaca_paper_crypto_asset import (
     PaperCryptoAssetReadPolicy,
 )
 from autotrade.brokers.alpaca_paper_crypto_market_data import (
+    LATEST_QUOTE_PATH,
+    LATEST_TRADE_PATH,
     AlpacaPaperCryptoMarketDataConfig,
     AlpacaPaperCryptoMarketDataDisabled,
     AlpacaPaperCryptoMarketDataGateway,
@@ -131,8 +133,14 @@ def test_crypto_market_config_and_disabled_gateway_fail_closed() -> None:
     for kwargs in (
         {"timeout_seconds": 0},
         {"max_response_bytes": 0},
-        {"max_component_age_seconds": 0},
-        {"max_component_skew_seconds": 121},
+        {"fresh_activity_age_seconds": 0},
+        {"fresh_activity_age_seconds": 121},
+        {"fresh_activity_age_seconds": 61, "max_reference_age_seconds": 60},
+        {"max_reference_age_seconds": 901},
+        {"max_spread_bps": -1},
+        {"max_spread_bps": 1001},
+        {"max_trade_mid_deviation_bps": -1},
+        {"max_trade_mid_deviation_bps": 1001},
         {"future_tolerance_seconds": 6},
     ):
         with pytest.raises(ValueError):
@@ -144,15 +152,17 @@ def test_crypto_market_config_and_disabled_gateway_fail_closed() -> None:
 
 
 class MarketShapeTransport:
-    def __init__(self, orderbooks: object, trades: object):
-        self.orderbooks = orderbooks
+    def __init__(self, quotes: object, trades: object):
+        self.quotes = quotes
         self.trades = trades
 
     def read(self, request):
-        if "orderbooks" in request.url:
-            body = json.dumps({"orderbooks": self.orderbooks}).encode()
-        else:
+        if LATEST_QUOTE_PATH in request.url:
+            body = json.dumps({"quotes": self.quotes}).encode()
+        elif LATEST_TRADE_PATH in request.url:
             body = json.dumps({"trades": self.trades}).encode()
+        else:
+            raise AssertionError(request.url)
         return AlpacaPaperMarketDataHttpResponse(
             status_code=200,
             body=body,
@@ -161,11 +171,13 @@ class MarketShapeTransport:
         )
 
 
-def _book(*, bid: object = "99999", ask: object = "100001", timestamp: str | None = None):
+def _quote(*, bid: object = "99999", ask: object = "100001", timestamp: str | None = None):
     return {
         "BTC/USD": {
-            "a": [{"p": ask, "s": "1"}],
-            "b": [{"p": bid, "s": "1"}],
+            "bp": bid,
+            "bs": "1",
+            "ap": ask,
+            "as": "1",
             "t": timestamp or NOW.isoformat().replace("+00:00", "Z"),
         }
     }
@@ -182,22 +194,22 @@ def _trades(*, price: object = "100000", timestamp: str | None = None):
 
 
 @pytest.mark.parametrize(
-    ("books", "trades"),
+    ("quotes", "trades"),
     [
         ([], _trades()),
         ({}, _trades()),
-        ({"BTC/USD": {"a": [], "b": []}}, _trades()),
-        (_book(bid="100002", ask="100001"), _trades()),
-        (_book(), []),
-        (_book(), {}),
-        (_book(), _trades(price="0")),
-        (_book(timestamp="not-time"), _trades()),
+        ({"BTC/USD": {}}, _trades()),
+        (_quote(bid="100002", ask="100001"), _trades()),
+        (_quote(ask="0"), _trades()),
+        (_quote(), []),
+        (_quote(), {}),
+        (_quote(), _trades(price="0")),
+        (_quote(timestamp="not-time"), _trades()),
     ],
 )
-def test_crypto_market_rejects_malformed_shapes(books: object, trades: object) -> None:
+def test_crypto_market_rejects_malformed_shapes(quotes: object, trades: object) -> None:
     gateway = AlpacaPaperCryptoMarketDataGateway(
-        AlpacaPaperCryptoMarketDataConfig(enabled=True),
-        transport=MarketShapeTransport(books, trades),
+        AlpacaPaperCryptoMarketDataConfig(enabled=True), transport=MarketShapeTransport(quotes, trades)
     )
     with pytest.raises(AlpacaPaperCryptoMarketDataIntegrityError):
         gateway.attest_snapshot(credentials=CREDS, now=NOW)
@@ -208,7 +220,7 @@ def test_crypto_market_rejects_future_and_naive_now() -> None:
     gateway = AlpacaPaperCryptoMarketDataGateway(
         AlpacaPaperCryptoMarketDataConfig(enabled=True),
         transport=MarketShapeTransport(
-            _book(timestamp=future_stamp),
+            _quote(timestamp=future_stamp),
             _trades(timestamp=future_stamp),
         ),
     )
@@ -216,3 +228,19 @@ def test_crypto_market_rejects_future_and_naive_now() -> None:
         gateway.attest_snapshot(credentials=CREDS, now=NOW)
     with pytest.raises(ValueError, match="timezone-aware"):
         gateway.attest_snapshot(credentials=CREDS, now=NOW.replace(tzinfo=None))
+
+
+def test_crypto_market_rejects_wide_spread_and_trade_quote_dislocation() -> None:
+    wide = AlpacaPaperCryptoMarketDataGateway(
+        AlpacaPaperCryptoMarketDataConfig(enabled=True, max_spread_bps=50),
+        transport=MarketShapeTransport(_quote(bid="99000", ask="101000"), _trades(price="100000")),
+    )
+    with pytest.raises(AlpacaPaperCryptoMarketDataIntegrityError, match="spread exceeds"):
+        wide.attest_snapshot(credentials=CREDS, now=NOW)
+
+    dislocated = AlpacaPaperCryptoMarketDataGateway(
+        AlpacaPaperCryptoMarketDataConfig(enabled=True, max_trade_mid_deviation_bps=50),
+        transport=MarketShapeTransport(_quote(), _trades(price="99000")),
+    )
+    with pytest.raises(AlpacaPaperCryptoMarketDataIntegrityError, match="deviates from quote midpoint"):
+        dislocated.attest_snapshot(credentials=CREDS, now=NOW)

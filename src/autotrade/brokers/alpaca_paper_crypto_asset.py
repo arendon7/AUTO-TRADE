@@ -122,8 +122,6 @@ class AlpacaPaperCryptoAssetAttestation:
             raise ValueError("crypto asset id is required")
         if self.asset_class != "crypto":
             raise ValueError("crypto attestation requires asset class crypto")
-        # Alpaca Trading API changed its crypto asset exchange enum to CRYPTO in July 2026.
-        # Fail closed on stale/other exchange values so provider drift is visible immediately.
         if self.exchange != CURRENT_TRADING_API_CRYPTO_EXCHANGE:
             raise ValueError("crypto asset exchange must match current Alpaca Trading API CRYPTO enum")
         if self.status != "active" or self.tradable is not True or self.fractionable is not True:
@@ -151,12 +149,8 @@ class AlpacaPaperCryptoAssetAttestation:
         if self.source_host != ALPACA_PAPER_TRADING_HOST or self.source_path != crypto_asset_path(canonical):
             raise ValueError("crypto asset source is not exact PAPER pair endpoint")
 
-    @property
-    def fingerprint(self) -> str:
-        raw = json.dumps(self.to_dict(), sort_keys=True, separators=(",", ":"), allow_nan=False)
-        return sha256(raw.encode("utf-8")).hexdigest()
-
-    def to_dict(self) -> dict[str, object]:
+    def contract_payload(self) -> dict[str, object]:
+        """Stable broker product contract, excluding observation/account freshness evidence."""
         return {
             "symbol": self.symbol,
             "asset_id": self.asset_id,
@@ -170,13 +164,33 @@ class AlpacaPaperCryptoAssetAttestation:
             "min_order_size": str(self.min_order_size),
             "min_trade_increment": str(self.min_trade_increment),
             "price_increment": str(self.price_increment),
+            "source_host": self.source_host,
+            "source_path": self.source_path,
+        }
+
+    @property
+    def contract_fingerprint(self) -> str:
+        raw = json.dumps(
+            self.contract_payload(),
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        )
+        return sha256(raw.encode("utf-8")).hexdigest()
+
+    @property
+    def fingerprint(self) -> str:
+        raw = json.dumps(self.to_dict(), sort_keys=True, separators=(",", ":"), allow_nan=False)
+        return sha256(raw.encode("utf-8")).hexdigest()
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            **self.contract_payload(),
             "account_attestation_fingerprint": self.account_attestation_fingerprint,
             "credential_reference": self.credential_reference,
             "observed_at": self.observed_at.astimezone(timezone.utc).isoformat(),
             "request_id": self.request_id,
             "response_sha256": self.response_sha256,
-            "source_host": self.source_host,
-            "source_path": self.source_path,
         }
 
 

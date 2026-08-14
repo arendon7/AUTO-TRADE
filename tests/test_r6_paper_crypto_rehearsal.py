@@ -18,8 +18,8 @@ from autotrade.brokers.alpaca_paper_crypto_asset import (
     normalize_crypto_pair,
 )
 from autotrade.brokers.alpaca_paper_crypto_market_data import (
+    LATEST_QUOTE_PATH,
     LATEST_TRADE_PATH,
-    ORDERBOOK_PATH,
     AlpacaPaperCryptoMarketDataConfig,
     AlpacaPaperCryptoMarketDataGateway,
     AlpacaPaperCryptoMarketDataIntegrityError,
@@ -162,8 +162,7 @@ def test_crypto_asset_rejects_requested_response_pair_mismatch_and_stale_exchang
 )
 def test_crypto_asset_fails_closed_on_wrong_product_or_constraints(field: str, value: object) -> None:
     gateway = AlpacaPaperCryptoAssetGateway(
-        config=AlpacaPaperGatewayConfig(enabled=True),
-        transport=AssetTransport(asset_payload(**{field: value})),
+        config=AlpacaPaperGatewayConfig(enabled=True), transport=AssetTransport(asset_payload(**{field: value}))
     )
     with pytest.raises((PaperCryptoAssetIntegrityError, ValueError)):
         gateway.attest_asset(
@@ -182,29 +181,34 @@ class CryptoMarketTransport:
         bid: object = "99999",
         ask: object = "100001",
         last: object = "100000",
-        observed_at: datetime | None = None,
+        quote_observed_at: datetime | None = None,
+        trade_observed_at: datetime | None = None,
     ) -> None:
         self.symbol = symbol
         self.bid = bid
         self.ask = ask
         self.last = last
-        self.observed_at = observed_at or (NOW - timedelta(seconds=1))
+        self.quote_observed_at = quote_observed_at or (NOW - timedelta(seconds=1))
+        self.trade_observed_at = trade_observed_at or (NOW - timedelta(seconds=1))
         self.requests = []
 
     def read(self, request):
         self.requests.append(request)
-        timestamp = self.observed_at.isoformat().replace("+00:00", "Z")
-        if ORDERBOOK_PATH in request.url:
+        if LATEST_QUOTE_PATH in request.url:
+            timestamp = self.quote_observed_at.isoformat().replace("+00:00", "Z")
             payload = {
-                "orderbooks": {
+                "quotes": {
                     self.symbol: {
-                        "a": [{"p": self.ask, "s": "0.5"}],
-                        "b": [{"p": self.bid, "s": "0.4"}],
+                        "bp": self.bid,
+                        "bs": "0.4",
+                        "ap": self.ask,
+                        "as": "0.5",
                         "t": timestamp,
                     }
                 }
             }
         elif LATEST_TRADE_PATH in request.url:
+            timestamp = self.trade_observed_at.isoformat().replace("+00:00", "Z")
             payload = {"trades": {self.symbol: {"p": self.last, "s": "0.001", "t": timestamp}}}
         else:
             raise AssertionError(request.url)
@@ -216,7 +220,7 @@ class CryptoMarketTransport:
         )
 
 
-def test_crypto_market_uses_exact_two_gets_and_builds_fresh_snapshot() -> None:
+def test_crypto_market_uses_exact_latest_quote_and_trade_gets_and_builds_fresh_snapshot() -> None:
     transport = CryptoMarketTransport()
     gateway = AlpacaPaperCryptoMarketDataGateway(
         AlpacaPaperCryptoMarketDataConfig(enabled=True), transport=transport
@@ -226,11 +230,34 @@ def test_crypto_market_uses_exact_two_gets_and_builds_fresh_snapshot() -> None:
     assert result.market.bid == Decimal("99999")
     assert result.market.ask == Decimal("100001")
     assert result.market.last == Decimal("100000")
+    assert result.market.observed_at == NOW
+    assert result.quote_observed_at == NOW - timedelta(seconds=1)
+    assert result.quote_age_seconds == Decimal("1.0")
+    assert result.trade_age_seconds == Decimal("1.0")
+    assert result.activity_witness == "QUOTE"
+    assert len(result.quote_response_sha256) == 64
     assert len(transport.requests) == 2
     assert all(request.method == "GET" for request in transport.requests)
-    assert ORDERBOOK_PATH in transport.requests[0].url
+    assert LATEST_QUOTE_PATH in transport.requests[0].url
     assert LATEST_TRADE_PATH in transport.requests[1].url
     assert all("symbols=BTC/USD" in request.url for request in transport.requests)
+
+
+def test_crypto_market_contract_does_not_use_orderbook_as_quote_freshness_proxy() -> None:
+    source = (
+        Path(__file__).resolve().parents[1] / "src/autotrade/brokers/alpaca_paper_crypto_market_data.py"
+    ).read_text(encoding="utf-8")
+    assert 'LATEST_QUOTE_PATH = "/v1beta3/crypto/us/latest/quotes"' in source
+    assert 'LATEST_TRADE_PATH = "/v1beta3/crypto/us/latest/trades"' in source
+    assert "/latest/orderbooks" not in source
+    assert 'root.get("quotes")' in source
+    assert 'quote.get("bp")' in source
+    assert 'quote.get("ap")' in source
+    assert 'quote.get("t")' in source
+    assert "fresh_activity_age_seconds" in source
+    assert "max_reference_age_seconds" in source
+    assert "crypto market has no recent quote/trade activity" in source
+    assert "crypto latest trade deviates from quote midpoint" in source
 
 
 def test_crypto_market_supports_second_pair_without_cross_pair_data() -> None:
@@ -249,16 +276,52 @@ def test_crypto_market_supports_second_pair_without_cross_pair_data() -> None:
         ).attest_snapshot(credentials=CREDS, now=NOW, symbol="ETH/USD")
 
 
-def test_crypto_market_rejects_zero_or_stale_prices() -> None:
+def test_crypto_market_accepts_one_recent_activity_witness_with_bounded_quiet_component() -> None:
+    quote_quiet = CryptoMarketTransport(
+        quote_observed_at=NOW - timedelta(seconds=90),
+        trade_observed_at=NOW - timedelta(seconds=2),
+    )
+    quote_result = AlpacaPaperCryptoMarketDataGateway(
+        AlpacaPaperCryptoMarketDataConfig(enabled=True), transport=quote_quiet
+    ).attest_snapshot(credentials=CREDS, now=NOW)
+    assert quote_result.activity_witness == "TRADE"
+    assert quote_result.quote_age_seconds == Decimal("90.0")
+    assert quote_result.market.observed_at == NOW
+
+    trade_quiet = CryptoMarketTransport(
+        quote_observed_at=NOW - timedelta(seconds=2),
+        trade_observed_at=NOW - timedelta(seconds=90),
+    )
+    trade_result = AlpacaPaperCryptoMarketDataGateway(
+        AlpacaPaperCryptoMarketDataConfig(enabled=True), transport=trade_quiet
+    ).attest_snapshot(credentials=CREDS, now=NOW)
+    assert trade_result.activity_witness == "QUOTE"
+    assert trade_result.trade_age_seconds == Decimal("90.0")
+    assert trade_result.market.observed_at == NOW
+
+
+def test_crypto_market_rejects_zero_no_recent_activity_or_unbounded_reference() -> None:
     with pytest.raises(AlpacaPaperCryptoMarketDataIntegrityError, match="positive"):
         AlpacaPaperCryptoMarketDataGateway(
-            AlpacaPaperCryptoMarketDataConfig(enabled=True),
-            transport=CryptoMarketTransport(ask="0"),
+            AlpacaPaperCryptoMarketDataConfig(enabled=True), transport=CryptoMarketTransport(ask="0")
         ).attest_snapshot(credentials=CREDS, now=NOW)
-    with pytest.raises(AlpacaPaperCryptoMarketDataIntegrityError, match="stale"):
+
+    with pytest.raises(AlpacaPaperCryptoMarketDataIntegrityError, match="no recent quote/trade activity"):
         AlpacaPaperCryptoMarketDataGateway(
             AlpacaPaperCryptoMarketDataConfig(enabled=True),
-            transport=CryptoMarketTransport(observed_at=NOW - timedelta(seconds=61)),
+            transport=CryptoMarketTransport(
+                quote_observed_at=NOW - timedelta(seconds=61),
+                trade_observed_at=NOW - timedelta(seconds=61),
+            ),
+        ).attest_snapshot(credentials=CREDS, now=NOW)
+
+    with pytest.raises(AlpacaPaperCryptoMarketDataIntegrityError, match="reference is too old"):
+        AlpacaPaperCryptoMarketDataGateway(
+            AlpacaPaperCryptoMarketDataConfig(enabled=True),
+            transport=CryptoMarketTransport(
+                quote_observed_at=NOW - timedelta(seconds=301),
+                trade_observed_at=NOW - timedelta(seconds=1),
+            ),
         ).attest_snapshot(credentials=CREDS, now=NOW)
 
 
@@ -303,10 +366,13 @@ def test_crypto_rehearsal_runs_profile_safety_and_oms_without_broker_write(monke
             bid=Decimal("4999"),
             ask=Decimal("5001"),
             last=Decimal("5000"),
-            observed_at=NOW - timedelta(seconds=1),
+            observed_at=NOW,
         ),
         fingerprint="c" * 64,
         location="us",
+        quote_age_seconds=Decimal("2"),
+        trade_age_seconds=Decimal("90"),
+        activity_witness="QUOTE",
     )
 
     class AccountGateway:

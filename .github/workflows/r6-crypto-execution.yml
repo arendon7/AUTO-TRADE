@@ -1,0 +1,219 @@
+name: R6 Crypto PAPER Execution Authority
+
+on:
+  push:
+    branches:
+      - "work/r6-crypto-paper-execution"
+  pull_request:
+    paths:
+      - "src/autotrade/product_profile.py"
+      - "src/autotrade/brokers/alpaca_paper_crypto_*.py"
+      - "scripts/check_r6_crypto_*.py"
+      - "scripts/check_r6_execution_bridge_boundary.py"
+      - "scripts/check_r6_authority.py"
+      - "tests/test_r6_crypto_*.py"
+      - "tests/test_r6_paper_crypto_*.py"
+      - "tests/test_r6_execution_bridge_boundary.py"
+      - "skills/crypto-trading/**"
+      - "skills/multi-asset-safety/**"
+      - "knowledge/00_CANON/debt_register_r6_multi_asset.json"
+      - ".github/workflows/r6-crypto-execution.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  crypto-execution-authority:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout exact head
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install project
+        run: python -m pip install -e '.[dev]'
+
+      - name: Compile crypto execution surface
+        run: |
+          python -m compileall -q \
+            src/autotrade/product_profile.py \
+            src/autotrade/brokers/alpaca_paper_crypto_asset.py \
+            src/autotrade/brokers/alpaca_paper_crypto_catalog.py \
+            src/autotrade/brokers/alpaca_paper_crypto_market_data.py \
+            src/autotrade/brokers/alpaca_paper_crypto_order.py \
+            src/autotrade/brokers/alpaca_paper_crypto_lifecycle.py \
+            src/autotrade/brokers/alpaca_paper_crypto_canary_coordinator.py \
+            src/autotrade/brokers/alpaca_paper_crypto_protection_coordinator.py \
+            src/autotrade/brokers/alpaca_paper_crypto_operator_decision.py \
+            src/autotrade/brokers/alpaca_paper_crypto_final_guard.py \
+            src/autotrade/brokers/alpaca_paper_crypto_execution_attempt.py \
+            src/autotrade/brokers/alpaca_paper_crypto_execution_bridge.py \
+            src/autotrade/brokers/alpaca_paper_crypto_pre_io.py \
+            src/autotrade/brokers/alpaca_paper_crypto_execution_simulation.py \
+            src/autotrade/brokers/alpaca_paper_crypto_writer.py \
+            src/autotrade/brokers/alpaca_paper_crypto_reconciliation.py \
+            src/autotrade/brokers/alpaca_paper_crypto_unknown_recovery.py
+
+      - name: Global R6 PAPER authority boundary
+        run: python scripts/check_r6_authority.py
+
+      - name: Permanent crypto execution authority boundary
+        run: python scripts/check_r6_crypto_execution_boundary.py
+
+      - name: Offline crypto canary coordinator boundary
+        run: python scripts/check_r6_crypto_canary_coordinator_boundary.py
+
+      - name: Offline crypto protection coordinator boundary
+        run: python scripts/check_r6_crypto_protection_boundary.py
+
+      - name: Human crypto operator decision boundary
+        run: python scripts/check_r6_crypto_operator_decision_boundary.py
+
+      - name: Crypto final freshness boundary
+        run: python scripts/check_r6_crypto_final_guard_boundary.py
+
+      - name: Crypto same-attempt checkpoint boundary
+        run: python scripts/check_r6_crypto_execution_attempt_boundary.py
+
+      - name: Equity + crypto execution bridge boundary
+        run: python scripts/check_r6_execution_bridge_boundary.py
+
+      - name: Guarded crypto execution simulation boundary
+        run: python scripts/check_r6_crypto_execution_simulation_boundary.py
+
+      - name: Permanent multi-asset product boundary
+        run: python scripts/check_r6_product_boundary.py
+
+      - name: Machine-readable debt contract
+        run: python scripts/check_debt_register.py
+
+      - name: Crypto ProductCapabilities and pair contracts
+        run: |
+          pytest -q \
+            tests/test_r6_multi_asset_product_profile.py \
+            tests/test_r6_paper_crypto_catalog.py \
+            tests/test_r6_paper_crypto_rehearsal.py \
+            tests/test_r6_paper_crypto_order.py
+
+      - name: Crypto offline first-canary preparation
+        run: |
+          pytest -q \
+            tests/test_r6_paper_crypto_canary_coordinator.py \
+            tests/test_r6_crypto_canary_coordinator_boundary.py
+
+      - name: Crypto reconciliation-bound offline protection preparation
+        run: |
+          pytest -q \
+            tests/test_r6_paper_crypto_protection_coordinator.py \
+            tests/test_r6_paper_crypto_protection_coordinator_adversarial.py \
+            tests/test_r6_crypto_protection_boundary.py
+
+      - name: Crypto durable human operator authority
+        run: |
+          pytest -q \
+            tests/test_r6_paper_crypto_operator_decision.py \
+            tests/test_r6_crypto_operator_decision_boundary.py
+
+      - name: Crypto durable same-attempt checkpoint and restart recovery
+        run: |
+          pytest -q \
+            tests/test_r6_paper_crypto_execution_attempt.py \
+            tests/test_r6_paper_crypto_execution_attempt_adversarial.py \
+            tests/test_r6_crypto_execution_attempt_boundary.py
+
+      - name: Crypto checkpoint-aware OMS execution bridge
+        run: |
+          pytest -q \
+            tests/test_r6_paper_crypto_execution_bridge.py \
+            tests/test_r6_execution_bridge_boundary.py
+
+      - name: Crypto final freshness and stable contract identity
+        run: |
+          pytest -q --junitxml=crypto-final-freshness-junit.xml \
+            tests/test_r6_paper_crypto_final_guard.py \
+            tests/test_r6_paper_crypto_final_guard_adversarial.py \
+            tests/test_r6_crypto_final_guard_boundary.py
+
+      - name: Upload final freshness JUnit diagnostics
+        if: ${{ always() && hashFiles('crypto-final-freshness-junit.xml') != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: r6-crypto-final-freshness-junit
+          path: crypto-final-freshness-junit.xml
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Crypto guarded PRE_IO interlock adversarial coverage
+        run: |
+          pytest -q \
+            tests/test_r6_paper_crypto_pre_io_adversarial.py \
+            tests/test_r6_paper_crypto_protection_pre_io.py
+
+      - name: Crypto guarded end-to-end execution simulation
+        run: |
+          pytest -q \
+            tests/test_r6_paper_crypto_execution_simulation.py \
+            tests/test_r6_paper_crypto_execution_contract_adversarial.py \
+            tests/test_r6_crypto_execution_simulation_boundary.py
+
+      - name: Crypto durable lifecycle and adversarial recovery
+        run: |
+          pytest -q \
+            tests/test_r6_paper_crypto_lifecycle.py \
+            tests/test_r6_paper_crypto_lifecycle_adversarial.py
+
+      - name: Crypto one-shot writer, reconciliation and UNKNOWN recovery
+        run: |
+          pytest -q \
+            tests/test_r6_paper_crypto_writer.py \
+            tests/test_r6_paper_crypto_writer_ambiguity.py \
+            tests/test_r6_paper_crypto_reconciliation.py \
+            tests/test_r6_paper_crypto_unknown_recovery.py \
+            tests/test_r6_paper_crypto_unknown_recovery_adversarial.py \
+            tests/test_r6_crypto_execution_boundary.py
+
+      - name: Prove user-facing Mac crypto remains NO-POST
+        run: |
+          python scripts/check_mac_dashboard_boundary.py
+          python - <<'PY'
+          from pathlib import Path
+          root = Path('.')
+          surfaces = [
+              root / 'scripts/mac_dashboard.py',
+              root / 'scripts/mac_crypto_dashboard.py',
+              root / 'scripts/mac_crypto_paper_rehearsal.py',
+              root / 'web/mac_multi_asset.html',
+              root / 'web/mac_crypto_dashboard.html',
+              root / 'ABRIR_AUTO_TRADE.command',
+              root / 'ABRIR_CRYPTO_PAPER.command',
+          ]
+          text = '\n'.join(p.read_text(encoding='utf-8') for p in surfaces if p.is_file())
+          forbidden = (
+              'alpaca_paper_crypto_writer',
+              'alpaca_paper_crypto_operator_decision',
+              'alpaca_paper_crypto_final_guard',
+              'alpaca_paper_crypto_execution_attempt',
+              'alpaca_paper_crypto_execution_bridge',
+              'alpaca_paper_crypto_pre_io',
+              'alpaca_paper_crypto_execution_simulation',
+              'alpaca_paper_crypto_protection_coordinator',
+              'alpaca_paper_crypto_unknown_recovery',
+              'CryptoPaperWriterConfig(enabled=True)',
+              'record_operator_approval(',
+              'record_pre_consume(',
+              'stage_after_checkpoint(',
+              'prepare_protection(',
+              'submit_once(',
+              'R6_CRYPTO_EXTERNAL_PAPER_WRITE=ENABLED',
+          )
+          for token in forbidden:
+              assert token not in text, f'user-facing crypto execution surface leaked: {token}'
+          print('Mac crypto user-facing NO-POST/NO-APPROVAL boundary: PASS')
+          PY
