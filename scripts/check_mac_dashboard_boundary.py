@@ -127,9 +127,18 @@ def main() -> int:
             "PAPER WRITE · DISABLED",
             "LIVE · BLOCKED",
             "NO POST",
+            "function clearResult(",
+            "function beginAttempt(",
+            "function blockResult(",
+            "function technicalSummary(",
+            "Causa técnica resumida:",
+            "El resultado anterior fue invalidado",
+            'blockResult(symbol);const tech=technicalSummary(d)',
         ):
             if anchor not in crypto:
                 errors.append(f"crypto dashboard anchor missing: {anchor}")
+        if 'Diagnóstico técnico:' in crypto:
+            errors.append("crypto dashboard must not render raw traceback diagnostics in the primary operator log")
         for forbidden in FORBIDDEN + STORAGE_CALLS + ('<script src=', '<link rel="stylesheet" href='):
             if forbidden in crypto:
                 errors.append(f"crypto dashboard contains forbidden surface: {forbidden}")
@@ -211,8 +220,9 @@ def main() -> int:
         return 1
     print(
         "AUTO-TRADE Mac Multi-Asset Control Center boundary: PASS "
-        "(localhost-only; Equities + Crypto routes; ephemeral PAPER credentials; safe allowlist; "
-        "FULL standalone integration; no Final Freshness/staging/POST/LIVE surface)"
+        "(localhost-only; Equities + Crypto routes; ephemeral PAPER credentials; stale-result invalidation; "
+        "summarized operator diagnostics; safe allowlist; FULL standalone integration; "
+        "no Final Freshness/staging/POST/LIVE surface)"
     )
     return 0
 
