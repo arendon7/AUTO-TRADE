@@ -125,7 +125,7 @@ def test_guarded_transport_rejects_non_attestation_and_preconsume_evidence(tmp_p
     delegate = RecordingDelegate()
 
     guarded = FinalGuardedCryptoEntryTransport(delegate=delegate, authorizer=lambda: object())
-    with pytest.raises(CryptoPreIoInterlockError, match="invalid evidence"):
+    with pytest.raises(CryptoPreIoInterlockError, match="invalid ENTRY evidence"):
         guarded.post(
             host=ALPACA_PAPER_TRADING_HOST,
             path=CRYPTO_ORDERS_PATH,
