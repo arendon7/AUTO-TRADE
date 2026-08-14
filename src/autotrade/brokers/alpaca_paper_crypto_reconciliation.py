@@ -211,9 +211,10 @@ class CryptoBrokerReconciliation:
 class CryptoBrokerUnknownReconciliation:
     """GET-only evidence for an UNKNOWN write whose exact order lookup is 404.
 
-    A 404 is evidence of current order absence only. It is never permission to
-    retry a POST. Exact position truth is still collected and must be resolved
-    by the dedicated offline unknown-recovery coordinator.
+    The original POST outcome remains unresolved. A 404 is evidence of current
+    order absence only and is never permission to retry a POST. Exact position
+    truth is still collected and must be resolved by the dedicated offline
+    unknown-recovery coordinator.
     """
 
     order_absence: CryptoBrokerOrderAbsenceEvidence
@@ -301,8 +302,8 @@ class AlpacaPaperCryptoReconciliationGateway:
             )
             order_absence = None
 
-        # IMPORTANT: position truth is read even when exact order lookup is 404.
-        # The absence result remains reconciliation-only and never authorizes POST.
+        # Position truth is read even when exact order lookup is 404. The
+        # original POST outcome remains unresolved and retry remains forbidden.
         position_url = (
             "https" + "://" + ALPACA_PAPER_TRADING_HOST + POSITION_PATH_PREFIX
             + symbol.replace("/", "%2F")
