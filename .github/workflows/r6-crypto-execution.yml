@@ -58,7 +58,8 @@ jobs:
             src/autotrade/brokers/alpaca_paper_crypto_pre_io.py \
             src/autotrade/brokers/alpaca_paper_crypto_execution_simulation.py \
             src/autotrade/brokers/alpaca_paper_crypto_writer.py \
-            src/autotrade/brokers/alpaca_paper_crypto_reconciliation.py
+            src/autotrade/brokers/alpaca_paper_crypto_reconciliation.py \
+            src/autotrade/brokers/alpaca_paper_crypto_unknown_recovery.py
 
       - name: Global R6 PAPER authority boundary
         run: python scripts/check_r6_authority.py
@@ -168,12 +169,13 @@ jobs:
             tests/test_r6_paper_crypto_lifecycle.py \
             tests/test_r6_paper_crypto_lifecycle_adversarial.py
 
-      - name: Crypto one-shot writer and reconciliation
+      - name: Crypto one-shot writer, reconciliation and UNKNOWN recovery
         run: |
           pytest -q \
             tests/test_r6_paper_crypto_writer.py \
             tests/test_r6_paper_crypto_writer_ambiguity.py \
             tests/test_r6_paper_crypto_reconciliation.py \
+            tests/test_r6_paper_crypto_unknown_recovery.py \
             tests/test_r6_crypto_execution_boundary.py
 
       - name: Prove user-facing Mac crypto remains NO-POST
@@ -201,6 +203,7 @@ jobs:
               'alpaca_paper_crypto_pre_io',
               'alpaca_paper_crypto_execution_simulation',
               'alpaca_paper_crypto_protection_coordinator',
+              'alpaca_paper_crypto_unknown_recovery',
               'CryptoPaperWriterConfig(enabled=True)',
               'record_operator_approval(',
               'record_pre_consume(',
