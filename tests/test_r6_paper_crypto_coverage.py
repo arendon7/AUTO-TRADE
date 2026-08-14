@@ -133,8 +133,14 @@ def test_crypto_market_config_and_disabled_gateway_fail_closed() -> None:
     for kwargs in (
         {"timeout_seconds": 0},
         {"max_response_bytes": 0},
-        {"max_component_age_seconds": 0},
-        {"max_component_skew_seconds": 121},
+        {"fresh_activity_age_seconds": 0},
+        {"fresh_activity_age_seconds": 121},
+        {"fresh_activity_age_seconds": 61, "max_reference_age_seconds": 60},
+        {"max_reference_age_seconds": 901},
+        {"max_spread_bps": -1},
+        {"max_spread_bps": 1001},
+        {"max_trade_mid_deviation_bps": -1},
+        {"max_trade_mid_deviation_bps": 1001},
         {"future_tolerance_seconds": 6},
     ):
         with pytest.raises(ValueError):
@@ -203,8 +209,7 @@ def _trades(*, price: object = "100000", timestamp: str | None = None):
 )
 def test_crypto_market_rejects_malformed_shapes(quotes: object, trades: object) -> None:
     gateway = AlpacaPaperCryptoMarketDataGateway(
-        AlpacaPaperCryptoMarketDataConfig(enabled=True),
-        transport=MarketShapeTransport(quotes, trades),
+        AlpacaPaperCryptoMarketDataConfig(enabled=True), transport=MarketShapeTransport(quotes, trades)
     )
     with pytest.raises(AlpacaPaperCryptoMarketDataIntegrityError):
         gateway.attest_snapshot(credentials=CREDS, now=NOW)
@@ -223,3 +228,19 @@ def test_crypto_market_rejects_future_and_naive_now() -> None:
         gateway.attest_snapshot(credentials=CREDS, now=NOW)
     with pytest.raises(ValueError, match="timezone-aware"):
         gateway.attest_snapshot(credentials=CREDS, now=NOW.replace(tzinfo=None))
+
+
+def test_crypto_market_rejects_wide_spread_and_trade_quote_dislocation() -> None:
+    wide = AlpacaPaperCryptoMarketDataGateway(
+        AlpacaPaperCryptoMarketDataConfig(enabled=True, max_spread_bps=50),
+        transport=MarketShapeTransport(_quote(bid="99000", ask="101000"), _trades(price="100000")),
+    )
+    with pytest.raises(AlpacaPaperCryptoMarketDataIntegrityError, match="spread exceeds"):
+        wide.attest_snapshot(credentials=CREDS, now=NOW)
+
+    dislocated = AlpacaPaperCryptoMarketDataGateway(
+        AlpacaPaperCryptoMarketDataConfig(enabled=True, max_trade_mid_deviation_bps=50),
+        transport=MarketShapeTransport(_quote(), _trades(price="99000")),
+    )
+    with pytest.raises(AlpacaPaperCryptoMarketDataIntegrityError, match="deviates from quote midpoint"):
+        dislocated.attest_snapshot(credentials=CREDS, now=NOW)
