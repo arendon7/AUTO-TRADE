@@ -53,6 +53,8 @@ KEY_ENV = "APCA_API_KEY_ID"
 SECRET_ENV = "APCA_API_SECRET_KEY"
 STRATEGY_ID = "R6_CRYPTO_PAPER_QUALIFICATION_PREVIEW"
 PREVIEW_MAX_NOTIONAL = Decimal("5")
+PREVIEW_TARGET_NOTIONAL = Decimal("2")
+MIN_BUY_MARKET_VALUE = Decimal("1")
 MAX_ACCOUNT_FRACTION = Decimal("0.001")
 QUALIFICATION_STOP_BPS = Decimal("100")
 QUALIFICATION_LIMIT_BPS = Decimal("150")
@@ -118,6 +120,24 @@ def _ceil(value: Decimal, increment: Decimal) -> Decimal:
 def _floor(value: Decimal, increment: Decimal) -> Decimal:
     units = (value / increment).to_integral_value(rounding=ROUND_FLOOR)
     return units * increment
+
+
+def _qualification_quantity(
+    *,
+    min_order_size: Decimal,
+    min_trade_increment: Decimal,
+    limit_price: Decimal,
+) -> Decimal:
+    if limit_price <= 0 or min_order_size <= 0 or min_trade_increment <= 0:
+        raise CryptoPaperCanaryPreviewError("qualification sizing inputs must be positive")
+    broker_minimum = _ceil(min_order_size, min_trade_increment)
+    target_minimum = _ceil(PREVIEW_TARGET_NOTIONAL / limit_price, min_trade_increment)
+    quantity = max(broker_minimum, target_minimum)
+    notional = quantity * limit_price
+    if notional < MIN_BUY_MARKET_VALUE:
+        quantity = _ceil(MIN_BUY_MARKET_VALUE / limit_price, min_trade_increment)
+        quantity = max(quantity, broker_minimum)
+    return quantity
 
 
 def _qualification_protection_reference(entry_price: Decimal, price_increment: Decimal) -> tuple[Decimal, Decimal]:
@@ -205,14 +225,22 @@ def run(
     if effective_cap <= 0:
         raise CryptoPaperCanaryPreviewError("PAPER account has no positive qualification-preview capacity")
 
-    quantity = asset.min_order_size
     limit_price = _ceil(market.ask, asset.price_increment)
+    quantity = _qualification_quantity(
+        min_order_size=asset.min_order_size,
+        min_trade_increment=asset.min_trade_increment,
+        limit_price=limit_price,
+    )
     notional = quantity * limit_price
     if quantity % asset.min_trade_increment != 0:
-        raise CryptoPaperCanaryPreviewError("minimum BTC/USD quantity violates current broker increment")
+        raise CryptoPaperCanaryPreviewError("qualification BTC/USD quantity violates current broker increment")
+    if quantity < asset.min_order_size:
+        raise CryptoPaperCanaryPreviewError("qualification BTC/USD quantity is below current broker minimum")
+    if notional < MIN_BUY_MARKET_VALUE:
+        raise CryptoPaperCanaryPreviewError("qualification BTC/USD buy value is below the USD 1 market-value floor")
     if notional > effective_cap:
         raise CryptoPaperCanaryPreviewError(
-            f"minimum BTC/USD notional {notional} exceeds qualification preview hard cap {effective_cap}"
+            f"qualification BTC/USD notional {notional} exceeds qualification preview hard cap {effective_cap}"
         )
 
     base_currency, quote_currency = canonical.split("/", 1)
@@ -259,7 +287,7 @@ def run(
             price_tick=asset.price_increment,
             quantity_step=asset.min_trade_increment,
             min_quantity=asset.min_order_size,
-            max_quantity=asset.min_order_size,
+            max_quantity=quantity,
             min_notional=None,
             max_notional=effective_cap,
             trading_status=InstrumentTradingStatus.TRADING,
@@ -306,21 +334,26 @@ def run(
             safety_state_store=safety_state,
         )
         lifecycle = SQLiteCryptoPaperLifecycle(runtime)
-        prepared = CryptoPaperCanaryCoordinator(oms=oms).prepare_entry(
-            intent=intent,
-            decision=decision,
-            market_attestation=market_attestation,
-            account_attestation=account,
-            asset_attestation=asset,
-            product_profile=product_profile,
-            lifecycle=lifecycle,
-            now=instant,
-            certified_tracks=CERTIFIED_TRACKS,
-            reconciliation_clean=True,
-            unresolved_unknown_orders=0,
-            relevant_open_orders=flat.open_order_count,
-            confirmed_pair_position_quantity=Decimal("0"),
-        )
+        try:
+            prepared = CryptoPaperCanaryCoordinator(oms=oms).prepare_entry(
+                intent=intent,
+                decision=decision,
+                market_attestation=market_attestation,
+                account_attestation=account,
+                asset_attestation=asset,
+                product_profile=product_profile,
+                lifecycle=lifecycle,
+                now=instant,
+                certified_tracks=CERTIFIED_TRACKS,
+                reconciliation_clean=True,
+                unresolved_unknown_orders=0,
+                relevant_open_orders=flat.open_order_count,
+                confirmed_pair_position_quantity=Decimal("0"),
+            )
+        except Exception as exc:
+            raise CryptoPaperCanaryPreviewError(
+                f"coordinator preparation blocked: {type(exc).__name__}: {exc}"
+            ) from exc
         package = prepared.package
         dry_run_attempt_id = f"preview-{package.package_hash[:24]}"
         context = CryptoOperatorDecisionContext.from_prepared_package(
@@ -356,6 +389,10 @@ def run(
                 "quantity": str(package.quantity),
                 "limit_price": str(package.limit_price),
                 "notional": str(package.notional),
+                "target_notional": str(PREVIEW_TARGET_NOTIONAL),
+                "minimum_buy_market_value": str(MIN_BUY_MARKET_VALUE),
+                "broker_min_order_size": str(asset.min_order_size),
+                "broker_min_trade_increment": str(asset.min_trade_increment),
                 "safety_hard_cap": str(effective_cap),
                 "coordinator_effective_cap": str(package.effective_notional_cap),
                 "dry_run_client_order_id": package.client_order_id,
@@ -406,12 +443,27 @@ def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     if not args.allow_paper_crypto_read:
         raise SystemExit("canary preview requires explicit --allow-paper-crypto-read")
-    result = run(
-        workspace_path=args.workspace,
-        credentials=_credentials(),
-        now=datetime.now(timezone.utc),
-        symbol=args.symbol,
-    )
+    try:
+        result = run(
+            workspace_path=args.workspace,
+            credentials=_credentials(),
+            now=datetime.now(timezone.utc),
+            symbol=args.symbol,
+        )
+    except Exception as exc:
+        blocked = {
+            "status": "CRYPTO_PAPER_QUALIFICATION_PREVIEW_BLOCKED",
+            "mode": "DRY_RUN_NO_POST",
+            "reason": str(exc),
+            "error_type": type(exc).__name__,
+            "broker_write_performed": False,
+            "external_post_authorized": False,
+            "operator_approval_authority": "NONE",
+            "capital_authority": "NONE",
+            "live_trading": "BLOCKED",
+        }
+        print(json.dumps(blocked, indent=2, sort_keys=True))
+        return 2
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0
 
