@@ -32,7 +32,9 @@ class CryptoDashboardError(RuntimeError):
 
 
 def _parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Local crypto-pair PAPER rehearsal dashboard; no broker write surface.")
+    parser = argparse.ArgumentParser(
+        description="Local crypto PAPER rehearsal + qualification preview dashboard; no broker write surface."
+    )
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8766)
     parser.add_argument("--no-browser", action="store_true")
@@ -107,13 +109,18 @@ def _extract_json(text: str) -> dict[str, object] | None:
     return value if isinstance(value, dict) else None
 
 
-def _run(payload: dict[str, object]) -> dict[str, object]:
+def _run_child(
+    payload: dict[str, object],
+    *,
+    script: str,
+    timeout: int,
+) -> dict[str, object]:
     workspace = _workspace(payload)
     symbol = _symbol(payload)
     credentials = _credentials(payload)
     command = [
         str(PYTHON),
-        "scripts/mac_crypto_paper_rehearsal.py",
+        script,
         "--workspace", workspace,
         "--symbol", symbol,
         "--allow-paper-crypto-read",
@@ -125,7 +132,7 @@ def _run(payload: dict[str, object]) -> dict[str, object]:
         env=_safe_env(credentials),
         text=True,
         capture_output=True,
-        timeout=45,
+        timeout=timeout,
         check=False,
     )
     stdout = _redact(completed.stdout, credentials)
@@ -139,10 +146,21 @@ def _run(payload: dict[str, object]) -> dict[str, object]:
         "elapsed_ms": int((time.monotonic() - started) * 1000),
         "broker_write_performed": False,
         "external_post_authorized": False,
+        "operator_approval_authority": "NONE",
         "capital_authority": "NONE",
         "live_trading": "BLOCKED",
         "at": datetime.now(timezone.utc).isoformat(),
     }
+
+
+def _run(payload: dict[str, object]) -> dict[str, object]:
+    return _run_child(payload, script="scripts/mac_crypto_paper_rehearsal.py", timeout=45)
+
+
+def _run_canary_preview(payload: dict[str, object]) -> dict[str, object]:
+    if _symbol(payload) != CRYPTO_PAIR:
+        raise CryptoDashboardError("first TD-R6-017 qualification preview is fixed to BTC/USD")
+    return _run_child(payload, script="scripts/mac_crypto_canary_preview.py", timeout=45)
 
 
 def _read_key_values(path: Path) -> dict[str, str]:
@@ -166,6 +184,10 @@ def _meta() -> dict[str, object]:
         "capital_authority": "NONE",
         "live_trading": "BLOCKED",
         "broker_order_surface": False,
+        "qualification_preview_available": True,
+        "qualification_preview_symbol": CRYPTO_PAIR,
+        "qualification_preview_max_notional_usd": "5",
+        "qualification_preview_write_authority": False,
     }
 
 
@@ -212,7 +234,7 @@ class CryptoHandler(BaseHTTPRequestHandler):
         self._json(HTTPStatus.NOT_FOUND, {"ok": False, "error": "not found"})
 
     def do_POST(self) -> None:  # noqa: N802
-        if self.path != "/api/rehearsal":
+        if self.path not in {"/api/rehearsal", "/api/canary-preview"}:
             self._json(HTTPStatus.NOT_FOUND, {"ok": False, "error": "not found"})
             return
         expected_origin = f"http://127.0.0.1:{self.crypto_server.server_port}"
@@ -229,9 +251,12 @@ class CryptoHandler(BaseHTTPRequestHandler):
             payload = json.loads(self.rfile.read(length).decode("utf-8"))
             if not isinstance(payload, dict):
                 raise CryptoDashboardError("request must be a JSON object")
-            result = _run(payload)
+            if self.path == "/api/canary-preview":
+                result = _run_canary_preview(payload)
+            else:
+                result = _run(payload)
         except subprocess.TimeoutExpired:
-            self._json(HTTPStatus.REQUEST_TIMEOUT, {"ok": False, "error": "crypto rehearsal timed out"})
+            self._json(HTTPStatus.REQUEST_TIMEOUT, {"ok": False, "error": "crypto read-only operation timed out"})
             return
         except (CryptoDashboardError, OSError, ValueError, UnicodeDecodeError, json.JSONDecodeError) as exc:
             self._json(HTTPStatus.BAD_REQUEST, {"ok": False, "error": str(exc)})
@@ -281,7 +306,10 @@ def main(argv: list[str] | None = None) -> int:
     server = _start_server(args.host, args.port)
     url = f"http://127.0.0.1:{server.server_port}/"
     print(f"AUTO-TRADE Crypto PAPER Lab: {url}")
-    print("Crypto pair 24/7 read + ProductCapabilities + Capital Safety + local OMS only. Broker POST: DISABLED. LIVE: BLOCKED.")
+    print(
+        "Crypto 24/7 read + ProductCapabilities + Capital Safety + local OMS + qualification preview only. "
+        "Broker POST: DISABLED. OPERATOR AUTHORITY: NONE. LIVE: BLOCKED."
+    )
     if not args.no_browser:
         if not _open_browser(url):
             print(f"Browser did not open automatically. Open this URL manually: {url}")
