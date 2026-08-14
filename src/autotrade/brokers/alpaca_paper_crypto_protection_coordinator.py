@@ -77,6 +77,8 @@ class PreparedCryptoProtectionPackage:
     market_fingerprint: str
     market_attestation_fingerprint: str
     account_attestation_fingerprint: str
+    account_reference: str
+    credential_reference: str
     asset_attestation_fingerprint: str
     product_profile_fingerprint: str
     crypto_order_fingerprint: str
@@ -116,6 +118,8 @@ class PreparedCryptoProtectionPackage:
             ("market_fingerprint", self.market_fingerprint),
             ("market_attestation_fingerprint", self.market_attestation_fingerprint),
             ("account_attestation_fingerprint", self.account_attestation_fingerprint),
+            ("account_reference", self.account_reference),
+            ("credential_reference", self.credential_reference),
             ("asset_attestation_fingerprint", self.asset_attestation_fingerprint),
             ("product_profile_fingerprint", self.product_profile_fingerprint),
             ("crypto_order_fingerprint", self.crypto_order_fingerprint),
@@ -245,6 +249,10 @@ class CryptoPaperProtectionCoordinator:
             product_profile=product_profile,
             now=instant,
         )
+        if entry_reconciliation.position.credential_reference != account_attestation.credential_reference:
+            raise CryptoProtectionPreparationBlocked(
+                "entry reconciliation position credential differs from protection PAPER account"
+            )
 
         confirmed_entry_fill = entry_reconciliation.order.filled_quantity
         confirmed_net_long = entry_reconciliation.position.quantity
@@ -320,6 +328,8 @@ class CryptoPaperProtectionCoordinator:
             "market_fingerprint": market_fingerprint(market_attestation.market),
             "market_attestation_fingerprint": market_attestation.fingerprint,
             "account_attestation_fingerprint": account_attestation.fingerprint,
+            "account_reference": account_attestation.account_reference,
+            "credential_reference": account_attestation.credential_reference,
             "asset_attestation_fingerprint": asset_attestation.fingerprint,
             "product_profile_fingerprint": product_profile.fingerprint,
             "crypto_order_fingerprint": broker_order.fingerprint,
@@ -474,6 +484,8 @@ def _package_payload(value: PreparedCryptoProtectionPackage, *, include_hash: bo
             "market_fingerprint": value.market_fingerprint,
             "market_attestation_fingerprint": value.market_attestation_fingerprint,
             "account_attestation_fingerprint": value.account_attestation_fingerprint,
+            "account_reference": value.account_reference,
+            "credential_reference": value.credential_reference,
             "asset_attestation_fingerprint": value.asset_attestation_fingerprint,
             "product_profile_fingerprint": value.product_profile_fingerprint,
             "crypto_order_fingerprint": value.crypto_order_fingerprint,
