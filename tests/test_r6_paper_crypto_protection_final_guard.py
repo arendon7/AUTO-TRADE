@@ -182,7 +182,7 @@ def test_protection_preconsume_rejects_other_account_credential_or_position_cred
         phase=CryptoProtectionFinalWritePhase.PRE_CONSUME,
     )
 
-    other_account = replace(ctx.prepared_account, account_reference="f" * 64)
+    other_account = replace(ctx.prepared_account, account_reference="c" * 64)
     with pytest.raises(CryptoProtectionFinalGuardBlocked, match="account reference differs"):
         guard.authorize(**base, fresh_account=other_account)
 
