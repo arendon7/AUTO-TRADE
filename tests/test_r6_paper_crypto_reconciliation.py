@@ -20,6 +20,7 @@ from autotrade.brokers.alpaca_paper_crypto_order import (
 )
 from autotrade.brokers.alpaca_paper_crypto_reconciliation import (
     AlpacaPaperCryptoReconciliationGateway,
+    CryptoBrokerUnknownReconciliation,
     CryptoPaperReconciliationDisabled,
     CryptoPaperReconciliationIntegrityError,
 )
@@ -187,6 +188,7 @@ def test_entry_reconciliation_reads_exact_client_order_and_position_then_advance
         order=entry,
         now=NOW + timedelta(seconds=2),
     )
+    assert not isinstance(reconciliation, CryptoBrokerUnknownReconciliation)
     assert reconciliation.order.client_order_id == entry.client_order_id
     assert reconciliation.order.terminal is True
     assert reconciliation.position.quantity == Decimal("0.0010")
@@ -219,6 +221,7 @@ def test_partial_entry_is_known_but_remains_unprotectable_until_terminal(tmp_pat
         position_transport=FakeRead(_bound_response(_position_payload(qty="0.0004"))),
     )
     reconciliation = gateway.reconcile(credentials=CREDS, order=entry, now=NOW + timedelta(seconds=2))
+    assert not isinstance(reconciliation, CryptoBrokerUnknownReconciliation)
     state = gateway.apply_to_lifecycle(
         lifecycle=lifecycle,
         lifecycle_id=binding.lifecycle_id,
@@ -238,6 +241,7 @@ def test_canceled_partial_entry_becomes_terminal_exposure_ready_for_protection(t
         position_transport=FakeRead(_bound_response(_position_payload(qty="0.0004"))),
     )
     reconciliation = gateway.reconcile(credentials=CREDS, order=entry, now=NOW + timedelta(seconds=2))
+    assert not isinstance(reconciliation, CryptoBrokerUnknownReconciliation)
     state = gateway.apply_to_lifecycle(
         lifecycle=lifecycle,
         lifecycle_id=binding.lifecycle_id,
@@ -250,17 +254,38 @@ def test_canceled_partial_entry_becomes_terminal_exposure_ready_for_protection(t
     assert state.confirmed_net_long_quantity == Decimal("0.0004")
 
 
-def test_order_not_found_never_authorizes_retry(tmp_path) -> None:
+def test_order_404_still_reads_position_and_never_authorizes_retry(tmp_path) -> None:
     lifecycle, _asset_value, _profile, entry, binding = _setup(tmp_path)
+    order_read = FakeRead(_bound_response({"message": "not found"}, status=404, request_id="req-order-404"))
+    position_read = FakeRead(_bound_response(_position_payload(qty="0"), request_id="req-position-after-404"))
     gateway = AlpacaPaperCryptoReconciliationGateway(
         config=AlpacaPaperGatewayConfig(enabled=True),
-        order_transport=FakeRead(_bound_response({"message": "not found"}, status=404)),
-        position_transport=FakeRead(_bound_response(_position_payload(qty="0"))),
+        order_transport=order_read,
+        position_transport=position_read,
     )
-    with pytest.raises(CryptoPaperReconciliationIntegrityError, match="remains unresolved"):
-        gateway.reconcile(credentials=CREDS, order=entry, now=NOW + timedelta(seconds=2))
-    assert lifecycle.snapshot(binding.lifecycle_id).state.status is CryptoLifecycleStatus.ENTRY_SUBMISSION_UNKNOWN
-    assert lifecycle.snapshot(binding.lifecycle_id).state.restart_action == "RECONCILE_ONLY"
+    result = gateway.reconcile(credentials=CREDS, order=entry, now=NOW + timedelta(seconds=2))
+    assert isinstance(result, CryptoBrokerUnknownReconciliation)
+    assert result.order_absence.client_order_id == entry.client_order_id
+    assert result.order_absence.credential_reference == CREDS.credential_reference
+    assert result.position.quantity == 0
+    assert result.position.credential_reference == CREDS.credential_reference
+    assert len(result.order_absence.fingerprint) == 64
+    assert len(result.position.fingerprint) == 64
+    assert len(result.fingerprint) == 64
+    assert len(order_read.requests) == 1
+    assert len(position_read.requests) == 1
+    with pytest.raises(CryptoPaperReconciliationIntegrityError, match="dedicated recovery"):
+        gateway.apply_to_lifecycle(
+            lifecycle=lifecycle,
+            lifecycle_id=binding.lifecycle_id,
+            requested_order=entry,
+            reconciliation=result,  # type: ignore[arg-type]
+            at=NOW + timedelta(seconds=3),
+        )
+    state = lifecycle.snapshot(binding.lifecycle_id).state
+    assert state.status is CryptoLifecycleStatus.ENTRY_SUBMISSION_UNKNOWN
+    assert state.entry_attempt_count == 1
+    assert state.restart_action == "RECONCILE_ONLY"
 
 
 def test_absent_position_is_zero_only_with_explicit_404_response(tmp_path) -> None:
@@ -271,6 +296,7 @@ def test_absent_position_is_zero_only_with_explicit_404_response(tmp_path) -> No
         position_transport=FakeRead(_bound_response({"message": "position does not exist"}, status=404)),
     )
     reconciliation = gateway.reconcile(credentials=CREDS, order=entry, now=NOW + timedelta(seconds=2))
+    assert not isinstance(reconciliation, CryptoBrokerUnknownReconciliation)
     assert reconciliation.position.absent is True
     assert reconciliation.position.quantity == 0
     assert reconciliation.position.credential_reference == CREDS.credential_reference
@@ -326,6 +352,7 @@ def test_protection_reconciliation_uses_same_client_id_and_position_truth(tmp_pa
         position_transport=FakeRead(_bound_response(_position_payload())),
     )
     entry_reconciliation = entry_gateway.reconcile(credentials=CREDS, order=entry, now=NOW + timedelta(seconds=2))
+    assert not isinstance(entry_reconciliation, CryptoBrokerUnknownReconciliation)
     state = entry_gateway.apply_to_lifecycle(
         lifecycle=lifecycle,
         lifecycle_id=binding.lifecycle_id,
@@ -358,6 +385,7 @@ def test_protection_reconciliation_uses_same_client_id_and_position_truth(tmp_pa
         order=protection,
         now=NOW + timedelta(seconds=6),
     )
+    assert not isinstance(reconciliation, CryptoBrokerUnknownReconciliation)
     assert reconciliation.position.credential_reference == CREDS.credential_reference
     state = protect_gateway.apply_to_lifecycle(
         lifecycle=lifecycle,
