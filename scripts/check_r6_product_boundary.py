@@ -24,6 +24,9 @@ CRYPTO_REQUIRED_FILES = {
     CRYPTO_LIFECYCLE_FILE,
     "alpaca_paper_crypto_catalog.py",
 }
+# Backward-compatible fixture surface only. Production validation below never
+# iterates this alias; it discovers the complete family dynamically.
+CRYPTO_FILES = CRYPTO_REQUIRED_FILES
 CRYPTO_FILE_GLOB = "alpaca_paper_crypto_*.py"
 CRYPTO_FORBIDDEN_IMPORT_FRAGMENTS = {
     "alpaca_paper_bracket",
@@ -68,7 +71,7 @@ def main() -> int:
         "AUTO-TRADE R6 multi-asset product boundary: PASS "
         "(certified us_equity bracket preserved; every alpaca_paper_crypto_* production module "
         "is scanned for cross-product authority; crypto uses explicit ProductCapabilities, "
-        "24/7 pair semantics and separate no-network protection lifecycle)"
+        "24/7 pair semantics and separate no-network protection lifecycle; no cross-product writer path)"
     )
     return 0
 
