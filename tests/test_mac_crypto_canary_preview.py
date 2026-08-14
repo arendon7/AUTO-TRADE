@@ -25,12 +25,27 @@ SPEC.loader.exec_module(preview)
 
 def test_preview_has_stricter_five_dollar_cap_and_deterministic_reference_protection() -> None:
     assert preview.PREVIEW_MAX_NOTIONAL == Decimal("5")
+    assert preview.PREVIEW_TARGET_NOTIONAL == Decimal("2")
+    assert preview.MIN_BUY_MARKET_VALUE == Decimal("1")
     assert preview.QUALIFICATION_STOP_BPS == Decimal("100")
     assert preview.QUALIFICATION_LIMIT_BPS == Decimal("150")
     stop, limit = preview._qualification_protection_reference(Decimal("100000"), Decimal("1"))
     assert stop == Decimal("99000")
     assert limit == Decimal("98500")
     assert limit <= stop
+
+
+def test_preview_sizing_lifts_dynamic_broker_minimum_above_one_dollar_floor() -> None:
+    quantity = preview._qualification_quantity(
+        min_order_size=Decimal("0.000015739"),
+        min_trade_increment=Decimal("0.000000001"),
+        limit_price=Decimal("62943"),
+    )
+    notional = quantity * Decimal("62943")
+    assert quantity >= Decimal("0.000015739")
+    assert quantity % Decimal("0.000000001") == 0
+    assert notional >= Decimal("2")
+    assert notional <= Decimal("5")
 
 
 def test_preview_source_has_no_operator_issuance_or_writer_path() -> None:
@@ -48,9 +63,12 @@ def test_preview_source_has_no_operator_issuance_or_writer_path() -> None:
         assert forbidden not in source
     for required in (
         'PREVIEW_MAX_NOTIONAL = Decimal("5")',
+        'PREVIEW_TARGET_NOTIONAL = Decimal("2")',
+        'MIN_BUY_MARKET_VALUE = Decimal("1")',
         'os.environ.get(WRITE_ENV) == "ENABLED"',
         'raise CryptoPaperCanaryPreviewError("canary preview refuses R6_EXTERNAL_PAPER_WRITE=ENABLED")',
         '"mode": "DRY_RUN_NO_POST"',
+        '"status": "CRYPTO_PAPER_QUALIFICATION_PREVIEW_BLOCKED"',
         '"broker_write_performed": False',
         '"external_post_authorized": False',
         '"operator_approval_authority": "NONE"',
@@ -116,7 +134,10 @@ def test_preview_runs_certified_coordinator_in_temporary_runtime_without_post(mo
     assert result["entry"]["payload"]["side"] == "buy"
     assert result["entry"]["payload"]["type"] == "limit"
     assert result["entry"]["payload"]["time_in_force"] == "ioc"
+    assert Decimal(result["entry"]["notional"]) >= Decimal("2")
     assert Decimal(result["entry"]["notional"]) <= Decimal("5")
+    assert result["entry"]["target_notional"] == "2"
+    assert result["entry"]["minimum_buy_market_value"] == "1"
     assert result["entry"]["network_write_authorized"] is False
     assert result["operator"]["approval_recorded"] is False
     assert result["operator"]["decision_consumed"] is False
