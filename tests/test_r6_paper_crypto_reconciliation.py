@@ -190,6 +190,7 @@ def test_entry_reconciliation_reads_exact_client_order_and_position_then_advance
     assert reconciliation.order.client_order_id == entry.client_order_id
     assert reconciliation.order.terminal is True
     assert reconciliation.position.quantity == Decimal("0.0010")
+    assert reconciliation.position.credential_reference == CREDS.credential_reference
     assert len(reconciliation.fingerprint) == 64
     assert len(order_read.requests) == 1
     assert len(position_read.requests) == 1
@@ -272,6 +273,7 @@ def test_absent_position_is_zero_only_with_explicit_404_response(tmp_path) -> No
     reconciliation = gateway.reconcile(credentials=CREDS, order=entry, now=NOW + timedelta(seconds=2))
     assert reconciliation.position.absent is True
     assert reconciliation.position.quantity == 0
+    assert reconciliation.position.credential_reference == CREDS.credential_reference
     state = gateway.apply_to_lifecycle(
         lifecycle=lifecycle,
         lifecycle_id=binding.lifecycle_id,
@@ -356,6 +358,7 @@ def test_protection_reconciliation_uses_same_client_id_and_position_truth(tmp_pa
         order=protection,
         now=NOW + timedelta(seconds=6),
     )
+    assert reconciliation.position.credential_reference == CREDS.credential_reference
     state = protect_gateway.apply_to_lifecycle(
         lifecycle=lifecycle,
         lifecycle_id=binding.lifecycle_id,
