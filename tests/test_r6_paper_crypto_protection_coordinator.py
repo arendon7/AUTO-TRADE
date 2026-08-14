@@ -60,6 +60,7 @@ def _entry_reconciliation(ctx, *, status="filled", filled=None, position=None, o
         quantity=position,
         market_value=None,
         average_entry_price=None,
+        credential_reference=ctx.prepared_account.credential_reference,
         request_id="entry-reconcile-position-001",
         response_sha256="2" * 64,
         observed_at=observed,
@@ -172,6 +173,9 @@ def test_protection_preparation_is_exact_position_offline_and_operator_gated(tmp
     assert package.confirmed_net_long_quantity == reconciliation.position.quantity
     assert package.quantity == reconciliation.position.quantity
     assert package.entry_reconciliation_fingerprint == reconciliation.fingerprint
+    assert package.account_reference == ctx.prepared_account.account_reference
+    assert package.credential_reference == ctx.prepared_account.credential_reference
+    assert reconciliation.position.credential_reference == package.credential_reference
     assert package.network_write_authorized is False
     assert package.next_action == "OPERATOR_DECISION_REQUIRED"
     assert package.risk_reducing is True
@@ -186,6 +190,30 @@ def test_protection_preparation_is_exact_position_offline_and_operator_gated(tmp
     assert state.protection_quantity == reconciliation.position.quantity
     assert state.confirmed_net_long_quantity == reconciliation.position.quantity
     assert state.event_head_hash == package.lifecycle_event_head_hash
+
+
+def test_protection_rejects_reconciliation_position_from_other_credential(tmp_path) -> None:
+    ctx = _setup(tmp_path / "ctx")
+    reconciliation = _entry_reconciliation(ctx)
+    _advance_entry_to_unprotected(ctx, reconciliation)
+    forged = replace(
+        reconciliation,
+        position=replace(reconciliation.position, credential_reference="f" * 64),
+    )
+    market = _market(observed=NOW + timedelta(seconds=5))
+    intent = _protection_intent(ctx, quantity=forged.position.quantity)
+    decision = _protection_decision(intent, market)
+
+    with pytest.raises(CryptoProtectionPreparationBlocked, match="position credential differs"):
+        _prepare(
+            tmp_path,
+            ctx=ctx,
+            entry_reconciliation=forged,
+            advance_entry=False,
+            market_attestation=market,
+            intent=intent,
+            decision=decision,
+        )
 
 
 def test_protection_requires_terminal_reconciled_entry_exposure(tmp_path) -> None:
