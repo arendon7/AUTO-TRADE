@@ -181,11 +181,15 @@ def main() -> int:
         text = CRYPTO_PREVIEW.read_text(encoding="utf-8")
         for anchor in (
             'PREVIEW_MAX_NOTIONAL = Decimal("5")',
+            'PREVIEW_TARGET_NOTIONAL = Decimal("2")',
+            'MIN_BUY_MARKET_VALUE = Decimal("1")',
+            "_qualification_quantity",
             "TemporaryDirectory",
             "CryptoPaperCanaryCoordinator",
             "CryptoOperatorDecisionContext",
             "crypto_operator_confirmation_challenge",
             '"mode": "DRY_RUN_NO_POST"',
+            '"status": "CRYPTO_PAPER_QUALIFICATION_PREVIEW_BLOCKED"',
             '"network_write_authorized": package.network_write_authorized',
             '"approval_recorded": False',
             '"decision_consumed": False',
