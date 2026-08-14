@@ -109,6 +109,13 @@ def _extract_json(text: str) -> dict[str, object] | None:
     return value if isinstance(value, dict) else None
 
 
+def _stderr_reason(stderr: str, returncode: int) -> str:
+    lines = [line.strip() for line in stderr.splitlines() if line.strip()]
+    if lines:
+        return lines[-1][:1000]
+    return f"crypto child exited with returncode={returncode} without structured reason"
+
+
 def _run_child(
     payload: dict[str, object],
     *,
@@ -126,23 +133,33 @@ def _run_child(
         "--allow-paper-crypto-read",
     ]
     started = time.monotonic()
-    completed = subprocess.run(
-        command,
-        cwd=ROOT,
-        env=_safe_env(credentials),
-        text=True,
-        capture_output=True,
-        timeout=timeout,
-        check=False,
-    )
+    try:
+        completed = subprocess.run(
+            command,
+            cwd=ROOT,
+            env=_safe_env(credentials),
+            text=True,
+            capture_output=True,
+            timeout=timeout,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        raise
+    except Exception as exc:
+        raise CryptoDashboardError(
+            f"crypto read-only child launch failed closed: {type(exc).__name__}"
+        ) from exc
     stdout = _redact(completed.stdout, credentials)
     stderr = _redact(completed.stderr, credentials)
     parsed = _extract_json(stdout)
     structured_reason = ""
-    if completed.returncode != 0 and isinstance(parsed, dict):
-        raw_reason = parsed.get("reason")
-        if isinstance(raw_reason, str):
-            structured_reason = raw_reason[:1000]
+    if completed.returncode != 0:
+        if isinstance(parsed, dict):
+            raw_reason = parsed.get("reason")
+            if isinstance(raw_reason, str) and raw_reason.strip():
+                structured_reason = raw_reason.strip()[:1000]
+        if not structured_reason:
+            structured_reason = _stderr_reason(stderr, completed.returncode)
     return {
         "ok": completed.returncode == 0,
         "returncode": completed.returncode,
@@ -199,6 +216,31 @@ def _meta() -> dict[str, object]:
     }
 
 
+def _unexpected_failure(exc: Exception, payload: dict[str, object]) -> dict[str, object]:
+    diagnostic_id = secrets.token_hex(8)
+    credentials = (
+        str(payload.get("paper_key") or ""),
+        str(payload.get("paper_secret") or ""),
+    )
+    detail = _redact(str(exc), credentials).strip()[:1000]
+    print(
+        f"AUTO-TRADE Crypto Lab diagnostic {diagnostic_id}: {type(exc).__name__}: {detail}",
+        file=sys.stderr,
+        flush=True,
+    )
+    return {
+        "ok": False,
+        "error": f"local qualification service failed closed [{diagnostic_id}]",
+        "error_type": type(exc).__name__,
+        "diagnostic_id": diagnostic_id,
+        "broker_write_performed": False,
+        "external_post_authorized": False,
+        "operator_approval_authority": "NONE",
+        "capital_authority": "NONE",
+        "live_trading": "BLOCKED",
+    }
+
+
 class CryptoHandler(BaseHTTPRequestHandler):
     server_version = "AUTO-TRADE-R6-CryptoLab"
 
@@ -209,9 +251,12 @@ class CryptoHandler(BaseHTTPRequestHandler):
     def log_message(self, format: str, *args: object) -> None:
         return
 
-    def _headers(self, status: HTTPStatus, content_type: str) -> None:
+    def _headers(self, status: HTTPStatus, content_type: str, content_length: int) -> None:
+        self.close_connection = True
         self.send_response(status)
         self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(content_length))
+        self.send_header("Connection", "close")
         self.send_header("Cache-Control", "no-store, max-age=0")
         self.send_header("Pragma", "no-cache")
         self.send_header("X-Content-Type-Options", "nosniff")
@@ -224,17 +269,25 @@ class CryptoHandler(BaseHTTPRequestHandler):
         )
         self.end_headers()
 
-    def _json(self, status: HTTPStatus, value: dict[str, object]) -> None:
-        body = json.dumps(value, ensure_ascii=False, separators=(",", ":")).encode()
-        self._headers(status, "application/json; charset=utf-8")
+    def _write_body(self, status: HTTPStatus, content_type: str, body: bytes) -> None:
+        self._headers(status, content_type, len(body))
         self.wfile.write(body)
+        self.wfile.flush()
+
+    def _json(self, status: HTTPStatus, value: dict[str, object]) -> None:
+        body = json.dumps(
+            value,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            default=str,
+        ).encode("utf-8")
+        self._write_body(status, "application/json; charset=utf-8", body)
 
     def do_GET(self) -> None:  # noqa: N802
         parsed = urlparse(self.path)
         if parsed.path == "/":
             page = HTML.read_text(encoding="utf-8").replace("__CSRF_TOKEN__", self.crypto_server.csrf_token)
-            self._headers(HTTPStatus.OK, "text/html; charset=utf-8")
-            self.wfile.write(page.encode())
+            self._write_body(HTTPStatus.OK, "text/html; charset=utf-8", page.encode("utf-8"))
             return
         if parsed.path == "/api/meta":
             self._json(HTTPStatus.OK, {"ok": True, "meta": _meta()})
@@ -242,7 +295,8 @@ class CryptoHandler(BaseHTTPRequestHandler):
         self._json(HTTPStatus.NOT_FOUND, {"ok": False, "error": "not found"})
 
     def do_POST(self) -> None:  # noqa: N802
-        if self.path not in {"/api/rehearsal", "/api/canary-preview"}:
+        parsed_path = urlparse(self.path).path
+        if parsed_path not in {"/api/rehearsal", "/api/canary-preview"}:
             self._json(HTTPStatus.NOT_FOUND, {"ok": False, "error": "not found"})
             return
         expected_origin = f"http://127.0.0.1:{self.crypto_server.server_port}"
@@ -252,22 +306,49 @@ class CryptoHandler(BaseHTTPRequestHandler):
         if self.headers.get("X-CSRF-Token") != self.crypto_server.csrf_token:
             self._json(HTTPStatus.FORBIDDEN, {"ok": False, "error": "csrf rejected"})
             return
+        payload: dict[str, object] = {}
         try:
             length = int(self.headers.get("Content-Length", "0"))
             if not 0 < length <= MAX_BODY_BYTES:
                 raise CryptoDashboardError("invalid request size")
-            payload = json.loads(self.rfile.read(length).decode("utf-8"))
-            if not isinstance(payload, dict):
+            decoded = json.loads(self.rfile.read(length).decode("utf-8"))
+            if not isinstance(decoded, dict):
                 raise CryptoDashboardError("request must be a JSON object")
-            if self.path == "/api/canary-preview":
+            payload = decoded
+            if parsed_path == "/api/canary-preview":
                 result = _run_canary_preview(payload)
             else:
                 result = _run(payload)
         except subprocess.TimeoutExpired:
-            self._json(HTTPStatus.REQUEST_TIMEOUT, {"ok": False, "error": "crypto read-only operation timed out"})
+            self._json(
+                HTTPStatus.REQUEST_TIMEOUT,
+                {
+                    "ok": False,
+                    "error": "crypto read-only operation timed out",
+                    "broker_write_performed": False,
+                    "external_post_authorized": False,
+                    "operator_approval_authority": "NONE",
+                    "capital_authority": "NONE",
+                    "live_trading": "BLOCKED",
+                },
+            )
             return
         except (CryptoDashboardError, OSError, ValueError, UnicodeDecodeError, json.JSONDecodeError) as exc:
-            self._json(HTTPStatus.BAD_REQUEST, {"ok": False, "error": str(exc)})
+            self._json(
+                HTTPStatus.BAD_REQUEST,
+                {
+                    "ok": False,
+                    "error": str(exc),
+                    "broker_write_performed": False,
+                    "external_post_authorized": False,
+                    "operator_approval_authority": "NONE",
+                    "capital_authority": "NONE",
+                    "live_trading": "BLOCKED",
+                },
+            )
+            return
+        except Exception as exc:
+            self._json(HTTPStatus.INTERNAL_SERVER_ERROR, _unexpected_failure(exc, payload))
             return
         self._json(HTTPStatus.OK, result)
 
