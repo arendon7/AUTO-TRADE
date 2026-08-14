@@ -66,6 +66,12 @@ jobs:
       - name: Pre-canary and Mac safe-console tests
         run: .venv/bin/pytest -q tests/test_r6_precanary_status.py tests/test_mac_safe_console.py tests/test_mac_click_launcher.py
 
+      - name: Crypto qualification preview boundary and tests
+        run: |
+          .venv/bin/python -m compileall -q scripts/mac_crypto_canary_preview.py scripts/mac_crypto_dashboard.py
+          .venv/bin/python scripts/check_mac_dashboard_boundary.py
+          .venv/bin/pytest -q tests/test_mac_crypto_canary_preview.py tests/test_mac_crypto_qualification_console.py
+
       - name: Build clean Mac rehearsal package
         shell: bash
         run: |
@@ -97,6 +103,7 @@ jobs:
           live_trading=BLOCKED
           broker_credentials_in_package=NO
           external_order_submitted_by_build=NO
+          crypto_qualification_preview=DRY_RUN_NO_POST
           EOF
           ditto -c -k --sequesterRsrc --keepParent "$PKG" "$ZIP"
           (
@@ -115,8 +122,11 @@ jobs:
           unzip -l AUTO-TRADE-R6-MAC.zip | grep -q 'AUTO-TRADE-R6-MAC/AUTO_TRADE_MAC.command'
           unzip -l AUTO-TRADE-R6-MAC.zip | grep -q 'AUTO-TRADE-R6-MAC/MAC_BUILD_INFO.txt'
           unzip -l AUTO-TRADE-R6-MAC.zip | grep -q 'AUTO-TRADE-R6-MAC/scripts/r6_precanary_status.py'
+          unzip -l AUTO-TRADE-R6-MAC.zip | grep -q 'AUTO-TRADE-R6-MAC/scripts/mac_crypto_canary_preview.py'
+          unzip -l AUTO-TRADE-R6-MAC.zip | grep -q 'AUTO-TRADE-R6-MAC/web/mac_crypto_dashboard.html'
           unzip -p AUTO-TRADE-R6-MAC.zip AUTO-TRADE-R6-MAC/MAC_BUILD_INFO.txt > /tmp/MAC_BUILD_INFO.txt
           grep -Fq "source_head=${EXPECTED_SOURCE_SHA}" /tmp/MAC_BUILD_INFO.txt
+          grep -Fq 'crypto_qualification_preview=DRY_RUN_NO_POST' /tmp/MAC_BUILD_INFO.txt
           if unzip -l AUTO-TRADE-R6-MAC.zip | grep -Eq '(^|/)(\.env|\.venv)(/|$)'; then
             echo 'ERROR: package contains forbidden .env/.venv material' >&2
             exit 1
