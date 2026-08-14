@@ -17,13 +17,14 @@ CRYPTO_ORDER_FILE = "alpaca_paper_crypto_order.py"
 CRYPTO_LIFECYCLE_FILE = "alpaca_paper_crypto_lifecycle.py"
 PRODUCT_PROFILE = SRC / "product_profile.py"
 
-CRYPTO_FILES = {
+CRYPTO_REQUIRED_FILES = {
     CRYPTO_ASSET_FILE,
     CRYPTO_MARKET_FILE,
     CRYPTO_ORDER_FILE,
     CRYPTO_LIFECYCLE_FILE,
     "alpaca_paper_crypto_catalog.py",
 }
+CRYPTO_FILE_GLOB = "alpaca_paper_crypto_*.py"
 CRYPTO_FORBIDDEN_IMPORT_FRAGMENTS = {
     "alpaca_paper_bracket",
     "alpaca_paper_writer",
@@ -65,8 +66,9 @@ def main() -> int:
         raise SystemExit(1)
     print(
         "AUTO-TRADE R6 multi-asset product boundary: PASS "
-        "(certified us_equity bracket preserved; crypto uses explicit ProductCapabilities, "
-        "24/7 pair semantics and separate no-network protection lifecycle; no cross-product writer path)"
+        "(certified us_equity bracket preserved; every alpaca_paper_crypto_* production module "
+        "is scanned for cross-product authority; crypto uses explicit ProductCapabilities, "
+        "24/7 pair semantics and separate no-network protection lifecycle)"
     )
     return 0
 
@@ -143,13 +145,27 @@ def _validate_product_profile() -> list[str]:
     return [reason for needle, reason in required.items() if needle not in text]
 
 
+def _crypto_product_files() -> tuple[Path, ...]:
+    return tuple(
+        path
+        for path in sorted(BROKER_DIR.glob(CRYPTO_FILE_GLOB))
+        if path.is_file()
+    )
+
+
 def _validate_crypto_files() -> list[str]:
     errors: list[str] = []
-    for name in sorted(CRYPTO_FILES):
-        path = BROKER_DIR / name
-        if not path.is_file():
-            errors.append(f"missing crypto product module {name}")
-            continue
+    discovered = _crypto_product_files()
+    discovered_names = {path.name for path in discovered}
+
+    for name in sorted(CRYPTO_REQUIRED_FILES - discovered_names):
+        errors.append(f"missing crypto product module {name}")
+    if not discovered:
+        errors.append("no crypto product modules discovered by permanent family scan")
+        return errors
+
+    for path in discovered:
+        name = path.name
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
         for module in _imports(tree):
             if any(fragment in module for fragment in CRYPTO_FORBIDDEN_IMPORT_FRAGMENTS):
