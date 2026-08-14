@@ -70,7 +70,7 @@ jobs:
         run: |
           .venv/bin/python -m compileall -q scripts/mac_crypto_canary_preview.py scripts/mac_crypto_dashboard.py
           .venv/bin/python scripts/check_mac_dashboard_boundary.py
-          .venv/bin/pytest -q tests/test_mac_crypto_canary_preview.py tests/test_mac_crypto_qualification_console.py
+          .venv/bin/pytest -q tests/test_mac_crypto_canary_preview.py tests/test_mac_crypto_qualification_console.py tests/test_mac_crypto_dashboard_http_resilience.py
 
       - name: Build clean Mac rehearsal package
         shell: bash
