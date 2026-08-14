@@ -112,6 +112,44 @@ class CryptoBrokerOrderSnapshot:
 
 
 @dataclass(frozen=True, slots=True)
+class CryptoBrokerOrderAbsenceEvidence:
+    client_order_id: str
+    credential_reference: str
+    request_id: str
+    response_sha256: str
+    observed_at: datetime
+
+    def __post_init__(self) -> None:
+        if not _CLIENT_ID_RE.fullmatch(self.client_order_id):
+            raise ValueError("crypto order absence client_order_id is invalid")
+        if not _HASH_RE.fullmatch(self.credential_reference):
+            raise ValueError("crypto order absence credential_reference must be lowercase SHA-256")
+        if not _REQUEST_ID_RE.fullmatch(self.request_id):
+            raise ValueError("crypto order absence request_id is invalid")
+        if not _HASH_RE.fullmatch(self.response_sha256):
+            raise ValueError("crypto order absence response_sha256 must be lowercase SHA-256")
+        if self.observed_at.tzinfo is None or self.observed_at.utcoffset() is None:
+            raise ValueError("crypto order absence observed_at must be timezone-aware")
+
+    @property
+    def fingerprint(self) -> str:
+        return sha256(
+            json.dumps(
+                {
+                    "kind": "R6_CRYPTO_ORDER_ABSENCE_404",
+                    "client_order_id": self.client_order_id,
+                    "credential_reference": self.credential_reference,
+                    "request_id": self.request_id,
+                    "response_sha256": self.response_sha256,
+                    "observed_at": self.observed_at.astimezone(timezone.utc).isoformat(),
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode()
+        ).hexdigest()
+
+
+@dataclass(frozen=True, slots=True)
 class CryptoBrokerPositionSnapshot:
     symbol: str
     quantity: Decimal
@@ -127,6 +165,26 @@ class CryptoBrokerPositionSnapshot:
         if not isinstance(self.credential_reference, str) or not _HASH_RE.fullmatch(self.credential_reference):
             raise ValueError("crypto position credential_reference must be lowercase SHA-256")
 
+    @property
+    def fingerprint(self) -> str:
+        return sha256(
+            json.dumps(
+                {
+                    "symbol": self.symbol,
+                    "quantity": _decimal_text(self.quantity),
+                    "market_value": None if self.market_value is None else _decimal_text(self.market_value),
+                    "average_entry_price": None if self.average_entry_price is None else _decimal_text(self.average_entry_price),
+                    "credential_reference": self.credential_reference,
+                    "request_id": self.request_id,
+                    "response_sha256": self.response_sha256,
+                    "observed_at": self.observed_at.astimezone(timezone.utc).isoformat(),
+                    "absent": self.absent,
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode()
+        ).hexdigest()
+
 
 @dataclass(frozen=True, slots=True)
 class CryptoBrokerReconciliation:
@@ -140,11 +198,42 @@ class CryptoBrokerReconciliation:
             json.dumps(
                 {
                     "order_fingerprint": self.order.fingerprint,
-                    "symbol": self.position.symbol,
-                    "position_quantity": _decimal_text(self.position.quantity),
-                    "position_absent": self.position.absent,
-                    "position_credential_reference": self.position.credential_reference,
-                    "position_response_sha256": self.position.response_sha256,
+                    "position_fingerprint": self.position.fingerprint,
+                    "observed_at": self.observed_at.astimezone(timezone.utc).isoformat(),
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode()
+        ).hexdigest()
+
+
+@dataclass(frozen=True, slots=True)
+class CryptoBrokerUnknownReconciliation:
+    """GET-only evidence for an UNKNOWN write whose exact order lookup is 404.
+
+    A 404 is evidence of current order absence only. It is never permission to
+    retry a POST. Exact position truth is still collected and must be resolved
+    by the dedicated offline unknown-recovery coordinator.
+    """
+
+    order_absence: CryptoBrokerOrderAbsenceEvidence
+    position: CryptoBrokerPositionSnapshot
+    observed_at: datetime
+
+    def __post_init__(self) -> None:
+        if self.order_absence.credential_reference != self.position.credential_reference:
+            raise ValueError("order-absence and position evidence credentials differ")
+        if self.observed_at.tzinfo is None or self.observed_at.utcoffset() is None:
+            raise ValueError("unknown reconciliation observed_at must be timezone-aware")
+
+    @property
+    def fingerprint(self) -> str:
+        return sha256(
+            json.dumps(
+                {
+                    "kind": "R6_CRYPTO_UNKNOWN_ORDER_404_RECONCILIATION",
+                    "order_absence_fingerprint": self.order_absence.fingerprint,
+                    "position_fingerprint": self.position.fingerprint,
                     "observed_at": self.observed_at.astimezone(timezone.utc).isoformat(),
                 },
                 sort_keys=True,
@@ -173,7 +262,7 @@ class AlpacaPaperCryptoReconciliationGateway:
         credentials: AlpacaPaperCredentials,
         order: AlpacaPaperCryptoOrderRequest,
         now: datetime,
-    ) -> CryptoBrokerReconciliation:
+    ) -> CryptoBrokerReconciliation | CryptoBrokerUnknownReconciliation:
         if not self._config.enabled:
             raise CryptoPaperReconciliationDisabled("crypto PAPER reconciliation is disabled")
         if now.tzinfo is None or now.utcoffset() is None:
@@ -196,12 +285,24 @@ class AlpacaPaperCryptoReconciliationGateway:
             _request(credentials=credentials, url=order_url, timeout=self._config.timeout_seconds)
         )
         order_policy.validate_final_url(order_response.final_url)
-        broker_order = _parse_order(
-            response=order_response,
-            expected=order,
-            observed_at=observed_at,
-        )
+        if order_response.status_code == 404:
+            broker_order: CryptoBrokerOrderSnapshot | None = None
+            order_absence = _parse_order_absence(
+                response=order_response,
+                expected_client_order_id=order.client_order_id,
+                credential_reference=credentials.credential_reference,
+                observed_at=observed_at,
+            )
+        else:
+            broker_order = _parse_order(
+                response=order_response,
+                expected=order,
+                observed_at=observed_at,
+            )
+            order_absence = None
 
+        # IMPORTANT: position truth is read even when exact order lookup is 404.
+        # The absence result remains reconciliation-only and never authorizes POST.
         position_url = (
             "https" + "://" + ALPACA_PAPER_TRADING_HOST + POSITION_PATH_PREFIX
             + symbol.replace("/", "%2F")
@@ -221,6 +322,13 @@ class AlpacaPaperCryptoReconciliationGateway:
             credential_reference=credentials.credential_reference,
             observed_at=observed_at,
         )
+        if order_absence is not None:
+            return CryptoBrokerUnknownReconciliation(
+                order_absence=order_absence,
+                position=position,
+                observed_at=observed_at,
+            )
+        assert broker_order is not None
         return CryptoBrokerReconciliation(
             order=broker_order,
             position=position,
@@ -236,6 +344,10 @@ class AlpacaPaperCryptoReconciliationGateway:
         reconciliation: CryptoBrokerReconciliation,
         at: datetime,
     ):
+        if not isinstance(reconciliation, CryptoBrokerReconciliation):
+            raise CryptoPaperReconciliationIntegrityError(
+                "order-404 UNKNOWN evidence requires dedicated recovery; retry remains forbidden"
+            )
         if requested_order.role is CryptoOrderRole.ENTRY:
             return lifecycle.reconcile_entry(
                 lifecycle_id,
@@ -273,16 +385,33 @@ def _request(*, credentials: AlpacaPaperCredentials, url: str, timeout: float) -
     return request
 
 
+def _parse_order_absence(
+    *,
+    response: AlpacaPaperHttpResponse,
+    expected_client_order_id: str,
+    credential_reference: str,
+    observed_at: datetime,
+) -> CryptoBrokerOrderAbsenceEvidence:
+    if response.status_code != 404:
+        raise CryptoPaperReconciliationIntegrityError("order absence evidence requires exact HTTP 404")
+    content_type = response.headers.get("content-type", "").split(";", 1)[0].strip().lower()
+    if content_type != "application/json":
+        raise CryptoPaperReconciliationIntegrityError("crypto order absence response must be application/json")
+    return CryptoBrokerOrderAbsenceEvidence(
+        client_order_id=expected_client_order_id,
+        credential_reference=credential_reference,
+        request_id=_request_id(response),
+        response_sha256=sha256(response.body).hexdigest(),
+        observed_at=observed_at,
+    )
+
+
 def _parse_order(
     *,
     response: AlpacaPaperHttpResponse,
     expected: AlpacaPaperCryptoOrderRequest,
     observed_at: datetime,
 ) -> CryptoBrokerOrderSnapshot:
-    if response.status_code == 404:
-        raise CryptoPaperReconciliationIntegrityError(
-            "broker cannot find durable crypto client_order_id; POST outcome remains unresolved"
-        )
     if response.status_code != 200:
         raise AlpacaPaperUnavailable(f"unexpected crypto order reconciliation status: {response.status_code}")
     payload, request_id = _json_payload(response, "crypto order reconciliation")
@@ -435,9 +564,11 @@ def _decimal_text(value: Decimal) -> str:
 
 __all__ = [
     "AlpacaPaperCryptoReconciliationGateway",
+    "CryptoBrokerOrderAbsenceEvidence",
     "CryptoBrokerOrderSnapshot",
     "CryptoBrokerPositionSnapshot",
     "CryptoBrokerReconciliation",
+    "CryptoBrokerUnknownReconciliation",
     "CryptoPaperReconciliationDisabled",
     "CryptoPaperReconciliationError",
     "CryptoPaperReconciliationIntegrityError",
