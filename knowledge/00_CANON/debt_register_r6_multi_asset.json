@@ -82,16 +82,17 @@
       "status": "OPEN",
       "evidence": [
         "skills/crypto-trading/SKILL.md",
-        "knowledge/20_ARQUITECTURA/R6_MULTI_ASSET_CRYPTO_ARCHITECTURE.md"
+        "knowledge/20_ARQUITECTURA/R6_MULTI_ASSET_CRYPTO_ARCHITECTURE.md",
+        "knowledge/60_EVIDENCE/R6_MAC_UAT_2026-08-14.md"
       ],
-      "next_action": "Structural writer, protection and UNKNOWN/reconciliation authority is now certified. Next, only under explicit human approval, run a bounded PAPER qualification campaign across multiple UTC/liquidity/weekend conditions and persist fills, fees, spread, slippage, protection acknowledgements/outcomes, reconciliation, stop-limit residual-risk evidence and any PROTECTION_AT_RISK behavior. Connectivity or structural certification alone cannot close this debt or support profitability claims, and no LIVE authority may be introduced."
+      "next_action": "Structural writer, protection and UNKNOWN/reconciliation authority is certified and the final real-Mac read-only UAT now passes for BTC/USD and ETH/USD. Next, only under explicit human approval, run a bounded PAPER qualification campaign across multiple UTC/liquidity/weekend conditions and persist fills, fees, spread, slippage, protection acknowledgements/outcomes, reconciliation, stop-limit residual-risk evidence and any PROTECTION_AT_RISK behavior. The successful Mac rehearsal is not broker-write qualification or profitability evidence, and no LIVE authority may be introduced."
     },
     {
       "id": "TD-R6-018",
       "track": "R6",
       "area": "Native Multi-Asset Mac Control Center and operator UAT",
       "severity": "P1",
-      "status": "OPEN",
+      "status": "CLOSED",
       "evidence": [
         "web/mac_multi_asset.html",
         "web/mac_dashboard.html",
@@ -100,9 +101,10 @@
         "scripts/mac_crypto_dashboard.py",
         "tests/test_mac_dashboard.py",
         "scripts/check_mac_dashboard_boundary.py",
-        "knowledge/60_EVIDENCE/R6_MAC_UAT_2026-08-12.md"
+        "knowledge/60_EVIDENCE/R6_MAC_UAT_2026-08-12.md",
+        "knowledge/60_EVIDENCE/R6_MAC_UAT_2026-08-14.md"
       ],
-      "next_action": "Code and dual-architecture Mac FULL artifacts now certify the localhost Multi-Asset Hub, first-class Equities/Crypto routes, ephemeral credentials, direct /usr/bin/open browser handoff with safe fallback, no hidden crypto/equity POST path and ARM64/x86_64 install/self-heal. Keep this debt OPEN until the operator performs a final real-Mac UAT on the final installable head and records the corrected browser handoff and primary user flow as observed evidence."
+      "resolution": "Closed after final operator UAT on the actual Mac using the structurally certified FULL build from source head e756b4bad6ceadf94d719f347655cfd586cdddb6 (Mac FULL run 31810758675, artifact 9223065435, SHA-256 9f0dfaab1a9f2748bf6bfd11ecdbb7e6561c60ba422a590be0a1ac7c19d4d50e). The operator installed/opened the corrected Mac flow and observed successful BTC/USD and ETH/USD rehearsals with fresh PAPER account, exact asset/exchange, flat-account proof, quote+trade crypto evidence, ProductCapabilities PASS, Capital Safety APPROVED and OMS VALIDATED. Both runs explicitly reported Broker POST: NO, Capital authority: NONE, LIVE: BLOCKED and PASS · NO POST. Earlier UAT defects involving browser handoff, stale cross-pair UI results, orderbook-as-quote freshness and latest-event timestamp semantics were corrected before this final pass. This closure is Mac usability/read-only rehearsal evidence only and does not authorize PAPER POST, profitability claims or LIVE trading."
     }
   ]
 }
