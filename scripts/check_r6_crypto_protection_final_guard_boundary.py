@@ -20,6 +20,15 @@ REQUIRED = (
     "class CryptoProtectionFinalWritePhase(str, Enum):",
     'PRE_CONSUME = "PRE_CONSUME"',
     'PRE_IO = "PRE_IO"',
+    "fresh_account: AlpacaPaperAccountAttestation",
+    "account.account_reference != package.account_reference",
+    "account.credential_reference != package.credential_reference",
+    "account.source_host != ALPACA_PAPER_TRADING_HOST",
+    "account.source_path != ALPACA_PAPER_ACCOUNT_PATH",
+    "position.credential_reference != package.credential_reference",
+    "position.credential_reference != account.credential_reference",
+    '"fresh_account_fingerprint": fresh_account.fingerprint',
+    '"position_credential_reference": fresh_position.credential_reference',
     "decision_state.status is not CryptoProtectionOperatorDecisionStatus.ISSUED",
     "snapshot.state.status is not CryptoLifecycleStatus.PROTECTION_PREPARED",
     "snapshot.state.protection_attempt_count != 0",
@@ -29,6 +38,9 @@ REQUIRED = (
     "snapshot.state.protection_attempt_count != 1",
     "oms_order.status is not OrderStatus.SUBMITTING",
     "position.quantity != package.confirmed_net_long_quantity",
+    "previous.account_reference != package.account_reference",
+    "previous.credential_reference != package.credential_reference",
+    "previous.position_credential_reference != package.credential_reference",
     "previous_attestation.attestation_hash",
 )
 ATTEMPT_REQUIRED = (
@@ -38,6 +50,14 @@ ATTEMPT_REQUIRED = (
     "CryptoLifecycleStatus.PROTECTION_PREPARED",
     "self.pre_consume.protection_attempt_count != 0",
     "self.pre_consume.oms_order_status is not OrderStatus.VALIDATED",
+    '("account_reference", self.pre_consume.account_reference)',
+    '("credential_reference", self.pre_consume.credential_reference)',
+    '("fresh_account_fingerprint", self.pre_consume.fresh_account_fingerprint)',
+    '("position_credential_reference", self.pre_consume.position_credential_reference)',
+    '"account_reference": attestation.account_reference',
+    '"credential_reference": attestation.credential_reference',
+    '"fresh_account_fingerprint": attestation.fresh_account_fingerprint',
+    '"position_credential_reference": attestation.position_credential_reference',
     "package_hash TEXT NOT NULL UNIQUE",
     "operator_decision_hash TEXT NOT NULL UNIQUE",
     "record_hash TEXT NOT NULL UNIQUE",
@@ -121,8 +141,8 @@ def main() -> int:
         if "alpaca_paper_crypto_protection_execution_attempt" in text or "SQLiteCryptoProtectionExecutionAttemptRegistry" in text:
             fail(f"Mac leaked protection execution checkpoint authority: {path.name}")
     print(
-        "crypto protection final guard boundary: PASS — PRE_CONSUME requires ISSUED/PREPARED/VALIDATED and durable no-network checkpoint; "
-        "PRE_IO requires CONSUMED/UNKNOWN/SUBMITTING attempt=1; exact fresh position; no network/Mac authority"
+        "crypto protection final guard boundary: PASS — PRE_CONSUME requires ISSUED/PREPARED/VALIDATED plus fresh same-account/credential evidence and durable no-network checkpoint; "
+        "PRE_IO requires CONSUMED/UNKNOWN/SUBMITTING attempt=1 with same account-bound position; no network/Mac authority"
     )
     return 0
 
