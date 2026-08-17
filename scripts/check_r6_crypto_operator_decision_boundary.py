@@ -7,6 +7,7 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 MODULE = ROOT / "src/autotrade/brokers/alpaca_paper_crypto_operator_decision.py"
+ISSUER = ROOT / "scripts/r6_issue_crypto_operator_decision_uat.py"
 PRODUCTION_ROOTS = (ROOT / "src", ROOT / "scripts")
 CRYPTO_OPERATOR_MODULE_FRAGMENT = "alpaca_paper_crypto_operator_decision"
 
@@ -73,6 +74,49 @@ def main() -> int:
             if needle not in text:
                 errors.append(f"crypto operator decision: {reason}")
 
+    if not ISSUER.is_file():
+        errors.append("canonical crypto UAT operator issuer is missing")
+    else:
+        source = ISSUER.read_text(encoding="utf-8")
+        tree = ast.parse(source, filename=str(ISSUER))
+        imports = _imports(tree)
+        for module in imports:
+            if any(fragment in module for fragment in FORBIDDEN_IMPORT_FRAGMENTS):
+                errors.append(f"crypto UAT issuer imports forbidden execution/equity authority: {module}")
+            if module.split(".", 1)[0] in NETWORK_ROOTS:
+                errors.append(f"crypto UAT issuer imports forbidden network stack: {module}")
+        for anchor in (
+            "CryptoOperatorDecisionContext.from_dict",
+            "crypto_operator_confirmation_challenge(context)",
+            "secrets.compare_digest(confirmation, challenge)",
+            "SQLiteCryptoOperatorDecisionRegistry",
+            "registry.record_operator_approval(",
+            'state.status is not CryptoOperatorDecisionStatus.ISSUED',
+            '"decision_consumed": False',
+            '"uat_only": True',
+            '"reusable_for_real_execution": False',
+            '"execution_authority": "NONE"',
+            '"broker_write_performed": False',
+            '"external_post_authorized": False',
+            '"capital_authority": "NONE"',
+            '"live_trading": "BLOCKED"',
+        ):
+            if anchor not in source:
+                errors.append(f"canonical crypto UAT issuer missing anchor: {anchor}")
+        for forbidden in (
+            ".consume(",
+            "AlpacaPaperCredentials",
+            "AlpacaPaperCryptoWriter",
+            "FinalGuardedCryptoEntryTransport",
+            "stage_external_submission",
+            "submit_once(",
+            "R6_EXTERNAL_PAPER_WRITE",
+        ):
+            if forbidden in source:
+                errors.append(f"canonical crypto UAT issuer contains forbidden authority: {forbidden}")
+        if source.count("record_operator_approval(") != 1:
+            errors.append("canonical crypto UAT issuer must contain exactly one issuance call")
+
     errors.extend(_scan_for_unauthorized_issuance_calls())
 
     if errors:
@@ -82,7 +126,7 @@ def main() -> int:
     print(
         "AUTO-TRADE R6 crypto operator decision boundary: PASS "
         "(HUMAN_OPERATOR only; exact package+attempt binding; <=2m and package-bounded TTL; "
-        "tamper-evident ISSUED->CONSUMED; no production crypto approval caller; "
+        "tamper-evident ISSUED->CONSUMED; canonical crypto UAT issuer only and unconsumed; "
         "no credentials/network/writer/POST authority)"
     )
     return 0
@@ -90,6 +134,7 @@ def main() -> int:
 
 def _scan_for_unauthorized_issuance_calls() -> list[str]:
     errors: list[str] = []
+    allowed_caller = ISSUER.resolve()
     for root in PRODUCTION_ROOTS:
         if not root.is_dir():
             continue
@@ -102,17 +147,16 @@ def _scan_for_unauthorized_issuance_calls() -> list[str]:
                 errors.append(f"cannot inspect production approval surface {path.relative_to(ROOT)}: {exc}")
                 continue
             imports = _imports(tree)
-            # The existing equity operator script uses the same method name.
-            # Only a production surface that imports the crypto operator authority
-            # can issue a crypto approval and is therefore blocked at this phase.
             if not any(CRYPTO_OPERATOR_MODULE_FRAGMENT in module for module in imports):
                 continue
             for node in ast.walk(tree):
                 if not isinstance(node, ast.Call):
                     continue
-                if _call_name(node.func) == "record_operator_approval":
+                if _call_name(node.func) != "record_operator_approval":
+                    continue
+                if path.resolve() != allowed_caller:
                     errors.append(
-                        f"{path.relative_to(ROOT)}:{node.lineno}: crypto operator approval issuance is not authorized from production surfaces yet"
+                        f"{path.relative_to(ROOT)}:{node.lineno}: crypto operator approval issuance is only authorized from the canonical UAT issuer"
                     )
     return errors
 

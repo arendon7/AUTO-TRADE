@@ -6,9 +6,14 @@ on:
       - "ABRIR_AUTO_TRADE.command"
       - "scripts/mac_crypto_approval_prepare.py"
       - "scripts/mac_dashboard_one_shot.py"
+      - "scripts/r6_issue_crypto_operator_decision_uat.py"
       - "scripts/check_mac_crypto_one_shot_approval.py"
+      - "scripts/check_r6_operator_decision_boundary.py"
+      - "scripts/check_r6_crypto_operator_decision_boundary.py"
       - "tests/test_mac_crypto_approval_prepare.py"
       - "tests/test_mac_crypto_one_shot_approval_gate.py"
+      - "tests/test_r6_operator_decision_boundary.py"
+      - "tests/test_r6_crypto_operator_decision_boundary.py"
       - "src/autotrade/brokers/alpaca_paper_crypto_operator_decision.py"
       - ".github/workflows/r6-crypto-one-shot-approval.yml"
   workflow_dispatch:
@@ -43,17 +48,26 @@ jobs:
           .venv/bin/python -m compileall -q \
             scripts/mac_crypto_approval_prepare.py \
             scripts/mac_dashboard_one_shot.py \
-            scripts/check_mac_crypto_one_shot_approval.py
+            scripts/r6_issue_crypto_operator_decision_uat.py \
+            scripts/check_mac_crypto_one_shot_approval.py \
+            scripts/check_r6_crypto_operator_decision_boundary.py
 
       - name: Permanent one-shot approval UAT boundary
         run: .venv/bin/python scripts/check_mac_crypto_one_shot_approval.py
+
+      - name: Canonical crypto operator issuer boundary
+        run: |
+          .venv/bin/python scripts/check_r6_operator_decision_boundary.py
+          .venv/bin/python scripts/check_r6_crypto_operator_decision_boundary.py
 
       - name: Approval prepare and primary Control Center tests
         run: |
           .venv/bin/pytest -q \
             tests/test_mac_crypto_approval_prepare.py \
             tests/test_mac_crypto_one_shot_approval_gate.py \
-            tests/test_r6_paper_crypto_operator_decision.py
+            tests/test_r6_paper_crypto_operator_decision.py \
+            tests/test_r6_operator_decision_boundary.py \
+            tests/test_r6_crypto_operator_decision_boundary.py
 
       - name: Re-prove primary Mac Control Center remains NO-POST
         run: |

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from http import HTTPStatus
 import importlib.util
 import json
@@ -15,11 +15,8 @@ from urllib.parse import parse_qs, urlparse
 
 from autotrade.brokers.alpaca_paper_crypto_operator_decision import (
     CryptoOperatorDecisionContext,
-    CryptoOperatorDecisionStatus,
-    SQLiteCryptoOperatorDecisionRegistry,
     crypto_operator_confirmation_challenge,
 )
-from autotrade.persistence import SQLiteRuntime
 
 
 _BASE_PATH = Path(__file__).with_name("mac_dashboard.py")
@@ -29,6 +26,14 @@ if _BASE_SPEC is None or _BASE_SPEC.loader is None:
 _base = importlib.util.module_from_spec(_BASE_SPEC)
 sys.modules[_BASE_SPEC.name] = _base
 _BASE_SPEC.loader.exec_module(_base)
+
+_ISSUER_PATH = Path(__file__).with_name("r6_issue_crypto_operator_decision_uat.py")
+_ISSUER_SPEC = importlib.util.spec_from_file_location("autotrade_crypto_operator_uat_issuer", _ISSUER_PATH)
+if _ISSUER_SPEC is None or _ISSUER_SPEC.loader is None:
+    raise RuntimeError("cannot load canonical crypto operator UAT issuer")
+_issuer = importlib.util.module_from_spec(_ISSUER_SPEC)
+sys.modules[_ISSUER_SPEC.name] = _issuer
+_ISSUER_SPEC.loader.exec_module(_issuer)
 
 ROOT = _base.ROOT
 PYTHON = _base.PYTHON
@@ -59,13 +64,11 @@ _WRAPPER_META = {
 APPROVAL_ID_RE = re.compile(r"^[0-9a-f]{32}$")
 APPROVAL_RESULT_TTL_SECONDS = 120
 MAX_APPROVAL_RESULTS = 16
-APPROVAL_DB_DIR = "qualification_uat"
-APPROVAL_DB_NAME = "crypto_one_shot_approval_uat.sqlite3"
 APPROVAL_PREPARE_SCRIPT = "scripts/mac_crypto_approval_prepare.py"
 
 APPROVAL_SECTION = r'''
 <section class="card" id="approvalGateCard"><div class="head"><h2>4 · Aprobación humana de un solo uso · UAT</h2><span id="approvalStatus" class="badge warn">BLOQUEADO HASTA PREVIEW PASS</span></div><div class="body">
-<div class="callout amber"><strong>NO POST.</strong> Este gate vuelve a generar evidencia y una candidata fresca. Después exige escribir exactamente el challenge y registra una aprobación humana tamper-evident de vida corta. Este build NO puede consumir esa aprobación, abrir Final Guard ni enviar una orden.</div>
+<div class="callout amber"><strong>NO POST.</strong> Este gate vuelve a generar evidencia y una candidata fresca. Después exige escribir exactamente el challenge y registra una aprobación humana tamper-evident de vida corta mediante el issuer crypto canónico. Este build NO puede consumir esa aprobación, abrir Final Guard ni enviar una orden.</div>
 <div style="height:12px"></div><div class="actions"><button id="approvalPrepare" class="btn preview" disabled>Preparar aprobación fresca · NO POST</button></div><div style="height:14px"></div>
 <div class="canaryGrid">
 <div class="step"><h3>Paquete fresco para aprobación</h3><p>Se genera después del preview. No reutiliza el paquete anterior.</p><div class="code" id="approvalEntryCode">Aún no preparado.</div></div>
@@ -246,7 +249,7 @@ def _validate_confirmation(material: dict[str, object], *, operator_id: str, con
         raise DashboardError("human confirmation does not exactly match the one-shot challenge")
 
 
-def _record_operator_approval(
+def _issue_operator_approval(
     material: dict[str, object],
     *,
     operator_id: str,
@@ -255,63 +258,19 @@ def _record_operator_approval(
 ) -> dict[str, object]:
     _validate_confirmation(material, operator_id=operator_id, confirmation=confirmation)
     _payload, _challenge, context = _material_contract(material)
-    instant = now.astimezone(timezone.utc)
-    deadline = context.execution_deadline.astimezone(timezone.utc)
-    if deadline <= instant + timedelta(seconds=5):
-        raise DashboardError("approval package is too close to expiry; prepare a fresh challenge")
-    expires_at = min(deadline, instant + timedelta(seconds=60))
-
     workspace_raw = material.get("workspace")
     if not isinstance(workspace_raw, str) or not workspace_raw:
         raise DashboardError("approval material workspace is missing")
-    workspace = Path(workspace_raw).expanduser().resolve()
-    if not workspace.is_dir() or workspace.is_symlink():
-        raise DashboardError("approval workspace is unavailable or unsafe")
-    evidence_dir = workspace / APPROVAL_DB_DIR
-    if evidence_dir.exists() and evidence_dir.is_symlink():
-        raise DashboardError("approval evidence directory may not be a symlink")
-    evidence_dir.mkdir(mode=0o700, parents=False, exist_ok=True)
-    if evidence_dir.is_symlink():
-        raise DashboardError("approval evidence directory became unsafe")
-    database = evidence_dir / APPROVAL_DB_NAME
-    if database.is_symlink():
-        raise DashboardError("approval evidence database may not be a symlink")
-
-    registry = SQLiteCryptoOperatorDecisionRegistry(SQLiteRuntime(database))
-    state = registry.record_operator_approval(
-        context=context,
-        operator_id=operator_id.strip(),
-        issued_at=instant,
-        expires_at=expires_at,
-    )
-    verified = registry.get(context.preparation_hash)
-    if verified != state or state.status is not CryptoOperatorDecisionStatus.ISSUED:
-        raise DashboardError("durable approval registry did not verify exact ISSUED state")
-    if state.consumed_at is not None or state.consumed_attempt_id is not None:
-        raise DashboardError("UAT approval unexpectedly appears consumed")
-
-    return {
-        "status": "CRYPTO_PAPER_ONE_SHOT_APPROVAL_RECORDED_UAT",
-        "decision_status": state.status.value,
-        "operator_id": state.decision.operator_id,
-        "attempt_id": context.attempt_id,
-        "preparation_hash": context.preparation_hash,
-        "decision_hash": state.decision.decision_hash,
-        "event_hash": state.event_hash,
-        "event_sequence": state.event_sequence,
-        "issued_at": state.decision.issued_at.isoformat(),
-        "expires_at": state.decision.expires_at.isoformat(),
-        "decision_consumed": False,
-        "approval_database": f"{APPROVAL_DB_DIR}/{APPROVAL_DB_NAME}",
-        "uat_only": True,
-        "reusable_for_real_execution": False,
-        "execution_authority": "NONE",
-        "broker_write_performed": False,
-        "external_post_authorized": False,
-        "capital_authority": "NONE",
-        "live_trading": "BLOCKED",
-        "next_action": "BUILD_SEPARATE_RECERTIFIED_EXECUTION_GATE_WITH_NEW_FRESH_APPROVAL",
-    }
+    try:
+        return _issuer.issue(
+            workspace_path=Path(workspace_raw),
+            context_payload=context.to_dict(),
+            operator_id=operator_id,
+            confirmation=confirmation,
+            now=now,
+        )
+    except (ValueError, _issuer.CryptoOperatorApprovalUATError) as exc:
+        raise DashboardError(str(exc)) from exc
 
 
 def _fail_closed(message: str) -> dict[str, object]:
@@ -523,7 +482,7 @@ class DashboardHandler(_base.DashboardHandler):
                 raise DashboardError("approval preparation is missing or expired")
             _validate_confirmation(material, operator_id=operator_id, confirmation=confirmation)
             material = self.dashboard_server.begin_approval_record(record_id, approval_id=approval_id)
-            receipt = _record_operator_approval(
+            receipt = _issue_operator_approval(
                 material,
                 operator_id=operator_id,
                 confirmation=confirmation,

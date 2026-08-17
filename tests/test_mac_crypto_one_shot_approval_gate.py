@@ -71,6 +71,7 @@ def test_crypto_page_injects_one_shot_gate_but_keeps_execution_absent() -> None:
         'fetch("/api/canary-approval-prepare"',
         'fetch("/api/canary-approval-record"',
         "NO puede consumir esa aprobación",
+        "issuer crypto canónico",
         "LIVE · BLOCKED",
     ):
         assert anchor in html
@@ -100,7 +101,7 @@ def test_exact_human_challenge_records_durable_issued_but_unconsumed_uat_approva
     context = _context(tmp_path)
     material = _material(tmp_path, context=context)
     challenge = crypto_operator_confirmation_challenge(context)
-    receipt = gate._record_operator_approval(
+    receipt = gate._issue_operator_approval(
         material,
         operator_id="operator-001",
         confirmation=challenge,
@@ -123,24 +124,27 @@ def test_wrong_challenge_records_nothing_and_can_be_corrected(tmp_path) -> None:
     context = _context(tmp_path)
     material = _material(tmp_path, context=context)
     with pytest.raises(gate.DashboardError, match="does not exactly match"):
-        gate._validate_confirmation(
+        gate._issue_operator_approval(
             material,
             operator_id="operator-001",
             confirmation="APPROVE THE WRONG THING",
+            now=NOW + timedelta(seconds=3),
         )
-    assert not (Path(material["workspace"]) / gate.APPROVAL_DB_DIR / gate.APPROVAL_DB_NAME).exists()
-    gate._validate_confirmation(
+    assert not (Path(material["workspace"]) / gate._issuer.APPROVAL_DB_DIR / gate._issuer.APPROVAL_DB_NAME).exists()
+    receipt = gate._issue_operator_approval(
         material,
         operator_id="operator-001",
         confirmation=crypto_operator_confirmation_challenge(context),
+        now=NOW + timedelta(seconds=3),
     )
+    assert receipt["decision_status"] == "ISSUED"
 
 
 def test_expiring_package_requires_fresh_preparation_before_approval(tmp_path) -> None:
     context = _context(tmp_path)
     material = _material(tmp_path, context=context)
     with pytest.raises(gate.DashboardError, match="too close to expiry"):
-        gate._record_operator_approval(
+        gate._issue_operator_approval(
             material,
             operator_id="operator-001",
             confirmation=crypto_operator_confirmation_challenge(context),
@@ -190,7 +194,7 @@ def test_primary_control_center_http_prepare_and_record_recover_same_attempt_wit
         prepare_calls["count"] += 1
         return prepared_outer
 
-    def fake_record(_material, *, operator_id, confirmation, now):
+    def fake_issue(_material, *, operator_id, confirmation, now):
         del now
         record_calls["count"] += 1
         assert operator_id == "operator-001"
@@ -209,7 +213,7 @@ def test_primary_control_center_http_prepare_and_record_recover_same_attempt_wit
         }
 
     monkeypatch.setattr(gate, "_run_approval_prepare", fake_prepare)
-    monkeypatch.setattr(gate, "_record_operator_approval", fake_record)
+    monkeypatch.setattr(gate, "_issue_operator_approval", fake_issue)
     server = gate._start_server("127.0.0.1", 0)
     thread = threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True)
     thread.start()

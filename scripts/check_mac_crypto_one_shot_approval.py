@@ -6,6 +6,7 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 WRAPPER = ROOT / "scripts/mac_dashboard_one_shot.py"
 PREPARE = ROOT / "scripts/mac_crypto_approval_prepare.py"
+ISSUER = ROOT / "scripts/r6_issue_crypto_operator_decision_uat.py"
 LAUNCHER = ROOT / "ABRIR_AUTO_TRADE.command"
 TEST_GATE = ROOT / "tests/test_mac_crypto_one_shot_approval_gate.py"
 TEST_PREPARE = ROOT / "tests/test_mac_crypto_approval_prepare.py"
@@ -26,7 +27,7 @@ FORBIDDEN = (
 
 def main() -> int:
     errors: list[str] = []
-    for path in (WRAPPER, PREPARE, LAUNCHER, TEST_GATE, TEST_PREPARE):
+    for path in (WRAPPER, PREPARE, ISSUER, LAUNCHER, TEST_GATE, TEST_PREPARE):
         if not path.is_file():
             errors.append(f"missing one-shot approval contract file: {path.relative_to(ROOT)}")
 
@@ -37,11 +38,9 @@ def main() -> int:
         '"/api/canary-approval-prepare-result"',
         '"/api/canary-approval-record-result"',
         "secrets.compare_digest",
-        "SQLiteCryptoOperatorDecisionRegistry",
-        "record_operator_approval(",
+        "_issuer.issue(",
         '"decision_consumed": False',
         '"reusable_for_real_execution": False',
-        '"execution_authority": "NONE"',
         '"broker_write_performed": False',
         '"external_post_authorized": False',
         '"capital_authority": "NONE"',
@@ -56,6 +55,8 @@ def main() -> int:
     ):
         if anchor not in wrapper:
             errors.append(f"one-shot approval wrapper missing anchor: {anchor}")
+    if "record_operator_approval(" in wrapper:
+        errors.append("Mac approval wrapper may not mint authority directly; it must delegate to the canonical issuer")
     for forbidden in FORBIDDEN:
         if forbidden in wrapper:
             errors.append(f"one-shot approval wrapper contains forbidden execution surface: {forbidden}")
@@ -84,6 +85,33 @@ def main() -> int:
     for forbidden in FORBIDDEN + ("record_operator_approval(",):
         if forbidden in prepare:
             errors.append(f"approval prepare script contains forbidden authority: {forbidden}")
+
+    issuer = ISSUER.read_text(encoding="utf-8") if ISSUER.is_file() else ""
+    for anchor in (
+        "SQLiteCryptoOperatorDecisionRegistry",
+        "crypto_operator_confirmation_challenge",
+        "secrets.compare_digest",
+        "registry.record_operator_approval(",
+        'state.status is not CryptoOperatorDecisionStatus.ISSUED',
+        '"decision_consumed": False',
+        '"uat_only": True',
+        '"reusable_for_real_execution": False',
+        '"execution_authority": "NONE"',
+        '"broker_write_performed": False',
+        '"external_post_authorized": False',
+        '"capital_authority": "NONE"',
+        '"live_trading": "BLOCKED"',
+        '_MAX_UAT_APPROVAL_TTL = timedelta(seconds=60)',
+        '_MIN_REMAINING_PACKAGE_LIFE = timedelta(seconds=5)',
+        '_ATTEMPT_PREFIX = "approval-uat-"',
+    ):
+        if anchor not in issuer:
+            errors.append(f"canonical crypto UAT issuer missing anchor: {anchor}")
+    for forbidden in FORBIDDEN:
+        if forbidden in issuer:
+            errors.append(f"canonical crypto UAT issuer contains forbidden execution surface: {forbidden}")
+    if issuer.count("record_operator_approval(") != 1:
+        errors.append("canonical crypto UAT issuer must contain exactly one authority-minting call")
 
     launcher = LAUNCHER.read_text(encoding="utf-8") if LAUNCHER.is_file() else ""
     for anchor in (
@@ -124,8 +152,8 @@ def main() -> int:
         return 1
     print(
         "AUTO-TRADE Mac crypto one-shot approval UAT boundary: PASS "
-        "(fresh preparation + exact human challenge + durable ISSUED approval only; "
-        "no consume, Final Guard, broker POST, capital or LIVE authority)"
+        "(fresh preparation + exact human challenge + canonical durable ISSUED issuer only; "
+        "dashboard cannot mint directly; no consume, Final Guard, broker POST, capital or LIVE authority)"
     )
     return 0
 
