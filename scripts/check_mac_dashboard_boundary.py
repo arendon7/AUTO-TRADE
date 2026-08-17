@@ -150,7 +150,7 @@ def main() -> int:
             "function resetPreview(",
             "function previewCanary(",
             'fetch("/api/canary-preview"',
-            "no se puede reutilizar en la ejecución real",
+            "NO puede reutilizarse para ejecución real",
             "todavía no existe en esta interfaz ningún botón que pueda enviar una orden",
         ):
             if anchor not in crypto:
