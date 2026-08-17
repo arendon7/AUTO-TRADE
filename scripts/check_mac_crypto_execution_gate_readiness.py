@@ -25,7 +25,6 @@ FORBIDDEN_AUTHORITY = (
     "submit_once(",
     ".consume(",
     "record_operator_approval(",
-    "R6_EXTERNAL_PAPER_WRITE=ENABLED",
     'env[WRITE_ENV] = "ENABLED"',
     "r6_execute_paper_canary.py",
 )
@@ -95,6 +94,7 @@ def main() -> int:
     for forbidden in FORBIDDEN_AUTHORITY + (
         "APCA_API_KEY_ID",
         "APCA_API_SECRET_KEY",
+        "R6_EXTERNAL_PAPER_WRITE=ENABLED",
         "sqlite3.connect(str(",
     ):
         if forbidden in inspector:
@@ -121,7 +121,7 @@ def main() -> int:
     ):
         if anchor not in wrapper:
             errors.append(f"Mac execution readiness wrapper missing anchor: {anchor}")
-    for forbidden in FORBIDDEN_AUTHORITY:
+    for forbidden in FORBIDDEN_AUTHORITY + ("R6_EXTERNAL_PAPER_WRITE=ENABLED",):
         if forbidden in wrapper:
             errors.append(f"Mac execution readiness wrapper contains forbidden execution authority: {forbidden}")
 
@@ -136,7 +136,7 @@ def main() -> int:
     ):
         if anchor not in launcher:
             errors.append(f"launcher missing execution-readiness safe anchor: {anchor}")
-    for forbidden in FORBIDDEN_AUTHORITY:
+    for forbidden in FORBIDDEN_AUTHORITY + ("export R6_EXTERNAL_PAPER_WRITE=ENABLED",):
         if forbidden in launcher:
             errors.append(f"launcher contains forbidden execution authority: {forbidden}")
 
