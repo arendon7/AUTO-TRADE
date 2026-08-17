@@ -67,6 +67,9 @@ jobs:
       - name: Permanent crypto execution authority boundary
         run: python scripts/check_r6_crypto_execution_boundary.py
 
+      - name: Quote-primary crypto market policy
+        run: python scripts/check_r6_crypto_quote_primary_policy.py
+
       - name: Offline crypto canary coordinator boundary
         run: python scripts/check_r6_crypto_canary_coordinator_boundary.py
 
