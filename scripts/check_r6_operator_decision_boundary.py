@@ -7,6 +7,7 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 MODULE = ROOT / "src/autotrade/brokers/alpaca_paper_operator_decision.py"
 ISSUER = ROOT / "scripts/r6_issue_operator_decision.py"
+CRYPTO_UAT_ISSUER = ROOT / "scripts/r6_issue_crypto_operator_decision_uat.py"
 SRC = ROOT / "src"
 SCRIPTS = ROOT / "scripts"
 
@@ -33,7 +34,7 @@ R6 = ROOT / ".github/workflows/r6-authority.yml"
 
 def main() -> int:
     errors: list[str] = []
-    for path in (MODULE, ISSUER):
+    for path in (MODULE, ISSUER, CRYPTO_UAT_ISSUER):
         if not path.is_file():
             errors.append(f"required operator-decision surface missing: {path.relative_to(ROOT)}")
             continue
@@ -73,15 +74,39 @@ def main() -> int:
                     f"interactive issuer must derive decision paths from workspace, not accept {forbidden_cli}"
                 )
 
-    allowed_caller = ISSUER.resolve()
+    if CRYPTO_UAT_ISSUER.is_file():
+        source = CRYPTO_UAT_ISSUER.read_text(encoding="utf-8")
+        for anchor in (
+            "CryptoOperatorDecisionContext.from_dict",
+            "crypto_operator_confirmation_challenge(context)",
+            "secrets.compare_digest(confirmation, challenge)",
+            "SQLiteCryptoOperatorDecisionRegistry",
+            "registry.record_operator_approval(",
+            'state.status is not CryptoOperatorDecisionStatus.ISSUED',
+            '"decision_consumed": False',
+            '"execution_authority": "NONE"',
+            '"broker_write_performed": False',
+            '"external_post_authorized": False',
+            '"capital_authority": "NONE"',
+            '"live_trading": "BLOCKED"',
+        ):
+            if anchor not in source:
+                errors.append(f"canonical crypto UAT issuer anchor missing: {anchor}")
+        for forbidden in (".consume(", "alpaca_paper_writer", "FinalGuardedCryptoEntryTransport", "stage_external_submission"):
+            if forbidden in source:
+                errors.append(f"canonical crypto UAT issuer contains forbidden execution authority: {forbidden}")
+        if source.count("record_operator_approval(") != 1:
+            errors.append("canonical crypto UAT issuer must mint authority at exactly one audited call site")
+
+    allowed_callers = {ISSUER.resolve(), CRYPTO_UAT_ISSUER.resolve()}
     for root in (SRC, SCRIPTS):
         for path in sorted(root.rglob("*.py")):
             if path.resolve() == MODULE.resolve():
                 continue
             for lineno, call in _named_calls(path, "record_operator_approval"):
-                if path.resolve() != allowed_caller:
+                if path.resolve() not in allowed_callers:
                     errors.append(
-                        f"{path.relative_to(ROOT)}:{lineno}: production operator authority may only be minted by the interactive issuer ({call})"
+                        f"{path.relative_to(ROOT)}:{lineno}: production operator authority may only be minted by a canonical issuer ({call})"
                     )
 
     if MODULE.is_file():
@@ -113,7 +138,7 @@ def main() -> int:
         return 1
     print(
         "AUTO-TRADE R6 human operator decision boundary: PASS "
-        "(interactive issuer only; fresh same-workspace core provenance before/after challenge; "
+        "(canonical issuer only: interactive equity issuer + exact-challenge crypto UAT issuer; "
         "no network/OMS/AI authority; package-bound PAPER one-shot)"
     )
     return 0
