@@ -256,8 +256,10 @@ def test_crypto_market_contract_does_not_use_orderbook_as_quote_freshness_proxy(
     assert 'quote.get("t")' in source
     assert "fresh_activity_age_seconds" in source
     assert "max_reference_age_seconds" in source
-    assert "crypto market has no recent quote/trade activity" in source
+    assert "crypto latest quote is stale for execution" in source
+    assert "if trade_age <= max_reference:" in source
     assert "crypto latest trade deviates from quote midpoint" in source
+    assert "crypto latest trade reference is too old" not in source
 
 
 def test_crypto_market_supports_second_pair_without_cross_pair_data() -> None:
@@ -276,42 +278,71 @@ def test_crypto_market_supports_second_pair_without_cross_pair_data() -> None:
         ).attest_snapshot(credentials=CREDS, now=NOW, symbol="ETH/USD")
 
 
-def test_crypto_market_accepts_one_recent_activity_witness_with_bounded_quiet_component() -> None:
-    quote_quiet = CryptoMarketTransport(
+def test_crypto_market_requires_fresh_quote_even_when_trade_is_recent() -> None:
+    transport = CryptoMarketTransport(
         quote_observed_at=NOW - timedelta(seconds=90),
         trade_observed_at=NOW - timedelta(seconds=2),
     )
-    quote_result = AlpacaPaperCryptoMarketDataGateway(
-        AlpacaPaperCryptoMarketDataConfig(enabled=True), transport=quote_quiet
-    ).attest_snapshot(credentials=CREDS, now=NOW)
-    assert quote_result.activity_witness == "TRADE"
-    assert quote_result.quote_age_seconds == Decimal("90.0")
-    assert quote_result.market.observed_at == NOW
+    with pytest.raises(AlpacaPaperCryptoMarketDataIntegrityError, match="quote is stale for execution"):
+        AlpacaPaperCryptoMarketDataGateway(
+            AlpacaPaperCryptoMarketDataConfig(enabled=True), transport=transport
+        ).attest_snapshot(credentials=CREDS, now=NOW)
 
-    trade_quiet = CryptoMarketTransport(
+
+def test_crypto_market_accepts_actual_mac_case_fresh_quote_with_371s_old_trade() -> None:
+    transport = CryptoMarketTransport(
         quote_observed_at=NOW - timedelta(seconds=2),
-        trade_observed_at=NOW - timedelta(seconds=90),
+        trade_observed_at=NOW - timedelta(seconds=371, microseconds=705000),
     )
-    trade_result = AlpacaPaperCryptoMarketDataGateway(
-        AlpacaPaperCryptoMarketDataConfig(enabled=True), transport=trade_quiet
+    result = AlpacaPaperCryptoMarketDataGateway(
+        AlpacaPaperCryptoMarketDataConfig(enabled=True), transport=transport
     ).attest_snapshot(credentials=CREDS, now=NOW)
-    assert trade_result.activity_witness == "QUOTE"
-    assert trade_result.trade_age_seconds == Decimal("90.0")
-    assert trade_result.market.observed_at == NOW
+    assert result.activity_witness == "QUOTE"
+    assert result.quote_age_seconds == Decimal("2.0")
+    assert result.trade_age_seconds == Decimal("371.705")
+    assert result.market.observed_at == NOW
 
 
-def test_crypto_market_rejects_zero_no_recent_activity_or_unbounded_reference() -> None:
+def test_crypto_market_old_trade_cannot_poison_fresh_quote_but_recent_bad_trade_still_blocks() -> None:
+    stale_bad_trade = CryptoMarketTransport(
+        bid="99999",
+        ask="100001",
+        last="50000",
+        quote_observed_at=NOW - timedelta(seconds=2),
+        trade_observed_at=NOW - timedelta(seconds=371, microseconds=705000),
+    )
+    result = AlpacaPaperCryptoMarketDataGateway(
+        AlpacaPaperCryptoMarketDataConfig(enabled=True), transport=stale_bad_trade
+    ).attest_snapshot(credentials=CREDS, now=NOW)
+    assert result.market.last == Decimal("50000")
+    assert result.quote_age_seconds == Decimal("2.0")
+    assert result.trade_age_seconds == Decimal("371.705")
+
+    recent_bad_trade = CryptoMarketTransport(
+        bid="99999",
+        ask="100001",
+        last="50000",
+        quote_observed_at=NOW - timedelta(seconds=2),
+        trade_observed_at=NOW - timedelta(seconds=2),
+    )
+    with pytest.raises(AlpacaPaperCryptoMarketDataIntegrityError, match="deviates from quote midpoint"):
+        AlpacaPaperCryptoMarketDataGateway(
+            AlpacaPaperCryptoMarketDataConfig(enabled=True), transport=recent_bad_trade
+        ).attest_snapshot(credentials=CREDS, now=NOW)
+
+
+def test_crypto_market_rejects_zero_stale_quote_or_unbounded_quote_reference() -> None:
     with pytest.raises(AlpacaPaperCryptoMarketDataIntegrityError, match="positive"):
         AlpacaPaperCryptoMarketDataGateway(
             AlpacaPaperCryptoMarketDataConfig(enabled=True), transport=CryptoMarketTransport(ask="0")
         ).attest_snapshot(credentials=CREDS, now=NOW)
 
-    with pytest.raises(AlpacaPaperCryptoMarketDataIntegrityError, match="no recent quote/trade activity"):
+    with pytest.raises(AlpacaPaperCryptoMarketDataIntegrityError, match="quote is stale for execution"):
         AlpacaPaperCryptoMarketDataGateway(
             AlpacaPaperCryptoMarketDataConfig(enabled=True),
             transport=CryptoMarketTransport(
                 quote_observed_at=NOW - timedelta(seconds=61),
-                trade_observed_at=NOW - timedelta(seconds=61),
+                trade_observed_at=NOW - timedelta(seconds=1),
             ),
         ).attest_snapshot(credentials=CREDS, now=NOW)
 
