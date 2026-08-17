@@ -9,6 +9,7 @@ HTML = ROOT / "web/mac_dashboard.html"
 HUB = ROOT / "web/mac_multi_asset.html"
 CRYPTO_HTML = ROOT / "web/mac_crypto_dashboard.html"
 CRYPTO_REHEARSAL = ROOT / "scripts/mac_crypto_paper_rehearsal.py"
+CRYPTO_PREVIEW = ROOT / "scripts/mac_crypto_canary_preview.py"
 OPEN = ROOT / "ABRIR_AUTO_TRADE.command"
 INSTALL = ROOT / "INSTALAR_AUTO_TRADE.command"
 CORE = ROOT / ".github/workflows/core-tests.yml"
@@ -41,7 +42,19 @@ STORAGE_CALLS = (
 
 def main() -> int:
     errors: list[str] = []
-    for path in (SERVER, HTML, HUB, CRYPTO_HTML, CRYPTO_REHEARSAL, OPEN, INSTALL, CORE, R6, FULL):
+    for path in (
+        SERVER,
+        HTML,
+        HUB,
+        CRYPTO_HTML,
+        CRYPTO_REHEARSAL,
+        CRYPTO_PREVIEW,
+        OPEN,
+        INSTALL,
+        CORE,
+        R6,
+        FULL,
+    ):
         if not path.is_file():
             errors.append(f"missing Mac Control Center contract file: {path.relative_to(ROOT)}")
 
@@ -125,15 +138,20 @@ def main() -> int:
             "AUTO-TRADE · Crypto PAPER Lab",
             "BTC/USD",
             "PAPER WRITE · DISABLED",
+            "APPROVAL AUTHORITY · NONE",
             "LIVE · BLOCKED",
             "NO POST",
+            "Qualification Preview",
+            "Preparar canary · NO POST",
             "function clearResult(",
             "function beginAttempt(",
             "function blockResult(",
             "function technicalSummary(",
-            "Causa técnica resumida:",
-            "El resultado anterior fue invalidado",
-            'blockResult(symbol);const tech=technicalSummary(d)',
+            "function resetPreview(",
+            "function previewCanary(",
+            'fetch("/api/canary-preview"',
+            "NO puede reutilizarse para ejecución real",
+            "todavía no existe en esta interfaz ningún botón que pueda enviar una orden",
         ):
             if anchor not in crypto:
                 errors.append(f"crypto dashboard anchor missing: {anchor}")
@@ -158,6 +176,59 @@ def main() -> int:
         for forbidden in FORBIDDEN:
             if forbidden in text:
                 errors.append(f"crypto rehearsal contains forbidden write surface: {forbidden}")
+
+    if CRYPTO_PREVIEW.is_file():
+        text = CRYPTO_PREVIEW.read_text(encoding="utf-8")
+        for anchor in (
+            'PREVIEW_MAX_NOTIONAL = Decimal("5")',
+            'PREVIEW_TARGET_NOTIONAL = Decimal("2")',
+            'MIN_BUY_MARKET_VALUE = Decimal("1")',
+            "_qualification_quantity",
+            "TemporaryDirectory",
+            "CryptoPaperCanaryCoordinator",
+            "CryptoOperatorDecisionContext",
+            "crypto_operator_confirmation_challenge",
+            '"mode": "DRY_RUN_NO_POST"',
+            '"status": "CRYPTO_PAPER_QUALIFICATION_PREVIEW_BLOCKED"',
+            '"network_write_authorized": package.network_write_authorized',
+            '"approval_recorded": False',
+            '"decision_consumed": False',
+            '"reusable_for_real_execution": False',
+            '"blind_retry": False',
+            '"broker_write_performed": False',
+            '"external_post_authorized": False',
+            '"operator_approval_authority": "NONE"',
+            '"capital_authority": "NONE"',
+            '"live_trading": "BLOCKED"',
+            "STOP_LIMIT_IS_NOT_A_GUARANTEED_EXIT_OR_MAX_LOSS",
+        ):
+            if anchor not in text:
+                errors.append(f"crypto qualification preview anchor missing: {anchor}")
+        for forbidden in FORBIDDEN + (
+            "alpaca_paper_crypto_pre_io",
+            "FinalGuardedCryptoEntryTransport",
+            "record_operator_approval(",
+            ".consume(",
+        ):
+            if forbidden in text:
+                errors.append(f"crypto qualification preview contains forbidden authority: {forbidden}")
+
+    crypto_server_path = ROOT / "scripts/mac_crypto_dashboard.py"
+    if crypto_server_path.is_file():
+        text = crypto_server_path.read_text(encoding="utf-8")
+        for anchor in (
+            "scripts/mac_crypto_canary_preview.py",
+            '"/api/canary-preview"',
+            'env[WRITE_ENV] = "DISABLED"',
+            '"qualification_preview_write_authority": False',
+            '"operator_approval_authority": "NONE"',
+            "Crypto PAPER Lab may bind only to 127.0.0.1",
+        ):
+            if anchor not in text:
+                errors.append(f"crypto local server qualification-preview anchor missing: {anchor}")
+        for forbidden in FORBIDDEN:
+            if forbidden in text:
+                errors.append(f"crypto local server contains forbidden execution surface: {forbidden}")
 
     if OPEN.is_file():
         text = OPEN.read_text(encoding="utf-8")
@@ -220,9 +291,9 @@ def main() -> int:
         return 1
     print(
         "AUTO-TRADE Mac Multi-Asset Control Center boundary: PASS "
-        "(localhost-only; Equities + Crypto routes; ephemeral PAPER credentials; stale-result invalidation; "
-        "summarized operator diagnostics; safe allowlist; FULL standalone integration; "
-        "no Final Freshness/staging/POST/LIVE surface)"
+        "(localhost-only; Equities + Crypto routes; ephemeral PAPER credentials; safe rehearsal; "
+        "isolated BTC/USD qualification preview with USD 5 hard cap; no reusable operator authority; "
+        "FULL standalone integration; no Final Freshness/staging/broker-write/LIVE surface)"
     )
     return 0
 

@@ -23,7 +23,7 @@ def test_dashboard_allowlist_has_no_execution_or_final_freshness_surface() -> No
     assert names == {
         "init_workspace", "doctor", "rehearsal", "safety_rehearsal", "readiness", "status",
         "account_discovery", "account_preflight", "asset_preflight", "flat_account_preflight", "market_preflight",
-        "build_candidate", "prepare_candidate", "review_receipt", "crypto_rehearsal",
+        "build_candidate", "prepare_candidate", "review_receipt", "crypto_rehearsal", "crypto_preview",
     }
     joined = " ".join(sorted(names)).lower()
     for forbidden in ("post", "submit", "stage", "execute", "final_freshness", "live"):
@@ -118,6 +118,41 @@ def test_crypto_rehearsal_is_native_safe_action_without_writer_surface(monkeypat
         assert forbidden not in joined
 
 
+def test_crypto_preview_is_primary_control_center_safe_action_without_writer_surface(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(dashboard, "PYTHON", tmp_path / "python")
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    command, credentials = dashboard._command(
+        "crypto_preview",
+        {
+            "workspace": str(workspace),
+            "symbol": "BTC/USD",
+            "paper_key": "paper-key",
+            "paper_secret": "paper-secret",
+        },
+    )
+    joined = " ".join(command)
+    assert credentials == ("paper-key", "paper-secret")
+    assert "scripts/mac_crypto_canary_preview.py" in joined
+    assert "--allow-paper-crypto-read" in joined
+    for forbidden in (
+        "alpaca_paper_writer", "r6_execute_paper_canary.py", "stage_external_submission",
+        "r6_connectivity_bound_final_freshness.py",
+    ):
+        assert forbidden not in joined
+
+    with pytest.raises(dashboard.DashboardError, match="fixed to BTC/USD"):
+        dashboard._command(
+            "crypto_preview",
+            {
+                "workspace": str(workspace),
+                "symbol": "ETH/USD",
+                "paper_key": "paper-key",
+                "paper_secret": "paper-secret",
+            },
+        )
+
+
 def test_account_discovery_is_get_only_and_needs_no_expected_id(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(dashboard, "PYTHON", tmp_path / "python")
     workspace = tmp_path / "workspace"
@@ -169,6 +204,12 @@ def test_native_multi_asset_meta_keeps_all_execution_disabled() -> None:
     assert meta["equity_route"] == "/equities"
     assert meta["crypto_route"] == "/crypto"
     assert meta["crypto_rehearsal_available"] is True
+    assert meta["qualification_preview_available"] is True
+    assert meta["qualification_preview_symbol"] == "BTC/USD"
+    assert meta["qualification_preview_max_notional_usd"] == "5"
+    assert meta["qualification_preview_target_notional_usd"] == "2"
+    assert meta["qualification_preview_write_authority"] is False
+    assert meta["qualification_preview_response_recovery"] == "PRIMARY_CONTROL_CENTER_SAME_ATTEMPT_GET"
     assert meta["equity_execution_from_dashboard"] is False
     assert meta["crypto_execution_from_dashboard"] is False
     assert meta["order_execution_from_dashboard"] is False

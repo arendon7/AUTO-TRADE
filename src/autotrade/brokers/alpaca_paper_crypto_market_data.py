@@ -144,13 +144,13 @@ class AlpacaPaperCryptoMarketAttestation:
 class AlpacaPaperCryptoMarketDataGateway:
     """Two exact GETs for one canonical crypto pair latest quote/latest trade; no write surface.
 
-    Alpaca's latest endpoints return the latest *event* for each component. Event
-    time is therefore provenance, not the time at which AUTO-TRADE observed the
-    current REST state. The current snapshot is locally fresh only when both GETs
-    complete now, at least one component proves recent venue activity, the other
-    component remains within a bounded reference horizon, and prices are mutually
-    coherent. This prevents a quiet component from poisoning a valid snapshot
-    while still failing closed when the venue has no recent activity at all.
+    The latest quote is the execution-price witness for LIMIT decisions because it
+    supplies the bid/ask used by Capital Safety. Its event time must therefore be
+    fresh. The latest trade remains signed provenance and, while it is inside the
+    bounded reference horizon, an additional price-coherence witness. A quiet old
+    trade may not veto a fresh executable quote; it is simply too old to compare.
+    Future timestamps, stale quotes, crossed/wide quotes and comparable trades that
+    disagree materially with the quote still fail closed.
     """
 
     def __init__(
@@ -192,19 +192,12 @@ class AlpacaPaperCryptoMarketDataGateway:
                 "crypto latest quote reference is too old: "
                 f"age_seconds={_fmt(quote_age)} > {_fmt(max_reference)}"
             )
-        if trade_age > max_reference:
-            raise AlpacaPaperCryptoMarketDataIntegrityError(
-                "crypto latest trade reference is too old: "
-                f"age_seconds={_fmt(trade_age)} > {_fmt(max_reference)}"
-            )
 
         fresh_window = Decimal(str(self._config.fresh_activity_age_seconds))
-        if min(quote_age, trade_age) > fresh_window:
+        if quote_age > fresh_window:
             raise AlpacaPaperCryptoMarketDataIntegrityError(
-                "crypto market has no recent quote/trade activity: "
-                f"quote_age_seconds={_fmt(quote_age)} "
-                f"trade_age_seconds={_fmt(trade_age)} "
-                f"fresh_window_seconds={_fmt(fresh_window)}"
+                "crypto latest quote is stale for execution: "
+                f"age_seconds={_fmt(quote_age)} > {_fmt(fresh_window)}"
             )
 
         if bid > ask:
@@ -217,13 +210,19 @@ class AlpacaPaperCryptoMarketDataGateway:
                 "crypto quote spread exceeds policy: "
                 f"spread_bps={_fmt(spread_bps)} > {_fmt(max_spread)}"
             )
-        trade_mid_deviation_bps = abs(last - mid) / mid * Decimal("10000")
-        max_trade_deviation = Decimal(str(self._config.max_trade_mid_deviation_bps))
-        if trade_mid_deviation_bps > max_trade_deviation:
-            raise AlpacaPaperCryptoMarketDataIntegrityError(
-                "crypto latest trade deviates from quote midpoint: "
-                f"deviation_bps={_fmt(trade_mid_deviation_bps)} > {_fmt(max_trade_deviation)}"
-            )
+
+        # Latest trade is auxiliary for a LIMIT decision. Only compare it with the
+        # executable quote while the trade event remains within the bounded
+        # reference horizon. Older trades remain hashed provenance but cannot veto
+        # a fresh quote merely because the venue has not printed a newer trade.
+        if trade_age <= max_reference:
+            trade_mid_deviation_bps = abs(last - mid) / mid * Decimal("10000")
+            max_trade_deviation = Decimal(str(self._config.max_trade_mid_deviation_bps))
+            if trade_mid_deviation_bps > max_trade_deviation:
+                raise AlpacaPaperCryptoMarketDataIntegrityError(
+                    "crypto latest trade deviates from quote midpoint: "
+                    f"deviation_bps={_fmt(trade_mid_deviation_bps)} > {_fmt(max_trade_deviation)}"
+                )
 
         market = MarketSnapshot(
             symbol=canonical,
