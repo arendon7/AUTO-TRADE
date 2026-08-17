@@ -52,9 +52,10 @@ def main() -> int:
     if SAFETY.is_file():
         text = SAFETY.read_text(encoding="utf-8")
         for anchor in (
-            'reference_price = (market.bid + market.ask) / Decimal("2")',
-            'if intent.order_type is OrderType.LIMIT and intent.limit_price is not None:',
-            'if market.bid <= 0 or market.ask <= 0 or market.last <= 0:',
+            'if not all(_finite_positive(value) for value in (market.bid, market.ask, market.last)):',
+            'if intent.order_type is OrderType.LIMIT:',
+            'mid = (market.bid + market.ask) / Decimal("2")',
+            'deviation_bps = abs(intent.limit_price - mid) / mid * Decimal("10000")',
         ):
             if anchor not in text:
                 errors.append(f"Capital Safety quote-price contract anchor missing: {anchor}")
