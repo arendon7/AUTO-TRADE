@@ -68,10 +68,11 @@ jobs:
 
       - name: Crypto qualification preview boundary and tests
         run: |
-          .venv/bin/python -m compileall -q scripts/mac_crypto_canary_preview.py scripts/mac_crypto_dashboard.py scripts/check_mac_crypto_http_resilience.py
+          .venv/bin/python -m compileall -q scripts/mac_crypto_canary_preview.py scripts/mac_crypto_dashboard.py scripts/check_mac_crypto_http_resilience.py scripts/check_r6_crypto_quote_primary_policy.py src/autotrade/brokers/alpaca_paper_crypto_market_data.py
           .venv/bin/python scripts/check_mac_dashboard_boundary.py
           .venv/bin/python scripts/check_mac_crypto_http_resilience.py
-          .venv/bin/pytest -q tests/test_mac_crypto_canary_preview.py tests/test_mac_crypto_qualification_console.py tests/test_mac_crypto_dashboard_http_resilience.py
+          .venv/bin/python scripts/check_r6_crypto_quote_primary_policy.py
+          .venv/bin/pytest -q tests/test_r6_paper_crypto_rehearsal.py tests/test_mac_crypto_canary_preview.py tests/test_mac_crypto_qualification_console.py tests/test_mac_crypto_dashboard_http_resilience.py
 
       - name: Build clean Mac rehearsal package
         shell: bash
