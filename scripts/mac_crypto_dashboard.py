@@ -7,11 +7,13 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
 from pathlib import Path
+import re
 import secrets
 import subprocess
 import sys
+from threading import RLock
 import time
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 import webbrowser
 
 from autotrade.brokers.alpaca_paper_crypto_asset import CRYPTO_PAIR, normalize_crypto_pair
@@ -25,6 +27,9 @@ WRITE_ENV = "R6_EXTERNAL_PAPER_WRITE"
 KEY_ENV = "APCA_API_KEY_ID"
 SECRET_ENV = "APCA_API_SECRET_KEY"
 MAX_BODY_BYTES = 32 * 1024
+PREVIEW_RESULT_TTL_SECONDS = 120
+MAX_PREVIEW_RESULTS = 16
+_PREVIEW_ID_RE = re.compile(r"^[0-9a-f]{32}$")
 
 
 class CryptoDashboardError(RuntimeError):
@@ -73,6 +78,13 @@ def _credentials(payload: dict[str, object]) -> tuple[str, str]:
     if len(key) > 512 or len(secret) > 1024:
         raise CryptoDashboardError("credential input is unexpectedly long")
     return key, secret
+
+
+def _preview_request_id(payload: dict[str, object]) -> str:
+    value = str(payload.get("preview_request_id") or "").strip().lower()
+    if not _PREVIEW_ID_RE.fullmatch(value):
+        raise CryptoDashboardError("invalid preview request id")
+    return value
 
 
 def _safe_env(credentials: tuple[str, str]) -> dict[str, str]:
@@ -213,6 +225,19 @@ def _meta() -> dict[str, object]:
         "qualification_preview_max_notional_usd": "5",
         "qualification_preview_target_notional_usd": "2",
         "qualification_preview_write_authority": False,
+        "qualification_preview_response_recovery": "IN_MEMORY_SAME_ATTEMPT_GET",
+    }
+
+
+def _fail_closed_value(message: str) -> dict[str, object]:
+    return {
+        "ok": False,
+        "error": message,
+        "broker_write_performed": False,
+        "external_post_authorized": False,
+        "operator_approval_authority": "NONE",
+        "capital_authority": "NONE",
+        "live_trading": "BLOCKED",
     }
 
 
@@ -228,17 +253,9 @@ def _unexpected_failure(exc: Exception, payload: dict[str, object]) -> dict[str,
         file=sys.stderr,
         flush=True,
     )
-    return {
-        "ok": False,
-        "error": f"local qualification service failed closed [{diagnostic_id}]",
-        "error_type": type(exc).__name__,
-        "diagnostic_id": diagnostic_id,
-        "broker_write_performed": False,
-        "external_post_authorized": False,
-        "operator_approval_authority": "NONE",
-        "capital_authority": "NONE",
-        "live_trading": "BLOCKED",
-    }
+    value = _fail_closed_value(f"local qualification service failed closed [{diagnostic_id}]")
+    value.update({"error_type": type(exc).__name__, "diagnostic_id": diagnostic_id})
+    return value
 
 
 class CryptoHandler(BaseHTTPRequestHandler):
@@ -292,6 +309,47 @@ class CryptoHandler(BaseHTTPRequestHandler):
         if parsed.path == "/api/meta":
             self._json(HTTPStatus.OK, {"ok": True, "meta": _meta()})
             return
+        if parsed.path == "/api/canary-preview-result":
+            raw = parse_qs(parsed.query, keep_blank_values=True).get("request_id", [""])[0].strip().lower()
+            if not _PREVIEW_ID_RE.fullmatch(raw):
+                self._json(HTTPStatus.BAD_REQUEST, _fail_closed_value("invalid preview request id"))
+                return
+            record = self.crypto_server.preview_status(raw)
+            if record is None:
+                value = _fail_closed_value("preview request id is unknown or expired")
+                value.update({"state": "UNKNOWN", "preview_request_id": raw})
+                self._json(HTTPStatus.NOT_FOUND, value)
+                return
+            if record["state"] == "IN_PROGRESS":
+                self._json(
+                    HTTPStatus.ACCEPTED,
+                    {
+                        "ok": True,
+                        "state": "IN_PROGRESS",
+                        "preview_request_id": raw,
+                        "broker_write_performed": False,
+                        "external_post_authorized": False,
+                        "operator_approval_authority": "NONE",
+                        "capital_authority": "NONE",
+                        "live_trading": "BLOCKED",
+                    },
+                )
+                return
+            self._json(
+                HTTPStatus.OK,
+                {
+                    "ok": True,
+                    "state": "COMPLETE",
+                    "preview_request_id": raw,
+                    "result": record["result"],
+                    "broker_write_performed": False,
+                    "external_post_authorized": False,
+                    "operator_approval_authority": "NONE",
+                    "capital_authority": "NONE",
+                    "live_trading": "BLOCKED",
+                },
+            )
+            return
         self._json(HTTPStatus.NOT_FOUND, {"ok": False, "error": "not found"})
 
     def do_POST(self) -> None:  # noqa: N802
@@ -307,6 +365,7 @@ class CryptoHandler(BaseHTTPRequestHandler):
             self._json(HTTPStatus.FORBIDDEN, {"ok": False, "error": "csrf rejected"})
             return
         payload: dict[str, object] = {}
+        preview_request_id: str | None = None
         try:
             length = int(self.headers.get("Content-Length", "0"))
             if not 0 < length <= MAX_BODY_BYTES:
@@ -316,39 +375,29 @@ class CryptoHandler(BaseHTTPRequestHandler):
                 raise CryptoDashboardError("request must be a JSON object")
             payload = decoded
             if parsed_path == "/api/canary-preview":
+                preview_request_id = _preview_request_id(payload)
+                self.crypto_server.begin_preview(preview_request_id)
                 result = _run_canary_preview(payload)
+                self.crypto_server.finish_preview(preview_request_id, result)
             else:
                 result = _run(payload)
         except subprocess.TimeoutExpired:
-            self._json(
-                HTTPStatus.REQUEST_TIMEOUT,
-                {
-                    "ok": False,
-                    "error": "crypto read-only operation timed out",
-                    "broker_write_performed": False,
-                    "external_post_authorized": False,
-                    "operator_approval_authority": "NONE",
-                    "capital_authority": "NONE",
-                    "live_trading": "BLOCKED",
-                },
-            )
+            value = _fail_closed_value("crypto read-only operation timed out")
+            if preview_request_id is not None:
+                self.crypto_server.finish_preview(preview_request_id, value)
+            self._json(HTTPStatus.REQUEST_TIMEOUT, value)
             return
         except (CryptoDashboardError, OSError, ValueError, UnicodeDecodeError, json.JSONDecodeError) as exc:
-            self._json(
-                HTTPStatus.BAD_REQUEST,
-                {
-                    "ok": False,
-                    "error": str(exc),
-                    "broker_write_performed": False,
-                    "external_post_authorized": False,
-                    "operator_approval_authority": "NONE",
-                    "capital_authority": "NONE",
-                    "live_trading": "BLOCKED",
-                },
-            )
+            value = _fail_closed_value(str(exc))
+            if preview_request_id is not None:
+                self.crypto_server.finish_preview(preview_request_id, value)
+            self._json(HTTPStatus.BAD_REQUEST, value)
             return
         except Exception as exc:
-            self._json(HTTPStatus.INTERNAL_SERVER_ERROR, _unexpected_failure(exc, payload))
+            value = _unexpected_failure(exc, payload)
+            if preview_request_id is not None:
+                self.crypto_server.finish_preview(preview_request_id, value)
+            self._json(HTTPStatus.INTERNAL_SERVER_ERROR, value)
             return
         self._json(HTTPStatus.OK, result)
 
@@ -358,7 +407,47 @@ class CryptoServer(ThreadingHTTPServer):
 
     def __init__(self, address: tuple[str, int], csrf_token: str) -> None:
         self.csrf_token = csrf_token
+        self._preview_lock = RLock()
+        self._preview_results: dict[str, dict[str, object]] = {}
         super().__init__(address, CryptoHandler)
+
+    def _prune_preview_results_locked(self) -> None:
+        cutoff = time.monotonic() - PREVIEW_RESULT_TTL_SECONDS
+        expired = [key for key, value in self._preview_results.items() if float(value["stored_at"]) < cutoff]
+        for key in expired:
+            self._preview_results.pop(key, None)
+        if len(self._preview_results) > MAX_PREVIEW_RESULTS:
+            ordered = sorted(self._preview_results, key=lambda key: float(self._preview_results[key]["stored_at"]))
+            for key in ordered[: len(self._preview_results) - MAX_PREVIEW_RESULTS]:
+                self._preview_results.pop(key, None)
+
+    def begin_preview(self, request_id: str) -> None:
+        with self._preview_lock:
+            self._prune_preview_results_locked()
+            if request_id in self._preview_results:
+                raise CryptoDashboardError("preview request id already exists; no replay permitted")
+            self._preview_results[request_id] = {
+                "state": "IN_PROGRESS",
+                "stored_at": time.monotonic(),
+            }
+
+    def finish_preview(self, request_id: str, result: dict[str, object]) -> None:
+        with self._preview_lock:
+            record = self._preview_results.get(request_id)
+            if record is None:
+                return
+            self._preview_results[request_id] = {
+                "state": "COMPLETE",
+                "stored_at": time.monotonic(),
+                "result": result,
+            }
+            self._prune_preview_results_locked()
+
+    def preview_status(self, request_id: str) -> dict[str, object] | None:
+        with self._preview_lock:
+            self._prune_preview_results_locked()
+            record = self._preview_results.get(request_id)
+            return dict(record) if record is not None else None
 
 
 def _start_server(host: str, port: int) -> CryptoServer:
