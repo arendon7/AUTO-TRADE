@@ -26,6 +26,7 @@ def test_crypto_dashboard_meta_exposes_preview_but_zero_write_authority() -> Non
     assert meta["qualification_preview_max_notional_usd"] == "5"
     assert meta["qualification_preview_target_notional_usd"] == "2"
     assert meta["qualification_preview_write_authority"] is False
+    assert meta["qualification_preview_response_recovery"] == "IN_MEMORY_SAME_ATTEMPT_GET"
     assert meta["paper_write"] == "DISABLED"
     assert meta["capital_authority"] == "NONE"
     assert meta["live_trading"] == "BLOCKED"
@@ -135,12 +136,15 @@ def test_crypto_qualification_ui_requires_btc_rehearsal_and_has_no_send_control(
         "function resetPreview(",
         "function previewCanary(",
         'fetch("/api/canary-preview"',
+        'fetch("/api/canary-preview-result?request_id="',
         'lastPass!=="BTC/USD"',
-        "no se puede reutilizar en la ejecución real",
+        "RECUPERANDO MISMO INTENTO · NO REPLAY",
+        "NO puede reutilizarse para ejecución real",
         "todavía no existe en esta interfaz ningún botón que pueda enviar una orden",
         "blind_retry = false",
     ):
         assert anchor in html
+    assert html.count('fetch("/api/canary-preview",') == 1
     for forbidden in (
         "localStorage",
         "sessionStorage",
