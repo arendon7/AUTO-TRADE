@@ -39,8 +39,6 @@ def main() -> int:
         '"/api/canary-approval-record-result"',
         "secrets.compare_digest",
         "_issuer.issue(",
-        '"decision_consumed": False',
-        '"reusable_for_real_execution": False',
         '"broker_write_performed": False',
         '"external_post_authorized": False',
         '"capital_authority": "NONE"',
