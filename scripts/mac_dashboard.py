@@ -14,7 +14,7 @@ import sys
 import threading
 import time
 from typing import NamedTuple
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 import webbrowser
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -30,6 +30,9 @@ DEFAULT_WORKSPACE = Path.home() / "AUTO-TRADE-R6/workspace-001"
 SYMBOL_RE = re.compile(r"^[A-Z0-9.\-]{1,16}$")
 CRYPTO_PAIR_RE = re.compile(r"^[A-Z0-9]{2,16}/[A-Z0-9]{2,16}$")
 ACCOUNT_ID_RE = re.compile(r"^[0-9a-fA-F-]{16,64}$")
+PREVIEW_ID_RE = re.compile(r"^[0-9a-f]{32}$")
+PREVIEW_RESULT_TTL_SECONDS = 120
+MAX_PREVIEW_RESULTS = 16
 
 
 class DashboardError(RuntimeError):
@@ -57,6 +60,7 @@ SAFE_ACTIONS: dict[str, ActionSpec] = {
     "prepare_candidate": ActionSpec("none"),
     "review_receipt": ActionSpec("none"),
     "crypto_rehearsal": ActionSpec("paper", 60),
+    "crypto_preview": ActionSpec("paper", 60),
 }
 
 
@@ -112,6 +116,13 @@ def _crypto_symbol(payload: dict[str, object]) -> str:
     return value
 
 
+def _preview_request_id(payload: dict[str, object]) -> str:
+    value = str(payload.get("preview_request_id") or "").strip().lower()
+    if not PREVIEW_ID_RE.fullmatch(value):
+        raise DashboardError("invalid preview request id")
+    return value
+
+
 def _paper_credentials(payload: dict[str, object]) -> tuple[str, str]:
     key = str(payload.get("paper_key") or "").strip()
     secret = str(payload.get("paper_secret") or "").strip()
@@ -136,14 +147,22 @@ def _command(action: str, payload: dict[str, object]) -> tuple[list[str], tuple[
     if action not in SAFE_ACTIONS:
         raise DashboardError("Action is not in the certified dashboard allowlist")
 
-    if action == "crypto_rehearsal":
+    if action in {"crypto_rehearsal", "crypto_preview"}:
         workspace = _workspace(payload)
         credentials = _paper_credentials(payload)
+        symbol = _crypto_symbol(payload)
+        if action == "crypto_preview" and symbol != "BTC/USD":
+            raise DashboardError("first TD-R6-017 qualification preview is fixed to BTC/USD")
+        script = (
+            "scripts/mac_crypto_canary_preview.py"
+            if action == "crypto_preview"
+            else "scripts/mac_crypto_paper_rehearsal.py"
+        )
         return [
             str(PYTHON),
-            "scripts/mac_crypto_paper_rehearsal.py",
+            script,
             "--workspace", workspace,
-            "--symbol", _crypto_symbol(payload),
+            "--symbol", symbol,
             "--allow-paper-crypto-read",
         ], credentials
 
@@ -295,6 +314,12 @@ def _build_meta() -> dict[str, object]:
         "crypto_default_symbol": "BTC/USD",
         "crypto_pair_input": "BASE/QUOTE",
         "crypto_rehearsal_available": True,
+        "qualification_preview_available": True,
+        "qualification_preview_symbol": "BTC/USD",
+        "qualification_preview_max_notional_usd": "5",
+        "qualification_preview_target_notional_usd": "2",
+        "qualification_preview_write_authority": False,
+        "qualification_preview_response_recovery": "PRIMARY_CONTROL_CENTER_SAME_ATTEMPT_GET",
         "equity_execution_from_dashboard": False,
         "crypto_execution_from_dashboard": False,
         "external_paper_write": "DISABLED",
@@ -308,6 +333,18 @@ def _page(path: Path, token: str) -> bytes:
     return path.read_text(encoding="utf-8").replace("__CSRF_TOKEN__", token).encode("utf-8")
 
 
+def _fail_closed_preview_value(message: str) -> dict[str, object]:
+    return {
+        "ok": False,
+        "error": message,
+        "broker_write_performed": False,
+        "external_post_authorized": False,
+        "operator_approval_authority": "NONE",
+        "capital_authority": "NONE",
+        "live_trading": "BLOCKED",
+    }
+
+
 class DashboardHandler(BaseHTTPRequestHandler):
     server_version = "AUTO-TRADE-R6-MultiAssetDashboard"
 
@@ -318,9 +355,12 @@ class DashboardHandler(BaseHTTPRequestHandler):
     def log_message(self, format: str, *args: object) -> None:
         return
 
-    def _headers(self, status: HTTPStatus, content_type: str) -> None:
+    def _headers(self, status: HTTPStatus, content_type: str, content_length: int) -> None:
+        self.close_connection = True
         self.send_response(status)
         self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(content_length))
+        self.send_header("Connection", "close")
         self.send_header("Cache-Control", "no-store, max-age=0")
         self.send_header("Pragma", "no-cache")
         self.send_header("X-Content-Type-Options", "nosniff")
@@ -333,10 +373,14 @@ class DashboardHandler(BaseHTTPRequestHandler):
         )
         self.end_headers()
 
+    def _write_body(self, status: HTTPStatus, content_type: str, body: bytes) -> None:
+        self._headers(status, content_type, len(body))
+        self.wfile.write(body)
+        self.wfile.flush()
+
     def _json(self, status: HTTPStatus, payload: dict[str, object]) -> None:
         body = json.dumps(payload, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
-        self._headers(status, "application/json; charset=utf-8")
-        self.wfile.write(body)
+        self._write_body(status, "application/json; charset=utf-8", body)
 
     def _require_local_origin(self) -> bool:
         origin = self.headers.get("Origin")
@@ -367,8 +411,11 @@ class DashboardHandler(BaseHTTPRequestHandler):
             "/crypto": CRYPTO_HTML_PATH,
         }
         if parsed.path in pages:
-            self._headers(HTTPStatus.OK, "text/html; charset=utf-8")
-            self.wfile.write(_page(pages[parsed.path], self.dashboard_server.csrf_token))
+            self._write_body(
+                HTTPStatus.OK,
+                "text/html; charset=utf-8",
+                _page(pages[parsed.path], self.dashboard_server.csrf_token),
+            )
             return
         if parsed.path == "/api/meta":
             self._json(HTTPStatus.OK, {"ok": True, "meta": _build_meta()})
@@ -384,13 +431,42 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 "<style>body{font:14px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace;max-width:1100px;margin:40px auto;padding:0 24px;background:#08100e;color:#dbeae4}pre{white-space:pre-wrap}</style>"
                 f"<pre>{escaped}</pre>"
             )
-            self._headers(HTTPStatus.OK, "text/html; charset=utf-8")
-            self.wfile.write(body.encode("utf-8"))
+            self._write_body(HTTPStatus.OK, "text/html; charset=utf-8", body.encode("utf-8"))
+            return
+        if parsed.path == "/api/canary-preview-result":
+            raw = parse_qs(parsed.query, keep_blank_values=True).get("request_id", [""])[0].strip().lower()
+            if not PREVIEW_ID_RE.fullmatch(raw):
+                self._json(HTTPStatus.BAD_REQUEST, _fail_closed_preview_value("invalid preview request id"))
+                return
+            record = self.dashboard_server.preview_status(raw)
+            if record is None:
+                value = _fail_closed_preview_value("preview request id is unknown or expired")
+                value.update({"state": "UNKNOWN", "preview_request_id": raw})
+                self._json(HTTPStatus.NOT_FOUND, value)
+                return
+            if record["state"] == "IN_PROGRESS":
+                value = _fail_closed_preview_value("preview still in progress")
+                value.update({"ok": True, "state": "IN_PROGRESS", "preview_request_id": raw})
+                self._json(HTTPStatus.ACCEPTED, value)
+                return
+            value = {
+                "ok": True,
+                "state": "COMPLETE",
+                "preview_request_id": raw,
+                "result": record["result"],
+                "broker_write_performed": False,
+                "external_post_authorized": False,
+                "operator_approval_authority": "NONE",
+                "capital_authority": "NONE",
+                "live_trading": "BLOCKED",
+            }
+            self._json(HTTPStatus.OK, value)
             return
         self._json(HTTPStatus.NOT_FOUND, {"ok": False, "error": "not found"})
 
     def do_POST(self) -> None:  # noqa: N802
-        if self.path not in {"/api/action", "/api/rehearsal"}:
+        parsed_path = urlparse(self.path).path
+        if parsed_path not in {"/api/action", "/api/rehearsal", "/api/canary-preview"}:
             self._json(HTTPStatus.NOT_FOUND, {"ok": False, "error": "not found"})
             return
         if not self._require_local_origin():
@@ -399,15 +475,44 @@ class DashboardHandler(BaseHTTPRequestHandler):
         if self.headers.get("X-CSRF-Token") != self.dashboard_server.csrf_token:
             self._json(HTTPStatus.FORBIDDEN, {"ok": False, "error": "csrf rejected"})
             return
+        preview_request_id: str | None = None
         try:
             payload = self._read_payload()
-            action = "crypto_rehearsal" if self.path == "/api/rehearsal" else str(payload.get("action") or "")
+            if parsed_path == "/api/canary-preview":
+                preview_request_id = _preview_request_id(payload)
+                self.dashboard_server.begin_preview(preview_request_id)
+                action = "crypto_preview"
+            elif parsed_path == "/api/rehearsal":
+                action = "crypto_rehearsal"
+            else:
+                action = str(payload.get("action") or "")
             result = _run_action(action, payload)
+            if preview_request_id is not None:
+                self.dashboard_server.finish_preview(preview_request_id, result)
         except subprocess.TimeoutExpired:
-            self._json(HTTPStatus.REQUEST_TIMEOUT, {"ok": False, "error": "safe action timed out"})
+            value = _fail_closed_preview_value("safe action timed out") if preview_request_id else {"ok": False, "error": "safe action timed out"}
+            if preview_request_id is not None:
+                self.dashboard_server.finish_preview(preview_request_id, value)
+            self._json(HTTPStatus.REQUEST_TIMEOUT, value)
             return
         except (DashboardError, OSError, ValueError) as exc:
-            self._json(HTTPStatus.BAD_REQUEST, {"ok": False, "error": str(exc)})
+            value = _fail_closed_preview_value(str(exc)) if parsed_path == "/api/canary-preview" else {"ok": False, "error": str(exc)}
+            if preview_request_id is not None:
+                self.dashboard_server.finish_preview(preview_request_id, value)
+            self._json(HTTPStatus.BAD_REQUEST, value)
+            return
+        except Exception as exc:
+            diagnostic_id = secrets.token_hex(8)
+            print(
+                f"AUTO-TRADE Control Center preview diagnostic {diagnostic_id}: {type(exc).__name__}",
+                file=sys.stderr,
+                flush=True,
+            )
+            value = _fail_closed_preview_value(f"local qualification service failed closed [{diagnostic_id}]")
+            value.update({"error_type": type(exc).__name__, "diagnostic_id": diagnostic_id})
+            if preview_request_id is not None:
+                self.dashboard_server.finish_preview(preview_request_id, value)
+            self._json(HTTPStatus.INTERNAL_SERVER_ERROR, value)
             return
         self._json(HTTPStatus.OK, result)
 
@@ -417,7 +522,53 @@ class DashboardServer(ThreadingHTTPServer):
 
     def __init__(self, address: tuple[str, int], csrf_token: str) -> None:
         self.csrf_token = csrf_token
+        self._preview_lock = threading.RLock()
+        self._preview_results: dict[str, dict[str, object]] = {}
         super().__init__(address, DashboardHandler)
+
+    def _prune_preview_results_locked(self) -> None:
+        cutoff = time.monotonic() - PREVIEW_RESULT_TTL_SECONDS
+        expired = [
+            key
+            for key, value in self._preview_results.items()
+            if float(value["stored_at"]) < cutoff
+        ]
+        for key in expired:
+            self._preview_results.pop(key, None)
+        if len(self._preview_results) > MAX_PREVIEW_RESULTS:
+            ordered = sorted(
+                self._preview_results,
+                key=lambda key: float(self._preview_results[key]["stored_at"]),
+            )
+            for key in ordered[: len(self._preview_results) - MAX_PREVIEW_RESULTS]:
+                self._preview_results.pop(key, None)
+
+    def begin_preview(self, request_id: str) -> None:
+        with self._preview_lock:
+            self._prune_preview_results_locked()
+            if request_id in self._preview_results:
+                raise DashboardError("preview request id already exists; no replay permitted")
+            self._preview_results[request_id] = {
+                "state": "IN_PROGRESS",
+                "stored_at": time.monotonic(),
+            }
+
+    def finish_preview(self, request_id: str, result: dict[str, object]) -> None:
+        with self._preview_lock:
+            if request_id not in self._preview_results:
+                return
+            self._preview_results[request_id] = {
+                "state": "COMPLETE",
+                "stored_at": time.monotonic(),
+                "result": result,
+            }
+            self._prune_preview_results_locked()
+
+    def preview_status(self, request_id: str) -> dict[str, object] | None:
+        with self._preview_lock:
+            self._prune_preview_results_locked()
+            record = self._preview_results.get(request_id)
+            return dict(record) if record is not None else None
 
 
 def _start_server(host: str, port: int) -> DashboardServer:
