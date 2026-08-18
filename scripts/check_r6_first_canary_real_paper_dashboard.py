@@ -57,6 +57,9 @@ def main() -> int:
             '"NO_READY_ATTEMPT"',
             'package_deadline <= now or approval_deadline <= now',
             '"automatic_attempt_discovery": "EXACTLY_ONE_FRESH_READY_ONLY"',
+            'discovery = _discover_ready_attempt(workspace=workspace)',
+            'discovery.get("selection_status") != "EXACT_ONE_READY"',
+            '"execution requires exactly one fresh approved unstarted attempt and the selected Attempt ID must match it"',
             'if confirmation != status.get("external_post_challenge"):',
             '"scripts/mac_crypto_first_canary_execute_real_paper.py"',
             '"--allow-exact-paper-post"',
@@ -168,10 +171,10 @@ def main() -> int:
 
     print(
         "first-canary real PAPER Mac surface: PASS — downloaded Finder launcher relocates/reuses exact certified "
-        "installed head; separate execution-only localhost UI; exactly-one fresh approved attempt auto-discovery; "
-        "ambiguous/expired selection fails closed; restart-safe preparation + approval required; exact second challenge; "
-        "consent/start => recovery-only; no direct broker stack; launcher carries no credentials and keeps generic write "
-        "disabled; LIVE blocked"
+        "installed head; separate execution-only localhost UI; exactly-one fresh approved attempt auto-discovery "
+        "is re-enforced at execute boundary; ambiguous/expired selection fails closed; restart-safe preparation + "
+        "approval required; exact second challenge; consent/start => recovery-only; no direct broker stack; launcher "
+        "carries no credentials and keeps generic write disabled; LIVE blocked"
     )
     return 0
 
