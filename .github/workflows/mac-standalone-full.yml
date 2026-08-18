@@ -288,6 +288,7 @@ jobs:
     env:
       PIP_NO_INDEX: '1'
       PIP_DISABLE_PIP_VERSION_CHECK: '1'
+      PYTHONUNBUFFERED: '1'
       R6_EXTERNAL_PAPER_WRITE: DISABLED
     steps:
       - name: Download exact candidate
