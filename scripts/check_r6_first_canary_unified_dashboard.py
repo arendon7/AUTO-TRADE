@@ -8,7 +8,9 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 SERVER = ROOT / "scripts/mac_first_canary_unified_dashboard.py"
 HTML = ROOT / "web/mac_first_canary_unified.html"
-LAUNCHER = ROOT / "ABRIR_AUTO_TRADE_CANARY.command"
+SOURCE_LAUNCHER = ROOT / "ABRIR_AUTO_TRADE_CANARY.command"
+INSTALLED_LAUNCHER = ROOT / "ABRIR_AUTO_TRADE.command"
+MANIFEST = ROOT / "MAC_STANDALONE_MANIFEST.txt"
 NETWORK_ROOTS = {"urllib", "requests", "httpx", "aiohttp", "socket", "ssl", "websocket", "websockets"}
 FORBIDDEN_DIRECT_AUTHORITY = (
     "HttpsAlpacaPaperCryptoWriteTransport",
@@ -38,14 +40,24 @@ def imports(path: Path) -> set[str]:
     return result
 
 
+def _launcher() -> Path:
+    if SOURCE_LAUNCHER.is_file():
+        return SOURCE_LAUNCHER
+    if MANIFEST.is_file() and "first_canary_unified_surface=ONE_APP" in MANIFEST.read_text(encoding="utf-8"):
+        if INSTALLED_LAUNCHER.is_file():
+            return INSTALLED_LAUNCHER
+    return SOURCE_LAUNCHER
+
+
 def main() -> int:
-    for path in (SERVER, HTML, LAUNCHER):
+    launcher_path = _launcher()
+    for path in (SERVER, HTML, launcher_path):
         if not path.is_file():
             fail(f"missing required unified surface: {path.relative_to(ROOT)}")
 
     server = SERVER.read_text(encoding="utf-8")
     html = HTML.read_text(encoding="utf-8")
-    launcher = LAUNCHER.read_text(encoding="utf-8")
+    launcher = launcher_path.read_text(encoding="utf-8")
 
     roots = {module.split(".", 1)[0] for module in imports(SERVER) if module}
     forbidden_network = roots & NETWORK_ROOTS
@@ -80,7 +92,6 @@ def main() -> int:
         if token not in server:
             fail(f"unified server missing boundary anchor: {token}")
 
-    # Internal authority identifiers/challenges never become operator-entered fields.
     forbidden_html_inputs = (
         'id="attempt',
         'name="attempt',
