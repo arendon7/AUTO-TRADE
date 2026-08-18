@@ -9,6 +9,8 @@ ROOT = Path(__file__).resolve().parents[1]
 BROKERS = ROOT / "src/autotrade/brokers"
 WRITER = BROKERS / "alpaca_paper_crypto_writer.py"
 PRE_IO = BROKERS / "alpaca_paper_crypto_pre_io.py"
+COLD_START_PRE_IO = BROKERS / "alpaca_paper_crypto_cold_start_pre_io.py"
+COLD_START_PRE_IO_AUTHORITY = BROKERS / "alpaca_paper_crypto_cold_start_pre_io_authority.py"
 RECONCILIATION = BROKERS / "alpaca_paper_crypto_reconciliation.py"
 UNKNOWN_RECOVERY = BROKERS / "alpaca_paper_crypto_unknown_recovery.py"
 ORDER = BROKERS / "alpaca_paper_crypto_order.py"
@@ -27,12 +29,22 @@ GUARDED_CAPABILITY = "GuardedAlpacaPaperCryptoWriteTransport"
 EXPECTED_GUARDED_SUBCLASSES = {
     (PRE_IO.name, "FinalGuardedCryptoEntryTransport"),
     (PRE_IO.name, "FinalGuardedCryptoProtectionTransport"),
+    (COLD_START_PRE_IO.name, "ColdStartFinalGuardedCryptoEntryTransport"),
 }
 
 
 def main() -> int:
     errors: list[str] = []
-    for path in (WRITER, PRE_IO, RECONCILIATION, UNKNOWN_RECOVERY, ORDER, LIFECYCLE):
+    for path in (
+        WRITER,
+        PRE_IO,
+        COLD_START_PRE_IO,
+        COLD_START_PRE_IO_AUTHORITY,
+        RECONCILIATION,
+        UNKNOWN_RECOVERY,
+        ORDER,
+        LIFECYCLE,
+    ):
         if not path.is_file():
             errors.append(f"missing crypto execution contract file: {path.relative_to(ROOT)}")
 
@@ -82,6 +94,52 @@ def main() -> int:
         for needle, reason in required.items():
             if needle not in text:
                 errors.append(f"pre_io: {reason}")
+
+    if COLD_START_PRE_IO.is_file():
+        text = COLD_START_PRE_IO.read_text(encoding="utf-8")
+        required = {
+            "class ColdStartFinalGuardedCryptoEntryTransport(GuardedAlpacaPaperCryptoWriteTransport):": "cold-start ENTRY transport is not nominally guarded",
+            "role = CryptoOrderRole.ENTRY": "cold-start ENTRY role binding is missing",
+            "CryptoColdStartPreIoAuthority": "cold-start transport lacks durable PRE_IO authority",
+            "CryptoColdStartPreIoExecutionContext": "cold-start exact execution context is missing",
+            "request_payload != expected_payload": "cold-start writer body is not bound to prepared broker payload",
+            "credentials = _ephemeral_credentials(headers)": "cold-start actual request credential binding is missing",
+            "CryptoColdStartFinalWritePhase.PRE_IO": "cold-start PRE_IO phase gate is missing",
+            "CryptoLifecycleStatus.ENTRY_SUBMISSION_UNKNOWN": "cold-start durable UNKNOWN gate is missing",
+            "attestation.entry_attempt_count != 1": "cold-start one-attempt gate is missing",
+            "attestation.package_hash != self._context.package.package_hash": "cold-start package binding is missing",
+            "attestation.credential_reference != credentials.credential_reference": "cold-start request credential provenance gate is missing",
+            "self._last_attestation = attestation": "cold-start PRE_IO evidence latch is missing",
+            "response = self._delegate.post(": "cold-start delegated one-shot I/O is missing",
+        }
+        for needle, reason in required.items():
+            if needle not in text:
+                errors.append(f"cold_start_pre_io: {reason}")
+        latch = text.find("self._last_attestation = attestation")
+        delegate = text.find("response = self._delegate.post(")
+        if not 0 <= latch < delegate:
+            errors.append("cold_start_pre_io: PRE_IO evidence must latch before delegated I/O")
+        constructor_start = text.find("class ColdStartFinalGuardedCryptoEntryTransport")
+        property_start = text.find("    @property\n    def last_attestation", constructor_start)
+        constructor_surface = text[constructor_start:property_start] if constructor_start >= 0 and property_start >= 0 else ""
+        if "clock" in constructor_surface:
+            errors.append("cold_start_pre_io: production transport may not accept an injectable clock")
+
+    if COLD_START_PRE_IO_AUTHORITY.is_file():
+        text = COLD_START_PRE_IO_AUTHORITY.read_text(encoding="utf-8")
+        required = {
+            "class CryptoColdStartPreIoAuthority:": "durable cold-start PRE_IO authority is missing",
+            "self._checkpoints.get(attempt_id)": "PRE_IO does not reload durable PRE_CONSUME checkpoint",
+            "resolve_cold_start_external_submission_handoff": "PRE_IO does not resolve OMS-owned durable handoff",
+            "checkpoint_hash": "PRE_IO handoff/checkpoint binding is missing",
+            "CryptoColdStartFinalWritePhase.PRE_IO": "PRE_IO authority does not invoke isolated Final Guard PRE_IO",
+            "previous_attestation=checkpoint.pre_consume": "PRE_IO predecessor is not the durable PRE_CONSUME attestation",
+            "attestation.previous_attestation_hash != checkpoint.pre_consume.attestation_hash": "PRE_IO predecessor hash verification is missing",
+            "attestation.authority_state_fingerprint != checkpoint.authority_state_fingerprint": "PRE_IO cold-start core fingerprint verification is missing",
+        }
+        for needle, reason in required.items():
+            if needle not in text:
+                errors.append(f"cold_start_pre_io_authority: {reason}")
 
     if RECONCILIATION.is_file():
         text = RECONCILIATION.read_text(encoding="utf-8")
@@ -191,9 +249,9 @@ def main() -> int:
         return 1
     print(
         "AUTO-TRADE R6 crypto execution authority boundary: PASS "
-        "(disabled-by-default PAPER writer; nominal role-bound ENTRY/PROTECTION Final Guards; "
-        "UNKNOWN-before-I/O; exact /v2/orders POST; GET-only client-id + position reconciliation; "
-        "order-404 always continues to position truth and can only HALT or strongly FLAT-reconcile; "
+        "(disabled-by-default PAPER writer; nominal role-bound normal ENTRY/PROTECTION Final Guards plus isolated first-canary ENTRY guard; "
+        "UNKNOWN-before-I/O; exact /v2/orders POST; durable cold-start PRE_CONSUME+OMS handoff PRE_IO binding; "
+        "GET-only client-id + position reconciliation; order-404 always continues to position truth and can only HALT or strongly FLAT-reconcile; "
         "zero blind retry; no equity bracket/LIVE cross-authority)"
     )
     return 0

@@ -23,6 +23,7 @@ TRADE_UPDATES_FILE = "alpaca_paper_trade_updates_transport.py"
 CRYPTO_WRITER_FILE = "alpaca_paper_crypto_writer.py"
 CRYPTO_RECONCILIATION_FILE = "alpaca_paper_crypto_reconciliation.py"
 CRYPTO_PRE_IO_FILE = "alpaca_paper_crypto_pre_io.py"
+CRYPTO_COLD_START_PRE_IO_FILE = "alpaca_paper_crypto_cold_start_pre_io.py"
 APPROVED_NETWORK_FILES = frozenset(
     {
         ATTESTATION_FILE,
@@ -96,6 +97,7 @@ def _scan(path: Path) -> list[str]:
     writer_calls: list[ast.Call] = []
     crypto_writer_calls: list[ast.Call] = []
     crypto_pre_io_delegate_calls: list[ast.Call] = []
+    crypto_cold_start_pre_io_delegate_calls: list[ast.Call] = []
     control_sends: list[ast.Call] = []
 
     for node in ast.walk(tree):
@@ -141,11 +143,17 @@ def _scan(path: Path) -> list[str]:
                 and name == "post"
                 and _is_crypto_pre_io_delegate_post(node)
             )
+            is_exact_crypto_cold_start_pre_io_delegate = (
+                path.name == CRYPTO_COLD_START_PRE_IO_FILE
+                and name == "post"
+                and _is_crypto_pre_io_delegate_post(node)
+            )
             if (
                 name in FORBIDDEN_EXTERNAL_CALLS
                 and not is_exact_control_send
                 and not is_exact_crypto_post
                 and not is_exact_crypto_pre_io_delegate
+                and not is_exact_crypto_cold_start_pre_io_delegate
             ):
                 errors.append(
                     f"{rel}:{node.lineno}: unaudited external write call {name} is forbidden"
@@ -161,6 +169,12 @@ def _scan(path: Path) -> list[str]:
                 if _inside_loop(tree, node):
                     errors.append(
                         f"{rel}:{node.lineno}: crypto PRE_IO delegated POST cannot execute inside a loop"
+                    )
+            if is_exact_crypto_cold_start_pre_io_delegate:
+                crypto_cold_start_pre_io_delegate_calls.append(node)
+                if _inside_loop(tree, node):
+                    errors.append(
+                        f"{rel}:{node.lineno}: crypto cold-start PRE_IO delegated POST cannot execute inside a loop"
                     )
             if is_exact_control_send:
                 control_sends.append(node)
@@ -209,6 +223,10 @@ def _scan(path: Path) -> list[str]:
     if path.name == CRYPTO_PRE_IO_FILE and len(crypto_pre_io_delegate_calls) != 2:
         errors.append(
             f"{rel}: crypto PRE_IO interlock must contain exactly two role-bound self._delegate.post call sites"
+        )
+    if path.name == CRYPTO_COLD_START_PRE_IO_FILE and len(crypto_cold_start_pre_io_delegate_calls) != 1:
+        errors.append(
+            f"{rel}: crypto cold-start PRE_IO interlock must contain exactly one audited self._delegate.post call site"
         )
     if path.name == TRADE_UPDATES_FILE and len(control_sends) != 2:
         errors.append(
