@@ -2,211 +2,73 @@ from __future__ import annotations
 
 import ast
 from pathlib import Path
+import re
 import sys
 
-
 ROOT = Path(__file__).resolve().parents[1]
-BROKERS = ROOT / "src/autotrade/brokers"
-WRITER = BROKERS / "alpaca_paper_crypto_writer.py"
-PRE_IO = BROKERS / "alpaca_paper_crypto_pre_io.py"
-RECONCILIATION = BROKERS / "alpaca_paper_crypto_reconciliation.py"
-UNKNOWN_RECOVERY = BROKERS / "alpaca_paper_crypto_unknown_recovery.py"
-ORDER = BROKERS / "alpaca_paper_crypto_order.py"
-LIFECYCLE = BROKERS / "alpaca_paper_crypto_lifecycle.py"
-CRYPTO_MODULES = tuple(sorted(BROKERS.glob("alpaca_paper_crypto_*.py")))
-
-FORBIDDEN_CROSS_PRODUCT = (
-    "alpaca_paper_bracket",
-    "alpaca_paper_writer",
-    "alpaca_paper_final_guard",
-    "connectivity_final_freshness",
-    "connectivity_workspace_post",
-)
-NETWORK_IMPORT_ROOTS = {"http", "urllib", "socket", "requests", "httpx"}
-GUARDED_CAPABILITY = "GuardedAlpacaPaperCryptoWriteTransport"
+SRC = ROOT / "src/autotrade/brokers"
+WRITER = SRC / "alpaca_paper_crypto_writer.py"
+PRE_IO = SRC / "alpaca_paper_crypto_pre_io.py"
+COLD_START_PRE_IO = SRC / "alpaca_paper_crypto_cold_start_pre_io.py"
+LIFECYCLE = SRC / "alpaca_paper_crypto_lifecycle.py"
+RECOVERY = SRC / "alpaca_paper_crypto_unknown_recovery.py"
+RECONCILIATION = SRC / "alpaca_paper_crypto_reconciliation.py"
+PROTECTION_ATTEMPT = SRC / "alpaca_paper_crypto_protection_execution_attempt.py"
+WORKFLOW = ROOT / ".github/workflows/r6-crypto-execution.yml"
+COLD_START_WORKFLOW = ROOT / ".github/workflows/r6-crypto-cold-start-execution-authority.yml"
+TEST = ROOT / "tests/test_r6_paper_crypto_writer.py"
+PROTECTION_TEST = ROOT / "tests/test_r6_paper_crypto_protection_pre_io.py"
+UNKNOWN_RECOVERY_TEST = ROOT / "tests/test_r6_paper_crypto_unknown_recovery.py"
+UNKNOWN_RECOVERY_ADVERSARIAL_TEST = ROOT / "tests/test_r6_paper_crypto_unknown_recovery_adversarial.py"
+COLD_START_TRANSPORT_TEST = ROOT / "tests/test_r6_paper_crypto_cold_start_pre_io_transport.py"
+WRITE_ENV = "R6_EXTERNAL_PAPER_WRITE"
+ALLOWED_WRITER = "alpaca_paper_crypto_writer.py"
 EXPECTED_GUARDED_SUBCLASSES = {
-    (PRE_IO.name, "FinalGuardedCryptoEntryTransport"),
-    (PRE_IO.name, "FinalGuardedCryptoProtectionTransport"),
+    "FinalGuardedCryptoEntryTransport",
+    "FinalGuardedCryptoProtectionTransport",
+    "ColdStartFinalGuardedCryptoEntryTransport",
+}
+NETWORK_IMPORT_ROOTS = {
+    "aiohttp",
+    "http.client",
+    "httpx",
+    "requests",
+    "socket",
+    "ssl",
+    "urllib.request",
+    "urllib3",
 }
 
 
-def main() -> int:
-    errors: list[str] = []
-    for path in (WRITER, PRE_IO, RECONCILIATION, UNKNOWN_RECOVERY, ORDER, LIFECYCLE):
-        if not path.is_file():
-            errors.append(f"missing crypto execution contract file: {path.relative_to(ROOT)}")
-
-    if WRITER.is_file():
-        text = WRITER.read_text(encoding="utf-8")
-        required = {
-            'CRYPTO_ORDERS_PATH = "/v2/orders"': "exact orders path is missing",
-            "enabled: bool = False": "crypto writer must be disabled by default",
-            "host: str = ALPACA_PAPER_TRADING_HOST": "writer host is not bound to PAPER constant",
-            'if self.host != ALPACA_PAPER_TRADING_HOST': "writer exact PAPER host self-check is missing",
-            "http.client.HTTPSConnection(host": "writer TLS transport is missing",
-            'connection.request("POST", path': "writer exact POST transport is missing",
-            "class GuardedAlpacaPaperCryptoWriteTransport:": "nominal guarded transport capability is missing",
-            "if not isinstance(self._transport, GuardedAlpacaPaperCryptoWriteTransport):": "enabled writer nominal Final-Guard gate is missing",
-            'getattr(self._transport, "role", None) is not order.role': "enabled writer role-binding gate is missing",
-            "lifecycle.mark_entry_submission_unknown": "entry UNKNOWN-before-I/O transition is missing",
-            "lifecycle.mark_protection_submission_unknown": "protection UNKNOWN-before-I/O transition is missing",
-            "self._transport.post(": "one-shot transport call is missing",
-            'raise CryptoLifecycleBlocked("entry POST requires durable ENTRY_PREPARED")': "entry state gate is missing",
-            'raise CryptoLifecycleBlocked("protection POST requires durable PROTECTION_PREPARED")': "protection state gate is missing",
-            "reconcile by durable client_order_id": "ambiguous ACK reconciliation instruction is missing",
-        }
-        for needle, reason in required.items():
-            if needle not in text:
-                errors.append(f"writer: {reason}")
-        if "api.alpaca.markets" in text:
-            errors.append("writer contains LIVE Alpaca host literal")
-        if "order_class" in text:
-            errors.append("crypto writer may not expose equity order_class semantics")
-        if text.find("lifecycle.mark_entry_submission_unknown") > text.find("self._transport.post("):
-            errors.append("entry UNKNOWN transition does not precede broker I/O in source authority flow")
-        if text.find("lifecycle.mark_protection_submission_unknown") > text.find("self._transport.post("):
-            errors.append("protection UNKNOWN transition does not precede broker I/O in source authority flow")
-
-    if PRE_IO.is_file():
-        text = PRE_IO.read_text(encoding="utf-8")
-        required = {
-            "class FinalGuardedCryptoEntryTransport(GuardedAlpacaPaperCryptoWriteTransport):": "ENTRY transport is not nominally guarded",
-            "role = CryptoOrderRole.ENTRY": "ENTRY guarded transport role is missing",
-            "class FinalGuardedCryptoProtectionTransport(GuardedAlpacaPaperCryptoWriteTransport):": "PROTECTION transport is not nominally guarded",
-            "role = CryptoOrderRole.PROTECTION": "PROTECTION guarded transport role is missing",
-            "CryptoFinalWritePhase.PRE_IO": "ENTRY PRE_IO evidence gate is missing",
-            "CryptoProtectionFinalWritePhase.PRE_IO": "PROTECTION PRE_IO evidence gate is missing",
-            "CryptoLifecycleStatus.ENTRY_SUBMISSION_UNKNOWN": "ENTRY durable UNKNOWN evidence gate is missing",
-            "CryptoLifecycleStatus.PROTECTION_SUBMISSION_UNKNOWN": "PROTECTION durable UNKNOWN evidence gate is missing",
-        }
-        for needle, reason in required.items():
-            if needle not in text:
-                errors.append(f"pre_io: {reason}")
-
-    if RECONCILIATION.is_file():
-        text = RECONCILIATION.read_text(encoding="utf-8")
-        required = {
-            'ORDER_BY_CLIENT_PATH = "/v2/orders:by_client_order_id"': "client-order reconciliation endpoint is missing",
-            'POSITION_PATH_PREFIX = "/v2/positions/"': "position reconciliation endpoint is missing",
-            "class CryptoBrokerOrderAbsenceEvidence:": "tamper-evident order-404 absence type is missing",
-            "class CryptoBrokerUnknownReconciliation:": "discriminated UNKNOWN reconciliation type is missing",
-            "client_order_id=": "durable client_order_id lookup binding is missing",
-            "UrllibAlpacaPaperReadTransport": "reconciliation must use certified read transport",
-            'method="GET"': "reconciliation GET-only request is missing",
-            "credentials.credential_reference": "reconciliation evidence is not credential-bound",
-            "retry remains forbidden": "order-404 result does not explicitly preserve no-retry contract",
-            "confirmed_net_long_quantity=reconciliation.position.quantity": "position truth is not applied to normal lifecycle reconciliation",
-        }
-        for needle, reason in required.items():
-            if needle not in text:
-                errors.append(f"reconciliation: {reason}")
-        order_404 = text.find("if order_response.status_code == 404:")
-        position_read = text.find("position_response = position_transport.read(")
-        absence_return = text.find("return CryptoBrokerUnknownReconciliation(")
-        if not 0 <= order_404 < position_read < absence_return:
-            errors.append("reconciliation: exact order 404 must continue to position GET before returning UNKNOWN evidence")
-        for forbidden in ("http.client", ".post(", 'method="POST"'):
-            if forbidden in text:
-                errors.append(f"reconciliation contains forbidden write marker: {forbidden}")
-
-    if UNKNOWN_RECOVERY.is_file():
-        text = UNKNOWN_RECOVERY.read_text(encoding="utf-8")
-        required = {
-            "class CryptoPaperUnknownRecoveryCoordinator:": "UNKNOWN recovery coordinator is missing",
-            "CryptoExecutionAttemptCheckpoint": "ENTRY durable checkpoint binding is missing",
-            "CryptoProtectionExecutionAttemptCheckpoint": "PROTECTION durable checkpoint binding is missing",
-            "CryptoBrokerUnknownReconciliation": "order-404 evidence binding is missing",
-            "fresh_account: AlpacaPaperAccountAttestation": "fresh same-account evidence is missing",
-            "PaperFlatAccountAttestation": "all-account flatness evidence is missing",
-            "if position.quantity > 0:": "remaining-long fail-closed branch is missing",
-            "CryptoLifecycleStatus.HALTED_RECONCILIATION_REQUIRED": "remaining-long HALT state is missing",
-            "clean_for_first_canary": "zero-position branch does not require complete account flatness",
-            "CryptoLifecycleStatus.FLAT_RECONCILED": "strong-flat terminal state is missing",
-            '"retry_authorized": False': "UNKNOWN recovery does not permanently deny retry",
-            "attempt_count != 1": "UNKNOWN recovery does not preserve one-shot attempt count",
-            "lifecycle._mutate(": "UNKNOWN recovery is not persisted through lifecycle event chain",
-            '"order_absence_fingerprint"': "order-absence evidence is not persisted in event payload",
-            '"position_fingerprint"': "position evidence is not persisted in event payload",
-            '"fresh_account_fingerprint"': "account evidence is not persisted in event payload",
-            '"flat_account_fingerprint"': "flat-account evidence is not persisted in event payload",
-        }
-        for needle, reason in required.items():
-            if needle not in text:
-                errors.append(f"unknown recovery: {reason}")
-        for forbidden in (
-            "http.client",
-            "urllib",
-            "socket",
-            "requests",
-            "httpx",
-            ".post(",
-            "submit_once(",
-            "stage_external_submission(",
-            "mark_entry_submission_unknown(",
-            "mark_protection_submission_unknown(",
-        ):
-            if forbidden in text:
-                errors.append(f"unknown recovery contains forbidden new-write/network marker: {forbidden}")
-
-    guarded_subclasses: set[tuple[str, str]] = set()
-    for path in CRYPTO_MODULES:
-        source = path.read_text(encoding="utf-8")
-        tree = ast.parse(source, filename=str(path))
-        imports = _imports(tree)
-        for module in imports:
-            if any(fragment in module for fragment in FORBIDDEN_CROSS_PRODUCT):
-                errors.append(f"{path.name}: imports forbidden equity/write authority {module}")
-        network_roots = {module.split(".", 1)[0] for module in imports if module}
-        if path != WRITER and network_roots & NETWORK_IMPORT_ROOTS:
-            errors.append(
-                f"{path.name}: only dedicated crypto writer may import direct network stack; found {sorted(network_roots & NETWORK_IMPORT_ROOTS)}"
-            )
-        if path not in {LIFECYCLE, UNKNOWN_RECOVERY} and "._mutate(" in source:
-            errors.append(f"{path.name}: direct lifecycle transaction primitive is reserved for lifecycle/UNKNOWN recovery")
-        for class_name in _subclasses_of(tree, GUARDED_CAPABILITY):
-            guarded_subclasses.add((path.name, class_name))
-
-    if guarded_subclasses != EXPECTED_GUARDED_SUBCLASSES:
-        missing = sorted(EXPECTED_GUARDED_SUBCLASSES - guarded_subclasses)
-        extra = sorted(guarded_subclasses - EXPECTED_GUARDED_SUBCLASSES)
-        if missing:
-            errors.append(f"missing sanctioned guarded crypto transports: {missing}")
-        if extra:
-            errors.append(f"unauthorized production guarded crypto transport subclasses: {extra}")
-
-    if ORDER.is_file():
-        text = ORDER.read_text(encoding="utf-8")
-        for forbidden in ("http.client", "urllib", "socket", "requests", "httpx", ".post("):
-            if forbidden in text:
-                errors.append(f"order contract contains forbidden network marker: {forbidden}")
-    if LIFECYCLE.is_file():
-        text = LIFECYCLE.read_text(encoding="utf-8")
-        for forbidden in ("http.client", "urllib", "socket", "requests", "httpx", ".post("):
-            if forbidden in text:
-                errors.append(f"lifecycle contains forbidden network marker: {forbidden}")
-
-    if errors:
-        for error in errors:
-            print(f"ERROR: {error}", file=sys.stderr)
-        return 1
-    print(
-        "AUTO-TRADE R6 crypto execution authority boundary: PASS "
-        "(disabled-by-default PAPER writer; nominal role-bound ENTRY/PROTECTION Final Guards; "
-        "UNKNOWN-before-I/O; exact /v2/orders POST; GET-only client-id + position reconciliation; "
-        "order-404 always continues to position truth and can only HALT or strongly FLAT-reconcile; "
-        "zero blind retry; no equity bracket/LIVE cross-authority)"
-    )
-    return 0
+class BoundaryError(RuntimeError):
+    pass
 
 
-def _imports(tree: ast.AST) -> set[str]:
-    modules: set[str] = set()
+def _text(path: Path) -> str:
+    if not path.is_file():
+        raise BoundaryError(f"required file missing: {path}")
+    return path.read_text(encoding="utf-8")
+
+
+def _imports(source: str) -> set[str]:
+    tree = ast.parse(source)
+    found: set[str] = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
-            modules.update(alias.name for alias in node.names)
-        elif isinstance(node, ast.ImportFrom):
-            modules.add(node.module or "")
-    return modules
+            found.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            found.add(node.module)
+    return found
+
+
+def _network_imports(source: str) -> set[str]:
+    imports = _imports(source)
+    bad: set[str] = set()
+    for name in imports:
+        for root in NETWORK_IMPORT_ROOTS:
+            if name == root or name.startswith(f"{root}."):
+                bad.add(name)
+    return bad
 
 
 def _base_name(base: ast.expr) -> str:
@@ -217,12 +79,336 @@ def _base_name(base: ast.expr) -> str:
     return ""
 
 
-def _subclasses_of(tree: ast.AST, base_name: str) -> set[str]:
-    return {
-        node.name
-        for node in ast.walk(tree)
-        if isinstance(node, ast.ClassDef) and any(_base_name(base) == base_name for base in node.bases)
-    }
+def _guarded_subclasses(source: str) -> set[str]:
+    tree = ast.parse(source)
+    found: set[str] = set()
+    for node in tree.body:
+        if not isinstance(node, ast.ClassDef):
+            continue
+        if any(_base_name(base) == "GuardedAlpacaPaperCryptoWriteTransport" for base in node.bases):
+            found.add(node.name)
+    return found
+
+
+def _writer_has_nominal_gate(source: str) -> bool:
+    tree = ast.parse(source)
+    for node in tree.body:
+        if not isinstance(node, ast.ClassDef) or node.name != "AlpacaPaperCryptoWriter":
+            continue
+        for item in node.body:
+            if not isinstance(item, ast.FunctionDef) or item.name != "submit_once":
+                continue
+            first_mark_unknown: int | None = None
+            first_transport_post: int | None = None
+            first_guarded_gate: int | None = None
+            first_role_gate: int | None = None
+            for child in ast.walk(item):
+                if (
+                    isinstance(child, ast.Call)
+                    and isinstance(child.func, ast.Attribute)
+                    and child.func.attr == "mark_entry_submission_unknown"
+                ):
+                    first_mark_unknown = child.lineno if first_mark_unknown is None else min(first_mark_unknown, child.lineno)
+                if (
+                    isinstance(child, ast.Call)
+                    and isinstance(child.func, ast.Attribute)
+                    and child.func.attr == "post"
+                    and isinstance(child.func.value, ast.Attribute)
+                    and child.func.value.attr == "_transport"
+                ):
+                    first_transport_post = child.lineno if first_transport_post is None else min(first_transport_post, child.lineno)
+                if isinstance(child, ast.Call) and isinstance(child.func, ast.Name) and child.func.id == "isinstance":
+                    if len(child.args) == 2 and isinstance(child.args[0], ast.Attribute) and child.args[0].attr == "_transport":
+                        second = child.args[1]
+                        if isinstance(second, ast.Name) and second.id == "GuardedAlpacaPaperCryptoWriteTransport":
+                            first_guarded_gate = child.lineno if first_guarded_gate is None else min(first_guarded_gate, child.lineno)
+                if (
+                    isinstance(child, ast.Compare)
+                    and isinstance(child.left, ast.Attribute)
+                    and child.left.attr == "role"
+                    and any(isinstance(comp, ast.Attribute) and comp.attr == "role" for comp in child.comparators)
+                ):
+                    first_role_gate = child.lineno if first_role_gate is None else min(first_role_gate, child.lineno)
+            return bool(
+                first_guarded_gate is not None
+                and first_role_gate is not None
+                and first_mark_unknown is not None
+                and first_transport_post is not None
+                and first_guarded_gate < first_mark_unknown
+                and first_role_gate < first_mark_unknown
+                and first_mark_unknown < first_transport_post
+            )
+    return False
+
+
+def _cold_start_transport_contract(source: str) -> list[str]:
+    errors: list[str] = []
+    required = (
+        "class ColdStartFinalGuardedCryptoEntryTransport(GuardedAlpacaPaperCryptoWriteTransport):",
+        "role = CryptoOrderRole.ENTRY",
+        "CryptoColdStartPreIoAuthority",
+        "CryptoColdStartPreIoExecutionContext",
+        "request_payload != expected_payload",
+        "credentials = _ephemeral_credentials(headers)",
+        "CryptoColdStartFinalWritePhase.PRE_IO",
+        "CryptoLifecycleStatus.ENTRY_SUBMISSION_UNKNOWN",
+        "attestation.entry_attempt_count != 1",
+        "attestation.client_order_id != self._context.broker_order.client_order_id",
+        "attestation.package_hash != self._context.package.package_hash",
+        "attestation.credential_reference != credentials.credential_reference",
+        "self._last_attestation = attestation",
+        "response = self._delegate.post(",
+        "return datetime.now(timezone.utc)",
+    )
+    for token in required:
+        if token not in source:
+            errors.append(f"cold-start guarded transport contract missing: {token}")
+    class_start = source.find("class ColdStartFinalGuardedCryptoEntryTransport")
+    property_start = source.find("    @property\n    def last_attestation", class_start)
+    constructor_surface = source[class_start:property_start] if class_start >= 0 and property_start >= 0 else ""
+    if "clock" in constructor_surface:
+        errors.append("cold-start transport constructor may not accept injectable clock")
+    latch = source.find("self._last_attestation = attestation")
+    delegate = source.find("response = self._delegate.post(")
+    if latch < 0 or delegate < 0 or latch > delegate:
+        errors.append("cold-start PRE_IO evidence must latch before delegate I/O")
+    return errors
+
+
+def main() -> int:
+    errors: list[str] = []
+    required_files = (
+        (WRITER, "crypto PAPER writer missing"),
+        (PRE_IO, "crypto PRE_IO interlock missing"),
+        (COLD_START_PRE_IO, "crypto cold-start PRE_IO interlock missing"),
+        (LIFECYCLE, "crypto lifecycle missing"),
+        (RECOVERY, "crypto UNKNOWN recovery missing"),
+        (RECONCILIATION, "crypto reconciliation missing"),
+        (PROTECTION_ATTEMPT, "crypto protection attempt checkpoint missing"),
+        (TEST, "crypto writer tests missing"),
+        (PROTECTION_TEST, "crypto protection PRE_IO tests missing"),
+        (UNKNOWN_RECOVERY_TEST, "crypto UNKNOWN recovery tests missing"),
+        (UNKNOWN_RECOVERY_ADVERSARIAL_TEST, "crypto UNKNOWN recovery adversarial tests missing"),
+        (COLD_START_TRANSPORT_TEST, "crypto cold-start PRE_IO transport tests missing"),
+    )
+    for path, message in required_files:
+        if not path.is_file():
+            errors.append(message)
+
+    writer = _text(WRITER) if WRITER.is_file() else ""
+    pre_io = _text(PRE_IO) if PRE_IO.is_file() else ""
+    cold_start_pre_io = _text(COLD_START_PRE_IO) if COLD_START_PRE_IO.is_file() else ""
+    lifecycle = _text(LIFECYCLE) if LIFECYCLE.is_file() else ""
+    recovery = _text(RECOVERY) if RECOVERY.is_file() else ""
+    reconciliation = _text(RECONCILIATION) if RECONCILIATION.is_file() else ""
+    protection_attempt = _text(PROTECTION_ATTEMPT) if PROTECTION_ATTEMPT.is_file() else ""
+    test = _text(TEST) if TEST.is_file() else ""
+    protection_test = _text(PROTECTION_TEST) if PROTECTION_TEST.is_file() else ""
+    unknown_test = _text(UNKNOWN_RECOVERY_TEST) if UNKNOWN_RECOVERY_TEST.is_file() else ""
+    unknown_adv = _text(UNKNOWN_RECOVERY_ADVERSARIAL_TEST) if UNKNOWN_RECOVERY_ADVERSARIAL_TEST.is_file() else ""
+    cold_start_test = _text(COLD_START_TRANSPORT_TEST) if COLD_START_TRANSPORT_TEST.is_file() else ""
+
+    for token in (
+        "class GuardedAlpacaPaperCryptoWriteTransport(AlpacaPaperCryptoWriteTransport, Protocol):",
+        "class AlpacaPaperCryptoWriteTransport(Protocol):",
+        "class AlpacaPaperCryptoWriterConfig:",
+        "enabled: bool = False",
+        "base_url: str = f\"https://{ALPACA_PAPER_TRADING_HOST}\"",
+        "def submit_once(",
+        "mark_entry_submission_unknown",
+        "mark_protection_submission_unknown",
+        "attempt_count != 1",
+        "client_order_id",
+        "CryptoPaperWriterAmbiguous",
+        "CryptoPaperWriterProtocolError",
+        "AlpacaPaperCryptoHttpsTransport",
+    ):
+        if token not in writer:
+            errors.append(f"writer contract missing: {token}")
+    if writer and not _writer_has_nominal_gate(writer):
+        errors.append("writer nominal guarded transport/role gate must execute before lifecycle UNKNOWN and broker I/O")
+
+    for token in (
+        "class FinalGuardedCryptoEntryTransport(GuardedAlpacaPaperCryptoWriteTransport):",
+        "class FinalGuardedCryptoProtectionTransport(GuardedAlpacaPaperCryptoWriteTransport):",
+        "role = CryptoOrderRole.ENTRY",
+        "role = CryptoOrderRole.PROTECTION",
+        "FinalCryptoExecutionPreIoAuthorizer",
+        "FinalCryptoProtectionPreIoAuthorizer",
+        "attestation.phase is not CryptoFinalWritePhase.PRE_IO",
+        "attestation.phase is not CryptoProtectionFinalWritePhase.PRE_IO",
+        "ENTRY_SUBMISSION_UNKNOWN",
+        "PROTECTION_SUBMISSION_UNKNOWN",
+        "attempt_count != 1",
+    ):
+        if token not in pre_io:
+            errors.append(f"PRE_IO interlock contract missing: {token}")
+    if cold_start_pre_io:
+        errors.extend(_cold_start_transport_contract(cold_start_pre_io))
+
+    production_guarded: set[str] = set()
+    production_files: dict[str, set[str]] = {}
+    for path in sorted(SRC.glob("alpaca_paper_crypto*.py")):
+        source = path.read_text(encoding="utf-8")
+        subclasses = _guarded_subclasses(source)
+        if subclasses:
+            production_files[path.name] = subclasses
+            production_guarded.update(subclasses)
+    if production_guarded != EXPECTED_GUARDED_SUBCLASSES:
+        errors.append(
+            "production guarded crypto transport subclasses must be exactly "
+            f"{sorted(EXPECTED_GUARDED_SUBCLASSES)}; got {sorted(production_guarded)} from {production_files}"
+        )
+
+    for token in (
+        "class CryptoLifecycleStatus",
+        "ENTRY_SUBMISSION_UNKNOWN",
+        "PROTECTION_SUBMISSION_UNKNOWN",
+        "HALTED_RECONCILIATION_REQUIRED",
+        "attempt_count",
+        "reconciliation_only",
+        "validate_entry_write_attempt",
+        "validate_protection_write_attempt",
+    ):
+        if token not in lifecycle:
+            errors.append(f"lifecycle contract missing: {token}")
+
+    for token in (
+        "class CryptoBrokerOrderAbsenceEvidence",
+        "class CryptoBrokerUnknownReconciliation",
+        "if status_code == 404:",
+        "position_status_code, position_body, position_headers =",
+        "retry_authorized=False",
+    ):
+        if token not in reconciliation:
+            errors.append(f"reconciliation UNKNOWN/404 contract missing: {token}")
+    if reconciliation:
+        absence_pos = reconciliation.find("if status_code == 404:")
+        position_pos = reconciliation.find("position_status_code, position_body, position_headers =")
+        unknown_pos = reconciliation.find("return CryptoBrokerUnknownReconciliation(")
+        if min(absence_pos, position_pos, unknown_pos) < 0 or not (absence_pos < position_pos < unknown_pos):
+            errors.append("exact-order 404 must still fetch position before returning UNKNOWN reconciliation")
+
+    for token in (
+        "def recover_unknown_entry(",
+        "def recover_unknown_protection(",
+        "CryptoExecutionAttemptCheckpoint",
+        "CryptoProtectionExecutionAttemptCheckpoint",
+        "PaperFlatAccountAttestation",
+        "HALTED_RECONCILIATION_REQUIRED",
+        "FLAT_RECONCILED",
+        "retry_authorized=False",
+        "RECONCILE_ONLY",
+        "fresh_account.account_reference != pre.account_reference",
+        "fresh_account.credential_reference != pre.credential_reference",
+        "flat_account.account_attestation_fingerprint != fresh_account.fingerprint",
+    ):
+        if token not in recovery:
+            errors.append(f"UNKNOWN recovery contract missing: {token}")
+    for forbidden in ("AlpacaPaperCryptoHttpsTransport", "urllib", "requests", "httpx", "socket", "R6_EXTERNAL_PAPER_WRITE"):
+        if forbidden in recovery:
+            errors.append(f"UNKNOWN recovery must remain offline/no-network: {forbidden}")
+
+    if "_mutate(" not in lifecycle:
+        errors.append("lifecycle mutation transaction primitive missing")
+    mutate_users: list[str] = []
+    for path in sorted(SRC.glob("alpaca_paper_crypto*.py")):
+        if path in {LIFECYCLE, RECOVERY}:
+            continue
+        source = path.read_text(encoding="utf-8")
+        if re.search(r"\.\s*_mutate\s*\(", source):
+            mutate_users.append(path.name)
+    if mutate_users:
+        errors.append(f"package-internal lifecycle _mutate may only be used by dedicated UNKNOWN recovery; found {mutate_users}")
+
+    for token in ("account_reference", "credential_reference", "fresh_account_fingerprint", "position_credential_reference"):
+        if token not in protection_attempt:
+            errors.append(f"protection checkpoint lost same-account binding: {token}")
+
+    for token in (
+        "test_enabled_writer_rejects_raw_transport_before_lifecycle_mutation_or_io",
+        "test_enabled_writer_rejects_default_https_transport_before_lifecycle_mutation_or_io",
+        "test_enabled_writer_rejects_role_mismatch_before_lifecycle_mutation_or_io",
+    ):
+        if token not in test:
+            errors.append(f"writer fail-closed transport test missing: {token}")
+    if "FinalGuardedCryptoEntryTransport" not in test:
+        errors.append("ENTRY nominal guarded capability is not exercised by writer tests")
+    if "FinalGuardedCryptoProtectionTransport" not in protection_test:
+        errors.append("PROTECTION nominal guarded capability is not exercised by tests")
+    if "ColdStartFinalGuardedCryptoEntryTransport" not in cold_start_test:
+        errors.append("cold-start ENTRY nominal guarded capability is not exercised by tests")
+
+    for token in (
+        "test_unknown_entry_long_halts_and_never_authorizes_retry",
+        "test_unknown_entry_zero_requires_full_flat_account_attestation",
+        "test_unknown_entry_zero_clean_flat_account_reconciles_flat",
+        "test_unknown_protection_long_halts",
+        "test_unknown_protection_zero_clean_flat_account_reconciles_flat",
+    ):
+        if token not in unknown_test:
+            errors.append(f"UNKNOWN recovery scenario test missing: {token}")
+    for token in (
+        "test_unknown_recovery_rejects_wrong_input_types",
+        "test_unknown_entry_rejects_checkpoint_from_other_lifecycle",
+        "test_unknown_entry_rejects_long_plus_flat_override",
+        "test_unknown_entry_rejects_account_and_credential_rebinding",
+        "test_unknown_entry_rejects_stale_future_and_nonatomic_evidence",
+        "test_unknown_entry_flat_path_rejects_nonzero_counts_and_binding_drift",
+        "test_unknown_recovery_receipt_rejects_tampering",
+    ):
+        if token not in unknown_adv:
+            errors.append(f"UNKNOWN recovery adversarial test missing: {token}")
+
+    if WORKFLOW.is_file():
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+        for token in (
+            "python scripts/check_r6_crypto_execution_boundary.py",
+            "tests/test_r6_paper_crypto_writer.py",
+            "tests/test_r6_paper_crypto_reconciliation.py",
+            "tests/test_r6_paper_crypto_writer_ambiguity.py",
+            "tests/test_r6_paper_crypto_pre_io.py",
+            "tests/test_r6_paper_crypto_protection_pre_io.py",
+            "tests/test_r6_paper_crypto_unknown_recovery.py",
+            "tests/test_r6_paper_crypto_unknown_recovery_adversarial.py",
+        ):
+            if token not in workflow:
+                errors.append(f"crypto execution workflow missing: {token}")
+    else:
+        errors.append("R6 crypto execution workflow missing")
+    if COLD_START_WORKFLOW.is_file():
+        cold_workflow = COLD_START_WORKFLOW.read_text(encoding="utf-8")
+        for token in (
+            "python scripts/check_r6_crypto_execution_boundary.py",
+            "tests/test_r6_paper_crypto_cold_start_pre_io_transport.py",
+        ):
+            if token not in cold_workflow:
+                errors.append(f"cold-start execution workflow missing: {token}")
+    else:
+        errors.append("R6 cold-start execution authority workflow missing")
+
+    for path in sorted(SRC.glob("alpaca_paper_crypto*.py")):
+        source = path.read_text(encoding="utf-8")
+        if path.name != ALLOWED_WRITER:
+            if WRITE_ENV in source:
+                errors.append(f"write env leaked outside single writer: {path.name}")
+            bad_imports = _network_imports(source)
+            if bad_imports:
+                errors.append(f"direct network stack imported outside single writer in {path.name}: {sorted(bad_imports)}")
+            for token in ("urlopen(", "requests.", "httpx.", "HTTPSConnection("):
+                if token in source:
+                    errors.append(f"direct crypto broker network call outside single writer in {path.name}: {token}")
+
+    if errors:
+        for error in errors:
+            print(f"ERROR: {error}", file=sys.stderr)
+        return 1
+    print(
+        "R6 crypto execution boundary: PASS "
+        "(single writer, exactly three role-bound nominal PRE_IO capabilities: normal ENTRY, "
+        "normal PROTECTION, isolated cold-start ENTRY; UNKNOWN before I/O; exact-order 404 recovery; no blind retry)"
+    )
+    return 0
 
 
 if __name__ == "__main__":
