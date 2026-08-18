@@ -71,7 +71,7 @@ def test_execution_approval_records_exact_issued_decision_in_attempt_db(tmp_path
         context.preparation_hash
     )
     assert state.status.value == "ISSUED"
-    assert state.decision.attempt_id == ATTEMPT_ID
+    assert state.decision.context.attempt_id == ATTEMPT_ID
     assert state.consumed_at is None
     assert state.consumed_attempt_id is None
 
