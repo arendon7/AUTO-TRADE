@@ -430,7 +430,7 @@ def test_recovery_order_parser_rejects_missing_wrong_product_and_corrupt_payload
 
     bad_qty = deepcopy(preparation)
     bad_qty["broker_order"]["payload"]["qty"] = "not-decimal"  # type: ignore[index]
-    with pytest.raises(CryptoFirstCanaryRecoveryError, match="broker order is invalid"):
+    with pytest.raises(CryptoFirstCanaryRecoveryError, match="qty is invalid"):
         recovery_mod._order_from_preparation(preparation=bad_qty)
 
     bad_fingerprint = deepcopy(preparation)
