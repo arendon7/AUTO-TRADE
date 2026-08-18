@@ -272,10 +272,19 @@ def _discover_ready_attempt(*, workspace: Path) -> dict[str, object]:
 def _run_execute(payload: dict[str, object]) -> dict[str, object]:
     workspace = _workspace_value(payload.get("workspace"))
     attempt_id = _attempt_id(payload.get("attempt_id"))
-    credentials = _credentials(payload)
     confirmation = payload.get("confirmation")
     if not isinstance(confirmation, str) or not confirmation or len(confirmation) > 4096:
         raise FirstCanaryRealPaperDashboardError("exact second POST confirmation is required")
+
+    discovery = _discover_ready_attempt(workspace=workspace)
+    if (
+        discovery.get("selection_status") != "EXACT_ONE_READY"
+        or discovery.get("attempt_id") != attempt_id
+    ):
+        raise FirstCanaryRealPaperDashboardError(
+            "execution requires exactly one fresh approved unstarted attempt and the selected Attempt ID must match it"
+        )
+
     status = _status(workspace=workspace, attempt_id=attempt_id)
     if status.get("ready_for_real_post") is not True:
         raise FirstCanaryRealPaperDashboardError(
@@ -283,6 +292,7 @@ def _run_execute(payload: dict[str, object]) -> dict[str, object]:
         )
     if confirmation != status.get("external_post_challenge"):
         raise FirstCanaryRealPaperDashboardError("second POST confirmation does not match exact challenge")
+    credentials = _credentials(payload)
 
     started_at = datetime.now(timezone.utc)
     try:
