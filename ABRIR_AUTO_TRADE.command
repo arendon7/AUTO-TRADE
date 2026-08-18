@@ -35,9 +35,11 @@ fi
 cd "$ROOT"
 [[ -x "$ROOT/.venv/bin/python" ]] || bash "$ROOT/INSTALAR_AUTO_TRADE.command"
 
-# Execution-readiness builds add a read-only Health R4 wrapper around the approved
-# one-shot UAT Control Center. Neither wrapper exposes broker execution authority.
-SERVER="$ROOT/scripts/mac_dashboard_execution_gate.py"
+# Health-commissioning builds add a fail-closed local schema commissioning wrapper
+# above the certified read-only Health readiness and one-shot approval surfaces.
+# No wrapper exposes broker execution authority.
+SERVER="$ROOT/scripts/mac_dashboard_health_commissioning.py"
+[[ -f "$SERVER" ]] || SERVER="$ROOT/scripts/mac_dashboard_execution_gate.py"
 [[ -f "$SERVER" ]] || SERVER="$ROOT/scripts/mac_dashboard_one_shot.py"
 [[ -f "$SERVER" ]] || SERVER="$ROOT/scripts/mac_dashboard.py"
 exec "$ROOT/.venv/bin/python" "$SERVER"
