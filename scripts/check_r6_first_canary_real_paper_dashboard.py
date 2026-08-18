@@ -116,8 +116,15 @@ def main() -> int:
     require(
         launcher,
         (
-            'DASHBOARD="$HERE/scripts/mac_first_canary_real_paper_dashboard.py"',
-            'PAGE="$HERE/web/mac_first_canary_real_paper.html"',
+            'SOURCE_ROOT="$(cd "$(dirname "$0")" && pwd -P)"',
+            'INSTALL_ROOT="$HOME/Applications/AUTO-TRADE-R6"',
+            'real_paper_surface=SEPARATE_EXACT_ONE_SHOT',
+            'EXPECTED_HEAD="$(read_source_head "$SOURCE_ROOT")"',
+            'INSTALLED_HEAD="$(read_source_head "$INSTALL_ROOT")"',
+            'bash "$SOURCE_ROOT/INSTALAR_AUTO_TRADE.command"',
+            'ROOT="$INSTALL_ROOT"',
+            'DASHBOARD="$ROOT/scripts/mac_first_canary_real_paper_dashboard.py"',
+            'PAGE="$ROOT/web/mac_first_canary_real_paper.html"',
             'if [[ "${R6_EXTERNAL_PAPER_WRITE:-DISABLED}" == "ENABLED" ]]',
             "export R6_EXTERNAL_PAPER_WRITE=DISABLED",
             "unset APCA_API_KEY_ID || true",
@@ -145,9 +152,10 @@ def main() -> int:
         fail("PR41 safe page acquired the real execution action")
 
     print(
-        "first-canary real PAPER Mac surface: PASS — separate execution-only localhost UI; "
-        "restart-safe preparation + approval required; exact second challenge; consent/start => recovery-only; "
-        "no direct broker stack; Finder launcher carries no credentials and keeps generic write disabled; LIVE blocked"
+        "first-canary real PAPER Mac surface: PASS — downloaded Finder launcher relocates/reuses exact certified "
+        "installed head; separate execution-only localhost UI; restart-safe preparation + approval required; "
+        "exact second challenge; consent/start => recovery-only; no direct broker stack; launcher carries no "
+        "credentials and keeps generic write disabled; LIVE blocked"
     )
     return 0
 
