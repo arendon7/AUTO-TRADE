@@ -1,0 +1,272 @@
+name: Mac First Canary Unified One-App Artifact
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - name: Checkout exact head
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Set up build Python 3.12
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Certify unified and inherited authority
+        run: |
+          python scripts/check_r6_first_canary_unified_dashboard.py
+          python scripts/check_r6_first_canary_restart_safe_dashboard.py
+          python scripts/check_r6_first_canary_real_paper_delegate.py
+          python scripts/check_r6_first_canary_real_paper_dashboard.py
+          python scripts/check_r6_first_canary_execution_gate.py
+          python scripts/check_r6_live_deny_boundary.py
+      - name: Build universal offline wheelhouse
+        shell: bash
+        run: |
+          set -euo pipefail
+          ASSETS="$RUNNER_TEMP/autotrade-unified-assets"
+          WHEELHOUSE="$ASSETS/wheels"
+          mkdir -p "$WHEELHOUSE"
+          python -m pip install --upgrade pip 'setuptools>=75' wheel
+          python -m pip wheel . --no-deps --no-build-isolation --wheel-dir "$WHEELHOUSE"
+          python -m pip download --dest "$WHEELHOUSE" --only-binary=:all: --platform macosx_11_0_arm64 --python-version 312 --implementation cp --abi cp312 'websockets==16.1.1' 'pytest>=8.3,<9' 'pytest-cov>=5,<7'
+          python -m pip download --dest "$WHEELHOUSE" --only-binary=:all: --platform macosx_10_13_x86_64 --python-version 312 --implementation cp --abi cp312 'websockets==16.1.1' 'pytest>=8.3,<9' 'pytest-cov>=5,<7'
+          (cd "$WHEELHOUSE" && find . -maxdepth 1 -type f -name '*.whl' -print0 | sort -z | xargs -0 shasum -a 256 > SHA256SUMS)
+          test -s "$WHEELHOUSE/SHA256SUMS"
+      - name: Download pinned dual-arch CPython
+        shell: bash
+        run: |
+          set -euo pipefail
+          RUNTIME_DIR="$RUNNER_TEMP/autotrade-unified-assets/runtime"
+          mkdir -p "$RUNTIME_DIR"
+          curl --fail --location --retry 3 --proto '=https' --tlsv1.2 'https://github.com/astral-sh/python-build-standalone/releases/download/20260718/cpython-3.12.13%2B20260718-aarch64-apple-darwin-install_only.tar.gz' --output "$RUNTIME_DIR/cpython-3.12.13-20260718-arm64.tar.gz"
+          curl --fail --location --retry 3 --proto '=https' --tlsv1.2 'https://github.com/astral-sh/python-build-standalone/releases/download/20260718/cpython-3.12.13%2B20260718-x86_64-apple-darwin-install_only.tar.gz' --output "$RUNTIME_DIR/cpython-3.12.13-20260718-x86_64.tar.gz"
+          echo '62aeee6161d57303a71a138b75fd5cc6fb8c89c4b1d9c7f0a052d89fa0b6652b  cpython-3.12.13-20260718-arm64.tar.gz' > "$RUNTIME_DIR/SHA256SUMS"
+          echo '10b47148de86f9d87ba6e96a3db606ced90a206a3454d7d6d8fa68536a05d81f  cpython-3.12.13-20260718-x86_64.tar.gz' >> "$RUNTIME_DIR/SHA256SUMS"
+          (cd "$RUNTIME_DIR" && shasum -a 256 -c SHA256SUMS)
+      - name: Build one-app operator package
+        shell: bash
+        run: |
+          set -euo pipefail
+          SOURCE_SHA="$(git rev-parse HEAD)"
+          ASSETS="$RUNNER_TEMP/autotrade-unified-assets"
+          PKG="dist/AUTO-TRADE-R6-MAC-FIRST-CANARY-ONE-APP"
+          ZIP="dist/AUTO-TRADE-R6-MAC-FIRST-CANARY-ONE-APP.zip"
+          rm -rf dist
+          mkdir -p "$PKG/vendor/runtime" "$PKG/vendor/wheels"
+          rsync -a ./ "$PKG/" --exclude '.git' --exclude '.venv' --exclude '.runtime' --exclude '.env' --exclude 'dist' --exclude '.pytest_cache' --exclude '.coverage' --exclude 'coverage.json' --exclude '__pycache__' --exclude '*.pyc' --exclude '*.sqlite3' --exclude '*.sqlite3-*'
+          cp "$ASSETS/runtime/"*.tar.gz "$PKG/vendor/runtime/"
+          cp "$ASSETS/runtime/SHA256SUMS" "$PKG/vendor/runtime/SHA256SUMS"
+          cp "$ASSETS/wheels/"*.whl "$PKG/vendor/wheels/"
+          cp "$ASSETS/wheels/SHA256SUMS" "$PKG/vendor/wheels/SHA256SUMS"
+
+          # One operator entrypoint only. Legacy/manual canary launchers remain
+          # repository internals but are physically absent from this package.
+          cp "$PKG/ABRIR_AUTO_TRADE_CANARY.command" "$PKG/ABRIR_AUTO_TRADE.command"
+          rm -f "$PKG/ABRIR_AUTO_TRADE_CANARY.command" "$PKG/ABRIR_PRIMER_CANARY_PREPARAR.command" "$PKG/ABRIR_PRIMER_CANARY_REAL_PAPER.command" "$PKG/ABRIR_PRIMER_CANARY_PAPER.command" "$PKG/AUTO_TRADE_MAC.command"
+          chmod +x "$PKG/ABRIR_AUTO_TRADE.command" "$PKG/INSTALAR_AUTO_TRADE.command"
+          chmod +x "$PKG/scripts/mac_bootstrap.sh" "$PKG/scripts/mac_rehearsal.sh" "$PKG/scripts/mac_start.sh"
+
+          cat > "$PKG/MAC_STANDALONE_MANIFEST.txt" <<EOF
+          AUTO-TRADE R6 MAC FIRST CANARY ONE-APP/STANDALONE
+          manifest_version=2
+          source_head=${SOURCE_SHA}
+          python_version=3.12.13
+          python_build_release=20260718
+          supported_architectures=arm64,x86_64
+          runtime_arm64_sha256=62aeee6161d57303a71a138b75fd5cc6fb8c89c4b1d9c7f0a052d89fa0b6652b
+          runtime_x86_64_sha256=10b47148de86f9d87ba6e96a3db606ced90a206a3454d7d6d8fa68536a05d81f
+          offline_wheelhouse=YES
+          generic_control_center_write=DISABLED
+          real_paper_surface=SEPARATE_EXACT_ONE_SHOT
+          first_canary_unified_surface=ONE_APP
+          operator_visible_launchers=ONE
+          credentials_persisted=NO
+          max_notional_usd=5
+          retry_post=NO
+          live_trading=BLOCKED
+          EOF
+
+          cat > "$PKG/MAC_BUILD_INFO.txt" <<EOF
+          AUTO-TRADE R6 MAC FIRST CANARY ONE-APP PACKAGE
+          source_head=${SOURCE_SHA}
+          branch=${GITHUB_HEAD_REF:-${GITHUB_REF_NAME}}
+          python_runtime=EMBEDDED_DUAL_ARCH_3.12.13
+          offline_install=YES
+          installed_home=HOME/Applications/AUTO-TRADE-R6
+          user_flow=ONE_APP_CONNECT_PREPARE_REVIEW_APPROVE_EXECUTE_RESULT
+          operator_attempt_id_input=NO
+          operator_challenge_copy=NO
+          broker_credentials_in_package=NO
+          broker_credentials_persisted=NO
+          external_order_submitted_by_build=NO
+          retry_post=NO
+          live_trading=BLOCKED
+          EOF
+
+          cat > "$PKG/LEEME.txt" <<'EOF'
+          AUTO-TRADE · PRIMER CANARY PAPER · UNA SOLA APP
+
+          1. Ejecuta INSTALAR_AUTO_TRADE.command una sola vez.
+          2. Después abre únicamente ABRIR_AUTO_TRADE.command.
+          3. Dentro de la app: Conectar PAPER -> Preparar -> Revisar/Aprobar -> Ejecutar una vez -> Resultado.
+
+          No abras otras herramientas. No necesitas copiar códigos ni identificadores.
+          PAPER ONLY · BTC/USD · máximo USD 5 · LIVE BLOCKED · RETRY POST FALSE.
+          EOF
+
+          ditto -c -k --sequesterRsrc --keepParent "$PKG" "$ZIP"
+          (cd dist && shasum -a 256 AUTO-TRADE-R6-MAC-FIRST-CANARY-ONE-APP.zip > AUTO-TRADE-R6-MAC-FIRST-CANARY-ONE-APP.zip.sha256)
+          test "$(stat -f%z "$ZIP")" -ge 40000000
+      - name: Verify one-app package boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd dist
+          shasum -a 256 -c AUTO-TRADE-R6-MAC-FIRST-CANARY-ONE-APP.zip.sha256
+          ZIP=AUTO-TRADE-R6-MAC-FIRST-CANARY-ONE-APP.zip
+          ROOT=AUTO-TRADE-R6-MAC-FIRST-CANARY-ONE-APP
+          for item in MAC_STANDALONE_MANIFEST.txt MAC_BUILD_INFO.txt LEEME.txt ABRIR_AUTO_TRADE.command INSTALAR_AUTO_TRADE.command scripts/mac_first_canary_unified_dashboard.py web/mac_first_canary_unified.html scripts/mac_crypto_first_canary_execute_real_paper.py; do
+            unzip -l "$ZIP" | grep -Fq "$ROOT/$item"
+          done
+          for forbidden in ABRIR_PRIMER_CANARY_PREPARAR.command ABRIR_PRIMER_CANARY_REAL_PAPER.command ABRIR_PRIMER_CANARY_PAPER.command ABRIR_AUTO_TRADE_CANARY.command; do
+            if unzip -l "$ZIP" | grep -Fq "$ROOT/$forbidden"; then echo "ERROR: legacy operator launcher leaked: $forbidden" >&2; exit 1; fi
+          done
+          unzip -p "$ZIP" "$ROOT/MAC_STANDALONE_MANIFEST.txt" | grep -Fq 'first_canary_unified_surface=ONE_APP'
+          unzip -p "$ZIP" "$ROOT/MAC_BUILD_INFO.txt" | grep -Fq 'operator_attempt_id_input=NO'
+          unzip -p "$ZIP" "$ROOT/MAC_BUILD_INFO.txt" | grep -Fq 'operator_challenge_copy=NO'
+          if unzip -l "$ZIP" | grep -Eq '(^|/)(\.env|\.venv|\.runtime)(/|$)'; then echo 'ERROR: package contains transient environment material' >&2; exit 1; fi
+      - name: Upload one-app candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: AUTO-TRADE-R6-MAC-FIRST-CANARY-ONE-APP-CANDIDATE
+          path: |
+            dist/AUTO-TRADE-R6-MAC-FIRST-CANARY-ONE-APP.zip
+            dist/AUTO-TRADE-R6-MAC-FIRST-CANARY-ONE-APP.zip.sha256
+          if-no-files-found: error
+          retention-days: 3
+
+  boot:
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            arch: arm64
+          - runner: macos-15-intel
+            arch: x86_64
+    runs-on: ${{ matrix.runner }}
+    env:
+      PIP_NO_INDEX: '1'
+      PIP_DISABLE_PIP_VERSION_CHECK: '1'
+      PYTHONUNBUFFERED: '1'
+      R6_EXTERNAL_PAPER_WRITE: DISABLED
+    steps:
+      - name: Download exact one-app candidate
+        uses: actions/download-artifact@v5
+        with:
+          name: AUTO-TRADE-R6-MAC-FIRST-CANARY-ONE-APP-CANDIDATE
+          path: candidate
+      - name: Quarantine and extract
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd candidate
+          shasum -a 256 -c AUTO-TRADE-R6-MAC-FIRST-CANARY-ONE-APP.zip.sha256
+          test "$(uname -m)" = '${{ matrix.arch }}'
+          QTN_VALUE="0083;$(printf '%x' "$(date +%s)");Safari;AUTO-TRADE-R6-MAC-FIRST-CANARY-ONE-APP.zip"
+          xattr -w com.apple.quarantine "$QTN_VALUE" AUTO-TRADE-R6-MAC-FIRST-CANARY-ONE-APP.zip
+          ditto -x -k AUTO-TRADE-R6-MAC-FIRST-CANARY-ONE-APP.zip .
+          SOURCE="$PWD/AUTO-TRADE-R6-MAC-FIRST-CANARY-ONE-APP"
+          test -x "$SOURCE/ABRIR_AUTO_TRADE.command"
+          test -x "$SOURCE/INSTALAR_AUTO_TRADE.command"
+          test ! -e "$SOURCE/ABRIR_PRIMER_CANARY_PREPARAR.command"
+          test ! -e "$SOURCE/ABRIR_PRIMER_CANARY_REAL_PAPER.command"
+      - name: Offline install with no broker credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          SOURCE="$PWD/candidate/AUTO-TRADE-R6-MAC-FIRST-CANARY-ONE-APP"
+          INSTALL_ROOT="$HOME/Applications/AUTO-TRADE-R6"
+          rm -rf "$INSTALL_ROOT"
+          unset APCA_API_KEY_ID APCA_API_SECRET_KEY || true
+          export PIP_INDEX_URL='http://127.0.0.1:9/forbidden'
+          export PIP_EXTRA_INDEX_URL='http://127.0.0.1:9/forbidden'
+          cd "$SOURCE"
+          bash INSTALAR_AUTO_TRADE.command | tee /tmp/autotrade-unified-install.log
+          grep -Fq 'AUTO-TRADE R6 INSTALL: OK' /tmp/autotrade-unified-install.log
+          test -x "$INSTALL_ROOT/.runtime/${{ matrix.arch }}/python/bin/python3"
+          test -x "$INSTALL_ROOT/.venv/bin/python"
+          test -x "$INSTALL_ROOT/ABRIR_AUTO_TRADE.command"
+          test ! -e "$INSTALL_ROOT/ABRIR_PRIMER_CANARY_PREPARAR.command"
+          test ! -e "$INSTALL_ROOT/ABRIR_PRIMER_CANARY_REAL_PAPER.command"
+          cd "$INSTALL_ROOT"
+          .venv/bin/python scripts/check_r6_first_canary_unified_dashboard.py
+          .venv/bin/python scripts/check_r6_first_canary_restart_safe_dashboard.py
+          .venv/bin/python scripts/check_r6_first_canary_real_paper_delegate.py
+          .venv/bin/python scripts/check_r6_live_deny_boundary.py
+          .venv/bin/pytest -q tests/test_r6_first_canary_unified_dashboard.py
+      - name: Unified localhost smoke with no credentials and no execute call
+        shell: bash
+        run: |
+          set -euo pipefail
+          INSTALL_ROOT="$HOME/Applications/AUTO-TRADE-R6"
+          cd "$INSTALL_ROOT"
+          unset APCA_API_KEY_ID APCA_API_SECRET_KEY || true
+          .venv/bin/python scripts/mac_first_canary_unified_dashboard.py --no-browser --port 8879 > /tmp/autotrade-unified-server.log 2>&1 &
+          PID=$!
+          trap 'kill $PID 2>/dev/null || true' EXIT
+          for i in {1..40}; do curl --fail --silent http://127.0.0.1:8879/api/meta > /tmp/meta.json && break; sleep 0.25; done
+          python - <<'PY'
+          import json
+          p=json.load(open('/tmp/meta.json'))
+          assert p['environment']=='PAPER'
+          assert p['hard_max_notional_usd']=='5'
+          assert p['user_visible_attempt_id'] is False
+          assert p['user_visible_hash_copying'] is False
+          assert p['retry_post'] is False
+          assert p['live_trading']=='BLOCKED'
+          PY
+          curl --fail --silent http://127.0.0.1:8879/ | grep -Fq 'Una sola app'
+          kill "$PID"
+          wait "$PID" || true
+          trap - EXIT
+      - name: Offline reinstall self-heal
+        shell: bash
+        run: |
+          set -euo pipefail
+          INSTALL_ROOT="$HOME/Applications/AUTO-TRADE-R6"
+          rm -rf "$INSTALL_ROOT/.venv"
+          cd "$INSTALL_ROOT"
+          bash INSTALAR_AUTO_TRADE.command > /tmp/autotrade-unified-reinstall.log
+          test -x "$INSTALL_ROOT/.venv/bin/python"
+          grep -Fq 'AUTO-TRADE R6 INSTALL: OK' /tmp/autotrade-unified-reinstall.log
+
+  publish:
+    needs: [build, boot]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download certified candidate
+        uses: actions/download-artifact@v5
+        with:
+          name: AUTO-TRADE-R6-MAC-FIRST-CANARY-ONE-APP-CANDIDATE
+          path: certified
+      - name: Verify checksum
+        run: cd certified && sha256sum -c AUTO-TRADE-R6-MAC-FIRST-CANARY-ONE-APP.zip.sha256
+      - name: Publish certified one-app artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: AUTO-TRADE-R6-MAC-FIRST-CANARY-ONE-APP
+          path: |
+            certified/AUTO-TRADE-R6-MAC-FIRST-CANARY-ONE-APP.zip
+            certified/AUTO-TRADE-R6-MAC-FIRST-CANARY-ONE-APP.zip.sha256
+          if-no-files-found: error
+          retention-days: 14
