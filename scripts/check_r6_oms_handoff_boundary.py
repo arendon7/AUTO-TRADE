@@ -7,6 +7,7 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 BROKER_DIR = ROOT / "src/autotrade/brokers"
 OMS = ROOT / "src/autotrade/oms.py"
+COLD_START_OMS = ROOT / "src/autotrade/cold_start_oms.py"
 WRITER = BROKER_DIR / "alpaca_paper_writer.py"
 CORE = ROOT / ".github/workflows/core-tests.yml"
 R6 = ROOT / ".github/workflows/r6-authority.yml"
@@ -22,6 +23,19 @@ OMS_REQUIRED = (
     "if current.status is OrderStatus.VALIDATED:",
     "status=OrderStatus.SUBMITTING",
     "self._append_idempotent(",
+    "self._orders.update(staged)",
+)
+COLD_START_OMS_REQUIRED = (
+    "class ColdStartOrderManagementSystem(OrderManagementSystem):",
+    "class ColdStartOmsStageAuthority:",
+    "class ColdStartOmsStageAuthorization:",
+    "class ColdStartExternalSubmissionHandoff:",
+    "def stage_cold_start_external_submission(",
+    "def resolve_cold_start_external_submission_handoff(",
+    'event_type="COLD_START_EXTERNAL_ORDER_HANDOFF_AUTHORIZED"',
+    "exact commissioning kill switch is required",
+    "cold-start OMS blocked by safety circuit",
+    "status=OrderStatus.SUBMITTING",
     "self._orders.update(staged)",
 )
 WRITER_REQUIRED = (
@@ -42,6 +56,15 @@ def main() -> int:
             if anchor not in source:
                 errors.append(f"OMS handoff anchor missing: {anchor}")
         errors.extend(_validate_oms_ordering(source))
+
+    if not COLD_START_OMS.is_file():
+        errors.append("cold-start OMS extension missing")
+    else:
+        source = COLD_START_OMS.read_text(encoding="utf-8")
+        for anchor in COLD_START_OMS_REQUIRED:
+            if anchor not in source:
+                errors.append(f"cold-start OMS handoff anchor missing: {anchor}")
+        errors.extend(_validate_cold_start_oms_ordering(source))
 
     if not WRITER.is_file():
         errors.append("R6 PAPER writer missing")
@@ -70,7 +93,8 @@ def main() -> int:
         return 1
     print(
         "AUTO-TRADE R6 OMS external-handoff boundary: PASS "
-        "(OMS-owned VALIDATED->SUBMITTING; durable handoff required; direct R6 mutation denied)"
+        "(OMS-owned VALIDATED->SUBMITTING for normal and isolated cold-start paths; "
+        "durable handoff required; direct R6 mutation denied)"
     )
     return 0
 
@@ -85,11 +109,27 @@ def _validate_oms_ordering(source: str) -> list[str]:
     event_pos = method.find('event_type="EXTERNAL_ORDER_HANDOFF_AUTHORIZED"')
     update_pos = method.find("self._orders.update(staged)")
     if event_pos < 0 or update_pos < 0 or event_pos > update_pos:
-        errors.append(
-            "OMS external handoff must durably append authorization event before SUBMITTING update"
-        )
+        errors.append("OMS external handoff must durably append authorization event before SUBMITTING update")
     if "self._broker.submit" in method:
         errors.append("OMS external handoff staging must never invoke broker.submit")
+    return errors
+
+
+def _validate_cold_start_oms_ordering(source: str) -> list[str]:
+    errors: list[str] = []
+    start = source.find("    def stage_cold_start_external_submission(")
+    end = source.find("    def resolve_cold_start_external_submission_handoff(", start)
+    if start < 0 or end < 0:
+        return ["cold-start OMS stage/resolve method boundaries missing"]
+    method = source[start:end]
+    event_pos = method.find('event_type="COLD_START_EXTERNAL_ORDER_HANDOFF_AUTHORIZED"')
+    update_pos = method.find("self._orders.update(staged)")
+    if event_pos < 0 or update_pos < 0 or event_pos > update_pos:
+        errors.append("cold-start OMS handoff must be durable before SUBMITTING update")
+    if "self._broker.submit" in method:
+        errors.append("cold-start OMS handoff staging must never invoke broker.submit")
+    if "stage_external_submission(" in method:
+        errors.append("cold-start OMS may not tunnel through normal Health-NORMAL handoff")
     return errors
 
 
@@ -101,9 +141,13 @@ def _scan_broker_source(source: str, path: Path) -> list[str]:
         return [f"{path}: syntax error: {exc}"]
     for node in ast.walk(tree):
         if isinstance(node, ast.Call):
-            if _call_name(node.func) == "ExternalSubmissionHandoff":
+            if _call_name(node.func) in {
+                "ExternalSubmissionHandoff",
+                "ColdStartExternalSubmissionHandoff",
+                "ColdStartOmsStageAuthorization",
+            }:
                 errors.append(
-                    f"{path}:{node.lineno}: R6 broker modules may not construct OMS handoff attestations"
+                    f"{path}:{node.lineno}: R6 broker modules may not construct OMS handoff/authorization attestations"
                 )
             if _is_direct_order_store_update(node):
                 errors.append(
