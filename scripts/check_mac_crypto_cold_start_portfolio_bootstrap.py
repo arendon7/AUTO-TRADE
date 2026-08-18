@@ -88,7 +88,11 @@ def main() -> int:
         _require(dashboard, needle, label)
 
     _require(launcher, 'SERVER="$ROOT/scripts/mac_dashboard_cold_start.py"', "launcher selects cold-start wrapper")
-    if re.search(r"(?:export\s+)?R6_EXTERNAL_PAPER_WRITE\s*=\s*ENABLED", bootstrap + "\n" + dashboard + "\n" + launcher):
+    surfaces = bootstrap + "\n" + dashboard + "\n" + launcher
+    if re.search(
+        r"(?m)^\s*(?:export\s+)?R6_EXTERNAL_PAPER_WRITE\s*=\s*ENABLED\s*$",
+        surfaces,
+    ):
         raise BoundaryFailure("cold-start surface must never enable external PAPER writes")
 
     forbidden_calls = (
