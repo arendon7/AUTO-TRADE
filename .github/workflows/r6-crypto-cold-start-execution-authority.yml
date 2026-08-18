@@ -34,6 +34,7 @@ jobs:
           tests/test_r6_paper_crypto_cold_start_authority_adversarial.py
           tests/test_r6_paper_crypto_cold_start_execution_bridge.py
           tests/test_r6_paper_crypto_cold_start_execution_bridge_guards.py
+          tests/test_r6_paper_crypto_cold_start_execution_authority_adversarial.py
           tests/test_r6_paper_crypto_cold_start_pre_io_authority.py
           tests/test_r6_paper_crypto_cold_start_writer_simulation.py
       - name: Permanent isolated cold-start execution boundary
@@ -48,6 +49,7 @@ jobs:
           tests/test_r6_paper_crypto_cold_start_authority_adversarial.py
           tests/test_r6_paper_crypto_cold_start_execution_bridge.py
           tests/test_r6_paper_crypto_cold_start_execution_bridge_guards.py
+          tests/test_r6_paper_crypto_cold_start_execution_authority_adversarial.py
           tests/test_r6_paper_crypto_cold_start_pre_io_authority.py
           tests/test_r6_paper_crypto_cold_start_writer_simulation.py
       - name: Re-prove normal crypto execution authority unchanged
