@@ -109,7 +109,8 @@ def main() -> int:
             "registry.record_operator_approval(",
             'state.status is not CryptoOperatorDecisionStatus.ISSUED',
             'ATTEMPT_PREFIX = "first-canary-"',
-            'MAX_APPROVAL_TTL = timedelta(seconds=30)',
+            'MAX_APPROVAL_TTL = timedelta(seconds=90)',
+            'MIN_REMAINING_PACKAGE_LIFE = timedelta(seconds=5)',
             'os.environ.get(WRITE_ENV) == "ENABLED"',
             '"decision_consumed": False',
             '"uat_only": False',
@@ -182,7 +183,8 @@ def main() -> int:
     print(
         "AUTO-TRADE R6 human operator decision boundary: PASS "
         "(exact audited issuers only: interactive equity + crypto UAT + isolated first-canary crypto execution; "
-        "issuers have no network/OMS/writer authority; package-bound PAPER one-shot)"
+        "first-canary approval <=90s with >=5s package life remaining; issuers have no network/OMS/writer authority; "
+        "package-bound PAPER one-shot)"
     )
     return 0
 

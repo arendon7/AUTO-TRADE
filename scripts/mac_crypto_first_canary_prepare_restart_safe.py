@@ -22,6 +22,7 @@ WRITE_ENV = "R6_EXTERNAL_PAPER_WRITE"
 KEY_ENV = "APCA_API_KEY_ID"
 SECRET_ENV = "APCA_API_SECRET_KEY"
 EVIDENCE_FILENAME = "prepared_evidence.json"
+HUMAN_STAGING_TTL_MS = 120_000
 
 
 class RestartSafePreparationError(RuntimeError):
@@ -68,6 +69,9 @@ def prepare_restart_safe(
     if prepare_callable is None:
         namespace = runpy.run_path(str(BASE_PREPARE))
         prepare_callable = namespace["prepare_first_canary"]
+        prepare_callable.__globals__["DECISION_TTL_MS"] = HUMAN_STAGING_TTL_MS
+        if prepare_callable.__globals__.get("DECISION_TTL_MS") != HUMAN_STAGING_TTL_MS:
+            raise RestartSafePreparationError("first-canary human staging TTL override failed closed")
     session = prepare_callable(
         workspace_path=workspace,
         attempt_id=attempt_id,

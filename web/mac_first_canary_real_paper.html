@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>AUTO-TRADE · Primer Canary REAL PAPER</title>
+  <style>
+    :root { color-scheme: dark; font-family: -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
+    body { margin:0; background:#0d1117; color:#e6edf3; }
+    main { max-width:920px; margin:0 auto; padding:28px 18px 60px; }
+    .danger { border:1px solid #f85149; background:#2d1117; border-radius:14px; padding:18px; margin-bottom:18px; }
+    .card { border:1px solid #30363d; background:#161b22; border-radius:14px; padding:18px; margin:14px 0; }
+    h1,h2 { margin-top:0; }
+    h1 { font-size:28px; }
+    h2 { font-size:18px; }
+    label { display:block; font-weight:650; margin:12px 0 6px; }
+    input { box-sizing:border-box; width:100%; padding:11px 12px; border-radius:9px; border:1px solid #30363d; background:#0d1117; color:#e6edf3; }
+    input[type=password] { font-family:monospace; }
+    button { padding:11px 15px; border:0; border-radius:9px; font-weight:700; cursor:pointer; margin:10px 8px 0 0; }
+    button.primary { background:#238636; color:white; }
+    button.dangerButton { background:#da3633; color:white; }
+    button.secondary { background:#30363d; color:#e6edf3; }
+    button:disabled { opacity:.4; cursor:not-allowed; }
+    code,pre { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
+    .challenge { user-select:all; overflow-wrap:anywhere; padding:12px; border-radius:9px; background:#0d1117; border:1px solid #f85149; }
+    .muted { color:#8b949e; }
+    .ok { color:#3fb950; }
+    .warn { color:#d29922; }
+    .bad { color:#f85149; }
+    .grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+    .pill { display:inline-block; border:1px solid #30363d; border-radius:99px; padding:5px 9px; margin-right:6px; font-size:12px; }
+    pre { white-space:pre-wrap; overflow-wrap:anywhere; background:#0d1117; padding:12px; border-radius:9px; max-height:340px; overflow:auto; }
+    @media (max-width:700px) { .grid { grid-template-columns:1fr; } }
+  </style>
+</head>
+<body>
+<main>
+  <section class="danger">
+    <h1>Primer Canary · REAL PAPER</h1>
+    <p><strong>Esta pantalla sí puede enviar exactamente una orden PAPER a Alpaca.</strong> No es LIVE y no puede operar más de USD 5. Solo ejecuta el intento BTC/USD ya preparado y aprobado.</p>
+    <span class="pill">PAPER ONLY</span><span class="pill">BTC/USD</span><span class="pill">BUY LIMIT IOC</span><span class="pill">USD 1–5</span><span class="pill">LIVE BLOCKED</span>
+    <p class="bad"><strong>Regla crítica:</strong> después de consentir o iniciar, nunca vuelvas a presionar ejecutar. Si el resultado es incierto, usa únicamente recuperación GET.</p>
+  </section>
+
+  <section class="card">
+    <h2>1. Intento aprobado</h2>
+    <p class="muted">Al abrir esta pantalla, AUTO-TRADE busca en el workspace exactamente un intento aprobado, restart-safe, no iniciado y todavía vigente. Solo en ese caso lo carga automáticamente. Si hay cero o varios, bloquea la selección automática.</p>
+    <label>Workspace</label>
+    <input id="workspace" autocomplete="off">
+    <label>Attempt ID</label>
+    <input id="attempt" placeholder="Se detectará automáticamente si existe exactamente uno listo" autocomplete="off">
+    <button class="secondary" id="refresh">Detectar / revisar estado</button>
+    <pre id="status">Buscando intento aprobado vigente…</pre>
+  </section>
+
+  <section class="card">
+    <h2>2. Credenciales PAPER efímeras</h2>
+    <p class="muted">Se envían solo al servicio localhost y al proceso puntual. No se guardan en los artefactos del intento.</p>
+    <div class="grid">
+      <div><label>APCA PAPER Key ID</label><input id="key" autocomplete="off"></div>
+      <div><label>APCA PAPER Secret</label><input id="secret" type="password" autocomplete="off"></div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>3. Segundo consentimiento exacto</h2>
+    <p>Solo se habilita cuando existen preparación restart-safe y aprobación humana nueva, y no existe evidencia de ejecución previa. Al pulsar ejecutar, AUTO-TRADE vuelve a comprobar que el intento siga siendo el único aprobado y vigente antes de enviar la solicitud de ejecución.</p>
+    <div id="challenge" class="challenge muted">Primero debe existir un único intento aprobado y vigente.</div>
+    <label>Escribe/pega exactamente el texto anterior</label>
+    <input id="confirmation" autocomplete="off">
+    <button class="dangerButton" id="execute" disabled>EJECUTAR UNA VEZ EN PAPER</button>
+  </section>
+
+  <section class="card">
+    <h2>4. Recuperación</h2>
+    <p>Solo se habilita después de consentimiento/inicio o cuando el intento entra en recuperación. Antes del primer POST no debe usarse. Si hubo timeout, error ambiguo, cierre de la ventana o el intento aparece quemado, <strong>no ejecutes otra vez</strong>; esta acción solo consulta por GET y reconcilia.</p>
+    <button class="primary" id="recover" disabled>RECUPERAR / RECONCILIAR GET-ONLY</button>
+    <pre id="result">Sin operación.</pre>
+  </section>
+</main>
+<script>
+const CSRF = "__CSRF_TOKEN__";
+const $ = id => document.getElementById(id);
+let currentStatus = null;
+
+function params() {
+  return {workspace:$('workspace').value.trim(), attempt_id:$('attempt').value.trim()};
+}
+function creds() {
+  return {...params(), paper_key:$('key').value.trim(), paper_secret:$('secret').value};
+}
+function renderStatus(s) {
+  currentStatus = s;
+  $('status').textContent = JSON.stringify(s, null, 2);
+  const challenge = s && s.external_post_challenge ? s.external_post_challenge : '';
+  $('challenge').textContent = challenge || 'No hay challenge ejecutable en este estado.';
+  $('challenge').className = challenge ? 'challenge' : 'challenge muted';
+  $('execute').disabled = !(s && s.ready_for_real_post === true && challenge);
+  $('recover').disabled = !(s && s.recovery_get_only === true);
+  if (!challenge) $('confirmation').value = '';
+}
+async function status() {
+  const p = params();
+  if (!p.attempt_id) throw new Error('No hay Attempt ID seleccionado. Usa detección automática o prepara un intento nuevo.');
+  const q = new URLSearchParams(p);
+  const r = await fetch('/api/status?' + q.toString(), {cache:'no-store'});
+  const j = await r.json();
+  if (!j.ok) throw new Error(j.error || 'No se pudo leer el estado');
+  renderStatus(j.status);
+}
+async function discover() {
+  const workspace = $('workspace').value.trim();
+  if (!workspace) throw new Error('Workspace requerido');
+  const q = new URLSearchParams({workspace});
+  const r = await fetch('/api/discover?' + q.toString(), {cache:'no-store'});
+  const j = await r.json();
+  if (!j.ok) throw new Error(j.error || 'No se pudo detectar el intento aprobado');
+  const d = j.discovery || {};
+  if (d.selection_status === 'EXACT_ONE_READY' && d.attempt_id) {
+    $('attempt').value = d.attempt_id;
+    await status();
+    return d;
+  }
+  currentStatus = null;
+  $('attempt').value = '';
+  $('execute').disabled = true;
+  $('recover').disabled = true;
+  $('confirmation').value = '';
+  $('challenge').textContent = 'No hay un único intento ejecutable seleccionado.';
+  $('challenge').className = 'challenge muted';
+  if (d.selection_status === 'AMBIGUOUS_MULTIPLE_READY') {
+    $('status').textContent = 'BLOQUEADO: existen ' + d.ready_count + ' intentos aprobados y vigentes. AUTO-TRADE no elegirá uno por ti. Cierra esta pantalla y resuelve la ambigüedad desde PREPARAR.';
+  } else if ((d.expired_count || 0) > 0) {
+    $('status').textContent = 'No existe un intento aprobado todavía vigente. Hay ' + d.expired_count + ' intento(s) expirado(s). Vuelve a PREPARAR y crea/aprueba un intento nuevo.';
+  } else {
+    $('status').textContent = 'No existe un intento aprobado y vigente. Vuelve a PREPARAR, crea el intento y apruébalo antes de abrir REAL PAPER.';
+  }
+  return d;
+}
+async function meta() {
+  const r = await fetch('/api/meta', {cache:'no-store'});
+  const j = await r.json();
+  if (!j.ok || !j.meta) throw new Error('No se pudo cargar la configuración local');
+  $('workspace').value = j.meta.default_workspace || '';
+  await discover();
+}
+async function post(path, body) {
+  const r = await fetch(path, {
+    method:'POST', cache:'no-store',
+    headers:{'Content-Type':'application/json','X-CSRF-Token':CSRF},
+    body:JSON.stringify(body)
+  });
+  const j = await r.json();
+  $('result').textContent = JSON.stringify(j, null, 2);
+  try { await status(); } catch (_) {}
+  return j;
+}
+$('refresh').onclick = async () => {
+  try {
+    if ($('attempt').value.trim()) await status();
+    else await discover();
+  } catch(e) { $('status').textContent=e.message; }
+};
+$('workspace').onchange = async () => {
+  $('attempt').value = '';
+  try { await discover(); } catch(e) { $('status').textContent=e.message; }
+};
+$('execute').onclick = async () => {
+  $('execute').disabled = true;
+  $('result').textContent = 'Revalidando vigencia y unicidad del intento antes de ejecutar…';
+  try {
+    const discovery = await discover();
+    if (!discovery || discovery.selection_status !== 'EXACT_ONE_READY' || !currentStatus || currentStatus.ready_for_real_post !== true) {
+      $('result').textContent = 'BLOQUEADO: el intento ya no está aprobado/vigente de forma inequívoca. No se envió ningún POST. Vuelve a PREPARAR.';
+      return;
+    }
+    const exact = currentStatus.external_post_challenge || '';
+    if ($('confirmation').value !== exact) {
+      $('result').textContent = 'BLOQUEADO: la segunda confirmación no coincide exactamente con el challenge fresco. No se envió ningún POST.';
+      return;
+    }
+    $('execute').disabled = true;
+    $('result').textContent = 'Enviando el único intento PAPER permitido. No repitas esta acción…';
+    await post('/api/execute', {...creds(), confirmation:$('confirmation').value});
+  } catch(e) {
+    $('result').textContent = 'Resultado local incierto: ' + e.message + '\nNO REINTENTAR POST. Usa recuperación GET-only solo si el estado la habilita.';
+    try { await status(); } catch (_) {}
+  }
+};
+$('recover').onclick = async () => {
+  if (!currentStatus || currentStatus.recovery_get_only !== true) {
+    $('result').textContent = 'BLOQUEADO: todavía no existe un estado que requiera recuperación GET-only.';
+    return;
+  }
+  $('result').textContent = 'Consultando broker por GET; no se enviará otra orden…';
+  try { await post('/api/recover', creds()); }
+  catch(e) { $('result').textContent = 'Recuperación falló cerrada: ' + e.message; }
+};
+meta().catch(e => $('status').textContent=e.message);
+</script>
+</body>
+</html>

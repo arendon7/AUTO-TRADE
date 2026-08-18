@@ -86,6 +86,7 @@ def main() -> int:
     print(
         "AUTO-TRADE R6 crypto operator decision boundary: PASS "
         "(HUMAN_OPERATOR only; exact package+attempt binding; <=2m and package-bounded TTL; "
+        "first-canary execution approval <=90s with >=5s package life remaining; "
         "tamper-evident ISSUED->CONSUMED; isolated UAT issuer plus exact first-canary execution issuer; "
         "approval issuers have no credentials/network/writer/POST/consumption authority)"
     )
@@ -148,7 +149,8 @@ def _validate_execution_issuer() -> list[str]:
         "registry.record_operator_approval(",
         'state.status is not CryptoOperatorDecisionStatus.ISSUED',
         'ATTEMPT_PREFIX = "first-canary-"',
-        'MAX_APPROVAL_TTL = timedelta(seconds=30)',
+        'MAX_APPROVAL_TTL = timedelta(seconds=90)',
+        'MIN_REMAINING_PACKAGE_LIFE = timedelta(seconds=5)',
         'EXPECTED_SYMBOL = "BTC/USD"',
         'os.environ.get(WRITE_ENV) == "ENABLED"',
         '"decision_consumed": False',

@@ -16,7 +16,7 @@
     <div>
       <div class="eyebrow">AUTO-TRADE · Gate aislado</div>
       <div class="title">Primer Canary BTC/USD · PAPER</div>
-      <div class="subtitle">Flujo separado del Control Center normal. Prepara evidencia fresca, exige una aprobación humana nueva y conserva recuperación GET-only. En esta build, el POST real sigue deliberadamente bloqueado.</div>
+      <div class="subtitle">Esta pantalla prepara evidencia fresca y registra una aprobación humana nueva. No puede enviar órdenes. Cuando el intento quede aprobado, la ejecución se hace únicamente desde el launcher separado ABRIR_PRIMER_CANARY_REAL_PAPER.command.</div>
     </div>
     <div class="badges">
       <span class="badge good">PAPER</span>
@@ -32,7 +32,7 @@
       <div class="formgrid">
         <div class="field full"><label>Workspace PAPER</label><input id="workspace" autocomplete="off"></div>
         <div class="field"><label>Attempt ID</label><input id="attemptId" autocomplete="off" spellcheck="false"></div>
-        <div class="field"><label>Operador</label><input id="operatorId" autocomplete="off" placeholder="operator-001"></div>
+        <div class="field"><label>Operador</label><input id="operatorId" autocomplete="off" value="operator-001" placeholder="operator-001"></div>
         <div class="field"><label>Alpaca PAPER Key ID</label><input id="paperKey" autocomplete="off" spellcheck="false"></div>
         <div class="field"><label>Alpaca PAPER Secret</label><input id="paperSecret" type="password" autocomplete="off" spellcheck="false"></div>
       </div>
@@ -48,7 +48,7 @@
     </section>
 
     <section class="card" id="approveCard">
-      <div class="step"><div class="num">2</div><div><h2>Aprobación humana nueva</h2><p>La aprobación anterior de UAT no sirve. Copia exactamente el challenge de este intento; expira rápidamente y queda ligada al package/attempt.</p></div></div>
+      <div class="step"><div class="num">2</div><div><h2>Aprobación humana nueva</h2><p>La aprobación anterior de UAT no sirve. Copia exactamente el challenge de este intento; expira rápidamente y queda ligada al package/attempt. El botón se habilita solo si el operador existe y el challenge coincide exactamente.</p></div></div>
       <div id="challengeWrap" class="hidden">
         <div class="challenge" id="challenge"></div>
         <div class="actions"><button class="ghost" id="copyChallenge">Copiar challenge</button></div>
@@ -59,9 +59,9 @@
     </section>
 
     <section class="card" id="executeCard">
-      <div class="step blocked"><div class="num">3</div><div><h2>Ejecutar una sola vez</h2><p>La arquitectura PRE_CONSUME → OMS → UNKNOWN → PRE_IO → un delegate ya está certificada en simulación. El injector HTTPS PAPER desde esta pantalla todavía no está habilitado.</p></div></div>
-      <div class="callout red"><strong>POST real bloqueado en esta build.</strong><br>Este botón solo se habilitará después de certificar la capa Mac que inyecta el transporte PAPER existente. No se agregará un segundo stack HTTP ni un botón reutilizable.</div>
-      <div class="actions"><button id="executeBtn" disabled>3. Ejecutar una vez · NO DISPONIBLE</button></div>
+      <div class="step blocked"><div class="num">3</div><div><h2>Ejecutar una sola vez</h2><p>La ejecución REAL PAPER está aislada en otro proceso y otra pantalla. Esta superficie de preparación nunca expone el endpoint de ejecución.</p></div></div>
+      <div class="callout red"><strong>POST real bloqueado en esta build de preparación.</strong><br>Cuando el estado sea APROBADO, cierra esta pantalla y abre ABRIR_PRIMER_CANARY_REAL_PAPER.command. Esa pantalla pedirá una segunda confirmación exacta inmediatamente antes del único POST permitido.</div>
+      <div class="actions"><button id="executeBtn" disabled>3. Ejecutar aquí · NO DISPONIBLE</button></div>
     </section>
 
     <section class="card" id="recoverCard">
@@ -95,7 +95,7 @@ function render(){
   const s=state||{}; const phase=s.phase||"READY_TO_PREPARE";
   if(phase==="RESOLVED")setPhase("RESUELTO","good");
   else if(phase==="RECOVERY_ONLY")setPhase("INTENTO QUEMADO · SOLO RECUPERACIÓN","warn");
-  else if(phase==="APPROVED_WAITING_FOR_CERTIFIED_EXECUTION")setPhase("APROBADO · POST REAL AÚN BLOQUEADO","warn");
+  else if(phase==="APPROVED_WAITING_FOR_CERTIFIED_EXECUTION")setPhase("APROBADO · ABRE LAUNCHER REAL PAPER","good");
   else if(phase==="APPROVAL_REQUIRED")setPhase("PREPARADO · REQUIERE APROBACIÓN","good");
   else setPhase("LISTO PARA PREPARAR","");
   const prep=s.preparation;
@@ -105,8 +105,9 @@ function render(){
   } else $("prepSummary").classList.add("hidden");
   const challenge=s.operator_challenge;
   $("challengeWrap").classList.toggle("hidden",!challenge); if(challenge)$("challenge").textContent=challenge;
+  const approvalReady=!!s.prepared&&!s.approved&&!s.execution_started&&!!$("operatorId").value.trim()&&!!challenge&&$("confirmation").value===challenge;
   $("prepareBtn").disabled=busy||!!s.prepared||!!s.execution_started;
-  $("approveBtn").disabled=busy||!s.prepared||!!s.approved||!!s.execution_started;
+  $("approveBtn").disabled=busy||!approvalReady;
   $("recoverBtn").disabled=busy||!s.execution_started||!!s.resolved;
   $("executeBtn").disabled=true;
   $("durable").textContent=JSON.stringify(s,null,2);
@@ -116,15 +117,17 @@ async function init(){
   const j=await getJSON("/api/meta");meta=j.meta;
   $("workspace").value=localStorage.getItem("autotrade.firstCanary.workspace")||meta.default_workspace;
   $("attemptId").value=localStorage.getItem("autotrade.firstCanary.attempt")||attemptId();
+  if(!$("operatorId").value.trim())$("operatorId").value="operator-001";
   await refresh();
 }
 $("newAttempt").onclick=async()=>{$("attemptId").value=attemptId();$("confirmation").value="";state=null;remember();await refresh()};
 $("refreshStatus").onclick=refresh;
 $("prepareBtn").onclick=async()=>{setBusy(true,"Leyendo PAPER y preparando…");try{const j=await postJSON("/api/prepare",{...base(),...creds()});showOutput("prepareOutput",j);await refresh()}catch(e){showOutput("prepareOutput",{error:String(e.message||e)});await refresh()}finally{setBusy(false)}};
-$("copyChallenge").onclick=async()=>{try{await navigator.clipboard.writeText($("challenge").textContent)}catch(e){$("confirmation").value=$("challenge").textContent}};
+$("copyChallenge").onclick=async()=>{try{await navigator.clipboard.writeText($("challenge").textContent);$("confirmation").value=$("challenge").textContent;render()}catch(e){$("confirmation").value=$("challenge").textContent;render()}};
 $("approveBtn").onclick=async()=>{setBusy(true,"Registrando aprobación durable…");try{const j=await postJSON("/api/approve",{...base(),operator_id:$("operatorId").value.trim(),confirmation:$("confirmation").value});showOutput("approveOutput",j);await refresh()}catch(e){showOutput("approveOutput",{error:String(e.message||e)});await refresh()}finally{setBusy(false)}};
 $("recoverBtn").onclick=async()=>{setBusy(true,"Consultando broker truth por GET…");try{const j=await postJSON("/api/recover",{...base(),...creds()});showOutput("recoverOutput",j);await refresh()}catch(e){showOutput("recoverOutput",{error:String(e.message||e)});await refresh()}finally{setBusy(false)}};
 for(const id of ["workspace","attemptId"])$(id).addEventListener("change",remember);
+for(const id of ["operatorId","confirmation"])$(id).addEventListener("input",render);
 init().catch(e=>{setPhase("SERVICIO BLOQUEADO","danger");$("durable").textContent=String(e.message||e)});
 </script>
 </body>
