@@ -545,7 +545,12 @@ def _reconcile_once(
 
 
 def _verify_persisted_preparation(inputs: FirstCanaryExecutionInputs) -> None:
-    document = inputs.attempt.read(path=inputs.attempt.preparation_path)
+    try:
+        document = inputs.attempt.read(path=inputs.attempt.preparation_path)
+    except Exception as exc:
+        raise FirstCanaryExecutionBlocked(
+            "persisted first-canary preparation is missing or corrupt"
+        ) from exc
     inputs.attempt.require_document_hash(
         document,
         hash_key="preparation_hash",
@@ -568,7 +573,12 @@ def _verify_persisted_preparation(inputs: FirstCanaryExecutionInputs) -> None:
     if not isinstance(broker, dict) or broker.get("payload") != inputs.broker_order.to_payload():
         raise FirstCanaryExecutionBlocked("persisted preparation broker order mismatch")
 
-    approval = inputs.attempt.read(path=inputs.attempt.approval_receipt_path)
+    try:
+        approval = inputs.attempt.read(path=inputs.attempt.approval_receipt_path)
+    except Exception as exc:
+        raise FirstCanaryExecutionBlocked(
+            "new execution-specific human approval is missing or corrupt"
+        ) from exc
     inputs.attempt.require_document_hash(
         approval,
         hash_key="approval_receipt_hash",
