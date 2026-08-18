@@ -1,0 +1,66 @@
+name: R6 Crypto PAPER Health R4 Commissioning
+
+on:
+  pull_request:
+    paths:
+      - "scripts/mac_crypto_health_commissioning.py"
+      - "scripts/mac_dashboard_health_commissioning.py"
+      - "scripts/check_mac_crypto_health_commissioning.py"
+      - "scripts/mac_crypto_execution_health_readiness.py"
+      - "scripts/mac_dashboard_execution_gate.py"
+      - "ABRIR_AUTO_TRADE.command"
+      - "tests/test_mac_crypto_health_commissioning.py"
+      - "tests/test_mac_crypto_health_commissioning_gate.py"
+      - "tests/test_mac_crypto_execution_health_readiness.py"
+      - "src/autotrade/**"
+      - ".github/workflows/r6-crypto-health-commissioning.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  health-r4-core-commissioning:
+    runs-on: macos-14
+    steps:
+      - name: Checkout exact head
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install project
+        run: python -m pip install -e '.[dev]'
+
+      - name: Compile commissioning surface
+        run: |
+          python -m compileall -q \
+            scripts/mac_crypto_health_commissioning.py \
+            scripts/mac_dashboard_health_commissioning.py \
+            scripts/check_mac_crypto_health_commissioning.py
+
+      - name: Permanent Health R4 commissioning boundary
+        run: python scripts/check_mac_crypto_health_commissioning.py
+
+      - name: Schema-only commissioning tests
+        run: |
+          python -m pytest -q \
+            tests/test_mac_crypto_health_commissioning.py \
+            tests/test_mac_crypto_health_commissioning_gate.py \
+            tests/test_mac_crypto_execution_health_readiness.py
+
+      - name: Re-prove read-only execution readiness boundary
+        run: python scripts/check_mac_crypto_execution_gate_readiness.py
+
+      - name: Re-prove Mac Control Center remains NO-POST
+        run: python scripts/check_mac_dashboard_boundary.py
+
+      - name: Re-prove global R6 authority boundary
+        run: python scripts/check_r6_authority.py
+
+      - name: Re-prove crypto execution authority boundary
+        run: python scripts/check_r6_crypto_execution_boundary.py
