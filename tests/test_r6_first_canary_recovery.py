@@ -72,7 +72,9 @@ def _burn_to_unknown(tmp_path, monkeypatch):
     )
     assert outcome.lifecycle_status == "ENTRY_SUBMISSION_UNKNOWN"
     assert session.attempt.execution_started_path.is_file()
-    assert session.attempt.reconciliation_path.is_file()
+    assert session.attempt.reconciliation_failure_path.is_file()
+    assert session.attempt.reconciliation_pending_path.exists() is False
+    assert session.attempt.reconciliation_path.exists() is False
     return session, inputs, execute_at
 
 
