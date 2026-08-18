@@ -11,6 +11,8 @@ on:
       - "src/autotrade/first_canary_real_paper_execution.py"
       - "scripts/mac_first_canary_restart_safe_dashboard.py"
       - "scripts/mac_first_canary_real_paper_dashboard.py"
+      - "scripts/mac_crypto_first_canary_prepare_restart_safe.py"
+      - "scripts/mac_crypto_first_canary_approval.py"
       - "scripts/mac_crypto_first_canary_execute_real_paper.py"
       - "scripts/check_r6_first_canary_restart_safe_dashboard.py"
       - "scripts/check_r6_first_canary_real_paper_delegate.py"
@@ -18,6 +20,7 @@ on:
       - "tests/test_r6_first_canary_external_post_consent.py"
       - "tests/test_r6_first_canary_real_paper_execution.py"
       - "tests/test_r6_first_canary_real_paper_autodiscovery.py"
+      - "tests/test_r6_first_canary_operator_timing_ux.py"
       - ".github/workflows/r6-first-canary-real-paper-delegate.yml"
   pull_request:
     paths:
@@ -28,6 +31,8 @@ on:
       - "src/autotrade/first_canary_real_paper_execution.py"
       - "scripts/mac_first_canary_restart_safe_dashboard.py"
       - "scripts/mac_first_canary_real_paper_dashboard.py"
+      - "scripts/mac_crypto_first_canary_prepare_restart_safe.py"
+      - "scripts/mac_crypto_first_canary_approval.py"
       - "scripts/mac_crypto_first_canary_execute_real_paper.py"
       - "scripts/check_r6_first_canary_restart_safe_dashboard.py"
       - "scripts/check_r6_first_canary_real_paper_delegate.py"
@@ -35,6 +40,7 @@ on:
       - "tests/test_r6_first_canary_external_post_consent.py"
       - "tests/test_r6_first_canary_real_paper_execution.py"
       - "tests/test_r6_first_canary_real_paper_autodiscovery.py"
+      - "tests/test_r6_first_canary_operator_timing_ux.py"
       - ".github/workflows/r6-first-canary-real-paper-delegate.yml"
   workflow_dispatch:
 
@@ -67,13 +73,16 @@ jobs:
             src/autotrade/first_canary_real_paper_execution.py \
             scripts/mac_first_canary_restart_safe_dashboard.py \
             scripts/mac_first_canary_real_paper_dashboard.py \
+            scripts/mac_crypto_first_canary_prepare_restart_safe.py \
+            scripts/mac_crypto_first_canary_approval.py \
             scripts/mac_crypto_first_canary_execute_real_paper.py \
             scripts/check_r6_first_canary_restart_safe_dashboard.py \
             scripts/check_r6_first_canary_real_paper_delegate.py \
             scripts/check_r6_first_canary_real_paper_dashboard.py \
             tests/test_r6_first_canary_external_post_consent.py \
             tests/test_r6_first_canary_real_paper_execution.py \
-            tests/test_r6_first_canary_real_paper_autodiscovery.py
+            tests/test_r6_first_canary_real_paper_autodiscovery.py \
+            tests/test_r6_first_canary_operator_timing_ux.py
 
       - name: Static restart-safe preparation UX boundary
         run: python scripts/check_r6_first_canary_restart_safe_dashboard.py
@@ -89,7 +98,8 @@ jobs:
           pytest -q \
             tests/test_r6_first_canary_external_post_consent.py \
             tests/test_r6_first_canary_real_paper_execution.py \
-            tests/test_r6_first_canary_real_paper_autodiscovery.py
+            tests/test_r6_first_canary_real_paper_autodiscovery.py \
+            tests/test_r6_first_canary_operator_timing_ux.py
 
       - name: Re-prove restart-safe preparation backend
         run: |
