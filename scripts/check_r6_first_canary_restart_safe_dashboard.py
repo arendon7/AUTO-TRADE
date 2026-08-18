@@ -61,7 +61,14 @@ def main() -> int:
             fail(f"restart-safe prepare missing durable no-POST anchor: {token}")
 
     for token in (
-        'DASHBOARD="$HERE/scripts/mac_first_canary_restart_safe_dashboard.py"',
+        'SOURCE_ROOT="$(cd "$(dirname "$0")" && pwd -P)"',
+        'INSTALL_ROOT="$HOME/Applications/AUTO-TRADE-R6"',
+        'real_paper_surface=SEPARATE_EXACT_ONE_SHOT',
+        'EXPECTED_HEAD="$(read_source_head "$SOURCE_ROOT")"',
+        'INSTALLED_HEAD="$(read_source_head "$INSTALL_ROOT")"',
+        'bash "$SOURCE_ROOT/INSTALAR_AUTO_TRADE.command"',
+        'ROOT="$INSTALL_ROOT"',
+        'DASHBOARD="$ROOT/scripts/mac_first_canary_restart_safe_dashboard.py"',
         "export R6_EXTERNAL_PAPER_WRITE=DISABLED",
         "unset APCA_API_KEY_ID || true",
         "unset APCA_API_SECRET_KEY || true",
@@ -70,7 +77,7 @@ def main() -> int:
         "LIVE: BLOCKED",
     ):
         if token not in launcher:
-            fail(f"preparation launcher missing isolation/UX anchor: {token}")
+            fail(f"preparation launcher missing isolation/relocation/UX anchor: {token}")
     for forbidden in (
         "R6_EXTERNAL_PAPER_WRITE=ENABLED",
         "APCA_API_SECRET_KEY=",
@@ -85,9 +92,9 @@ def main() -> int:
         fail("inherited safe dashboard no longer denies real execution")
 
     print(
-        "first-canary restart-safe Mac preparation: PASS — safe PR41 localhost UX reused; "
-        "prepare now persists typed restart-safe evidence; approve/recover remain no-POST; "
-        "separate REAL PAPER launcher required for any broker POST; LIVE blocked"
+        "first-canary restart-safe Mac preparation: PASS — downloaded Finder launcher relocates/reuses exact "
+        "certified installed head; safe localhost UX reused; prepare persists typed restart-safe evidence; "
+        "approve/recover remain no-POST; separate REAL PAPER launcher required for any broker POST; LIVE blocked"
     )
     return 0
 
