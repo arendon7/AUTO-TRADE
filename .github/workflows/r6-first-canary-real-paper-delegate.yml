@@ -89,8 +89,10 @@ jobs:
 
       - name: Re-prove restart-safe preparation backend
         run: |
-          python scripts/check_r6_first_canary_restart_safe.py
-          pytest -q tests/test_r6_first_canary_restart_safe_preparation.py
+          python scripts/check_r6_first_canary_restart_safe_preparation.py
+          pytest -q \
+            tests/test_r6_first_canary_prepared_evidence.py \
+            tests/test_r6_first_canary_restart_safe_prepare.py
 
       - name: Re-prove PR41 no-POST Mac surface
         run: python scripts/check_r6_first_canary_mac_dashboard.py
