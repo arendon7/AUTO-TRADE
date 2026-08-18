@@ -20,11 +20,11 @@ jobs:
       - name: Install project
         run: python -m pip install -e '.[dev]'
       - name: Compile binding surface
-        run: python -m compileall -q scripts/mac_crypto_cold_start_final_guard_binding.py scripts/mac_dashboard_cold_start_final_guard_binding.py scripts/check_mac_crypto_cold_start_final_guard_binding.py tests/test_mac_crypto_cold_start_final_guard_binding.py
+        run: python -m compileall -q scripts/mac_crypto_cold_start_final_guard_binding.py scripts/mac_crypto_cold_start_final_guard_binding_envelope.py scripts/mac_dashboard_cold_start_final_guard_binding.py scripts/mac_dashboard_cold_start_final_guard_binding_fixed.py scripts/check_mac_crypto_cold_start_final_guard_binding.py tests/test_mac_crypto_cold_start_final_guard_binding.py tests/test_mac_crypto_cold_start_final_guard_binding_envelope.py
       - name: Permanent cold-start Final Guard binding boundary
         run: python scripts/check_mac_crypto_cold_start_final_guard_binding.py
       - name: Cold-start Final Guard binding tests
-        run: pytest -q tests/test_mac_crypto_cold_start_final_guard_binding.py
+        run: pytest -q tests/test_mac_crypto_cold_start_final_guard_binding.py tests/test_mac_crypto_cold_start_final_guard_binding_envelope.py
       - name: Re-prove cold-start qualification attestation boundary
         run: python scripts/check_mac_crypto_cold_start_qualification_attestation.py
       - name: Re-prove cold-start Portfolio bootstrap boundary
