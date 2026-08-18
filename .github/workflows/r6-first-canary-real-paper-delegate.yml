@@ -4,12 +4,15 @@ on:
   push:
     branches: ["reconstruction/**", "work/r6-crypto-paper-first-canary-real-paper-delegate"]
     paths:
+      - "ABRIR_PRIMER_CANARY_PREPARAR.command"
       - "ABRIR_PRIMER_CANARY_REAL_PAPER.command"
       - "web/mac_first_canary_real_paper.html"
       - "src/autotrade/first_canary_external_post_consent.py"
       - "src/autotrade/first_canary_real_paper_execution.py"
+      - "scripts/mac_first_canary_restart_safe_dashboard.py"
       - "scripts/mac_first_canary_real_paper_dashboard.py"
       - "scripts/mac_crypto_first_canary_execute_real_paper.py"
+      - "scripts/check_r6_first_canary_restart_safe_dashboard.py"
       - "scripts/check_r6_first_canary_real_paper_delegate.py"
       - "scripts/check_r6_first_canary_real_paper_dashboard.py"
       - "tests/test_r6_first_canary_external_post_consent.py"
@@ -17,12 +20,15 @@ on:
       - ".github/workflows/r6-first-canary-real-paper-delegate.yml"
   pull_request:
     paths:
+      - "ABRIR_PRIMER_CANARY_PREPARAR.command"
       - "ABRIR_PRIMER_CANARY_REAL_PAPER.command"
       - "web/mac_first_canary_real_paper.html"
       - "src/autotrade/first_canary_external_post_consent.py"
       - "src/autotrade/first_canary_real_paper_execution.py"
+      - "scripts/mac_first_canary_restart_safe_dashboard.py"
       - "scripts/mac_first_canary_real_paper_dashboard.py"
       - "scripts/mac_crypto_first_canary_execute_real_paper.py"
+      - "scripts/check_r6_first_canary_restart_safe_dashboard.py"
       - "scripts/check_r6_first_canary_real_paper_delegate.py"
       - "scripts/check_r6_first_canary_real_paper_dashboard.py"
       - "tests/test_r6_first_canary_external_post_consent.py"
@@ -57,12 +63,17 @@ jobs:
           python -m compileall -q \
             src/autotrade/first_canary_external_post_consent.py \
             src/autotrade/first_canary_real_paper_execution.py \
+            scripts/mac_first_canary_restart_safe_dashboard.py \
             scripts/mac_first_canary_real_paper_dashboard.py \
             scripts/mac_crypto_first_canary_execute_real_paper.py \
+            scripts/check_r6_first_canary_restart_safe_dashboard.py \
             scripts/check_r6_first_canary_real_paper_delegate.py \
             scripts/check_r6_first_canary_real_paper_dashboard.py \
             tests/test_r6_first_canary_external_post_consent.py \
             tests/test_r6_first_canary_real_paper_execution.py
+
+      - name: Static restart-safe preparation UX boundary
+        run: python scripts/check_r6_first_canary_restart_safe_dashboard.py
 
       - name: Static real PAPER authority boundary
         run: python scripts/check_r6_first_canary_real_paper_delegate.py
@@ -75,6 +86,11 @@ jobs:
           pytest -q \
             tests/test_r6_first_canary_external_post_consent.py \
             tests/test_r6_first_canary_real_paper_execution.py
+
+      - name: Re-prove restart-safe preparation backend
+        run: |
+          python scripts/check_r6_first_canary_restart_safe.py
+          pytest -q tests/test_r6_first_canary_restart_safe_preparation.py
 
       - name: Re-prove PR41 no-POST Mac surface
         run: python scripts/check_r6_first_canary_mac_dashboard.py
