@@ -25,19 +25,22 @@ jobs:
           src/autotrade/brokers/alpaca_paper_crypto_cold_start_final_guard.py
           src/autotrade/brokers/alpaca_paper_crypto_cold_start_execution_attempt.py
           src/autotrade/brokers/alpaca_paper_crypto_cold_start_execution_bridge.py
+          src/autotrade/brokers/alpaca_paper_crypto_cold_start_pre_io_authority.py
           scripts/check_r6_crypto_cold_start_execution_boundary.py
           tests/test_r6_paper_crypto_cold_start_final_guard.py
           tests/test_r6_paper_crypto_cold_start_authority_adversarial.py
           tests/test_r6_paper_crypto_cold_start_execution_bridge.py
+          tests/test_r6_paper_crypto_cold_start_pre_io_authority.py
           tests/test_r6_paper_crypto_cold_start_writer_simulation.py
       - name: Permanent isolated cold-start execution boundary
         run: python scripts/check_r6_crypto_cold_start_execution_boundary.py
-      - name: Cold-start Final Guard + checkpoint + bridge + simulated writer tests
+      - name: Cold-start authority + durable PRE_IO + simulated writer tests
         run: >-
           pytest -q
           tests/test_r6_paper_crypto_cold_start_final_guard.py
           tests/test_r6_paper_crypto_cold_start_authority_adversarial.py
           tests/test_r6_paper_crypto_cold_start_execution_bridge.py
+          tests/test_r6_paper_crypto_cold_start_pre_io_authority.py
           tests/test_r6_paper_crypto_cold_start_writer_simulation.py
       - name: Re-prove normal crypto execution authority unchanged
         run: python scripts/check_r6_crypto_execution_boundary.py
