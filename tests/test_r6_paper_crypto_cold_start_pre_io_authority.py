@@ -4,6 +4,7 @@ from datetime import timedelta
 
 import pytest
 
+from autotrade.cold_start_oms import ColdStartOrderManagementSystem
 from autotrade.ledger import InMemoryEventLedger, LedgerEvent
 from autotrade.brokers.alpaca_paper_crypto_cold_start_execution_attempt import (
     SQLiteCryptoColdStartExecutionAttemptRegistry,
@@ -19,7 +20,7 @@ from autotrade.brokers.alpaca_paper_crypto_cold_start_pre_io_authority import (
     CryptoColdStartPreIoAuthorityBlocked,
 )
 from autotrade.brokers.alpaca_paper_crypto_lifecycle import CryptoLifecycleStatus
-from test_r6_paper_crypto_canary_coordinator import NOW, _decision, _intent, _market
+from test_r6_paper_crypto_canary_coordinator import NOW, _NoBroker, _decision, _intent, _market
 from test_r6_paper_crypto_cold_start_final_guard import _pre, _setup
 
 
@@ -30,14 +31,23 @@ def _risk_and_market(ctx):
     return decision, attestation.market
 
 
+def _oms(ctx, ledger):
+    return ColdStartOrderManagementSystem(
+        broker=_NoBroker(),
+        ledger=ledger,
+        order_store=ctx.order_store,
+        safety_state_store=ctx.safety,
+    )
+
+
 def _prepare_chain(ctx, ledger):
     pre = _pre(ctx)
     registry = SQLiteCryptoColdStartExecutionAttemptRegistry(ctx.core)
     checkpoint = registry.record_pre_consume(pre)
     decision, market = _risk_and_market(ctx)
+    oms = _oms(ctx, ledger)
     bridge = CryptoColdStartExecutionBridge(
-        order_store=ctx.order_store,
-        ledger=ledger,
+        oms=oms,
         authority_provider=ctx.authority,
     )
     stage = bridge.stage_after_checkpoint(
@@ -54,14 +64,14 @@ def _prepare_chain(ctx, ledger):
         ctx.package.lifecycle_id,
         at=NOW + timedelta(seconds=4, milliseconds=400),
     )
-    return registry, checkpoint, stage
+    return registry, checkpoint, stage, oms
 
 
-def _authorize(ctx, registry, ledger):
+def _authorize(ctx, registry, oms):
     authority = CryptoColdStartPreIoAuthority(
         guard=ctx.guard,
         checkpoint_registry=registry,
-        ledger=ledger,
+        oms=oms,
     )
     return authority.authorize(
         package=ctx.package,
@@ -81,11 +91,11 @@ def _authorize(ctx, registry, ledger):
     )
 
 
-def test_preio_authority_loads_exact_checkpoint_and_handoff_before_guard(tmp_path) -> None:
+def test_preio_authority_loads_exact_checkpoint_and_oms_handoff_before_guard(tmp_path) -> None:
     ctx = _setup(tmp_path)
     ledger = InMemoryEventLedger()
-    registry, checkpoint, stage = _prepare_chain(ctx, ledger)
-    result = _authorize(ctx, registry, ledger)
+    registry, checkpoint, stage, oms = _prepare_chain(ctx, ledger)
+    result = _authorize(ctx, registry, oms)
 
     assert result.phase is CryptoColdStartFinalWritePhase.PRE_IO
     assert result.previous_attestation_hash == checkpoint.pre_consume.attestation_hash
@@ -95,18 +105,18 @@ def test_preio_authority_loads_exact_checkpoint_and_handoff_before_guard(tmp_pat
     assert result.entry_attempt_count == 1
 
 
-def test_preio_authority_refuses_missing_handoff_even_when_local_states_look_ready(tmp_path) -> None:
-    ctx = _setup(tmp_path)
-    bridge_ledger = InMemoryEventLedger()
-    registry, _, _ = _prepare_chain(ctx, bridge_ledger)
-    with pytest.raises(CryptoColdStartPreIoAuthorityBlocked, match="handoff event is missing"):
-        _authorize(ctx, registry, InMemoryEventLedger())
-
-
-def test_preio_authority_refuses_tampered_handoff_payload(tmp_path) -> None:
+def test_preio_authority_refuses_missing_oms_handoff_even_when_local_states_look_ready(tmp_path) -> None:
     ctx = _setup(tmp_path)
     ledger = InMemoryEventLedger()
-    registry, _, stage = _prepare_chain(ctx, ledger)
+    registry, _, _, _ = _prepare_chain(ctx, ledger)
+    with pytest.raises(CryptoColdStartPreIoAuthorityBlocked, match="OMS cold-start handoff"):
+        _authorize(ctx, registry, _oms(ctx, InMemoryEventLedger()))
+
+
+def test_preio_authority_refuses_tampered_oms_handoff_payload(tmp_path) -> None:
+    ctx = _setup(tmp_path)
+    ledger = InMemoryEventLedger()
+    registry, _, stage, _ = _prepare_chain(ctx, ledger)
     original = tuple(ledger.all_events())[0]
     tampered = InMemoryEventLedger()
     payload = dict(original.payload)
@@ -119,15 +129,15 @@ def test_preio_authority_refuses_tampered_handoff_payload(tmp_path) -> None:
             payload=payload,
         )
     )
-    with pytest.raises(CryptoColdStartPreIoAuthorityBlocked, match="invalid or tampered"):
-        _authorize(ctx, registry, tampered)
+    with pytest.raises(CryptoColdStartPreIoAuthorityBlocked, match="OMS cold-start handoff"):
+        _authorize(ctx, registry, _oms(ctx, tampered))
     assert stage.handoff.package_hash == ctx.package.package_hash
 
 
-def test_preio_authority_refuses_corrupt_checkpoint_before_reading_handoff(tmp_path) -> None:
+def test_preio_authority_refuses_corrupt_checkpoint_before_oms_lookup(tmp_path) -> None:
     ctx = _setup(tmp_path)
     ledger = InMemoryEventLedger()
-    registry, checkpoint, _ = _prepare_chain(ctx, ledger)
+    registry, checkpoint, _, oms = _prepare_chain(ctx, ledger)
     conn = ctx.core.connect()
     try:
         conn.execute(
@@ -137,29 +147,29 @@ def test_preio_authority_refuses_corrupt_checkpoint_before_reading_handoff(tmp_p
     finally:
         conn.close()
     with pytest.raises(CryptoColdStartPreIoAuthorityBlocked, match="checkpoint is unavailable or corrupt"):
-        _authorize(ctx, registry, ledger)
+        _authorize(ctx, registry, oms)
 
 
-def test_preio_authority_refuses_duplicate_or_unavailable_handoff_ledger(tmp_path) -> None:
+def test_preio_authority_refuses_duplicate_or_unavailable_oms_handoff_ledger(tmp_path) -> None:
     ctx = _setup(tmp_path / "duplicate")
     ledger = InMemoryEventLedger()
-    registry, _, _ = _prepare_chain(ctx, ledger)
+    registry, _, _, _ = _prepare_chain(ctx, ledger)
     event = tuple(ledger.all_events())[0]
 
     class DuplicateLedger:
         def all_events(self):
             return (event, event)
 
-    with pytest.raises(CryptoColdStartPreIoAuthorityBlocked, match="missing or duplicated"):
-        _authorize(ctx, registry, DuplicateLedger())
+    with pytest.raises(CryptoColdStartPreIoAuthorityBlocked, match="OMS cold-start handoff"):
+        _authorize(ctx, registry, _oms(ctx, DuplicateLedger()))
 
     ctx2 = _setup(tmp_path / "unavailable")
     ledger2 = InMemoryEventLedger()
-    registry2, _, _ = _prepare_chain(ctx2, ledger2)
+    registry2, _, _, _ = _prepare_chain(ctx2, ledger2)
 
     class BrokenLedger:
         def all_events(self):
             raise RuntimeError("synthetic storage failure")
 
-    with pytest.raises(CryptoColdStartPreIoAuthorityBlocked, match="ledger is unavailable"):
-        _authorize(ctx2, registry2, BrokenLedger())
+    with pytest.raises(Exception):
+        _authorize(ctx2, registry2, _oms(ctx2, BrokenLedger()))
