@@ -388,6 +388,100 @@ class SQLiteCryptoPaperLifecycle:
             transition=transition,
         )
 
+    def recover_entry_unknown_absence(
+        self,
+        lifecycle_id: str,
+        *,
+        client_order_id: str,
+        position_quantity: Decimal,
+        order_absence_fingerprint: str,
+        reconciliation_fingerprint: str,
+        position_fingerprint: str,
+        fresh_account_fingerprint: str,
+        flat_account_fingerprint: str | None,
+        checkpoint_hash: str,
+        at: datetime,
+    ) -> CryptoLifecycleState:
+        """Persist an order-404 cold-start UNKNOWN resolution without retry authority."""
+
+        _validate_id(client_order_id, "entry client_order_id")
+        _nonnegative(position_quantity, "confirmed UNKNOWN position_quantity")
+        for label, value in (
+            ("order_absence_fingerprint", order_absence_fingerprint),
+            ("reconciliation_fingerprint", reconciliation_fingerprint),
+            ("position_fingerprint", position_fingerprint),
+            ("fresh_account_fingerprint", fresh_account_fingerprint),
+            ("checkpoint_hash", checkpoint_hash),
+        ):
+            _validate_hash(value, label)
+        if flat_account_fingerprint is not None:
+            _validate_hash(flat_account_fingerprint, "flat_account_fingerprint")
+        if position_quantity > 0 and flat_account_fingerprint is not None:
+            raise CryptoLifecycleIntegrityError(
+                "remaining UNKNOWN position cannot be combined with flat-account evidence"
+            )
+        if position_quantity == 0 and flat_account_fingerprint is None:
+            raise CryptoLifecycleBlocked(
+                "zero UNKNOWN position requires fresh all-account flatness evidence"
+            )
+
+        next_status = (
+            CryptoLifecycleStatus.HALTED_RECONCILIATION_REQUIRED
+            if position_quantity > 0
+            else CryptoLifecycleStatus.FLAT_RECONCILED
+        )
+        event_type = (
+            CryptoLifecycleEventType.HALTED
+            if position_quantity > 0
+            else CryptoLifecycleEventType.FLAT_RECONCILED
+        )
+        payload = {
+            "kind": "R6_CRYPTO_COLD_START_UNKNOWN_ORDER_404_RECOVERY",
+            "client_order_id": client_order_id,
+            "checkpoint_hash": checkpoint_hash,
+            "order_absence_fingerprint": order_absence_fingerprint,
+            "unknown_reconciliation_fingerprint": reconciliation_fingerprint,
+            "position_fingerprint": position_fingerprint,
+            "observed_position_quantity": _decimal_text(position_quantity),
+            "fresh_account_fingerprint": fresh_account_fingerprint,
+            "flat_account_fingerprint": flat_account_fingerprint,
+            "retry_authorized": False,
+        }
+
+        def transition(
+            binding: CryptoLifecycleBinding,
+            state: CryptoLifecycleState,
+            _payload: dict[str, object],
+        ) -> CryptoLifecycleState:
+            if (
+                state.status is not CryptoLifecycleStatus.ENTRY_SUBMISSION_UNKNOWN
+                or state.entry_attempt_count != 1
+            ):
+                raise CryptoLifecycleBlocked(
+                    "order-404 recovery requires durable ENTRY_SUBMISSION_UNKNOWN attempt=1"
+                )
+            if binding.entry_client_order_id != client_order_id:
+                raise CryptoLifecycleIntegrityError(
+                    "order-404 recovery client_order_id differs from lifecycle binding"
+                )
+            if state.entry_broker_order_id is not None:
+                raise CryptoLifecycleIntegrityError(
+                    "order-404 recovery cannot overwrite a known entry broker order"
+                )
+            return replace(
+                state,
+                status=next_status,
+                confirmed_net_long_quantity=position_quantity,
+            )
+
+        return self._mutate(
+            lifecycle_id,
+            at=at,
+            event_type=event_type,
+            payload=payload,
+            transition=transition,
+        )
+
     def prepare_protection(
         self,
         lifecycle_id: str,
