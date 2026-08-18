@@ -5,6 +5,7 @@ import json
 
 import pytest
 
+from autotrade.cold_start_oms import ColdStartOrderManagementSystem
 from autotrade.ledger import InMemoryEventLedger
 from autotrade.brokers.alpaca_paper_crypto_cold_start_execution_attempt import (
     SQLiteCryptoColdStartExecutionAttemptRegistry,
@@ -15,6 +16,9 @@ from autotrade.brokers.alpaca_paper_crypto_cold_start_execution_bridge import (
 from autotrade.brokers.alpaca_paper_crypto_cold_start_final_guard import (
     CryptoColdStartFinalWriteAttestation,
     CryptoColdStartFinalWritePhase,
+)
+from autotrade.brokers.alpaca_paper_crypto_cold_start_pre_io_authority import (
+    CryptoColdStartPreIoAuthority,
 )
 from autotrade.brokers.alpaca_paper_crypto_lifecycle import (
     CryptoLifecycleBlocked,
@@ -35,12 +39,12 @@ from autotrade.brokers.alpaca_paper_crypto_writer import (
     GuardedAlpacaPaperCryptoWriteTransport,
 )
 from autotrade.brokers.alpaca_paper_gateway import AlpacaPaperCredentials
-from test_r6_paper_crypto_canary_coordinator import NOW, _decision, _intent, _market
+from test_r6_paper_crypto_canary_coordinator import NOW, _NoBroker, _decision, _intent, _market
 from test_r6_paper_crypto_cold_start_final_guard import _pre, _setup
 
 
 class _TestOnlyColdStartEntryTransport(GuardedAlpacaPaperCryptoWriteTransport):
-    """Test-only nominal capability; production checker never scans test classes."""
+    """Test-only nominal capability; production checker never scans tests."""
 
     role = CryptoOrderRole.ENTRY
 
@@ -98,11 +102,18 @@ def _risk_and_market(ctx):
 
 def _stage(ctx):
     pre = _pre(ctx)
-    checkpoint = SQLiteCryptoColdStartExecutionAttemptRegistry(ctx.core).record_pre_consume(pre)
+    registry = SQLiteCryptoColdStartExecutionAttemptRegistry(ctx.core)
+    checkpoint = registry.record_pre_consume(pre)
     decision, market = _risk_and_market(ctx)
-    bridge = CryptoColdStartExecutionBridge(
+    ledger = InMemoryEventLedger()
+    oms = ColdStartOrderManagementSystem(
+        broker=_NoBroker(),
+        ledger=ledger,
         order_store=ctx.order_store,
-        ledger=InMemoryEventLedger(),
+        safety_state_store=ctx.safety,
+    )
+    bridge = CryptoColdStartExecutionBridge(
+        oms=oms,
         authority_provider=ctx.authority,
     )
     stage = bridge.stage_after_checkpoint(
@@ -115,12 +126,18 @@ def _stage(ctx):
         consume_at=NOW + timedelta(seconds=4, milliseconds=200),
         stage_at=NOW + timedelta(seconds=4, milliseconds=300),
     )
-    return pre, checkpoint, stage
+    return checkpoint, stage, registry, oms
 
 
-def _authorizer(ctx, pre):
+def _authorizer(ctx, registry, oms):
+    authority = CryptoColdStartPreIoAuthority(
+        guard=ctx.guard,
+        checkpoint_registry=registry,
+        oms=oms,
+    )
+
     def authorize():
-        return ctx.guard.authorize(
+        return authority.authorize(
             package=ctx.package,
             operator_decision=ctx.operator_decision,
             operator_registry=ctx.operator_registry,
@@ -135,9 +152,6 @@ def _authorizer(ctx, pre):
             fresh_market=ctx.fresh_market,
             fresh_flat_account=ctx.fresh_flat,
             now=NOW + timedelta(seconds=4, milliseconds=450),
-            phase=CryptoColdStartFinalWritePhase.PRE_IO,
-            expected_attempt_id=ctx.operator_decision.context.attempt_id,
-            previous_attestation=pre,
         )
 
     return authorize
@@ -150,16 +164,16 @@ def _credentials() -> AlpacaPaperCredentials:
     )
 
 
-def test_simulated_writer_marks_unknown_before_cold_start_preio_and_delegates_once(tmp_path) -> None:
+def test_simulated_writer_marks_unknown_before_durable_cold_start_preio_and_delegates_once(tmp_path) -> None:
     ctx = _setup(tmp_path)
-    pre, checkpoint, stage = _stage(ctx)
+    checkpoint, stage, registry, oms = _stage(ctx)
     assert stage.checkpoint_hash == checkpoint.record_hash
     assert ctx.lifecycle.snapshot(ctx.package.lifecycle_id).state.status is CryptoLifecycleStatus.ENTRY_PREPARED
 
     simulation = DeterministicCryptoPaperSimulationTransport()
     transport = _TestOnlyColdStartEntryTransport(
         delegate=simulation,
-        authorizer=_authorizer(ctx, pre),
+        authorizer=_authorizer(ctx, registry, oms),
     )
     writer = AlpacaPaperCryptoWriter(
         config=AlpacaPaperCryptoWriterConfig(enabled=True),
@@ -179,6 +193,7 @@ def test_simulated_writer_marks_unknown_before_cold_start_preio_and_delegates_on
     assert transport.delegated_calls == 1
     assert transport.last_attestation is not None
     assert transport.last_attestation.phase is CryptoColdStartFinalWritePhase.PRE_IO
+    assert transport.last_attestation.previous_attestation_hash == checkpoint.pre_consume.attestation_hash
     lifecycle = ctx.lifecycle.snapshot(ctx.package.lifecycle_id).state
     assert lifecycle.status is CryptoLifecycleStatus.ENTRY_SUBMISSION_UNKNOWN
     assert lifecycle.entry_attempt_count == 1
@@ -186,11 +201,11 @@ def test_simulated_writer_marks_unknown_before_cold_start_preio_and_delegates_on
 
 def test_simulated_ambiguous_timeout_stays_unknown_and_never_blind_retries(tmp_path) -> None:
     ctx = _setup(tmp_path)
-    pre, _, _ = _stage(ctx)
+    _, _, registry, oms = _stage(ctx)
     ambiguous = _AmbiguousSimulationDelegate()
     transport = _TestOnlyColdStartEntryTransport(
         delegate=ambiguous,
-        authorizer=_authorizer(ctx, pre),
+        authorizer=_authorizer(ctx, registry, oms),
     )
     writer = AlpacaPaperCryptoWriter(
         config=AlpacaPaperCryptoWriterConfig(enabled=True),
