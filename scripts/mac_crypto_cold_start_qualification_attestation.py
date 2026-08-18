@@ -33,6 +33,7 @@ KEY_ENV = "APCA_API_KEY_ID"
 SECRET_ENV = "APCA_API_SECRET_KEY"
 ATTESTATION_DIR = "qualification_cold_start"
 ATTESTATION_TTL = timedelta(seconds=30)
+BROKER_EVIDENCE_MAX_AGE = timedelta(seconds=5)
 EXPECTED_SYMBOL = "BTC/USD"
 MAX_NOTIONAL = Decimal("5")
 TARGET_NOTIONAL = Decimal("2")
@@ -48,6 +49,14 @@ def _aware(value: datetime) -> datetime:
     if value.tzinfo is None or value.utcoffset() is None:
         raise ValueError("attestation timestamp must be timezone-aware")
     return value.astimezone(timezone.utc)
+
+
+def _require_fresh(value: datetime, *, now: datetime, label: str) -> None:
+    observed = _aware(value)
+    if observed > now + timedelta(seconds=2):
+        raise CryptoColdStartQualificationAttestationError(f"{label} evidence timestamp is in the future")
+    if now - observed > BROKER_EVIDENCE_MAX_AGE:
+        raise CryptoColdStartQualificationAttestationError(f"{label} evidence is stale")
 
 
 def _credentials() -> AlpacaPaperCredentials:
@@ -281,6 +290,8 @@ def attest_cold_start_qualification(
         expected_credential_reference=account.credential_reference,
         now=instant,
     )
+    _require_fresh(account.attested_at, now=instant, label="account")
+    _require_fresh(flat.attested_at, now=instant, label="flat-account")
     if not flat.clean_for_first_canary:
         raise CryptoColdStartQualificationAttestationError(
             f"fresh PAPER account is not flat; positions={flat.position_count}, open_orders={flat.open_order_count}"
