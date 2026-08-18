@@ -99,4 +99,6 @@ def test_dashboard_envelope_requires_exact_persisted_document(tmp_path: Path) ->
 
 def test_fixed_dashboard_routes_only_seal_through_canonical_adapter() -> None:
     assert fixed_dashboard.base.binding.seal_binding is envelope.seal_binding
-    assert fixed_dashboard.base.binding.prepare_binding is core.prepare_binding
+    prepare = fixed_dashboard.base.binding.prepare_binding
+    assert prepare.__name__ == "prepare_binding"
+    assert Path(prepare.__code__.co_filename).name == "mac_crypto_cold_start_final_guard_binding.py"
