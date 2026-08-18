@@ -99,7 +99,8 @@ def main() -> int:
 
     for token in (
         'ATTEMPT_PREFIX = "first-canary-"',
-        'MAX_APPROVAL_TTL = timedelta(seconds=30)',
+        'MAX_APPROVAL_TTL = timedelta(seconds=90)',
+        'MIN_REMAINING_PACKAGE_LIFE = timedelta(seconds=5)',
         'EXPECTED_SYMBOL = "BTC/USD"',
         'os.environ.get(WRITE_ENV) == "ENABLED"',
         "secrets.compare_digest(confirmation, challenge)",
@@ -203,7 +204,7 @@ def main() -> int:
                 fail(f"generic Mac surface acquired first-canary write authority: {path.name}: {token}")
 
     print(
-        "first-canary execution gate: PASS — PAPER BTC/USD USD1-5; new exact human approval; "
+        "first-canary execution gate: PASS — PAPER BTC/USD USD1-5; bounded 90s human approval with 5s remaining-life floor; "
         "PRE_CONSUME -> OMS -> durable replay latch -> UNKNOWN/PRE_IO -> injected delegate -> reconciliation; "
         "FINAL/PENDING/FAILURE evidence separated; no raw network/LIVE authority; generic Mac remains write-disabled"
     )
