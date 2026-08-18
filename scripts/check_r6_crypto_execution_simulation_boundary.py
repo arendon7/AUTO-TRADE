@@ -10,6 +10,7 @@ SRC = ROOT / "src/autotrade"
 PRE_IO = SRC / "brokers/alpaca_paper_crypto_pre_io.py"
 BRIDGE = SRC / "brokers/alpaca_paper_crypto_execution_bridge.py"
 SIMULATION = SRC / "brokers/alpaca_paper_crypto_execution_simulation.py"
+FIRST_CANARY_GATE = SRC / "first_canary_execution_gate.py"
 WRITER = SRC / "brokers/alpaca_paper_crypto_writer.py"
 MAC_SURFACES = (
     ROOT / "scripts/mac_dashboard.py",
@@ -40,15 +41,16 @@ def _imports(path: Path) -> set[str]:
 
 
 def main() -> int:
-    for path in (PRE_IO, BRIDGE, SIMULATION, WRITER):
+    for path in (PRE_IO, BRIDGE, SIMULATION, FIRST_CANARY_GATE, WRITER):
         if not path.is_file():
             fail(f"missing required file: {path.relative_to(ROOT)}")
 
     pre = PRE_IO.read_text(encoding="utf-8")
     bridge = BRIDGE.read_text(encoding="utf-8")
     sim = SIMULATION.read_text(encoding="utf-8")
+    first_canary = FIRST_CANARY_GATE.read_text(encoding="utf-8")
 
-    for path in (PRE_IO, BRIDGE, SIMULATION):
+    for path in (PRE_IO, BRIDGE, SIMULATION, FIRST_CANARY_GATE):
         imports = _imports(path)
         roots = {module.split(".", 1)[0] for module in imports if module}
         forbidden = roots & NETWORK_ROOTS
@@ -133,14 +135,69 @@ def main() -> int:
         if forbidden in sim:
             fail(f"simulation coordinator contains forbidden direct authority/network source: {forbidden}")
 
-    # The enabled crypto writer must have no production caller other than this
-    # explicitly simulation-only coordinator until a separately certified real
-    # PAPER execution interface is introduced.
+    # The first-canary gate is an orchestration caller, not a raw transport. It
+    # may invoke the audited writer exactly once, but its delegate is injected,
+    # it owns no HTTP stack, it latches durable replay prevention before the
+    # writer call, and every durable UNKNOWN path is reconciliation-only.
+    required_first_canary = (
+        "class FirstCanaryExecutionInputs:",
+        "class FirstCanaryFinalEvidence:",
+        "def execute_first_canary_once(",
+        "inputs.attempt.assert_unexecuted()",
+        "CryptoColdStartFinalWritePhase.PRE_CONSUME",
+        "checkpoint_registry.record_pre_consume(pre_consume)",
+        "bridge.stage_after_checkpoint(",
+        "inputs.attempt.execution_started_path",
+        '"retry_forbidden": True',
+        "ColdStartFinalGuardedCryptoEntryTransport(",
+        "delegate=delegate",
+        "AlpacaPaperCryptoWriterConfig(enabled=True)",
+        "writer.submit_once(",
+        "UNKNOWN_RECONCILIATION_REQUIRED",
+        "reconciler.reconcile(",
+        '"retry_post": False',
+    )
+    for token in required_first_canary:
+        if token not in first_canary:
+            fail(f"first-canary orchestration missing contract token: {token}")
+    sequence = (
+        first_canary.find("checkpoint_registry.record_pre_consume(pre_consume)"),
+        first_canary.find("stage = bridge.stage_after_checkpoint("),
+        first_canary.find("inputs.attempt.write_once(\n        path=inputs.attempt.execution_started_path"),
+        first_canary.find("writer.submit_once("),
+        first_canary.find("reconciler.reconcile("),
+    )
+    if any(index < 0 for index in sequence) or tuple(sorted(sequence)) != sequence:
+        fail(
+            "first-canary sequence must be PRE_CONSUME checkpoint -> OMS stage -> durable replay latch -> writer -> reconciliation"
+        )
+    for forbidden in (
+        "HttpsAlpacaPaperCryptoWriteTransport",
+        "http.client",
+        "urllib",
+        "requests",
+        "socket",
+        ".post(",
+        "operator_registry.consume(",
+        "stage_external_submission(",
+        "R6_EXTERNAL_PAPER_WRITE",
+        "APCA_API_SECRET_KEY",
+    ):
+        if forbidden in first_canary:
+            fail(f"first-canary orchestration contains forbidden direct authority/network source: {forbidden}")
+    if first_canary.count("writer.submit_once(") != 1:
+        fail("first-canary orchestration must contain exactly one audited writer invocation call site")
+
+    # Enabled crypto writer callers are deliberately closed. The legacy
+    # deterministic simulator and the new simulation-first first-canary
+    # orchestrator are the only callers at this stage; neither constructs raw
+    # network transport. A real Mac delegate injector needs its own later gate.
+    allowed_writer_callers = {SIMULATION.resolve(), FIRST_CANARY_GATE.resolve()}
     for path in SRC.rglob("*.py"):
-        if path in (SIMULATION, WRITER):
+        if path.resolve() == WRITER.resolve():
             continue
         text = path.read_text(encoding="utf-8")
-        if "AlpacaPaperCryptoWriter(" in text:
+        if "AlpacaPaperCryptoWriter(" in text and path.resolve() not in allowed_writer_callers:
             fail(f"unexpected production crypto writer caller: {path.relative_to(ROOT)}")
 
     for path in MAC_SURFACES:
@@ -151,18 +208,21 @@ def main() -> int:
             "alpaca_paper_crypto_execution_bridge",
             "alpaca_paper_crypto_pre_io",
             "alpaca_paper_crypto_execution_simulation",
+            "first_canary_execution_gate",
             "CryptoPaperExecutionBridge",
             "CryptoPaperExecutionSimulationCoordinator",
+            "FirstCanaryExecutionInputs",
+            "execute_first_canary_once",
             "FinalGuardedCryptoEntryTransport",
             "AlpacaPaperCryptoWriter",
         ):
             if token in text:
-                fail(f"Mac/user-facing surface leaked simulation/write authority: {path.name}: {token}")
+                fail(f"generic Mac/user-facing surface leaked simulation/write authority: {path.name}: {token}")
 
     print(
-        "crypto execution simulation boundary: PASS — checkpoint -> crypto execution bridge -> "
-        "UNKNOWN -> PRE_IO -> delegated transport; deterministic in-memory delegate only; "
-        "no direct OMS staging/environment credentials/network; Mac remains disconnected"
+        "crypto execution simulation boundary: PASS — legacy deterministic simulator + isolated first-canary "
+        "orchestrator only; durable replay latch before writer; UNKNOWN -> reconciliation; injected delegate only; "
+        "no raw network transport; generic Mac remains disconnected"
     )
     return 0
 
