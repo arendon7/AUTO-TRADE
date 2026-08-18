@@ -15,6 +15,7 @@ from urllib.parse import parse_qs, urlparse
 
 from autotrade.first_canary_external_post_consent import external_post_challenge
 from autotrade.brokers.alpaca_paper_crypto_first_canary_attempt import (
+    ATTEMPT_ID_RE,
     EXECUTION_DIR,
     FirstCanaryAttemptWorkspace,
 )
@@ -84,6 +85,18 @@ def _decimal_text(raw: object, label: str) -> Decimal:
     if not value.is_finite():
         raise FirstCanaryRealPaperDashboardError(f"{label} must be finite")
     return value
+
+
+def _timestamp(raw: object, label: str) -> datetime:
+    if not isinstance(raw, str) or not raw.strip():
+        raise FirstCanaryRealPaperDashboardError(f"{label} is missing")
+    try:
+        value = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise FirstCanaryRealPaperDashboardError(f"{label} is invalid") from exc
+    if value.tzinfo is None or value.utcoffset() is None:
+        raise FirstCanaryRealPaperDashboardError(f"{label} must be timezone-aware")
+    return value.astimezone(timezone.utc)
 
 
 def _status(*, workspace: Path, attempt_id: str) -> dict[str, object]:
@@ -181,6 +194,81 @@ def _status(*, workspace: Path, attempt_id: str) -> dict[str, object]:
     }
 
 
+def _discover_ready_attempt(*, workspace: Path) -> dict[str, object]:
+    execution_root = workspace / EXECUTION_DIR
+    if not execution_root.exists():
+        return {
+            "selection_status": "NO_READY_ATTEMPT",
+            "attempt_id": None,
+            "ready_count": 0,
+            "expired_count": 0,
+            "invalid_count": 0,
+            "auto_selected": False,
+        }
+    if execution_root.is_symlink() or not execution_root.is_dir():
+        raise FirstCanaryRealPaperDashboardError("unsafe first-canary execution directory")
+
+    now = datetime.now(timezone.utc)
+    ready_attempts: list[str] = []
+    expired_attempts: list[str] = []
+    invalid_attempts: list[str] = []
+
+    for child in sorted(execution_root.iterdir(), key=lambda value: value.name):
+        if not ATTEMPT_ID_RE.fullmatch(child.name):
+            continue
+        if child.is_symlink() or not child.is_dir():
+            invalid_attempts.append(child.name)
+            continue
+        try:
+            value = _status(workspace=workspace, attempt_id=child.name)
+            if value.get("ready_for_real_post") is not True:
+                continue
+            preparation = value.get("preparation")
+            if not isinstance(preparation, dict):
+                raise FirstCanaryRealPaperDashboardError("ready attempt is missing preparation summary")
+            package_deadline = _timestamp(
+                preparation.get("execution_deadline"),
+                "execution deadline",
+            )
+            approval = _safe_document(child / "approval.json")
+            if not isinstance(approval, dict):
+                raise FirstCanaryRealPaperDashboardError("ready attempt is missing approval receipt")
+            approval_deadline = _timestamp(approval.get("expires_at"), "approval expiry")
+            if package_deadline <= now or approval_deadline <= now:
+                expired_attempts.append(child.name)
+                continue
+            ready_attempts.append(child.name)
+        except Exception:
+            invalid_attempts.append(child.name)
+
+    if len(ready_attempts) == 1:
+        return {
+            "selection_status": "EXACT_ONE_READY",
+            "attempt_id": ready_attempts[0],
+            "ready_count": 1,
+            "expired_count": len(expired_attempts),
+            "invalid_count": len(invalid_attempts),
+            "auto_selected": True,
+        }
+    if len(ready_attempts) > 1:
+        return {
+            "selection_status": "AMBIGUOUS_MULTIPLE_READY",
+            "attempt_id": None,
+            "ready_count": len(ready_attempts),
+            "expired_count": len(expired_attempts),
+            "invalid_count": len(invalid_attempts),
+            "auto_selected": False,
+        }
+    return {
+        "selection_status": "NO_READY_ATTEMPT",
+        "attempt_id": None,
+        "ready_count": 0,
+        "expired_count": len(expired_attempts),
+        "invalid_count": len(invalid_attempts),
+        "auto_selected": False,
+    }
+
+
 def _run_execute(payload: dict[str, object]) -> dict[str, object]:
     workspace = _workspace_value(payload.get("workspace"))
     attempt_id = _attempt_id(payload.get("attempt_id"))
@@ -263,6 +351,7 @@ def _meta() -> dict[str, object]:
         "real_execution_enabled": True,
         "one_shot_only": True,
         "hard_max_notional_usd": "5",
+        "automatic_attempt_discovery": "EXACTLY_ONE_FRESH_READY_ONLY",
         "generic_control_center_write_enabled": False,
         "credentials_persisted": False,
         "retry_post": False,
@@ -332,6 +421,16 @@ class RealPaperHandler(BaseHTTPRequestHandler):
             return
         if parsed.path == "/api/meta":
             self._json(HTTPStatus.OK, {"ok": True, "meta": _meta()})
+            return
+        if parsed.path == "/api/discover":
+            query = parse_qs(parsed.query, keep_blank_values=True)
+            try:
+                workspace = _workspace_value(query.get("workspace", [str(DEFAULT_WORKSPACE)])[0])
+                value = _discover_ready_attempt(workspace=workspace)
+            except Exception as exc:
+                self._json(HTTPStatus.BAD_REQUEST, _fail_closed(str(exc)))
+                return
+            self._json(HTTPStatus.OK, {"ok": True, "discovery": value})
             return
         if parsed.path == "/api/status":
             query = parse_qs(parsed.query, keep_blank_values=True)
