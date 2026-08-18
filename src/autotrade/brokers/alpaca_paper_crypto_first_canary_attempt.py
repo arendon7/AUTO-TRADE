@@ -81,6 +81,10 @@ class FirstCanaryAttemptWorkspace:
         return self.attempt_root / "approval.json"
 
     @property
+    def execution_started_path(self) -> Path:
+        return self.attempt_root / "execution_started.json"
+
+    @property
     def execution_result_path(self) -> Path:
         return self.attempt_root / "execution_result.json"
 
@@ -106,7 +110,7 @@ class FirstCanaryAttemptWorkspace:
         ) + "\n"
         try:
             with path.open("x", encoding="utf-8") as handle:
-                handle.write(encoded)
+                print(encoded, file=handle, end="")
                 handle.flush()
             path.chmod(0o600)
         except OSError as exc:
@@ -134,10 +138,14 @@ class FirstCanaryAttemptWorkspace:
         return payload
 
     def assert_unexecuted(self) -> None:
-        for path in (self.execution_result_path, self.reconciliation_path):
+        for path in (
+            self.execution_started_path,
+            self.execution_result_path,
+            self.reconciliation_path,
+        ):
             if path.exists():
                 raise CryptoFirstCanaryAttemptConflict(
-                    "attempt already has execution/reconciliation evidence; POST replay is forbidden"
+                    "attempt already has execution evidence; POST replay is forbidden"
                 )
 
     @staticmethod
