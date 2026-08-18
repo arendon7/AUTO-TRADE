@@ -35,10 +35,11 @@ fi
 cd "$ROOT"
 [[ -x "$ROOT/.venv/bin/python" ]] || bash "$ROOT/INSTALAR_AUTO_TRADE.command"
 
-# Cold-start qualification builds add a GET-only broker-grounded Portfolio State
-# bootstrap above the Health commissioning/readiness/approval UAT surfaces.
+# Cold-start qualification builds add a non-executable, GET-only qualification
+# attestation above the broker-grounded Portfolio bootstrap and Health commissioning.
 # No wrapper exposes Final Guard, approval consumption, broker POST or LIVE authority.
-SERVER="$ROOT/scripts/mac_dashboard_cold_start.py"
+SERVER="$ROOT/scripts/mac_dashboard_cold_start_attestation.py"
+[[ -f "$SERVER" ]] || SERVER="$ROOT/scripts/mac_dashboard_cold_start.py"
 [[ -f "$SERVER" ]] || SERVER="$ROOT/scripts/mac_dashboard_health_commissioning.py"
 [[ -f "$SERVER" ]] || SERVER="$ROOT/scripts/mac_dashboard_execution_gate.py"
 [[ -f "$SERVER" ]] || SERVER="$ROOT/scripts/mac_dashboard_one_shot.py"
