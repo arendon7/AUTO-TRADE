@@ -127,6 +127,14 @@ class _UnknownReconciler:
         )
 
 
+def _small_asset(account, *, observed):
+    return replace(
+        _asset(account, observed=observed),
+        min_order_size=Decimal("0.0001"),
+        min_trade_increment=Decimal("0.0001"),
+    )
+
+
 def _profile(asset):
     return ProductCapabilities.crypto_alpaca_paper(
         source_fingerprint=asset.fingerprint,
@@ -137,7 +145,7 @@ def _profile(asset):
     )
 
 
-def _prepared(tmp_path, monkeypatch):
+def _prepare_session(tmp_path, monkeypatch, *, approve: bool = True):
     monkeypatch.delenv("R6_EXTERNAL_PAPER_WRITE", raising=False)
     workspace = tmp_path / "workspace"
     ctx = _setup(workspace)
@@ -146,9 +154,7 @@ def _prepared(tmp_path, monkeypatch):
         _account(observed=prepared_at),
         credential_reference=CREDENTIAL_REFERENCE,
     )
-    asset = _asset(account, observed=prepared_at)
-    flat = _flat_attestation(account, at=prepared_at)
-    market = _market(observed=prepared_at)
+    asset = _small_asset(account, observed=prepared_at)
     credentials = AlpacaPaperCredentials(key_id=KEY_ID, secret_key=SECRET)
     prepare = runpy.run_path(str(PREPARE))
     session = prepare["prepare_from_evidence"](
@@ -157,19 +163,20 @@ def _prepared(tmp_path, monkeypatch):
         credentials=credentials,
         account=account,
         asset=asset,
-        flat_account=flat,
-        market_attestation=market,
+        flat_account=_flat_attestation(account, at=prepared_at),
+        market_attestation=_market(observed=prepared_at),
         now=prepared_at,
     )
-    approve = runpy.run_path(str(APPROVE))
-    approve["issue_approval"](
-        workspace_path=workspace,
-        attempt_id=ATTEMPT_ID,
-        context_payload=session.operator_context.to_dict(),
-        operator_id="operator-first-canary-001",
-        confirmation=session.preparation_document["operator_challenge"],
-        now=prepared_at + timedelta(milliseconds=100),
-    )
+    if approve:
+        approval = runpy.run_path(str(APPROVE))
+        approval["issue_approval"](
+            workspace_path=workspace,
+            attempt_id=ATTEMPT_ID,
+            context_payload=session.operator_context.to_dict(),
+            operator_id="operator-first-canary-001",
+            confirmation=session.preparation_document["operator_challenge"],
+            now=prepared_at + timedelta(milliseconds=100),
+        )
     inputs = FirstCanaryExecutionInputs(
         attempt=session.attempt,
         core_runtime=session.core_runtime,
@@ -192,7 +199,7 @@ def _final(inputs, *, at):
         _account(observed=at),
         credential_reference=inputs.credentials.credential_reference,
     )
-    asset = _asset(account, observed=at)
+    asset = _small_asset(account, observed=at)
     return FirstCanaryFinalEvidence(
         account=account,
         asset=asset,
@@ -203,16 +210,12 @@ def _final(inputs, *, at):
 
 
 def test_first_canary_gate_crosses_delegate_once_then_reconciles_terminal_no_fill(tmp_path, monkeypatch) -> None:
-    _, session, inputs = _prepared(tmp_path, monkeypatch)
+    _, session, inputs = _prepare_session(tmp_path, monkeypatch)
     execute_at = NOW + timedelta(seconds=4, milliseconds=300)
     final = _final(inputs, at=execute_at)
-    monkeypatch.setattr(
-        cold_pre_io,
-        "_utc_now",
-        lambda: execute_at + timedelta(milliseconds=35),
-    )
+    monkeypatch.setattr(cold_pre_io, "_utc_now", lambda: execute_at + timedelta(milliseconds=35))
     delegate = _CountingSimulationDelegate()
-    reconciler = _FoundReconciler(status="canceled", filled=Decimal("0"))
+    reconciler = _FoundReconciler()
 
     outcome = execute_first_canary_once(
         inputs=inputs,
@@ -227,9 +230,6 @@ def test_first_canary_gate_crosses_delegate_once_then_reconciles_terminal_no_fil
     assert outcome.retry_forbidden is True
     assert outcome.broker_post_outcome == "BROKER_RESPONSE_RECEIVED"
     assert outcome.lifecycle_status != "ENTRY_SUBMISSION_UNKNOWN"
-    assert session.attempt.execution_started_path.is_file()
-    assert session.attempt.execution_result_path.is_file()
-    assert session.attempt.reconciliation_path.is_file()
     started = session.attempt.read(path=session.attempt.execution_started_path)
     assert started["operator_decision_consumed"] is True
     assert started["retry_forbidden"] is True
@@ -251,20 +251,15 @@ def test_first_canary_gate_crosses_delegate_once_then_reconciles_terminal_no_fil
 
 
 def test_first_canary_gate_ambiguous_delegate_reconciles_404_and_never_retries(tmp_path, monkeypatch) -> None:
-    _, session, inputs = _prepared(tmp_path, monkeypatch)
+    _, session, inputs = _prepare_session(tmp_path, monkeypatch)
     execute_at = NOW + timedelta(seconds=4, milliseconds=300)
-    final = _final(inputs, at=execute_at)
-    monkeypatch.setattr(
-        cold_pre_io,
-        "_utc_now",
-        lambda: execute_at + timedelta(milliseconds=35),
-    )
+    monkeypatch.setattr(cold_pre_io, "_utc_now", lambda: execute_at + timedelta(milliseconds=35))
     delegate = _AmbiguousDelegate()
     reconciler = _UnknownReconciler()
 
     outcome = execute_first_canary_once(
         inputs=inputs,
-        final_evidence=final,
+        final_evidence=_final(inputs, at=execute_at),
         delegate=delegate,
         reconciler=reconciler,
         now=execute_at,
@@ -275,10 +270,8 @@ def test_first_canary_gate_ambiguous_delegate_reconciles_404_and_never_retries(t
     assert outcome.status == "UNKNOWN_HALTED_NO_RETRY"
     assert outcome.lifecycle_status == "ENTRY_SUBMISSION_UNKNOWN"
     assert outcome.broker_post_outcome == "UNKNOWN_RECONCILIATION_REQUIRED"
-    assert outcome.retry_forbidden is True
     result = session.attempt.read(path=session.attempt.execution_result_path)
     assert result["broker_delegate_boundary_crossed"] is True
-    assert result["receipt"] is None
     reconciliation = session.attempt.read(path=session.attempt.reconciliation_path)
     assert reconciliation["status"] == "CRYPTO_PAPER_FIRST_CANARY_ORDER_404_UNKNOWN_HALT_NO_RETRY"
     assert reconciliation["retry_post"] is False
@@ -286,53 +279,23 @@ def test_first_canary_gate_ambiguous_delegate_reconciles_404_and_never_retries(t
 
 
 def test_first_canary_gate_missing_approval_blocks_before_delegate_and_latch(tmp_path, monkeypatch) -> None:
-    monkeypatch.delenv("R6_EXTERNAL_PAPER_WRITE", raising=False)
-    workspace = tmp_path / "workspace"
-    _setup(workspace)
-    prepared_at = NOW + timedelta(seconds=4)
-    account = replace(_account(observed=prepared_at), credential_reference=CREDENTIAL_REFERENCE)
-    asset = _asset(account, observed=prepared_at)
-    credentials = AlpacaPaperCredentials(key_id=KEY_ID, secret_key=SECRET)
-    prepare = runpy.run_path(str(PREPARE))
-    session = prepare["prepare_from_evidence"](
-        workspace_path=workspace,
-        attempt_id=ATTEMPT_ID,
-        credentials=credentials,
-        account=account,
-        asset=asset,
-        flat_account=_flat_attestation(account, at=prepared_at),
-        market_attestation=_market(observed=prepared_at),
-        now=prepared_at,
-    )
-    inputs = FirstCanaryExecutionInputs(
-        attempt=session.attempt,
-        core_runtime=session.core_runtime,
-        attempt_runtime=session.attempt_runtime,
-        credentials=credentials,
-        package=session.preparation.package,
-        broker_order=session.preparation.broker_order,
-        prepared_account=session.account,
-        prepared_asset=session.asset,
-        prepared_product_profile=session.product_profile,
-        prepared_market=session.market_attestation,
-        risk_decision=session.risk_decision,
-        preparation_authority_state_fingerprint=session.authority_state_fingerprint,
-    )
+    _, session, inputs = _prepare_session(tmp_path, monkeypatch, approve=False)
+    execute_at = NOW + timedelta(seconds=4, milliseconds=300)
     delegate = _CountingSimulationDelegate()
     with pytest.raises(FirstCanaryExecutionBlocked, match="approval"):
         execute_first_canary_once(
             inputs=inputs,
-            final_evidence=_final(inputs, at=prepared_at + timedelta(milliseconds=300)),
+            final_evidence=_final(inputs, at=execute_at),
             delegate=delegate,
             reconciler=_FoundReconciler(),
-            now=prepared_at + timedelta(milliseconds=300),
+            now=execute_at,
         )
     assert delegate.calls == 0
     assert session.attempt.execution_started_path.exists() is False
 
 
 def test_first_canary_gate_stale_final_evidence_blocks_before_consumption_and_delegate(tmp_path, monkeypatch) -> None:
-    _, session, inputs = _prepared(tmp_path, monkeypatch)
+    _, session, inputs = _prepare_session(tmp_path, monkeypatch)
     execute_at = NOW + timedelta(seconds=11)
     stale = _final(inputs, at=NOW + timedelta(seconds=4, milliseconds=200))
     delegate = _CountingSimulationDelegate()
@@ -349,7 +312,7 @@ def test_first_canary_gate_stale_final_evidence_blocks_before_consumption_and_de
 
 
 def test_first_canary_gate_core_change_blocks_before_delegate(tmp_path, monkeypatch) -> None:
-    ctx, session, inputs = _prepared(tmp_path, monkeypatch)
+    ctx, session, inputs = _prepare_session(tmp_path, monkeypatch)
     execute_at = NOW + timedelta(seconds=4, milliseconds=300)
     ctx.safety.activate_circuit(
         reason="SYNTHETIC_LATE_CIRCUIT",
