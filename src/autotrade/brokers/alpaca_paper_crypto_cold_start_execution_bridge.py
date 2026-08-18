@@ -1,21 +1,24 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from hashlib import sha256
-import json
-import re
 
+from autotrade.cold_start_oms import (
+    COLD_START_OMS_SCOPE,
+    ColdStartExternalSubmissionHandoff,
+    ColdStartOmsStageAuthorization,
+    ColdStartOmsStageAuthority,
+    ColdStartOrderManagementSystem,
+)
 from autotrade.domain import (
     MarketSnapshot,
     OrderRecord,
-    OrderStatus,
     RiskDecision,
+    intent_fingerprint,
     market_fingerprint,
     risk_decision_fingerprint,
 )
-from autotrade.ledger import DuplicateLedgerEvent, EventLedger, LedgerEvent
-from autotrade.state import OrderStore
 
 from .alpaca_paper_crypto_canary_coordinator import PreparedCryptoPaperCanaryPackage
 from .alpaca_paper_crypto_cold_start_execution_attempt import (
@@ -35,9 +38,6 @@ from .alpaca_paper_crypto_operator_decision import (
 )
 
 
-_HASH_RE = re.compile(r"^[0-9a-f]{64}$")
-
-
 class CryptoColdStartExecutionBridgeError(RuntimeError):
     pass
 
@@ -47,55 +47,20 @@ class CryptoColdStartExecutionBridgeBlocked(CryptoColdStartExecutionBridgeError)
 
 
 @dataclass(frozen=True, slots=True)
-class CryptoColdStartExternalHandoff:
-    handoff_id: str
-    package_hash: str
-    operator_decision_hash: str
-    checkpoint_hash: str
-    authority_state_fingerprint: str
-    attempt_id: str
-    order_id: str
-    client_order_id: str
-    risk_decision_id: str
-    market_fingerprint: str
-    authorized_at: datetime
-    event_id: str
-    handoff_hash: str
+class CryptoColdStartOmsStageContext:
+    package: PreparedCryptoPaperCanaryPackage
+    operator_decision: CryptoOperatorDecision
+    checkpoint: CryptoColdStartExecutionAttemptCheckpoint
+    consumed_at: datetime
 
     def __post_init__(self) -> None:
-        for label, value in (
-            ("handoff_id", self.handoff_id),
-            ("package_hash", self.package_hash),
-            ("operator_decision_hash", self.operator_decision_hash),
-            ("checkpoint_hash", self.checkpoint_hash),
-            ("authority_state_fingerprint", self.authority_state_fingerprint),
-            ("market_fingerprint", self.market_fingerprint),
-            ("handoff_hash", self.handoff_hash),
-        ):
-            if not isinstance(value, str) or not _HASH_RE.fullmatch(value):
-                raise ValueError(f"{label} must be lowercase SHA-256")
-        _require_aware(self.authorized_at, "authorized_at")
-        if self.event_id != f"cold-start-external-handoff:{self.order_id}:{self.handoff_id}":
-            raise ValueError("cold-start handoff event_id mismatch")
-        if self.handoff_hash != _handoff_hash_values(_handoff_values(self, include_hash=False)):
-            raise ValueError("cold-start handoff hash mismatch")
-
-    def event_payload(self) -> dict[str, str]:
-        return {
-            "scope": COLD_START_SCOPE,
-            "handoff_id": self.handoff_id,
-            "package_hash": self.package_hash,
-            "operator_decision_hash": self.operator_decision_hash,
-            "checkpoint_hash": self.checkpoint_hash,
-            "authority_state_fingerprint": self.authority_state_fingerprint,
-            "attempt_id": self.attempt_id,
-            "order_id": self.order_id,
-            "client_order_id": self.client_order_id,
-            "risk_decision_id": self.risk_decision_id,
-            "market_fingerprint": self.market_fingerprint,
-            "authorized_at": _iso(self.authorized_at),
-            "handoff_hash": self.handoff_hash,
-        }
+        if not isinstance(self.package, PreparedCryptoPaperCanaryPackage):
+            raise ValueError("cold-start stage context requires prepared package")
+        if not isinstance(self.operator_decision, CryptoOperatorDecision):
+            raise ValueError("cold-start stage context requires operator decision")
+        if not isinstance(self.checkpoint, CryptoColdStartExecutionAttemptCheckpoint):
+            raise ValueError("cold-start stage context requires durable checkpoint")
+        _require_aware(self.consumed_at, "consumed_at")
 
 
 @dataclass(frozen=True, slots=True)
@@ -105,34 +70,29 @@ class CryptoColdStartExecutionStageResult:
     attempt_id: str
     checkpoint_hash: str
     order: OrderRecord
-    handoff: CryptoColdStartExternalHandoff
-
-    def __post_init__(self) -> None:
-        if self.order.status is not OrderStatus.SUBMITTING:
-            raise ValueError("cold-start bridge result requires SUBMITTING")
-        if self.order.order_id != self.handoff.order_id:
-            raise ValueError("cold-start bridge order/handoff mismatch")
+    handoff: ColdStartExternalSubmissionHandoff
 
 
-class CryptoColdStartExecutionBridge:
-    """No-network bridge for exactly one isolated cold-start PAPER canary.
+class CryptoColdStartExecutionBridge(ColdStartOmsStageAuthority):
+    """No-network crypto authority feeding an OMS-owned cold-start handoff.
 
-    The normal OMS handoff remains untouched and continues to require Health
-    NORMAL plus an inactive kill switch. This bridge can only consume the exact
-    human decision already bound to a dedicated cold-start PRE_CONSUME checkpoint,
-    persist a tamper-evident local handoff, and move the same durable order from
-    VALIDATED to SUBMITTING. It has no credentials, transport, broker or POST API.
+    The bridge validates the dedicated PRE_CONSUME checkpoint, consumes the
+    exact one-shot human decision, and asks `ColdStartOrderManagementSystem` to
+    own the ledger handoff plus VALIDATED->SUBMITTING transition. This module
+    never updates OrderStore directly and never constructs SUBMITTING state.
     """
 
     def __init__(
         self,
         *,
-        order_store: OrderStore,
-        ledger: EventLedger,
+        oms: ColdStartOrderManagementSystem,
         authority_provider: SQLiteCryptoColdStartAuthorityProvider,
     ) -> None:
-        self._orders = order_store
-        self._ledger = ledger
+        if not isinstance(oms, ColdStartOrderManagementSystem):
+            raise TypeError("cold-start bridge requires ColdStartOrderManagementSystem")
+        if not isinstance(authority_provider, SQLiteCryptoColdStartAuthorityProvider):
+            raise TypeError("cold-start bridge requires authoritative core provider")
+        self._oms = oms
         self._authority = authority_provider
 
     def stage_after_checkpoint(
@@ -160,48 +120,40 @@ class CryptoColdStartExecutionBridge:
         _require_aware(consume_at, "consume_at")
         _require_aware(stage_at, "stage_at")
         consume_instant = consume_at.astimezone(timezone.utc)
-        requested_stage = stage_at.astimezone(timezone.utc)
-        if consume_instant > requested_stage:
+        stage_instant = stage_at.astimezone(timezone.utc)
+        if consume_instant > stage_instant:
             raise CryptoColdStartExecutionBridgeBlocked("consumption cannot occur after staging")
-        if requested_stage >= package.execution_deadline.astimezone(timezone.utc):
+        if stage_instant >= package.execution_deadline.astimezone(timezone.utc):
             raise CryptoColdStartExecutionBridgeBlocked("prepared package expired before cold-start staging")
-        if package.network_write_authorized is not False:
+        if package.network_write_authorized is not False or package.next_action != "OPERATOR_DECISION_REQUIRED":
             raise CryptoColdStartExecutionBridgeBlocked("prepared package must remain non-executable")
-        if package.next_action != "OPERATOR_DECISION_REQUIRED":
-            raise CryptoColdStartExecutionBridgeBlocked("prepared package must still require operator decision")
         if not COLD_START_MIN_NOTIONAL <= package.notional <= COLD_START_MAX_NOTIONAL:
             raise CryptoColdStartExecutionBridgeBlocked("cold-start staging is limited to USD 1-5")
 
-        attempt_id = operator_decision.context.attempt_id
-        if checkpoint.attempt_id != attempt_id:
-            raise CryptoColdStartExecutionBridgeBlocked("checkpoint attempt mismatch")
-        if checkpoint.package_hash != package.package_hash:
-            raise CryptoColdStartExecutionBridgeBlocked("checkpoint package mismatch")
-        if checkpoint.preparation_hash != operator_decision.context.preparation_hash:
-            raise CryptoColdStartExecutionBridgeBlocked("checkpoint preparation mismatch")
-        if checkpoint.operator_decision_hash != operator_decision.decision_hash:
-            raise CryptoColdStartExecutionBridgeBlocked("checkpoint decision hash mismatch")
-        if checkpoint.order_id != package.order_id or checkpoint.client_order_id != package.client_order_id:
-            raise CryptoColdStartExecutionBridgeBlocked("checkpoint order identity mismatch")
-
+        self._validate_checkpoint(
+            package=package,
+            operator_decision=operator_decision,
+            checkpoint=checkpoint,
+        )
         before = self._authority.snapshot()
         if before.state_fingerprint != checkpoint.authority_state_fingerprint:
             raise CryptoColdStartExecutionBridgeBlocked("authoritative cold-start core changed after PRE_CONSUME")
-
-        _validate_decision_package(
-            package=package,
-            risk_decision=risk_decision,
-            market=market,
+        expected_snapshot = (
+            "r6-crypto-paper-cold-start:"
+            f"{checkpoint.pre_consume.account_reference[:20]}"
         )
+        if checkpoint.pre_consume.portfolio_snapshot_id != expected_snapshot:
+            raise CryptoColdStartExecutionBridgeBlocked(
+                "cold-start Portfolio snapshot is not bound to exact PAPER account"
+            )
+        _validate_decision_package(package=package, risk_decision=risk_decision, market=market)
+
         expected_context = CryptoOperatorDecisionContext.from_prepared_package(
             package,
-            attempt_id=attempt_id,
+            attempt_id=checkpoint.attempt_id,
         )
         if operator_decision.context != expected_context:
             raise CryptoColdStartExecutionBridgeBlocked("operator decision does not bind exact package")
-        if operator_decision.issued_at < package.prepared_at or operator_decision.issued_at >= package.execution_deadline:
-            raise CryptoColdStartExecutionBridgeBlocked("operator decision timing is outside prepared package")
-
         try:
             durable = operator_registry.get(expected_context.preparation_hash)
         except Exception as exc:
@@ -209,7 +161,7 @@ class CryptoColdStartExecutionBridge:
         if durable.decision != operator_decision:
             raise CryptoColdStartExecutionBridgeBlocked("supplied operator decision differs from durable evidence")
         if durable.status is CryptoOperatorDecisionStatus.CONSUMED:
-            if durable.consumed_attempt_id != attempt_id:
+            if durable.consumed_attempt_id != checkpoint.attempt_id:
                 raise CryptoColdStartExecutionBridgeBlocked("operator decision consumed by another attempt")
         elif durable.status is CryptoOperatorDecisionStatus.ISSUED:
             if not operator_decision.is_valid_at(consume_instant):
@@ -217,78 +169,135 @@ class CryptoColdStartExecutionBridge:
         else:
             raise CryptoColdStartExecutionBridgeBlocked("operator decision state is not resumable")
 
-        current = self._orders.get_by_order_id(package.order_id)
-        if current is None:
-            raise CryptoColdStartExecutionBridgeBlocked("durable cold-start OMS order is missing")
-        if current.risk_decision_id != package.risk_decision_id:
-            raise CryptoColdStartExecutionBridgeBlocked("durable order RiskDecision mismatch")
-        if current.status not in {OrderStatus.VALIDATED, OrderStatus.SUBMITTING}:
-            raise CryptoColdStartExecutionBridgeBlocked(
-                f"cold-start staging cannot resume from {current.status.value}"
-            )
-
         try:
             consumed = operator_registry.consume(
                 decision=operator_decision,
-                attempt_id=attempt_id,
+                attempt_id=checkpoint.attempt_id,
                 now=consume_instant,
             )
         except Exception as exc:
             raise CryptoColdStartExecutionBridgeBlocked("operator decision consumption failed") from exc
-        if consumed.status is not CryptoOperatorDecisionStatus.CONSUMED or consumed.consumed_attempt_id != attempt_id:
+        if (
+            consumed.status is not CryptoOperatorDecisionStatus.CONSUMED
+            or consumed.consumed_attempt_id != checkpoint.attempt_id
+            or consumed.consumed_at is None
+        ):
             raise CryptoColdStartExecutionBridgeBlocked("operator decision was not durably consumed")
 
-        handoff_id = crypto_cold_start_handoff_id(
+        context = CryptoColdStartOmsStageContext(
             package=package,
             operator_decision=operator_decision,
             checkpoint=checkpoint,
+            consumed_at=consumed.consumed_at,
         )
-        event_id = f"cold-start-external-handoff:{package.order_id}:{handoff_id}"
-        existing = _find_handoff(self._ledger, event_id)
-        if existing is None:
-            if current.status is not OrderStatus.VALIDATED:
-                raise CryptoColdStartExecutionBridgeBlocked("SUBMITTING cannot exist without durable cold-start handoff")
-            handoff = _build_handoff(
-                handoff_id=handoff_id,
-                package=package,
-                operator_decision=operator_decision,
-                checkpoint=checkpoint,
+        try:
+            order, handoff = self._oms.stage_cold_start_external_submission(
+                order_id=package.order_id,
+                decision=risk_decision,
                 market=market,
-                authorized_at=requested_stage,
+                now=stage_instant,
+                authority=self,
+                authority_context=context,
             )
-            _append_handoff_idempotent(self._ledger, handoff)
-        else:
-            handoff = existing
-            _validate_handoff_binding(
-                handoff=handoff,
-                handoff_id=handoff_id,
-                package=package,
-                operator_decision=operator_decision,
-                checkpoint=checkpoint,
-                market=market,
-            )
-
-        if current.status is OrderStatus.VALIDATED:
-            staged = replace(current, status=OrderStatus.SUBMITTING, submitted_at=handoff.authorized_at)
-            self._orders.update(staged)
-        else:
-            if current.submitted_at != handoff.authorized_at:
-                raise CryptoColdStartExecutionBridgeBlocked("SUBMITTING timestamp differs from durable cold-start handoff")
-            staged = current
+        except Exception as exc:
+            raise CryptoColdStartExecutionBridgeBlocked("OMS-owned cold-start staging failed") from exc
 
         after = self._authority.snapshot()
         if after.state_fingerprint != checkpoint.authority_state_fingerprint:
             raise CryptoColdStartExecutionBridgeBlocked(
-                "authoritative cold-start core changed during no-network staging"
+                "authoritative cold-start core changed during OMS staging"
             )
+        if handoff.authorization_id != crypto_cold_start_handoff_id(
+            package=package,
+            operator_decision=operator_decision,
+            checkpoint=checkpoint,
+        ):
+            raise CryptoColdStartExecutionBridgeBlocked("OMS cold-start handoff id mismatch")
+        if handoff.checkpoint_hash != checkpoint.record_hash:
+            raise CryptoColdStartExecutionBridgeBlocked("OMS cold-start handoff checkpoint mismatch")
         return CryptoColdStartExecutionStageResult(
             package_hash=package.package_hash,
             operator_decision_hash=operator_decision.decision_hash,
-            attempt_id=attempt_id,
+            attempt_id=checkpoint.attempt_id,
             checkpoint_hash=checkpoint.record_hash,
-            order=staged,
+            order=order,
             handoff=handoff,
         )
+
+    def authorize_oms_stage(
+        self,
+        *,
+        order: OrderRecord,
+        decision: RiskDecision,
+        market: MarketSnapshot,
+        now: datetime,
+        context: object,
+    ) -> ColdStartOmsStageAuthorization:
+        if not isinstance(context, CryptoColdStartOmsStageContext):
+            raise CryptoColdStartExecutionBridgeBlocked("cold-start OMS stage context is invalid")
+        package = context.package
+        operator_decision = context.operator_decision
+        checkpoint = context.checkpoint
+        self._validate_checkpoint(
+            package=package,
+            operator_decision=operator_decision,
+            checkpoint=checkpoint,
+        )
+        authority = self._authority.snapshot()
+        if authority.state_fingerprint != checkpoint.authority_state_fingerprint:
+            raise CryptoColdStartExecutionBridgeBlocked("cold-start core changed before OMS authorization")
+        expected_snapshot = f"r6-crypto-paper-cold-start:{checkpoint.pre_consume.account_reference[:20]}"
+        if authority.portfolio_snapshot_id != expected_snapshot:
+            raise CryptoColdStartExecutionBridgeBlocked("authoritative Portfolio snapshot/account mismatch")
+        if order.order_id != package.order_id or order.risk_decision_id != package.risk_decision_id:
+            raise CryptoColdStartExecutionBridgeBlocked("OMS order differs from prepared package")
+        if intent_fingerprint(order.intent) != package.intent_fingerprint:
+            raise CryptoColdStartExecutionBridgeBlocked("OMS intent differs from prepared package")
+        _validate_decision_package(package=package, risk_decision=decision, market=market)
+        if context.consumed_at > now.astimezone(timezone.utc):
+            raise CryptoColdStartExecutionBridgeBlocked("operator consumption is future-dated")
+        authorization_id = crypto_cold_start_handoff_id(
+            package=package,
+            operator_decision=operator_decision,
+            checkpoint=checkpoint,
+        )
+        return self._issue_authorization(
+            authorization_id=authorization_id,
+            package_hash=package.package_hash,
+            operator_decision_hash=operator_decision.decision_hash,
+            checkpoint_hash=checkpoint.record_hash,
+            authority_state_fingerprint=checkpoint.authority_state_fingerprint,
+            attempt_id=checkpoint.attempt_id,
+            order_id=package.order_id,
+            client_order_id=package.client_order_id,
+            intent_fingerprint_value=package.intent_fingerprint,
+            risk_decision_id=package.risk_decision_id,
+            market_fingerprint_value=package.market_fingerprint,
+            safety_state_version=authority.safety_state_version,
+            authorized_at=context.consumed_at,
+        )
+
+    @staticmethod
+    def _validate_checkpoint(
+        *,
+        package: PreparedCryptoPaperCanaryPackage,
+        operator_decision: CryptoOperatorDecision,
+        checkpoint: CryptoColdStartExecutionAttemptCheckpoint,
+    ) -> None:
+        if checkpoint.package_hash != package.package_hash:
+            raise CryptoColdStartExecutionBridgeBlocked("checkpoint package mismatch")
+        if checkpoint.preparation_hash != operator_decision.context.preparation_hash:
+            raise CryptoColdStartExecutionBridgeBlocked("checkpoint preparation mismatch")
+        if checkpoint.operator_decision_hash != operator_decision.decision_hash:
+            raise CryptoColdStartExecutionBridgeBlocked("checkpoint decision hash mismatch")
+        if checkpoint.attempt_id != operator_decision.context.attempt_id:
+            raise CryptoColdStartExecutionBridgeBlocked("checkpoint attempt mismatch")
+        if checkpoint.order_id != package.order_id or checkpoint.client_order_id != package.client_order_id:
+            raise CryptoColdStartExecutionBridgeBlocked("checkpoint order identity mismatch")
+        if checkpoint.pre_consume.bootstrap_scope != COLD_START_SCOPE:
+            raise CryptoColdStartExecutionBridgeBlocked("checkpoint is outside cold-start scope")
+        if COLD_START_OMS_SCOPE != COLD_START_SCOPE:
+            raise CryptoColdStartExecutionBridgeBlocked("core/broker cold-start scope drift")
 
 
 def crypto_cold_start_handoff_id(
@@ -338,162 +347,6 @@ def _validate_decision_package(
         raise CryptoColdStartExecutionBridgeBlocked("MarketSnapshot mismatch")
 
 
-def _build_handoff(
-    *,
-    handoff_id: str,
-    package: PreparedCryptoPaperCanaryPackage,
-    operator_decision: CryptoOperatorDecision,
-    checkpoint: CryptoColdStartExecutionAttemptCheckpoint,
-    market: MarketSnapshot,
-    authorized_at: datetime,
-) -> CryptoColdStartExternalHandoff:
-    values: dict[str, object] = {
-        "handoff_id": handoff_id,
-        "package_hash": package.package_hash,
-        "operator_decision_hash": operator_decision.decision_hash,
-        "checkpoint_hash": checkpoint.record_hash,
-        "authority_state_fingerprint": checkpoint.authority_state_fingerprint,
-        "attempt_id": checkpoint.attempt_id,
-        "order_id": package.order_id,
-        "client_order_id": package.client_order_id,
-        "risk_decision_id": package.risk_decision_id,
-        "market_fingerprint": market_fingerprint(market),
-        "authorized_at": authorized_at.astimezone(timezone.utc),
-        "event_id": f"cold-start-external-handoff:{package.order_id}:{handoff_id}",
-    }
-    return CryptoColdStartExternalHandoff(
-        **values,  # type: ignore[arg-type]
-        handoff_hash=_handoff_hash_values(values),
-    )
-
-
-def _validate_handoff_binding(
-    *,
-    handoff: CryptoColdStartExternalHandoff,
-    handoff_id: str,
-    package: PreparedCryptoPaperCanaryPackage,
-    operator_decision: CryptoOperatorDecision,
-    checkpoint: CryptoColdStartExecutionAttemptCheckpoint,
-    market: MarketSnapshot,
-) -> None:
-    expected = {
-        "handoff_id": handoff_id,
-        "package_hash": package.package_hash,
-        "operator_decision_hash": operator_decision.decision_hash,
-        "checkpoint_hash": checkpoint.record_hash,
-        "authority_state_fingerprint": checkpoint.authority_state_fingerprint,
-        "attempt_id": checkpoint.attempt_id,
-        "order_id": package.order_id,
-        "client_order_id": package.client_order_id,
-        "risk_decision_id": package.risk_decision_id,
-        "market_fingerprint": market_fingerprint(market),
-    }
-    actual = {key: getattr(handoff, key) for key in expected}
-    if actual != expected:
-        raise CryptoColdStartExecutionBridgeBlocked("durable cold-start handoff binding mismatch")
-
-
-def _append_handoff_idempotent(ledger: EventLedger, handoff: CryptoColdStartExternalHandoff) -> None:
-    event = LedgerEvent(
-        event_id=handoff.event_id,
-        event_type="COLD_START_EXTERNAL_HANDOFF_AUTHORIZED",
-        occurred_at=handoff.authorized_at,
-        payload=handoff.event_payload(),
-    )
-    try:
-        ledger.append(event)
-    except DuplicateLedgerEvent:
-        existing = _find_handoff(ledger, handoff.event_id)
-        if existing != handoff:
-            raise CryptoColdStartExecutionBridgeBlocked("cold-start handoff ledger identity conflict")
-
-
-def _find_handoff(ledger: EventLedger, event_id: str) -> CryptoColdStartExternalHandoff | None:
-    matches = tuple(event for event in ledger.all_events() if event.event_id == event_id)
-    if not matches:
-        return None
-    if len(matches) != 1:
-        raise CryptoColdStartExecutionBridgeBlocked("duplicate cold-start handoff ledger identity")
-    event = matches[0]
-    if event.event_type != "COLD_START_EXTERNAL_HANDOFF_AUTHORIZED":
-        raise CryptoColdStartExecutionBridgeBlocked("cold-start handoff event type mismatch")
-    payload = dict(event.payload)
-    expected_keys = {
-        "scope",
-        "handoff_id",
-        "package_hash",
-        "operator_decision_hash",
-        "checkpoint_hash",
-        "authority_state_fingerprint",
-        "attempt_id",
-        "order_id",
-        "client_order_id",
-        "risk_decision_id",
-        "market_fingerprint",
-        "authorized_at",
-        "handoff_hash",
-    }
-    if set(payload) != expected_keys or payload.get("scope") != COLD_START_SCOPE:
-        raise CryptoColdStartExecutionBridgeBlocked("cold-start handoff payload is non-canonical")
-    handoff = CryptoColdStartExternalHandoff(
-        handoff_id=str(payload["handoff_id"]),
-        package_hash=str(payload["package_hash"]),
-        operator_decision_hash=str(payload["operator_decision_hash"]),
-        checkpoint_hash=str(payload["checkpoint_hash"]),
-        authority_state_fingerprint=str(payload["authority_state_fingerprint"]),
-        attempt_id=str(payload["attempt_id"]),
-        order_id=str(payload["order_id"]),
-        client_order_id=str(payload["client_order_id"]),
-        risk_decision_id=str(payload["risk_decision_id"]),
-        market_fingerprint=str(payload["market_fingerprint"]),
-        authorized_at=datetime.fromisoformat(str(payload["authorized_at"])),
-        event_id=event.event_id,
-        handoff_hash=str(payload["handoff_hash"]),
-    )
-    if event.occurred_at != handoff.authorized_at:
-        raise CryptoColdStartExecutionBridgeBlocked("cold-start handoff event timestamp mismatch")
-    return handoff
-
-
-def _handoff_values(
-    handoff: CryptoColdStartExternalHandoff,
-    *,
-    include_hash: bool,
-) -> dict[str, object]:
-    values: dict[str, object] = {
-        "handoff_id": handoff.handoff_id,
-        "package_hash": handoff.package_hash,
-        "operator_decision_hash": handoff.operator_decision_hash,
-        "checkpoint_hash": handoff.checkpoint_hash,
-        "authority_state_fingerprint": handoff.authority_state_fingerprint,
-        "attempt_id": handoff.attempt_id,
-        "order_id": handoff.order_id,
-        "client_order_id": handoff.client_order_id,
-        "risk_decision_id": handoff.risk_decision_id,
-        "market_fingerprint": handoff.market_fingerprint,
-        "authorized_at": handoff.authorized_at.astimezone(timezone.utc),
-        "event_id": handoff.event_id,
-    }
-    if include_hash:
-        values["handoff_hash"] = handoff.handoff_hash
-    return values
-
-
-def _handoff_hash_values(values: dict[str, object]) -> str:
-    payload = dict(values)
-    authorized_at = payload.get("authorized_at")
-    if isinstance(authorized_at, datetime):
-        payload["authorized_at"] = _iso(authorized_at)
-    return sha256(
-        json.dumps(payload, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
-    ).hexdigest()
-
-
-def _iso(value: datetime) -> str:
-    _require_aware(value, "timestamp")
-    return value.astimezone(timezone.utc).isoformat()
-
-
 def _require_aware(value: datetime, label: str) -> None:
     if value.tzinfo is None or value.utcoffset() is None:
         raise ValueError(f"cold-start execution bridge {label} must be timezone-aware")
@@ -504,6 +357,6 @@ __all__ = [
     "CryptoColdStartExecutionBridgeBlocked",
     "CryptoColdStartExecutionBridgeError",
     "CryptoColdStartExecutionStageResult",
-    "CryptoColdStartExternalHandoff",
+    "CryptoColdStartOmsStageContext",
     "crypto_cold_start_handoff_id",
 ]
