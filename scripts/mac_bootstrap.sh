@@ -37,10 +37,7 @@ if [[ -f "$STANDALONE_MARKER" ]]; then
   case "$(uname -m)" in
     arm64) RUNTIME_ARCH="arm64" ;;
     x86_64) RUNTIME_ARCH="x86_64" ;;
-    *)
-      echo "ERROR: unsupported Mac architecture for FULL/STANDALONE package: $(uname -m)" >&2
-      exit 1
-      ;;
+    *) echo "ERROR: unsupported Mac architecture for FULL/STANDALONE package: $(uname -m)" >&2; exit 1 ;;
   esac
 
   RUNTIME_ARCHIVE="$ROOT/vendor/runtime/cpython-3.12.13-20260718-${RUNTIME_ARCH}.tar.gz"
@@ -54,25 +51,15 @@ if [[ -f "$STANDALONE_MARKER" ]]; then
   [[ -d "$WHEELHOUSE" ]] || { echo "ERROR: standalone wheelhouse is missing." >&2; exit 1; }
   [[ -f "$WHEEL_SUMS" ]] || { echo "ERROR: standalone wheel SHA256 manifest is missing." >&2; exit 1; }
 
-  (
-    cd "$ROOT/vendor/runtime"
-    shasum -a 256 -c SHA256SUMS
-  )
-  (
-    cd "$WHEELHOUSE"
-    shasum -a 256 -c SHA256SUMS
-  )
+  (cd "$ROOT/vendor/runtime" && shasum -a 256 -c SHA256SUMS)
+  (cd "$WHEELHOUSE" && shasum -a 256 -c SHA256SUMS)
 
   if [[ ! -x "$RUNTIME_ROOT/python/bin/python3" ]]; then
     TMP_RUNTIME="$ROOT/.runtime/.extract-${RUNTIME_ARCH}-$$"
     rm -rf "$TMP_RUNTIME" "$RUNTIME_ROOT"
     mkdir -p "$TMP_RUNTIME" "$ROOT/.runtime"
     tar -xzf "$RUNTIME_ARCHIVE" -C "$TMP_RUNTIME"
-    [[ -x "$TMP_RUNTIME/python/bin/python3" ]] || {
-      rm -rf "$TMP_RUNTIME"
-      echo "ERROR: embedded runtime archive did not contain python/bin/python3." >&2
-      exit 1
-    }
+    [[ -x "$TMP_RUNTIME/python/bin/python3" ]] || { rm -rf "$TMP_RUNTIME"; echo "ERROR: embedded runtime archive did not contain python/bin/python3." >&2; exit 1; }
     mv "$TMP_RUNTIME" "$RUNTIME_ROOT"
   fi
 
@@ -95,21 +82,12 @@ PY
   VENV_STAMP="$ROOT/.venv/.autotrade-standalone-runtime"
   if [[ -d "$ROOT/.venv" ]]; then
     CURRENT_STAMP="$(cat "$VENV_STAMP" 2>/dev/null || true)"
-    if [[ "$CURRENT_STAMP" != "$EXPECTED_VENV_STAMP" ]]; then
-      rm -rf "$ROOT/.venv"
-    fi
+    if [[ "$CURRENT_STAMP" != "$EXPECTED_VENV_STAMP" ]]; then rm -rf "$ROOT/.venv"; fi
   fi
-
-  if [[ ! -d "$ROOT/.venv" ]]; then
-    "$PYTHON_BIN" -m venv "$ROOT/.venv"
-  fi
+  if [[ ! -d "$ROOT/.venv" ]]; then "$PYTHON_BIN" -m venv "$ROOT/.venv"; fi
   VENV_PY="$ROOT/.venv/bin/python"
   VENV_PIP="$ROOT/.venv/bin/pip"
-  "$VENV_PY" -m pip install \
-    --no-index \
-    --disable-pip-version-check \
-    --find-links "$WHEELHOUSE" \
-    'auto-trade-core[dev]==0.4.0.dev0'
+  "$VENV_PY" -m pip install --no-index --disable-pip-version-check --find-links "$WHEELHOUSE" 'auto-trade-core[dev]==0.4.0.dev0'
   printf '%s\n' "$EXPECTED_VENV_STAMP" > "$VENV_STAMP"
 else
   for candidate in python3.12 python3; do
@@ -117,13 +95,9 @@ else
 import sys
 raise SystemExit(0 if sys.version_info >= (3, 12) else 1)
 PY
-    then
-      PYTHON_BIN="$candidate"
-      break
-    fi
+    then PYTHON_BIN="$candidate"; break; fi
   done
   [[ -n "$PYTHON_BIN" ]] || { echo "ERROR: Python 3.12+ is required for source/rehearsal checkout. Use the FULL/STANDALONE package to avoid this host requirement." >&2; exit 1; }
-
   if [[ ! -d .venv ]]; then "$PYTHON_BIN" -m venv .venv; fi
   VENV_PY="$ROOT/.venv/bin/python"
   VENV_PIP="$ROOT/.venv/bin/pip"
@@ -133,7 +107,6 @@ fi
 
 "$VENV_PY" -m compileall -q src tests scripts
 
-# Common deterministic/core authority checks for every Mac package.
 "$VENV_PY" scripts/check_contract_registry.py
 "$VENV_PY" scripts/check_debt_register.py
 "$VENV_PY" scripts/check_r6_authority.py
@@ -150,14 +123,12 @@ fi
 "$VENV_PY" scripts/check_mac_safety_rehearsal_boundary.py
 
 if [[ "$UNIFIED_ONE_APP" == "YES" ]]; then
-  # The ONE-APP manifest deliberately replaces the generic Control Center
-  # launcher. Certify the unified operator surface plus the inherited real-PAPER
-  # gates instead of requiring the historical scripts/mac_dashboard.py opener.
+  # All legacy PREPARAR/REAL-PAPER surfaces were certified on the exact source
+  # head before packaging and are intentionally pruned from the operator ZIP.
+  # Validate only what physically remains installed plus global authority.
   "$VENV_PY" scripts/check_r6_first_canary_unified_dashboard.py
-  "$VENV_PY" scripts/check_r6_first_canary_restart_safe_dashboard.py
-  "$VENV_PY" scripts/check_r6_first_canary_real_paper_delegate.py
-  "$VENV_PY" scripts/check_r6_first_canary_real_paper_dashboard.py
-  "$VENV_PY" scripts/check_r6_first_canary_execution_gate.py
+  "$VENV_PY" scripts/check_r6_live_deny_boundary.py
+  "$VENV_PY" scripts/check_r6_authority.py
   "$VENV_PY" -m pytest -q tests/test_r6_first_canary_unified_dashboard.py
 else
   "$VENV_PY" scripts/check_mac_standalone_boundary.py
@@ -188,17 +159,13 @@ fi
 
 "$VENV_PY" scripts/mac_safety_rehearsal.py >/dev/null
 "$VENV_PY" scripts/mac_safety_rehearsal.py --kill-switch >/dev/null
-if [[ "$UNIFIED_ONE_APP" != "YES" ]]; then
-  "$VENV_PY" scripts/mac_doctor.py
-fi
+if [[ "$UNIFIED_ONE_APP" != "YES" ]]; then "$VENV_PY" scripts/mac_doctor.py; fi
 
 cat <<EOF
 
 MAC BOOTSTRAP: PASS
 standalone_mode=${STANDALONE_MODE}
 unified_one_app=${UNIFIED_ONE_APP}
-Recommended single safe entry point:
-  bash scripts/mac_start.sh
 No Alpaca credential was read by this bootstrap.
 No broker endpoint was called by this bootstrap.
 No PAPER order was submitted.
