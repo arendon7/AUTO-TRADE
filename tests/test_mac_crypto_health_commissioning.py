@@ -131,7 +131,7 @@ def test_commissioning_refuses_preexisting_authoritative_health_rows(tmp_path) -
                 entity_kind,entity_id,state,version,distinct_quarantine_count,
                 baseline_fingerprint,policy_fingerprint,last_assessment_fingerprint,
                 updated_at,recovery_ack_head,state_hash
-            ) VALUES('STRATEGY','existing','HEALTHY',1,0,?,?,?,?,?,'GENESIS',?)
+            ) VALUES('STRATEGY','existing','HEALTHY',1,0,?,?,?,?,'GENESIS',?)
             """,
             ("a" * 64, "b" * 64, "c" * 64, NOW.isoformat(), "d" * 64),
         )
