@@ -47,9 +47,6 @@ def main() -> int:
     prepare = PREPARE.read_text(encoding="utf-8")
     approve = APPROVE.read_text(encoding="utf-8")
 
-    # The reusable attempt store and orchestration layer are local-only. They
-    # cannot construct any socket/HTTP client; network remains inside the
-    # already-audited broker gateways/transports.
     for path in (ATTEMPT, ORCHESTRATOR, APPROVE):
         roots = {module.split(".", 1)[0] for module in imports(path) if module}
         forbidden = roots & NETWORK_ROOTS
@@ -60,6 +57,8 @@ def main() -> int:
         'ATTEMPT_ID_RE = re.compile(r"^first-canary-[0-9a-f]{32}$")',
         'return self.attempt_root / "execution_started.json"',
         'return self.attempt_root / "execution_result.json"',
+        'return self.attempt_root / "reconciliation_failure.json"',
+        'return self.attempt_root / "reconciliation_pending.json"',
         'return self.attempt_root / "reconciliation.json"',
         "def assert_unexecuted(self) -> None:",
         "self.execution_started_path",
@@ -141,6 +140,17 @@ def main() -> int:
         "writer.submit_once(",
         "CryptoPaperWriterAmbiguous",
         "reconciler.reconcile(",
+        "def _execution_outcome_status(",
+        '"RECONCILED_FINAL"',
+        '"RECONCILIATION_PENDING_NO_RETRY"',
+        '"CRYPTO_PAPER_FIRST_CANARY_RECONCILIATION_FAILURE_NO_RETRY"',
+        '"CRYPTO_PAPER_FIRST_CANARY_RECONCILIATION_PENDING_ORDER_404_NO_RETRY"',
+        '"CRYPTO_PAPER_FIRST_CANARY_RECONCILIATION_PENDING_ORDER_OPEN_NO_RETRY"',
+        '"CRYPTO_PAPER_FIRST_CANARY_RECONCILED_FINAL_NO_RETRY"',
+        "inputs.attempt.reconciliation_failure_path",
+        "inputs.attempt.reconciliation_pending_path",
+        "inputs.attempt.reconciliation_path",
+        '"persisted_final_resolution": False',
         '"retry_post": False',
         '"reconciliation_retry_get_only": True',
         '"live_trading": "BLOCKED"',
@@ -170,6 +180,15 @@ def main() -> int:
     if any(index < 0 for index in ordered) or tuple(sorted(ordered)) != ordered:
         fail("required sequence is not PRE_CONSUME -> OMS -> replay latch -> writer -> reconciliation")
 
+    final_status = orchestrator.find('"CRYPTO_PAPER_FIRST_CANARY_RECONCILED_FINAL_NO_RETRY"')
+    final_path = orchestrator.find("inputs.attempt.reconciliation_path", final_status)
+    pending_status = orchestrator.find('"CRYPTO_PAPER_FIRST_CANARY_RECONCILIATION_PENDING_ORDER_OPEN_NO_RETRY"')
+    pending_path = orchestrator.find("inputs.attempt.reconciliation_pending_path", pending_status)
+    if not 0 <= final_status < final_path:
+        fail("terminal reconciliation is not bound to immutable reconciliation.json")
+    if not 0 <= pending_status < pending_path:
+        fail("open reconciliation is not bound to reconciliation_pending.json")
+
     for path in GENERIC_MAC:
         if not path.is_file():
             continue
@@ -186,7 +205,7 @@ def main() -> int:
     print(
         "first-canary execution gate: PASS — PAPER BTC/USD USD1-5; new exact human approval; "
         "PRE_CONSUME -> OMS -> durable replay latch -> UNKNOWN/PRE_IO -> injected delegate -> reconciliation; "
-        "no raw network/LIVE authority; generic Mac remains write-disabled"
+        "FINAL/PENDING/FAILURE evidence separated; no raw network/LIVE authority; generic Mac remains write-disabled"
     )
     return 0
 
