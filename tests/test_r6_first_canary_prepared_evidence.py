@@ -12,7 +12,6 @@ import pytest
 from autotrade.first_canary_prepared_evidence import (
     FirstCanaryPreparedEvidence,
     FirstCanaryPreparedEvidenceIntegrityError,
-    _aware if False else FirstCanaryPreparedEvidenceIntegrityError,
 )
 import autotrade.first_canary_prepared_evidence as prepared_evidence
 from autotrade.domain import market_fingerprint, risk_decision_fingerprint
