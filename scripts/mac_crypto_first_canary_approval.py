@@ -5,10 +5,15 @@ from datetime import datetime, timedelta, timezone
 import json
 import os
 from pathlib import Path
-import re
 import secrets
 import sys
 
+from autotrade.brokers.alpaca_paper_crypto_first_canary_attempt import (
+    ATTEMPT_DB_NAME,
+    ATTEMPT_ID_RE,
+    EXECUTION_DIR,
+    FirstCanaryAttemptWorkspace,
+)
 from autotrade.brokers.alpaca_paper_crypto_operator_decision import (
     CryptoOperatorDecisionContext,
     CryptoOperatorDecisionStatus,
@@ -19,10 +24,7 @@ from autotrade.persistence import SQLiteRuntime
 
 
 WRITE_ENV = "R6_EXTERNAL_PAPER_WRITE"
-EXECUTION_DIR = "first_canary_execution"
-ATTEMPT_DB_NAME = "attempt.sqlite3"
 ATTEMPT_PREFIX = "first-canary-"
-ATTEMPT_ID_RE = re.compile(r"^first-canary-[0-9a-f]{32}$")
 MAX_APPROVAL_TTL = timedelta(seconds=30)
 MIN_REMAINING_PACKAGE_LIFE = timedelta(seconds=5)
 EXPECTED_SYMBOL = "BTC/USD"
@@ -38,40 +40,14 @@ def _aware(value: datetime, *, label: str) -> datetime:
     return value.astimezone(timezone.utc)
 
 
-def _root(workspace_path: Path) -> Path:
-    if not isinstance(workspace_path, Path):
-        raise TypeError("workspace_path must be pathlib.Path")
-    raw = workspace_path.expanduser()
-    if raw.is_symlink() or not raw.is_dir():
-        raise CryptoFirstCanaryApprovalError("existing non-symlink workspace is required")
-    return raw.resolve()
-
-
 def attempt_database(*, workspace_path: Path, attempt_id: str) -> Path:
-    root = _root(workspace_path)
-    if not ATTEMPT_ID_RE.fullmatch(attempt_id):
-        raise CryptoFirstCanaryApprovalError("execution attempt_id is invalid")
-    execution_dir = root / EXECUTION_DIR
-    if execution_dir.exists() and (execution_dir.is_symlink() or not execution_dir.is_dir()):
-        raise CryptoFirstCanaryApprovalError("execution evidence directory is unsafe")
-    execution_dir.mkdir(mode=0o700, exist_ok=True)
     try:
-        execution_dir.chmod(0o700)
-    except OSError as exc:
-        raise CryptoFirstCanaryApprovalError("cannot restrict execution evidence directory") from exc
-
-    attempt_dir = execution_dir / attempt_id
-    if attempt_dir.exists() and (attempt_dir.is_symlink() or not attempt_dir.is_dir()):
-        raise CryptoFirstCanaryApprovalError("execution attempt directory is unsafe")
-    attempt_dir.mkdir(mode=0o700, exist_ok=True)
-    try:
-        attempt_dir.chmod(0o700)
-    except OSError as exc:
-        raise CryptoFirstCanaryApprovalError("cannot restrict execution attempt directory") from exc
-    database = attempt_dir / ATTEMPT_DB_NAME
-    if database.is_symlink():
-        raise CryptoFirstCanaryApprovalError("execution attempt database may not be a symlink")
-    return database
+        return FirstCanaryAttemptWorkspace.open(
+            workspace_path=workspace_path,
+            attempt_id=attempt_id,
+        ).database_path
+    except Exception as exc:
+        raise CryptoFirstCanaryApprovalError(str(exc)) from exc
 
 
 def issue_approval(
@@ -115,8 +91,12 @@ def issue_approval(
             "execution package is too close to expiry; prepare fresh broker evidence"
         )
     expires_at = min(deadline, instant + MAX_APPROVAL_TTL)
-    database = attempt_database(workspace_path=workspace_path, attempt_id=attempt_id)
-    registry = SQLiteCryptoOperatorDecisionRegistry(SQLiteRuntime(database))
+    attempt = FirstCanaryAttemptWorkspace.open(
+        workspace_path=workspace_path,
+        attempt_id=attempt_id,
+    )
+    attempt.assert_unexecuted()
+    registry = SQLiteCryptoOperatorDecisionRegistry(SQLiteRuntime(attempt.database_path))
     state = registry.record_operator_approval(
         context=context,
         operator_id=operator,
@@ -131,7 +111,8 @@ def issue_approval(
     if state.consumed_at is not None or state.consumed_attempt_id is not None:
         raise CryptoFirstCanaryApprovalError("new execution approval unexpectedly appears consumed")
 
-    return {
+    receipt: dict[str, object] = {
+        "schema_version": 1,
         "status": "CRYPTO_PAPER_FIRST_CANARY_EXECUTION_APPROVAL_RECORDED",
         "environment": "PAPER",
         "symbol": EXPECTED_SYMBOL,
@@ -160,6 +141,12 @@ def issue_approval(
         "profitability_claim": False,
         "next_action": "RUN_EXACT_PRE_CONSUME_AND_OMS_GATE_BEFORE_ANY_PAPER_POST",
     }
+    receipt["approval_receipt_hash"] = attempt.document_hash(
+        receipt,
+        hash_key="approval_receipt_hash",
+    )
+    attempt.write_once(path=attempt.approval_receipt_path, document=receipt)
+    return receipt
 
 
 def _parser() -> argparse.ArgumentParser:
