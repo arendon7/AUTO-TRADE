@@ -1,0 +1,41 @@
+name: R6 Crypto PAPER Cold-Start Final Guard Binding UAT
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  cold-start-final-guard-binding:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout exact head
+        uses: actions/checkout@v5
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Install project
+        run: python -m pip install -e '.[dev]'
+      - name: Compile binding surface
+        run: python -m compileall -q scripts/mac_crypto_cold_start_final_guard_binding.py scripts/mac_crypto_cold_start_final_guard_binding_envelope.py scripts/mac_dashboard_cold_start_final_guard_binding.py scripts/mac_dashboard_cold_start_final_guard_binding_fixed.py scripts/check_mac_crypto_cold_start_final_guard_binding.py tests/test_mac_crypto_cold_start_final_guard_binding.py tests/test_mac_crypto_cold_start_final_guard_binding_envelope.py
+      - name: Permanent cold-start Final Guard binding boundary
+        run: python scripts/check_mac_crypto_cold_start_final_guard_binding.py
+      - name: Cold-start Final Guard binding tests
+        run: pytest -q tests/test_mac_crypto_cold_start_final_guard_binding.py tests/test_mac_crypto_cold_start_final_guard_binding_envelope.py
+      - name: Re-prove cold-start qualification attestation boundary
+        run: python scripts/check_mac_crypto_cold_start_qualification_attestation.py
+      - name: Re-prove cold-start Portfolio bootstrap boundary
+        run: python scripts/check_mac_crypto_cold_start_portfolio_bootstrap.py
+      - name: Re-prove Health R4 commissioning boundary
+        run: python scripts/check_mac_crypto_health_commissioning.py
+      - name: Re-prove one-shot human approval boundary
+        run: python scripts/check_mac_crypto_one_shot_approval.py
+      - name: Re-prove Mac Control Center remains NO-POST
+        run: python scripts/check_mac_dashboard_boundary.py
+      - name: Re-prove global R6 authority boundary
+        run: python scripts/check_r6_authority.py
+      - name: Re-prove crypto execution authority boundary
+        run: python scripts/check_r6_crypto_execution_boundary.py
