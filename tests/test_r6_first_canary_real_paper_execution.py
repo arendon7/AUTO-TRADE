@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from datetime import timedelta
+import json
+from pathlib import Path
 
 import pytest
 
@@ -11,8 +13,12 @@ from autotrade.first_canary_external_post_consent import (
 from autotrade.first_canary_prepared_evidence import FirstCanaryPreparedEvidence
 from autotrade.first_canary_real_paper_execution import (
     FirstCanaryRealPaperExecutionBlocked,
+    collect_fresh_final_evidence,
     execute_real_paper_first_canary_once,
     load_restart_safe_execution_inputs,
+)
+from autotrade.brokers.alpaca_paper_crypto_first_canary_attempt import (
+    CryptoFirstCanaryAttemptConflict,
 )
 from autotrade.brokers.alpaca_paper_gateway import AlpacaPaperCredentials
 import autotrade.brokers.alpaca_paper_crypto_cold_start_pre_io as cold_pre_io
@@ -81,6 +87,51 @@ def _post_challenge(session) -> str:
     )
 
 
+class _AccountGateway:
+    def __init__(self, value) -> None:
+        self.value = value
+        self.calls = 0
+
+    def attest_account(self, **kwargs):
+        self.calls += 1
+        assert kwargs["expected_account_id"] == self.value.account_id
+        return self.value
+
+
+class _AssetGateway:
+    def __init__(self, value) -> None:
+        self.value = value
+        self.calls = 0
+
+    def attest_asset(self, **kwargs):
+        self.calls += 1
+        assert kwargs["symbol"] == "BTC/USD"
+        assert kwargs["expected_credential_reference"] == self.value.credential_reference
+        return self.value
+
+
+class _FlatGateway:
+    def __init__(self, value) -> None:
+        self.value = value
+        self.calls = 0
+
+    def attest_flatness(self, **kwargs):
+        self.calls += 1
+        assert kwargs["expected_credential_reference"] == self.value.credential_reference
+        return self.value
+
+
+class _MarketGateway:
+    def __init__(self, value) -> None:
+        self.value = value
+        self.calls = 0
+
+    def attest_snapshot(self, **kwargs):
+        self.calls += 1
+        assert kwargs["symbol"] == "BTC/USD"
+        return self.value
+
+
 def test_restart_safe_loader_reconstructs_exact_typed_execution_inputs(tmp_path, monkeypatch) -> None:
     _, session, original = _prepare_session(tmp_path, monkeypatch)
     _persist_restart_safe(session)
@@ -139,7 +190,7 @@ def test_real_paper_wrapper_crosses_injected_delegate_exactly_once_after_second_
     assert durable_consent["retry_authorized"] is False
     assert started["retry_forbidden"] is True
 
-    with pytest.raises(FirstCanaryRealPaperExecutionBlocked, match="replay is forbidden|already exists"):
+    with pytest.raises(CryptoFirstCanaryAttemptConflict, match="POST replay is forbidden"):
         execute_real_paper_first_canary_once(
             workspace_path=session.workspace.root,
             attempt_id=session.attempt.attempt_id,
@@ -183,4 +234,117 @@ def test_restart_safe_loader_rejects_different_effective_paper_key(tmp_path, mon
             workspace_path=session.workspace.root,
             attempt_id=session.attempt.attempt_id,
             credentials=other,
+        )
+
+
+def test_collect_fresh_final_evidence_uses_only_injected_get_gateways(tmp_path, monkeypatch) -> None:
+    _, session, inputs = _prepare_session(tmp_path, monkeypatch)
+    final = _final(inputs, at=NOW + timedelta(seconds=4))
+    account = _AccountGateway(final.account)
+    asset = _AssetGateway(final.asset)
+    flat = _FlatGateway(final.flat_account)
+    market = _MarketGateway(final.market)
+
+    observed = collect_fresh_final_evidence(
+        workspace_path=session.workspace.root,
+        credentials=_credentials(),
+        now=NOW + timedelta(seconds=4),
+        account_gateway=account,
+        asset_gateway=asset,
+        flat_gateway=flat,
+        market_gateway=market,
+    )
+
+    assert observed.account == final.account
+    assert observed.asset == final.asset
+    assert observed.market == final.market
+    assert observed.flat_account == final.flat_account
+    assert observed.product_profile.fingerprint == final.product_profile.fingerprint
+    assert account.calls == asset.calls == flat.calls == market.calls == 1
+
+
+def test_collect_fresh_final_evidence_requires_verified_account_anchor(tmp_path, monkeypatch) -> None:
+    _, session, _ = _prepare_session(tmp_path, monkeypatch)
+    session.workspace.account_attestation_path.unlink()
+    with pytest.raises(FirstCanaryRealPaperExecutionBlocked, match="verified PAPER account is missing"):
+        collect_fresh_final_evidence(
+            workspace_path=session.workspace.root,
+            credentials=_credentials(),
+            now=NOW + timedelta(seconds=4),
+            account_gateway=object(),
+            asset_gateway=object(),
+            flat_gateway=object(),
+            market_gateway=object(),
+        )
+
+
+def test_collect_fresh_final_evidence_rejects_unreadable_account_anchor(tmp_path, monkeypatch) -> None:
+    _, session, _ = _prepare_session(tmp_path, monkeypatch)
+    session.workspace.account_attestation_path.write_text("{not-json", encoding="utf-8")
+    with pytest.raises(FirstCanaryRealPaperExecutionBlocked, match="unreadable"):
+        collect_fresh_final_evidence(
+            workspace_path=session.workspace.root,
+            credentials=_credentials(),
+            now=NOW + timedelta(seconds=4),
+            account_gateway=object(),
+            asset_gateway=object(),
+            flat_gateway=object(),
+            market_gateway=object(),
+        )
+
+
+def test_collect_fresh_final_evidence_rejects_non_paper_account_anchor(tmp_path, monkeypatch) -> None:
+    _, session, _ = _prepare_session(tmp_path, monkeypatch)
+    path = session.workspace.account_attestation_path
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload["environment"] = "LIVE"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    with pytest.raises(FirstCanaryRealPaperExecutionBlocked, match="not PAPER"):
+        collect_fresh_final_evidence(
+            workspace_path=session.workspace.root,
+            credentials=_credentials(),
+            now=NOW + timedelta(seconds=4),
+            account_gateway=object(),
+            asset_gateway=object(),
+            flat_gateway=object(),
+            market_gateway=object(),
+        )
+
+
+def test_collect_fresh_final_evidence_rejects_credential_persistence_anchor(tmp_path, monkeypatch) -> None:
+    _, session, _ = _prepare_session(tmp_path, monkeypatch)
+    path = session.workspace.account_attestation_path
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload["credentials_persisted"] = True
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    with pytest.raises(FirstCanaryRealPaperExecutionBlocked, match="credential policy"):
+        collect_fresh_final_evidence(
+            workspace_path=session.workspace.root,
+            credentials=_credentials(),
+            now=NOW + timedelta(seconds=4),
+            account_gateway=object(),
+            asset_gateway=object(),
+            flat_gateway=object(),
+            market_gateway=object(),
+        )
+
+
+def test_loader_rejects_non_path_workspace_before_any_execution(tmp_path) -> None:
+    with pytest.raises(TypeError, match="pathlib.Path"):
+        load_restart_safe_execution_inputs(
+            workspace_path=str(tmp_path),  # type: ignore[arg-type]
+            attempt_id="first-canary-0123456789abcdef0123456789abcdef",
+            credentials=_credentials(),
+        )
+
+
+def test_loader_rejects_symlink_workspace_before_any_execution(tmp_path, monkeypatch) -> None:
+    _, session, _ = _prepare_session(tmp_path, monkeypatch)
+    link = tmp_path / "workspace-link"
+    link.symlink_to(session.workspace.root, target_is_directory=True)
+    with pytest.raises(FirstCanaryRealPaperExecutionBlocked, match="non-symlink"):
+        load_restart_safe_execution_inputs(
+            workspace_path=Path(link),
+            attempt_id=session.attempt.attempt_id,
+            credentials=_credentials(),
         )
