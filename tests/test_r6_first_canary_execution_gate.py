@@ -40,8 +40,8 @@ ROOT = Path(__file__).resolve().parents[1]
 PREPARE = ROOT / "scripts/mac_crypto_first_canary_prepare.py"
 APPROVE = ROOT / "scripts/mac_crypto_first_canary_approval.py"
 ATTEMPT_ID = "first-canary-0123456789abcdef0123456789abcdef"
-KEY_ID = "first-canary-simulation-key"
-SECRET = "first-canary-simulation-secret"
+KEY_ID = "simulation-paper-key"
+SECRET = "simulation-paper-secret"
 CREDENTIAL_REFERENCE = sha256(KEY_ID.encode("utf-8")).hexdigest()
 
 
