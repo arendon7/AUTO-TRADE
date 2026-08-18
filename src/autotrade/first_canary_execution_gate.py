@@ -433,11 +433,7 @@ def execute_first_canary_once(
         ) from writer_error
 
     return FirstCanaryExecutionOutcome(
-        status=(
-            "RECONCILED"
-            if final_state.status is not CryptoLifecycleStatus.ENTRY_SUBMISSION_UNKNOWN
-            else "UNKNOWN_HALTED_NO_RETRY"
-        ),
+        status=_execution_outcome_status(final_state.status),
         attempt_id=inputs.attempt.attempt_id,
         client_order_id=inputs.package.client_order_id,
         execution_started_hash=str(started["execution_started_hash"]),
@@ -447,6 +443,20 @@ def execute_first_canary_once(
         broker_post_outcome=broker_post_outcome,
         retry_forbidden=True,
     )
+
+
+def _execution_outcome_status(status: CryptoLifecycleStatus) -> str:
+    if status in {
+        CryptoLifecycleStatus.ENTRY_TERMINAL_NO_FILL,
+        CryptoLifecycleStatus.ENTRY_FILLED_UNPROTECTED,
+    }:
+        return "RECONCILED_FINAL"
+    if status in {
+        CryptoLifecycleStatus.ENTRY_ACKNOWLEDGED,
+        CryptoLifecycleStatus.ENTRY_PARTIALLY_FILLED,
+    }:
+        return "RECONCILIATION_PENDING_NO_RETRY"
+    return "UNKNOWN_HALTED_NO_RETRY"
 
 
 def _reconcile_once(
@@ -466,7 +476,7 @@ def _reconcile_once(
     except Exception as exc:
         document: dict[str, object] = {
             "schema_version": 1,
-            "status": "CRYPTO_PAPER_FIRST_CANARY_RECONCILIATION_UNAVAILABLE_HALT_NO_RETRY",
+            "status": "CRYPTO_PAPER_FIRST_CANARY_RECONCILIATION_FAILURE_NO_RETRY",
             "attempt_id": inputs.attempt.attempt_id,
             "client_order_id": inputs.package.client_order_id,
             "execution_result_hash": execution_result_hash,
@@ -474,6 +484,7 @@ def _reconcile_once(
             "error": str(exc),
             "retry_post": False,
             "reconciliation_retry_get_only": True,
+            "persisted_final_resolution": False,
             "live_trading": "BLOCKED",
         }
         document["reconciliation_hash"] = inputs.attempt.document_hash(
@@ -481,7 +492,7 @@ def _reconcile_once(
             hash_key="reconciliation_hash",
         )
         inputs.attempt.write_once(
-            path=inputs.attempt.reconciliation_path,
+            path=inputs.attempt.reconciliation_failure_path,
             document=document,
         )
         return str(document["reconciliation_hash"])
@@ -489,7 +500,7 @@ def _reconcile_once(
     if isinstance(evidence, CryptoBrokerUnknownReconciliation):
         document = {
             "schema_version": 1,
-            "status": "CRYPTO_PAPER_FIRST_CANARY_ORDER_404_UNKNOWN_HALT_NO_RETRY",
+            "status": "CRYPTO_PAPER_FIRST_CANARY_RECONCILIATION_PENDING_ORDER_404_NO_RETRY",
             "attempt_id": inputs.attempt.attempt_id,
             "client_order_id": inputs.package.client_order_id,
             "execution_result_hash": execution_result_hash,
@@ -500,8 +511,10 @@ def _reconcile_once(
             "observed_at": evidence.observed_at.astimezone(timezone.utc).isoformat(),
             "retry_post": False,
             "reconciliation_retry_get_only": True,
+            "persisted_final_resolution": False,
             "live_trading": "BLOCKED",
         }
+        target_path = inputs.attempt.reconciliation_pending_path
     elif isinstance(evidence, CryptoBrokerReconciliation):
         AlpacaPaperCryptoReconciliationGateway.apply_to_lifecycle(
             lifecycle=lifecycle,
@@ -511,9 +524,14 @@ def _reconcile_once(
             at=at,
         )
         state = lifecycle.snapshot(inputs.package.lifecycle_id).state
+        terminal = evidence.order.terminal
         document = {
             "schema_version": 1,
-            "status": "CRYPTO_PAPER_FIRST_CANARY_RECONCILED_NO_RETRY",
+            "status": (
+                "CRYPTO_PAPER_FIRST_CANARY_RECONCILED_FINAL_NO_RETRY"
+                if terminal
+                else "CRYPTO_PAPER_FIRST_CANARY_RECONCILIATION_PENDING_ORDER_OPEN_NO_RETRY"
+            ),
             "attempt_id": inputs.attempt.attempt_id,
             "client_order_id": inputs.package.client_order_id,
             "execution_result_hash": execution_result_hash,
@@ -526,9 +544,15 @@ def _reconcile_once(
             "lifecycle_status": state.status.value,
             "observed_at": evidence.observed_at.astimezone(timezone.utc).isoformat(),
             "retry_post": False,
-            "reconciliation_retry_get_only": False,
+            "reconciliation_retry_get_only": not terminal,
+            "persisted_final_resolution": terminal,
             "live_trading": "BLOCKED",
         }
+        target_path = (
+            inputs.attempt.reconciliation_path
+            if terminal
+            else inputs.attempt.reconciliation_pending_path
+        )
     else:
         raise FirstCanaryExecutionBlocked(
             "reconciler returned unsupported evidence; POST retry remains forbidden"
@@ -538,7 +562,7 @@ def _reconcile_once(
         hash_key="reconciliation_hash",
     )
     inputs.attempt.write_once(
-        path=inputs.attempt.reconciliation_path,
+        path=target_path,
         document=document,
     )
     return str(document["reconciliation_hash"])
