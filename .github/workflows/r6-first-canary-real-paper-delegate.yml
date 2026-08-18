@@ -1,0 +1,85 @@
+name: R6 First Canary Real PAPER Delegate
+
+on:
+  push:
+    branches: ["reconstruction/**", "work/r6-crypto-paper-first-canary-real-paper-delegate"]
+    paths:
+      - "src/autotrade/first_canary_external_post_consent.py"
+      - "src/autotrade/first_canary_real_paper_execution.py"
+      - "scripts/mac_crypto_first_canary_execute_real_paper.py"
+      - "scripts/check_r6_first_canary_real_paper_delegate.py"
+      - "tests/test_r6_first_canary_external_post_consent.py"
+      - "tests/test_r6_first_canary_real_paper_execution.py"
+      - ".github/workflows/r6-first-canary-real-paper-delegate.yml"
+  pull_request:
+    paths:
+      - "src/autotrade/first_canary_external_post_consent.py"
+      - "src/autotrade/first_canary_real_paper_execution.py"
+      - "scripts/mac_crypto_first_canary_execute_real_paper.py"
+      - "scripts/check_r6_first_canary_real_paper_delegate.py"
+      - "tests/test_r6_first_canary_external_post_consent.py"
+      - "tests/test_r6_first_canary_real_paper_execution.py"
+      - ".github/workflows/r6-first-canary-real-paper-delegate.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  real-paper-delegate:
+    runs-on: ubuntu-24.04
+    env:
+      R6_EXTERNAL_PAPER_WRITE: DISABLED
+    steps:
+      - name: Checkout exact head
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install project
+        run: python -m pip install -e '.[dev]'
+
+      - name: Compile real PAPER gate
+        run: |
+          python -m compileall -q \
+            src/autotrade/first_canary_external_post_consent.py \
+            src/autotrade/first_canary_real_paper_execution.py \
+            scripts/mac_crypto_first_canary_execute_real_paper.py \
+            scripts/check_r6_first_canary_real_paper_delegate.py \
+            tests/test_r6_first_canary_external_post_consent.py \
+            tests/test_r6_first_canary_real_paper_execution.py
+
+      - name: Static real PAPER authority boundary
+        run: python scripts/check_r6_first_canary_real_paper_delegate.py
+
+      - name: Real PAPER gate functional tests with injected delegates only
+        run: |
+          pytest -q \
+            tests/test_r6_first_canary_external_post_consent.py \
+            tests/test_r6_first_canary_real_paper_execution.py
+
+      - name: Re-prove certified first-canary execution authority
+        run: python scripts/check_r6_first_canary_execution_gate.py
+
+      - name: Re-prove GET-only recovery boundary
+        run: python scripts/check_r6_first_canary_recovery_boundary.py
+
+      - name: Re-prove permanent LIVE deny
+        run: python scripts/check_r6_live_deny_boundary.py
+
+      - name: Re-prove global R6 PAPER authority
+        run: python scripts/check_r6_authority.py
+
+      - name: Prove CI cannot supply broker credentials or generic write enable
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "${R6_EXTERNAL_PAPER_WRITE}" = "DISABLED"
+          test -z "${APCA_API_KEY_ID:-}"
+          test -z "${APCA_API_SECRET_KEY:-}"
+          echo 'CI broker POST authority: ABSENT'
