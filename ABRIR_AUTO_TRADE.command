@@ -36,9 +36,11 @@ cd "$ROOT"
 [[ -x "$ROOT/.venv/bin/python" ]] || bash "$ROOT/INSTALAR_AUTO_TRADE.command"
 
 # Cold-start qualification builds add only non-executable evidence/binding layers.
-# The newest wrapper can issue a UAT-only human decision and seal a local binding,
-# but cannot consume approval, open Final Guard, broker POST or enable LIVE.
-SERVER="$ROOT/scripts/mac_dashboard_cold_start_final_guard_binding.py"
+# The newest wrapper canonicalizes prepare -> dashboard -> seal before the existing
+# UAT-only seal verifier. It cannot consume approval, open Final Guard, broker POST
+# or enable LIVE.
+SERVER="$ROOT/scripts/mac_dashboard_cold_start_final_guard_binding_fixed.py"
+[[ -f "$SERVER" ]] || SERVER="$ROOT/scripts/mac_dashboard_cold_start_final_guard_binding.py"
 [[ -f "$SERVER" ]] || SERVER="$ROOT/scripts/mac_dashboard_cold_start_attestation.py"
 [[ -f "$SERVER" ]] || SERVER="$ROOT/scripts/mac_dashboard_cold_start.py"
 [[ -f "$SERVER" ]] || SERVER="$ROOT/scripts/mac_dashboard_health_commissioning.py"
