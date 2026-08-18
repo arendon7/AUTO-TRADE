@@ -19,7 +19,8 @@ def test_crypto_execution_authority_checker_passes_repository() -> None:
     )
     assert result.returncode == 0, result.stderr
     assert "crypto execution authority boundary: PASS" in result.stdout
-    assert "nominal role-bound ENTRY/PROTECTION Final Guards" in result.stdout
+    assert "nominal role-bound normal ENTRY/PROTECTION Final Guards" in result.stdout
+    assert "isolated first-canary ENTRY guard" in result.stdout
     assert "UNKNOWN-before-I/O" in result.stdout
     assert "GET-only client-id + position reconciliation" in result.stdout
 
@@ -55,12 +56,16 @@ def test_checker_forbidden_cross_product_list_covers_equity_execution_authority(
     assert "connectivity_workspace_post" in forbidden
 
 
-def test_checker_allows_exactly_two_production_guarded_transport_subclasses() -> None:
+def test_checker_allows_exactly_three_production_guarded_transport_subclasses() -> None:
     namespace = runpy.run_path(str(CHECKER))
     expected = namespace["EXPECTED_GUARDED_SUBCLASSES"]
     assert expected == {
         ("alpaca_paper_crypto_pre_io.py", "FinalGuardedCryptoEntryTransport"),
         ("alpaca_paper_crypto_pre_io.py", "FinalGuardedCryptoProtectionTransport"),
+        (
+            "alpaca_paper_crypto_cold_start_pre_io.py",
+            "ColdStartFinalGuardedCryptoEntryTransport",
+        ),
     }
 
 
