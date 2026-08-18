@@ -26,7 +26,7 @@ from autotrade.persistence import SQLiteRuntime
 WRITE_ENV = "R6_EXTERNAL_PAPER_WRITE"
 ATTEMPT_PREFIX = "first-canary-"
 MAX_APPROVAL_TTL = timedelta(seconds=90)
-MIN_REMAINING_PACKAGE_LIFE = timedelta(seconds=30)
+MIN_REMAINING_PACKAGE_LIFE = timedelta(seconds=5)
 EXPECTED_SYMBOL = "BTC/USD"
 
 
