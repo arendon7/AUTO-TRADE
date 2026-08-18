@@ -4,6 +4,8 @@ from datetime import timedelta
 from pathlib import Path
 import runpy
 
+from autotrade.brokers import alpaca_paper_crypto_operator_decision as operator_decision
+
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -15,15 +17,12 @@ def test_human_staging_window_is_usable_but_within_existing_operator_authority()
     approval = runpy.run_path(
         str(ROOT / "scripts/mac_crypto_first_canary_approval.py")
     )
-    operator = runpy.run_path(
-        str(ROOT / "src/autotrade/brokers/alpaca_paper_crypto_operator_decision.py")
-    )
 
     assert restart_safe["HUMAN_STAGING_TTL_MS"] == 120_000
     assert approval["MAX_APPROVAL_TTL"] == timedelta(seconds=90)
-    assert approval["MIN_REMAINING_PACKAGE_LIFE"] == timedelta(seconds=30)
-    assert operator["_MAX_DECISION_TTL"] == timedelta(minutes=2)
-    assert approval["MAX_APPROVAL_TTL"] <= operator["_MAX_DECISION_TTL"]
+    assert approval["MIN_REMAINING_PACKAGE_LIFE"] == timedelta(seconds=5)
+    assert operator_decision._MAX_DECISION_TTL == timedelta(minutes=2)
+    assert approval["MAX_APPROVAL_TTL"] <= operator_decision._MAX_DECISION_TTL
 
     source = (ROOT / "scripts/mac_crypto_first_canary_prepare_restart_safe.py").read_text(
         encoding="utf-8"
