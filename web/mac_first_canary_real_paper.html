@@ -43,13 +43,14 @@
   </section>
 
   <section class="card">
-    <h2>1. Selecciona el intento ya preparado</h2>
+    <h2>1. Intento aprobado</h2>
+    <p class="muted">Al abrir esta pantalla, AUTO-TRADE busca en el workspace exactamente un intento aprobado, restart-safe, no iniciado y todavía vigente. Solo en ese caso lo carga automáticamente. Si hay cero o varios, bloquea la selección automática.</p>
     <label>Workspace</label>
     <input id="workspace" autocomplete="off">
     <label>Attempt ID</label>
-    <input id="attempt" placeholder="first-canary-…" autocomplete="off">
-    <button class="secondary" id="refresh">Revisar estado</button>
-    <pre id="status">Sin revisar.</pre>
+    <input id="attempt" placeholder="Se detectará automáticamente si existe exactamente uno listo" autocomplete="off">
+    <button class="secondary" id="refresh">Detectar / revisar estado</button>
+    <pre id="status">Buscando intento aprobado vigente…</pre>
   </section>
 
   <section class="card">
@@ -64,7 +65,7 @@
   <section class="card">
     <h2>3. Segundo consentimiento exacto</h2>
     <p>Solo se habilita cuando existen preparación restart-safe y aprobación humana nueva, y no existe evidencia de ejecución previa.</p>
-    <div id="challenge" class="challenge muted">Primero revisa el estado.</div>
+    <div id="challenge" class="challenge muted">Primero debe existir un único intento aprobado y vigente.</div>
     <label>Escribe/pega exactamente el texto anterior</label>
     <input id="confirmation" autocomplete="off">
     <button class="dangerButton" id="execute" disabled>EJECUTAR UNA VEZ EN PAPER</button>
@@ -82,11 +83,6 @@ const CSRF = "__CSRF_TOKEN__";
 const $ = id => document.getElementById(id);
 let currentStatus = null;
 
-async function meta() {
-  const r = await fetch('/api/meta', {cache:'no-store'});
-  const j = await r.json();
-  if (j.ok && j.meta) $('workspace').value = j.meta.default_workspace || '';
-}
 function params() {
   return {workspace:$('workspace').value.trim(), attempt_id:$('attempt').value.trim()};
 }
@@ -104,11 +100,46 @@ function renderStatus(s) {
 }
 async function status() {
   const p = params();
+  if (!p.attempt_id) throw new Error('No hay Attempt ID seleccionado. Usa detección automática o prepara un intento nuevo.');
   const q = new URLSearchParams(p);
   const r = await fetch('/api/status?' + q.toString(), {cache:'no-store'});
   const j = await r.json();
   if (!j.ok) throw new Error(j.error || 'No se pudo leer el estado');
   renderStatus(j.status);
+}
+async function discover() {
+  const workspace = $('workspace').value.trim();
+  if (!workspace) throw new Error('Workspace requerido');
+  const q = new URLSearchParams({workspace});
+  const r = await fetch('/api/discover?' + q.toString(), {cache:'no-store'});
+  const j = await r.json();
+  if (!j.ok) throw new Error(j.error || 'No se pudo detectar el intento aprobado');
+  const d = j.discovery || {};
+  if (d.selection_status === 'EXACT_ONE_READY' && d.attempt_id) {
+    $('attempt').value = d.attempt_id;
+    await status();
+    return;
+  }
+  currentStatus = null;
+  $('attempt').value = '';
+  $('execute').disabled = true;
+  $('confirmation').value = '';
+  $('challenge').textContent = 'No hay un único intento ejecutable seleccionado.';
+  $('challenge').className = 'challenge muted';
+  if (d.selection_status === 'AMBIGUOUS_MULTIPLE_READY') {
+    $('status').textContent = 'BLOQUEADO: existen ' + d.ready_count + ' intentos aprobados y vigentes. AUTO-TRADE no elegirá uno por ti. Cierra esta pantalla y resuelve la ambigüedad desde PREPARAR.';
+  } else if ((d.expired_count || 0) > 0) {
+    $('status').textContent = 'No existe un intento aprobado todavía vigente. Hay ' + d.expired_count + ' intento(s) expirado(s). Vuelve a PREPARAR y crea/aprueba un intento nuevo.';
+  } else {
+    $('status').textContent = 'No existe un intento aprobado y vigente. Vuelve a PREPARAR, crea el intento y apruébalo antes de abrir REAL PAPER.';
+  }
+}
+async function meta() {
+  const r = await fetch('/api/meta', {cache:'no-store'});
+  const j = await r.json();
+  if (!j.ok || !j.meta) throw new Error('No se pudo cargar la configuración local');
+  $('workspace').value = j.meta.default_workspace || '';
+  await discover();
 }
 async function post(path, body) {
   const r = await fetch(path, {
@@ -121,7 +152,16 @@ async function post(path, body) {
   try { await status(); } catch (_) {}
   return j;
 }
-$('refresh').onclick = async () => { try { await status(); } catch(e) { $('status').textContent=e.message; } };
+$('refresh').onclick = async () => {
+  try {
+    if ($('attempt').value.trim()) await status();
+    else await discover();
+  } catch(e) { $('status').textContent=e.message; }
+};
+$('workspace').onchange = async () => {
+  $('attempt').value = '';
+  try { await discover(); } catch(e) { $('status').textContent=e.message; }
+};
 $('execute').onclick = async () => {
   if (!currentStatus || currentStatus.ready_for_real_post !== true) return;
   const exact = currentStatus.external_post_challenge || '';
