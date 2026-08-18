@@ -29,6 +29,7 @@ jobs:
           src/autotrade/brokers/alpaca_paper_crypto_cold_start_pre_io_authority.py
           scripts/check_r6_crypto_cold_start_execution_boundary.py
           scripts/check_r6_oms_handoff_boundary.py
+          tests/test_r6_cold_start_oms_adversarial.py
           tests/test_r6_paper_crypto_cold_start_final_guard.py
           tests/test_r6_paper_crypto_cold_start_authority_adversarial.py
           tests/test_r6_paper_crypto_cold_start_execution_bridge.py
@@ -41,6 +42,7 @@ jobs:
       - name: Cold-start authority + durable PRE_IO + simulated writer tests
         run: >-
           pytest -q
+          tests/test_r6_cold_start_oms_adversarial.py
           tests/test_r6_paper_crypto_cold_start_final_guard.py
           tests/test_r6_paper_crypto_cold_start_authority_adversarial.py
           tests/test_r6_paper_crypto_cold_start_execution_bridge.py
