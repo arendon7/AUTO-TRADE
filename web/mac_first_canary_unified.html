@@ -25,7 +25,7 @@
   <section class="hero">
     <div class="eyebrow">AUTO-TRADE · FLUJO SIMPLIFICADO</div>
     <h1>Primer Canary BTC/USD · PAPER</h1>
-    <p>Una sola app. AUTO-TRADE maneja internamente los Attempt IDs, hashes, challenges, TTL, Final Guard y recuperación. Tú solo revisas la orden y haces dos confirmaciones humanas.</p>
+    <p>Una sola app. AUTO-TRADE gestiona internamente todas las comprobaciones técnicas y la recuperación. Tú solo revisas la orden y haces dos confirmaciones humanas.</p>
     <div class="chips"><span class="chip paper">PAPER ONLY</span><span class="chip">BTC/USD</span><span class="chip">BUY · LIMIT · IOC</span><span class="chip cap">máx. USD 5</span><span class="chip live">LIVE BLOCKED</span></div>
   </section>
 
@@ -53,7 +53,7 @@
 
   <section id="reviewCard" class="card hidden">
     <h2>3. Revisar la orden</h2>
-    <p>Esta es la orden exacta que quedará ligada al gate. No necesitas copiar IDs ni challenges.</p>
+    <p>Esta es la orden exacta que quedará preparada. No necesitas copiar códigos ni cambiar de pantalla.</p>
     <div class="summary">
       <div class="metric"><span>Mercado</span><strong id="mSymbol">BTC/USD</strong></div>
       <div class="metric"><span>Valor</span><strong id="mNotional">—</strong></div>
@@ -100,6 +100,6 @@ $('approveBtn').onclick=async()=>{busy(true);try{const j=await api('/api/approve
 $('executeBtn').onclick=async()=>{if(!confirm('Confirmación final: enviar UNA orden BTC/USD en Alpaca PAPER, máximo USD 5. ¿Continuar?'))return;busy(true);$('executeBtn').dataset.locked='1';try{stat('executeStatus','Revalidando evidencia final y ejecutando el one-shot PAPER…','warn');const j=await api('/api/execute',{execute_confirmed:true});stat('executeStatus','Proceso finalizado. Retry POST permanece bloqueado.','good');$('resultHeadline').textContent=j.headline||'Resultado PAPER';$('resultDetail').textContent=j.detail||'';$('resultStatus').textContent=JSON.stringify({phase:j.phase,execution:j.execution,recovery:j.recovery,retry_post:false,live_trading:'BLOCKED'},null,2);show('resultCard');steps(4);window.scrollTo({top:$('resultCard').offsetTop-20,behavior:'smooth'})}catch(e){stat('executeStatus',e.message+'\nNO vuelvas a pulsar ejecutar. AUTO-TRADE mantiene retry POST bloqueado.','bad');$('resultHeadline').textContent='Ejecución bloqueada / recuperación';$('resultDetail').textContent='No reintentes el POST. El sistema solo admite la ruta segura indicada.';$('resultStatus').textContent=e.message;show('resultCard');steps(4)}finally{busy(false)}};
 async function reset(){busy(true);try{await api('/api/reset',{});show('reviewCard',false);show('executeCard',false);show('resultCard',false);$('executeBtn').dataset.locked='0';$('reviewCheck').checked=false;$('executeCheck').checked=false;show('prepareCard',state.connected);steps(state.connected?2:1)}catch(e){alert(e.message)}finally{busy(false)}}
 $('resetBtn').onclick=reset;$('newBtn').onclick=reset;
-(async()=>{try{const m=await fetch('/api/meta').then(r=>r.json());const s=await fetch('/api/state').then(r=>r.json());state.connected=!!s.connected;if(s.connected){show('prepareCard');steps(2)}}catch(e){}})();
+(async()=>{try{await fetch('/api/meta').then(r=>r.json());const s=await fetch('/api/state').then(r=>r.json());state.connected=!!s.connected;if(s.connected){show('prepareCard');steps(2)}}catch(e){}})();
 </script>
 </body></html>
