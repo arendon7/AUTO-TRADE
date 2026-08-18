@@ -19,9 +19,13 @@ export R6_EXTERNAL_PAPER_WRITE="DISABLED"
 PYTHON_BIN=""
 STANDALONE_MARKER="$ROOT/MAC_STANDALONE_MANIFEST.txt"
 STANDALONE_MODE="NO"
+UNIFIED_ONE_APP="NO"
 
 if [[ -f "$STANDALONE_MARKER" ]]; then
   STANDALONE_MODE="YES"
+  if grep -Fq 'first_canary_unified_surface=ONE_APP' "$STANDALONE_MARKER"; then
+    UNIFIED_ONE_APP="YES"
+  fi
   EXPECTED_INSTALL_ROOT="$HOME/Applications/AUTO-TRADE-R6"
   if [[ "$ROOT" != "$EXPECTED_INSTALL_ROOT" ]]; then
     echo "ERROR: FULL/STANDALONE runtime execution is allowed only from:" >&2
@@ -129,6 +133,7 @@ fi
 
 "$VENV_PY" -m compileall -q src tests scripts
 
+# Common deterministic/core authority checks for every Mac package.
 "$VENV_PY" scripts/check_contract_registry.py
 "$VENV_PY" scripts/check_debt_register.py
 "$VENV_PY" scripts/check_r6_authority.py
@@ -143,7 +148,20 @@ fi
 "$VENV_PY" scripts/check_mac_rehearsal_boundary.py
 "$VENV_PY" scripts/check_mac_safe_console_boundary.py
 "$VENV_PY" scripts/check_mac_safety_rehearsal_boundary.py
-"$VENV_PY" scripts/check_mac_standalone_boundary.py
+
+if [[ "$UNIFIED_ONE_APP" == "YES" ]]; then
+  # The ONE-APP manifest deliberately replaces the generic Control Center
+  # launcher. Certify the unified operator surface plus the inherited real-PAPER
+  # gates instead of requiring the historical scripts/mac_dashboard.py opener.
+  "$VENV_PY" scripts/check_r6_first_canary_unified_dashboard.py
+  "$VENV_PY" scripts/check_r6_first_canary_restart_safe_dashboard.py
+  "$VENV_PY" scripts/check_r6_first_canary_real_paper_delegate.py
+  "$VENV_PY" scripts/check_r6_first_canary_real_paper_dashboard.py
+  "$VENV_PY" scripts/check_r6_first_canary_execution_gate.py
+  "$VENV_PY" -m pytest -q tests/test_r6_first_canary_unified_dashboard.py
+else
+  "$VENV_PY" scripts/check_mac_standalone_boundary.py
+fi
 
 "$VENV_PY" -m pytest -q \
   tests/test_r6_paper_asset.py \
@@ -170,29 +188,20 @@ fi
 
 "$VENV_PY" scripts/mac_safety_rehearsal.py >/dev/null
 "$VENV_PY" scripts/mac_safety_rehearsal.py --kill-switch >/dev/null
-"$VENV_PY" scripts/mac_doctor.py
+if [[ "$UNIFIED_ONE_APP" != "YES" ]]; then
+  "$VENV_PY" scripts/mac_doctor.py
+fi
 
 cat <<EOF
 
 MAC BOOTSTRAP: PASS
 standalone_mode=${STANDALONE_MODE}
+unified_one_app=${UNIFIED_ONE_APP}
 Recommended single safe entry point:
   bash scripts/mac_start.sh
-Try the real Capital Safety Kernel locally:
-  bash scripts/mac_start.sh safety-rehearsal
-  bash scripts/mac_start.sh safety-rehearsal --kill-switch
-Create the first private workspace outside the repository:
-  bash scripts/mac_start.sh init-workspace \"\$HOME/AUTO-TRADE-R6/workspace-001\"
-Repeatable offline rehearsal after this first installation:
-  bash scripts/mac_start.sh rehearsal
-Safe diagnostics:
-  bash scripts/mac_start.sh doctor
-  bash scripts/mac_start.sh readiness \"\$HOME/AUTO-TRADE-R6/workspace-001\"
 No Alpaca credential was read by this bootstrap.
 No broker endpoint was called by this bootstrap.
 No PAPER order was submitted.
 This bootstrap ran with R6_EXTERNAL_PAPER_WRITE=DISABLED.
 LIVE trading remains BLOCKED.
-Read next:
-  docs/MAC_PAPER_RUNBOOK.md
 EOF
