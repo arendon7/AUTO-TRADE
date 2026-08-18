@@ -89,6 +89,14 @@ class FirstCanaryAttemptWorkspace:
         return self.attempt_root / "execution_result.json"
 
     @property
+    def reconciliation_failure_path(self) -> Path:
+        return self.attempt_root / "reconciliation_failure.json"
+
+    @property
+    def reconciliation_pending_path(self) -> Path:
+        return self.attempt_root / "reconciliation_pending.json"
+
+    @property
     def reconciliation_path(self) -> Path:
         return self.attempt_root / "reconciliation.json"
 
@@ -141,6 +149,8 @@ class FirstCanaryAttemptWorkspace:
         for path in (
             self.execution_started_path,
             self.execution_result_path,
+            self.reconciliation_failure_path,
+            self.reconciliation_pending_path,
             self.reconciliation_path,
         ):
             if path.exists():
