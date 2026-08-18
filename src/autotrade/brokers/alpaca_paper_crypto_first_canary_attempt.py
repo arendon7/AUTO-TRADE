@@ -100,6 +100,10 @@ class FirstCanaryAttemptWorkspace:
     def reconciliation_path(self) -> Path:
         return self.attempt_root / "reconciliation.json"
 
+    @property
+    def recovery_resolution_path(self) -> Path:
+        return self.attempt_root / "recovery_resolution.json"
+
     def write_once(self, *, path: Path, document: Mapping[str, object]) -> Path:
         self._require_child(path)
         if path.exists():
@@ -152,6 +156,7 @@ class FirstCanaryAttemptWorkspace:
             self.reconciliation_failure_path,
             self.reconciliation_pending_path,
             self.reconciliation_path,
+            self.recovery_resolution_path,
         ):
             if path.exists():
                 raise CryptoFirstCanaryAttemptConflict(
