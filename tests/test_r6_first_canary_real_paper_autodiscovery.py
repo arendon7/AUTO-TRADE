@@ -5,6 +5,8 @@ import json
 from pathlib import Path
 import runpy
 
+import pytest
+
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts/mac_first_canary_real_paper_dashboard.py"
@@ -82,6 +84,36 @@ def test_discovery_never_guesses_when_multiple_attempts_are_ready(tmp_path, monk
     assert result["attempt_id"] is None
     assert result["ready_count"] == 2
     assert result["auto_selected"] is False
+
+
+def test_execute_boundary_rejects_manual_id_when_discovery_is_ambiguous(tmp_path, monkeypatch) -> None:
+    namespace = _module(monkeypatch)
+    globals_ = namespace["_run_execute"].__globals__
+    globals_["_workspace_value"] = lambda raw: tmp_path
+    globals_["_attempt_id"] = lambda raw: ATTEMPT_A
+    globals_["_discover_ready_attempt"] = lambda *, workspace: {
+        "selection_status": "AMBIGUOUS_MULTIPLE_READY",
+        "attempt_id": None,
+        "ready_count": 2,
+        "expired_count": 0,
+        "invalid_count": 0,
+        "auto_selected": False,
+    }
+    globals_["_credentials"] = lambda payload: pytest.fail(
+        "credentials must not be read when attempt selection is ambiguous"
+    )
+
+    with pytest.raises(
+        namespace["FirstCanaryRealPaperDashboardError"],
+        match="requires exactly one fresh approved unstarted attempt",
+    ):
+        namespace["_run_execute"](
+            {
+                "workspace": str(tmp_path),
+                "attempt_id": ATTEMPT_A,
+                "confirmation": "synthetic-exact-challenge",
+            }
+        )
 
 
 def test_discovery_excludes_expired_package_or_approval(tmp_path, monkeypatch) -> None:
