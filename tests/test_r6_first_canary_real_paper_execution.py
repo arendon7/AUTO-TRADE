@@ -74,6 +74,24 @@ def _persist_restart_safe(session) -> dict[str, object]:
     return document
 
 
+def _persist_account_anchor(session) -> None:
+    document = {
+        "schema_version": 1,
+        "status": "PAPER_ACCOUNT_VERIFIED",
+        "environment": "PAPER",
+        "account_id": session.account.account_id,
+        "account_reference": session.account.account_reference,
+        "credential_reference": session.account.credential_reference,
+        "credentials_persisted": False,
+        "secret_persisted": False,
+        "live_trading": "BLOCKED",
+    }
+    session.workspace.account_attestation_path.write_text(
+        json.dumps(document, sort_keys=True, separators=(",", ":")),
+        encoding="utf-8",
+    )
+
+
 def _credentials() -> AlpacaPaperCredentials:
     return AlpacaPaperCredentials(key_id=KEY_ID, secret_key=SECRET)
 
@@ -239,6 +257,7 @@ def test_restart_safe_loader_rejects_different_effective_paper_key(tmp_path, mon
 
 def test_collect_fresh_final_evidence_uses_only_injected_get_gateways(tmp_path, monkeypatch) -> None:
     _, session, inputs = _prepare_session(tmp_path, monkeypatch)
+    _persist_account_anchor(session)
     final = _final(inputs, at=NOW + timedelta(seconds=4))
     account = _AccountGateway(final.account)
     asset = _AssetGateway(final.asset)
@@ -265,7 +284,7 @@ def test_collect_fresh_final_evidence_uses_only_injected_get_gateways(tmp_path, 
 
 def test_collect_fresh_final_evidence_requires_verified_account_anchor(tmp_path, monkeypatch) -> None:
     _, session, _ = _prepare_session(tmp_path, monkeypatch)
-    session.workspace.account_attestation_path.unlink()
+    assert session.workspace.account_attestation_path.exists() is False
     with pytest.raises(FirstCanaryRealPaperExecutionBlocked, match="verified PAPER account is missing"):
         collect_fresh_final_evidence(
             workspace_path=session.workspace.root,
@@ -295,6 +314,7 @@ def test_collect_fresh_final_evidence_rejects_unreadable_account_anchor(tmp_path
 
 def test_collect_fresh_final_evidence_rejects_non_paper_account_anchor(tmp_path, monkeypatch) -> None:
     _, session, _ = _prepare_session(tmp_path, monkeypatch)
+    _persist_account_anchor(session)
     path = session.workspace.account_attestation_path
     payload = json.loads(path.read_text(encoding="utf-8"))
     payload["environment"] = "LIVE"
@@ -313,6 +333,7 @@ def test_collect_fresh_final_evidence_rejects_non_paper_account_anchor(tmp_path,
 
 def test_collect_fresh_final_evidence_rejects_credential_persistence_anchor(tmp_path, monkeypatch) -> None:
     _, session, _ = _prepare_session(tmp_path, monkeypatch)
+    _persist_account_anchor(session)
     path = session.workspace.account_attestation_path
     payload = json.loads(path.read_text(encoding="utf-8"))
     payload["credentials_persisted"] = True
