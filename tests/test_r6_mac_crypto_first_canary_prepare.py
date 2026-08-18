@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import timedelta
 from decimal import Decimal
 from pathlib import Path
@@ -28,18 +29,27 @@ def _credentials(account):
     return SimpleNamespace(credential_reference=account.credential_reference)
 
 
+def _executable_asset(asset):
+    return replace(
+        asset,
+        min_order_size=Decimal("0.0001"),
+        min_trade_increment=Decimal("0.0001"),
+    )
+
+
 def test_first_canary_prepare_persists_new_non_executable_attempt(tmp_path, monkeypatch) -> None:
     monkeypatch.delenv("R6_EXTERNAL_PAPER_WRITE", raising=False)
     namespace = _module()
     workspace = tmp_path / "workspace"
     ctx = _setup(workspace)
+    asset = _executable_asset(ctx.fresh_asset)
 
     session = namespace["prepare_from_evidence"](
         workspace_path=workspace,
         attempt_id=ATTEMPT_ID,
         credentials=_credentials(ctx.fresh_account),
         account=ctx.fresh_account,
-        asset=ctx.fresh_asset,
+        asset=asset,
         flat_account=ctx.fresh_flat,
         market_attestation=ctx.fresh_market,
         now=NOW + timedelta(seconds=4),
@@ -73,6 +83,7 @@ def test_first_canary_prepare_persists_new_non_executable_attempt(tmp_path, monk
     )
     assert attempt.preparation_path.is_file()
     assert attempt.approval_receipt_path.exists() is False
+    assert attempt.execution_started_path.exists() is False
     assert attempt.execution_result_path.exists() is False
     assert attempt.reconciliation_path.exists() is False
     assert attempt.read(path=attempt.preparation_path) == result
@@ -97,12 +108,13 @@ def test_first_canary_prepare_rejects_replay_of_same_attempt_identity(tmp_path, 
     namespace = _module()
     workspace = tmp_path / "workspace"
     ctx = _setup(workspace)
+    asset = _executable_asset(ctx.fresh_asset)
     kwargs = dict(
         workspace_path=workspace,
         attempt_id=ATTEMPT_ID,
         credentials=_credentials(ctx.fresh_account),
         account=ctx.fresh_account,
-        asset=ctx.fresh_asset,
+        asset=asset,
         flat_account=ctx.fresh_flat,
         market_attestation=ctx.fresh_market,
         now=NOW + timedelta(seconds=4),
