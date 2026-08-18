@@ -19,5 +19,5 @@ def test_crypto_operator_decision_boundary_passes_repository() -> None:
     assert "crypto operator decision boundary: PASS" in result.stdout
     assert "HUMAN_OPERATOR only" in result.stdout
     assert "tamper-evident ISSUED->CONSUMED" in result.stdout
-    assert "canonical crypto UAT issuer only and unconsumed" in result.stdout
-    assert "no credentials/network/writer/POST authority" in result.stdout
+    assert "isolated UAT issuer plus exact first-canary execution issuer" in result.stdout
+    assert "approval issuers have no credentials/network/writer/POST/consumption authority" in result.stdout
