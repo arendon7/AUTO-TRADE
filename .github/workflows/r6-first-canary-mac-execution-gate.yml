@@ -19,7 +19,7 @@ jobs:
           python-version: '3.12'
       - name: Install project
         run: python -m pip install -e '.[dev]'
-      - name: Compile first-canary execution and recovery surface
+      - name: Compile first-canary execution recovery and Mac surface
         run: >-
           python -m compileall -q
           src/autotrade/brokers/alpaca_paper_crypto_first_canary_attempt.py
@@ -29,18 +29,23 @@ jobs:
           scripts/mac_crypto_first_canary_prepare.py
           scripts/mac_crypto_first_canary_approval.py
           scripts/mac_crypto_first_canary_reconcile.py
+          scripts/mac_first_canary_dashboard.py
           scripts/check_r6_first_canary_execution_gate.py
           scripts/check_r6_first_canary_recovery_boundary.py
+          scripts/check_r6_first_canary_mac_dashboard.py
           tests/test_r6_mac_crypto_first_canary_prepare.py
           tests/test_r6_mac_crypto_first_canary_approval.py
           tests/test_r6_first_canary_execution_gate.py
           tests/test_r6_first_canary_execution_gate_failures.py
           tests/test_r6_first_canary_cold_start_unknown_recovery.py
           tests/test_r6_first_canary_recovery.py
+          tests/test_r6_first_canary_mac_dashboard_boundary.py
       - name: Permanent first-canary execution boundary
         run: python scripts/check_r6_first_canary_execution_gate.py
       - name: Permanent GET-only first-canary recovery boundary
         run: python scripts/check_r6_first_canary_recovery_boundary.py
+      - name: Permanent no-POST first-canary Mac dashboard boundary
+        run: python scripts/check_r6_first_canary_mac_dashboard.py
       - name: Re-prove guarded crypto writer boundary
         run: python scripts/check_r6_crypto_execution_simulation_boundary.py
       - name: Re-prove human crypto approval boundary
@@ -49,7 +54,7 @@ jobs:
         run: python scripts/check_r6_operator_decision_boundary.py
       - name: Re-prove permanent LIVE deny
         run: python scripts/check_r6_live_deny_boundary.py
-      - name: First-canary preparation approval execution and recovery tests
+      - name: First-canary preparation approval execution recovery and Mac tests
         run: >-
           pytest -q
           tests/test_r6_mac_crypto_first_canary_prepare.py
@@ -58,6 +63,7 @@ jobs:
           tests/test_r6_first_canary_execution_gate_failures.py
           tests/test_r6_first_canary_cold_start_unknown_recovery.py
           tests/test_r6_first_canary_recovery.py
+          tests/test_r6_first_canary_mac_dashboard_boundary.py
       - name: Re-prove cold-start backend authority
         run: python scripts/check_r6_crypto_cold_start_execution_boundary.py
       - name: Re-prove global R6 PAPER authority
