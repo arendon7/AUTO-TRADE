@@ -31,17 +31,14 @@ class UnifiedCanaryError(RuntimeError):
 
 
 class UnifiedCanarySession:
-    """Ephemeral operator session.
-
-    Credentials live only in this Python process. Attempt identity and authority
-    continue to live in the existing durable first-canary stores. The session
-    intentionally contains no broker transport or writer implementation.
-    """
+    """Ephemeral operator session around the already-certified authority path."""
 
     def __init__(self) -> None:
         self.workspace: Path = safe.DEFAULT_WORKSPACE
         self.credentials: tuple[str, str] | None = None
         self.active_attempt_id: str | None = None
+        self.review_token: str | None = None
+        self.execute_token: str | None = None
         self._action_lock = threading.Lock()
 
     def connect(self, payload: dict[str, object]) -> dict[str, object]:
@@ -56,7 +53,6 @@ class UnifiedCanarySession:
             "workspace": str(workspace),
             "credentials_persisted": False,
             "active_attempt_resumed": resumed,
-            "active_attempt_id": self.active_attempt_id,
             "live_trading": "BLOCKED",
         }
 
@@ -79,6 +75,8 @@ class UnifiedCanarySession:
             if result.get("ok") is not True:
                 raise UnifiedCanaryError(str(result.get("error") or "PAPER preparation failed"))
             self.active_attempt_id = attempt_id
+            self.review_token = secrets.token_urlsafe(24)
+            self.execute_token = None
             status = safe._attempt_status(workspace=self.workspace, attempt_id=attempt_id)
             preparation = status.get("preparation")
             if not isinstance(preparation, dict):
@@ -89,7 +87,7 @@ class UnifiedCanarySession:
                 "ok": True,
                 "phase": "REVIEW_READY",
                 "summary": _summary(preparation),
-                "attempt_id": attempt_id,
+                "review_token": self.review_token,
                 "credentials_persisted": False,
                 "broker_write_performed": False,
                 "live_trading": "BLOCKED",
@@ -98,6 +96,9 @@ class UnifiedCanarySession:
     def approve(self, payload: dict[str, object]) -> dict[str, object]:
         if payload.get("review_confirmed") is not True:
             raise UnifiedCanaryError("review confirmation is required")
+        supplied_token = str(payload.get("review_token") or "")
+        if not self.review_token or not secrets.compare_digest(supplied_token, self.review_token):
+            raise UnifiedCanaryError("this review screen is stale; prepare/review the current order again")
         with self._exclusive_action("approve"):
             attempt_id = self._require_active_attempt()
             status = safe._attempt_status(workspace=self.workspace, attempt_id=attempt_id)
@@ -130,10 +131,13 @@ class UnifiedCanarySession:
                 raise UnifiedCanaryError(
                     "approval completed but the exact restart-safe attempt is not ready for final PAPER confirmation"
                 )
+            self.review_token = None
+            self.execute_token = secrets.token_urlsafe(24)
             return {
                 "ok": True,
                 "phase": "FINAL_CONFIRMATION_READY",
                 "summary": _summary_from_real(ready),
+                "execute_token": self.execute_token,
                 "credentials_persisted": False,
                 "broker_write_performed": False,
                 "live_trading": "BLOCKED",
@@ -142,9 +146,13 @@ class UnifiedCanarySession:
     def execute(self, payload: dict[str, object]) -> dict[str, object]:
         if payload.get("execute_confirmed") is not True:
             raise UnifiedCanaryError("explicit final PAPER execution confirmation is required")
+        supplied_token = str(payload.get("execute_token") or "")
+        if not self.execute_token or not secrets.compare_digest(supplied_token, self.execute_token):
+            raise UnifiedCanaryError("this final confirmation is stale or already consumed")
         with self._exclusive_action("execute"):
             credentials = self._require_credentials()
             attempt_id = self._require_active_attempt()
+            self.execute_token = None
 
             discovery = real._discover_ready_attempt(workspace=self.workspace)
             if (
@@ -233,6 +241,8 @@ class UnifiedCanarySession:
         if self._action_lock.locked():
             raise UnifiedCanaryError("an operation is in progress")
         self.active_attempt_id = None
+        self.review_token = None
+        self.execute_token = None
         return {
             "ok": True,
             "connected": self.credentials is not None,
@@ -250,6 +260,8 @@ class UnifiedCanarySession:
             value = discovery.get("attempt_id")
             if isinstance(value, str):
                 self.active_attempt_id = value
+                self.review_token = None
+                self.execute_token = secrets.token_urlsafe(24)
                 return True
         return False
 
@@ -358,13 +370,7 @@ def _sanitize_execution(result: dict[str, object]) -> dict[str, object]:
         safe_parsed = {
             key: value
             for key, value in parsed.items()
-            if key
-            not in {
-                "paper_key",
-                "paper_secret",
-                "credentials",
-                "secret",
-            }
+            if key not in {"paper_key", "paper_secret", "credentials", "secret"}
         }
     return {
         "ok": result.get("ok"),
