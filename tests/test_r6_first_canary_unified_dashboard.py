@@ -10,6 +10,8 @@ ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts/mac_first_canary_unified_dashboard.py"
 CHECKER = ROOT / "scripts/check_r6_first_canary_unified_dashboard.py"
 ATTEMPT_ID = "first-canary-0123456789abcdef0123456789abcdef"
+REVIEW_TOKEN = "review-token-001"
+EXECUTE_TOKEN = "execute-token-001"
 
 
 def _module(monkeypatch):
@@ -34,12 +36,15 @@ def test_connect_keeps_credentials_only_in_ephemeral_session(tmp_path, monkeypat
     assert session.workspace == workspace
     assert session.credentials == ("paper-key", "paper-secret")
     assert session.active_attempt_id is None
+    assert session.review_token is None
+    assert session.execute_token is None
 
 
 def test_prepare_generates_internal_attempt_and_reuses_restart_safe_child(tmp_path, monkeypatch) -> None:
     namespace = _module(monkeypatch)
     session, workspace = _session(namespace, tmp_path, monkeypatch)
     monkeypatch.setattr(namespace["secrets"], "token_hex", lambda size: "0" * 32)
+    monkeypatch.setattr(namespace["secrets"], "token_urlsafe", lambda size: REVIEW_TOKEN)
     calls = []
 
     def child(command, *, credentials, timeout, **kwargs):
@@ -64,18 +69,24 @@ def test_prepare_generates_internal_attempt_and_reuses_restart_safe_child(tmp_pa
     result = session.prepare()
     assert result["phase"] == "REVIEW_READY"
     assert result["summary"]["notional_usd"] == "2.01"
+    assert result["review_token"] == REVIEW_TOKEN
+    assert session.review_token == REVIEW_TOKEN
+    assert session.execute_token is None
     assert session.active_attempt_id == "first-canary-" + "0" * 32
     assert calls[0][0][0] == "scripts/mac_crypto_first_canary_prepare_restart_safe.py"
     assert calls[0][1] == ("paper-key", "paper-secret")
     assert calls[0][2] == 75
 
 
-def test_approval_requires_explicit_review_click_but_hides_hash_copying(tmp_path, monkeypatch) -> None:
+def test_approval_requires_explicit_review_click_and_exact_invisible_review_binding(tmp_path, monkeypatch) -> None:
     namespace = _module(monkeypatch)
     session, workspace = _session(namespace, tmp_path, monkeypatch)
     session.active_attempt_id = ATTEMPT_ID
+    session.review_token = REVIEW_TOKEN
     with pytest.raises(namespace["UnifiedCanaryError"], match="review confirmation"):
-        session.approve({"review_confirmed": False})
+        session.approve({"review_confirmed": False, "review_token": REVIEW_TOKEN})
+    with pytest.raises(namespace["UnifiedCanaryError"], match="stale"):
+        session.approve({"review_confirmed": True, "review_token": "wrong"})
 
     captured = {}
     monkeypatch.setattr(
@@ -101,26 +112,30 @@ def test_approval_requires_explicit_review_click_but_hides_hash_copying(tmp_path
             "preparation": {"symbol": "BTC/USD", "notional": "2.01", "quantity": "0.00003", "limit_price": "67000"},
         },
     )
-    result = session.approve({"review_confirmed": True})
+    monkeypatch.setattr(namespace["secrets"], "token_urlsafe", lambda size: EXECUTE_TOKEN)
+    result = session.approve({"review_confirmed": True, "review_token": REVIEW_TOKEN})
     assert result["phase"] == "FINAL_CONFIRMATION_READY"
+    assert result["execute_token"] == EXECUTE_TOKEN
+    assert session.review_token is None
+    assert session.execute_token == EXECUTE_TOKEN
     assert captured["confirmation"] == "INTERNAL-EXACT-APPROVAL-CHALLENGE"
     assert captured["operator_id"] == "operator-001"
 
 
-def test_execute_requires_explicit_final_click_and_exact_unique_attempt(tmp_path, monkeypatch) -> None:
+def test_execute_requires_explicit_final_click_exact_token_and_unique_attempt(tmp_path, monkeypatch) -> None:
     namespace = _module(monkeypatch)
     session, workspace = _session(namespace, tmp_path, monkeypatch)
     session.active_attempt_id = ATTEMPT_ID
+    session.execute_token = EXECUTE_TOKEN
     with pytest.raises(namespace["UnifiedCanaryError"], match="final PAPER execution confirmation"):
-        session.execute({"execute_confirmed": False})
+        session.execute({"execute_confirmed": False, "execute_token": EXECUTE_TOKEN})
+    with pytest.raises(namespace["UnifiedCanaryError"], match="stale or already consumed"):
+        session.execute({"execute_confirmed": True, "execute_token": "wrong"})
 
     monkeypatch.setattr(
         namespace["real"],
         "_discover_ready_attempt",
-        lambda *, workspace: {
-            "selection_status": "EXACT_ONE_READY",
-            "attempt_id": ATTEMPT_ID,
-        },
+        lambda *, workspace: {"selection_status": "EXACT_ONE_READY", "attempt_id": ATTEMPT_ID},
     )
     monkeypatch.setattr(
         namespace["real"],
@@ -139,40 +154,44 @@ def test_execute_requires_explicit_final_click_and_exact_unique_attempt(tmp_path
 
     monkeypatch.setattr(namespace["real"], "_run_execute", run_execute)
     monkeypatch.setattr(session, "_auto_recover_if_needed", lambda status: None)
-    result = session.execute({"execute_confirmed": True})
+    result = session.execute({"execute_confirmed": True, "execute_token": EXECUTE_TOKEN})
     assert captured["attempt_id"] == ATTEMPT_ID
     assert captured["confirmation"] == "INTERNAL-EXACT-POST-CHALLENGE"
     assert captured["paper_key"] == "paper-key"
     assert captured["paper_secret"] == "paper-secret"
+    assert session.execute_token is None
     assert result["retry_post"] is False
     assert result["live_trading"] == "BLOCKED"
+
+    with pytest.raises(namespace["UnifiedCanaryError"], match="stale or already consumed"):
+        session.execute({"execute_confirmed": True, "execute_token": EXECUTE_TOKEN})
 
 
 def test_execute_never_uses_manual_attempt_when_unique_discovery_disagrees(tmp_path, monkeypatch) -> None:
     namespace = _module(monkeypatch)
     session, workspace = _session(namespace, tmp_path, monkeypatch)
     session.active_attempt_id = ATTEMPT_ID
+    session.execute_token = EXECUTE_TOKEN
     monkeypatch.setattr(
         namespace["real"],
         "_discover_ready_attempt",
-        lambda *, workspace: {
-            "selection_status": "AMBIGUOUS_MULTIPLE_READY",
-            "attempt_id": None,
-        },
+        lambda *, workspace: {"selection_status": "AMBIGUOUS_MULTIPLE_READY", "attempt_id": None},
     )
     monkeypatch.setattr(namespace["real"], "_run_execute", lambda payload: pytest.fail("writer path must not be reached"))
     with pytest.raises(namespace["UnifiedCanaryError"], match="unique fresh executable"):
-        session.execute({"execute_confirmed": True})
+        session.execute({"execute_confirmed": True, "execute_token": EXECUTE_TOKEN})
+    assert session.execute_token is None
 
 
 def test_action_lock_blocks_duplicate_click_before_any_second_authority(tmp_path, monkeypatch) -> None:
     namespace = _module(monkeypatch)
     session, workspace = _session(namespace, tmp_path, monkeypatch)
     session.active_attempt_id = ATTEMPT_ID
+    session.execute_token = EXECUTE_TOKEN
     assert session._action_lock.acquire(blocking=False)
     try:
         with pytest.raises(namespace["UnifiedCanaryError"], match="already running"):
-            session.execute({"execute_confirmed": True})
+            session.execute({"execute_confirmed": True, "execute_token": EXECUTE_TOKEN})
     finally:
         session._action_lock.release()
 
@@ -181,6 +200,7 @@ def test_ambiguous_execution_exception_transitions_to_get_only_recovery(tmp_path
     namespace = _module(monkeypatch)
     session, workspace = _session(namespace, tmp_path, monkeypatch)
     session.active_attempt_id = ATTEMPT_ID
+    session.execute_token = EXECUTE_TOKEN
     monkeypatch.setattr(
         namespace["real"],
         "_discover_ready_attempt",
@@ -197,11 +217,26 @@ def test_ambiguous_execution_exception_transitions_to_get_only_recovery(tmp_path
     )
     monkeypatch.setattr(namespace["real"], "_run_execute", lambda payload: (_ for _ in ()).throw(TimeoutError("synthetic timeout")))
     monkeypatch.setattr(session, "_auto_recover_if_needed", lambda status: {"ok": True, "broker_write_performed": False, "retry_post": False})
-    result = session.execute({"execute_confirmed": True})
+    result = session.execute({"execute_confirmed": True, "execute_token": EXECUTE_TOKEN})
     assert result["ok"] is False
     assert result["phase"] == "RECOVERY_ONLY"
     assert result["retry_post"] is False
     assert result["recovery"]["broker_write_performed"] is False
+    assert session.execute_token is None
+
+
+def test_reset_clears_internal_click_bindings_but_can_keep_ephemeral_credentials(tmp_path, monkeypatch) -> None:
+    namespace = _module(monkeypatch)
+    session, workspace = _session(namespace, tmp_path, monkeypatch)
+    session.active_attempt_id = ATTEMPT_ID
+    session.review_token = REVIEW_TOKEN
+    session.execute_token = EXECUTE_TOKEN
+    result = session.reset()
+    assert result["connected"] is True
+    assert session.active_attempt_id is None
+    assert session.review_token is None
+    assert session.execute_token is None
+    assert session.credentials == ("paper-key", "paper-secret")
 
 
 def test_unified_ui_contains_no_attempt_or_challenge_input_plumbing() -> None:
@@ -212,6 +247,8 @@ def test_unified_ui_contains_no_attempt_or_challenge_input_plumbing() -> None:
     assert "Attempt ID" not in html
     assert "Aprobar preparación" in html
     assert "EJECUTAR UNA VEZ EN PAPER" in html
+    assert "review_token:token" in html
+    assert "execute_token:token" in html
 
 
 def test_unified_static_boundary_checker_passes_repository() -> None:
