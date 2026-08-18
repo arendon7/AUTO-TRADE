@@ -7,6 +7,7 @@ from types import SimpleNamespace
 import pytest
 
 import autotrade.brokers.alpaca_paper_crypto_cold_start_execution_bridge as bridge_mod
+from autotrade.cold_start_oms import ColdStartExternalSubmissionConflict
 from autotrade.brokers.alpaca_paper_crypto_cold_start_execution_attempt import (
     SQLiteCryptoColdStartExecutionAttemptRegistry,
 )
@@ -19,7 +20,6 @@ from autotrade.brokers.alpaca_paper_crypto_cold_start_execution_bridge import (
 )
 from autotrade.brokers.alpaca_paper_crypto_cold_start_pre_io import (
     ColdStartFinalGuardedCryptoEntryTransport,
-    CryptoColdStartPreIoExecutionContext,
     CryptoColdStartPreIoInterlockError,
     _ephemeral_credentials,
     _request_payload,
@@ -28,7 +28,6 @@ from autotrade.brokers.alpaca_paper_crypto_cold_start_pre_io_authority import (
     CryptoColdStartPreIoAuthority,
     CryptoColdStartPreIoAuthorityBlocked,
 )
-from autotrade.brokers.alpaca_paper_gateway import AlpacaPaperCredentials
 from autotrade.persistence import SQLiteRuntime
 
 from test_r6_paper_crypto_canary_coordinator import NOW
@@ -68,6 +67,25 @@ def _checkpoint_proxy(checkpoint, **changes):
     }
     values.update(changes)
     return SimpleNamespace(**values)
+
+
+def _preio_values(ctx):
+    return {
+        "package": ctx.context.package,
+        "operator_decision": ctx.context.operator_decision,
+        "operator_registry": ctx.context.operator_registry,
+        "broker_order": ctx.context.broker_order,
+        "lifecycle": ctx.context.lifecycle,
+        "prepared_account": ctx.context.prepared_account,
+        "prepared_asset": ctx.context.prepared_asset,
+        "prepared_product_profile": ctx.context.prepared_product_profile,
+        "fresh_account": ctx.context.fresh_account,
+        "fresh_asset": ctx.context.fresh_asset,
+        "fresh_product_profile": ctx.context.fresh_product_profile,
+        "fresh_market": ctx.context.fresh_market,
+        "fresh_flat_account": ctx.context.fresh_flat_account,
+        "now": NOW + timedelta(seconds=4, milliseconds=450),
+    }
 
 
 def test_bridge_constructor_rejects_non_authoritative_dependencies(tmp_path) -> None:
@@ -500,27 +518,12 @@ def test_preio_authority_blocks_missing_checkpoint_and_handoff(tmp_path, monkeyp
         checkpoint_registry=empty,
         oms=ctx.authority._oms,
     )
-    values = vars(SimpleNamespace(**{
-        "package": ctx.context.package,
-        "operator_decision": ctx.context.operator_decision,
-        "operator_registry": ctx.context.operator_registry,
-        "broker_order": ctx.context.broker_order,
-        "lifecycle": ctx.context.lifecycle,
-        "prepared_account": ctx.context.prepared_account,
-        "prepared_asset": ctx.context.prepared_asset,
-        "prepared_product_profile": ctx.context.prepared_product_profile,
-        "fresh_account": ctx.context.fresh_account,
-        "fresh_asset": ctx.context.fresh_asset,
-        "fresh_product_profile": ctx.context.fresh_product_profile,
-        "fresh_market": ctx.context.fresh_market,
-        "fresh_flat_account": ctx.context.fresh_flat_account,
-        "now": NOW + timedelta(seconds=4, milliseconds=450),
-    }))
+    values = _preio_values(ctx)
     with pytest.raises(CryptoColdStartPreIoAuthorityBlocked, match="checkpoint is unavailable"):
         missing_checkpoint.authorize(**values)
 
     def missing_handoff(**_kwargs):
-        raise bridge_mod.ColdStartExternalSubmissionConflict("synthetic missing handoff")
+        raise ColdStartExternalSubmissionConflict("synthetic missing handoff")
 
     monkeypatch.setattr(
         ctx.authority._oms,
@@ -532,32 +535,18 @@ def test_preio_authority_blocks_missing_checkpoint_and_handoff(tmp_path, monkeyp
 
 
 def test_preio_authority_detects_handoff_and_guard_result_rebinding(tmp_path, monkeypatch) -> None:
-    # Each branch receives a fresh fully staged context so failures are isolated.
     ctx = _preio_setup(tmp_path / "handoff")
-    values = {
-        "package": ctx.context.package,
-        "operator_decision": ctx.context.operator_decision,
-        "operator_registry": ctx.context.operator_registry,
-        "broker_order": ctx.context.broker_order,
-        "lifecycle": ctx.context.lifecycle,
-        "prepared_account": ctx.context.prepared_account,
-        "prepared_asset": ctx.context.prepared_asset,
-        "prepared_product_profile": ctx.context.prepared_product_profile,
-        "fresh_account": ctx.context.fresh_account,
-        "fresh_asset": ctx.context.fresh_asset,
-        "fresh_product_profile": ctx.context.fresh_product_profile,
-        "fresh_market": ctx.context.fresh_market,
-        "fresh_flat_account": ctx.context.fresh_flat_account,
-        "now": NOW + timedelta(seconds=4, milliseconds=450),
-    }
+    values = _preio_values(ctx)
     checkpoint = ctx.checkpoint
     authorization_id = crypto_cold_start_handoff_id(
         package=ctx.package,
         operator_decision=ctx.context.operator_decision,
         checkpoint=checkpoint,
     )
-    original_resolve = ctx.authority._oms.resolve_cold_start_external_submission_handoff
-    actual = original_resolve(order_id=ctx.package.order_id, authorization_id=authorization_id)
+    actual = ctx.authority._oms.resolve_cold_start_external_submission_handoff(
+        order_id=ctx.package.order_id,
+        authorization_id=authorization_id,
+    )
     handoff_values = {
         "authorization_id": actual.authorization_id,
         "package_hash": actual.package_hash,
@@ -577,52 +566,31 @@ def test_preio_authority_detects_handoff_and_guard_result_rebinding(tmp_path, mo
     with pytest.raises(CryptoColdStartPreIoAuthorityBlocked, match="does not bind exact checkpoint"):
         ctx.authority.authorize(**values)
 
-    for suffix, result, message in (
-        (
-            "predecessor",
-            SimpleNamespace(
-                previous_attestation_hash="0" * 64,
-                authority_state_fingerprint=checkpoint.authority_state_fingerprint,
-                package_hash=ctx.package.package_hash,
-            ),
-            "predecessor differs",
-        ),
-        (
-            "authority",
-            SimpleNamespace(
-                previous_attestation_hash=checkpoint.pre_consume.attestation_hash,
-                authority_state_fingerprint="0" * 64,
-                package_hash=ctx.package.package_hash,
-            ),
-            "authority fingerprint differs",
-        ),
-        (
-            "package",
-            SimpleNamespace(
-                previous_attestation_hash=checkpoint.pre_consume.attestation_hash,
-                authority_state_fingerprint=checkpoint.authority_state_fingerprint,
-                package_hash="0" * 64,
-            ),
-            "package differs",
-        ),
+    for suffix, mode, message in (
+        ("predecessor", "predecessor", "predecessor differs"),
+        ("authority", "authority", "authority fingerprint differs"),
+        ("package", "package", "package differs"),
     ):
         fresh = _preio_setup(tmp_path / suffix)
-        fresh_values = {
-            "package": fresh.context.package,
-            "operator_decision": fresh.context.operator_decision,
-            "operator_registry": fresh.context.operator_registry,
-            "broker_order": fresh.context.broker_order,
-            "lifecycle": fresh.context.lifecycle,
-            "prepared_account": fresh.context.prepared_account,
-            "prepared_asset": fresh.context.prepared_asset,
-            "prepared_product_profile": fresh.context.prepared_product_profile,
-            "fresh_account": fresh.context.fresh_account,
-            "fresh_asset": fresh.context.fresh_asset,
-            "fresh_product_profile": fresh.context.fresh_product_profile,
-            "fresh_market": fresh.context.fresh_market,
-            "fresh_flat_account": fresh.context.fresh_flat_account,
-            "now": NOW + timedelta(seconds=4, milliseconds=450),
-        }
-        monkeypatch.setattr(fresh.authority._guard, "authorize", lambda **_kwargs: result)
+        fresh_checkpoint = fresh.checkpoint
+        if mode == "predecessor":
+            result = SimpleNamespace(
+                previous_attestation_hash="0" * 64,
+                authority_state_fingerprint=fresh_checkpoint.authority_state_fingerprint,
+                package_hash=fresh.package.package_hash,
+            )
+        elif mode == "authority":
+            result = SimpleNamespace(
+                previous_attestation_hash=fresh_checkpoint.pre_consume.attestation_hash,
+                authority_state_fingerprint="0" * 64,
+                package_hash=fresh.package.package_hash,
+            )
+        else:
+            result = SimpleNamespace(
+                previous_attestation_hash=fresh_checkpoint.pre_consume.attestation_hash,
+                authority_state_fingerprint=fresh_checkpoint.authority_state_fingerprint,
+                package_hash="0" * 64,
+            )
+        monkeypatch.setattr(fresh.authority._guard, "authorize", lambda _result=result, **_kwargs: _result)
         with pytest.raises(CryptoColdStartPreIoAuthorityBlocked, match=message):
-            fresh.authority.authorize(**fresh_values)
+            fresh.authority.authorize(**_preio_values(fresh))
