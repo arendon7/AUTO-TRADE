@@ -50,12 +50,20 @@ def main() -> int:
             '"RESOLVED_NO_MORE_POST"',
             "external_post_challenge(",
             'if not Decimal("1") <= notional <= Decimal("5"):',
+            'def _discover_ready_attempt(*, workspace: Path)',
+            'ATTEMPT_ID_RE.fullmatch(child.name)',
+            '"EXACT_ONE_READY"',
+            '"AMBIGUOUS_MULTIPLE_READY"',
+            '"NO_READY_ATTEMPT"',
+            'package_deadline <= now or approval_deadline <= now',
+            '"automatic_attempt_discovery": "EXACTLY_ONE_FRESH_READY_ONLY"',
             'if confirmation != status.get("external_post_challenge"):',
             '"scripts/mac_crypto_first_canary_execute_real_paper.py"',
             '"--allow-exact-paper-post"',
             'env=_safe_env(credentials)',
             'input=json.dumps({"confirmation": confirmation}',
             '"execution process timed out; POST outcome is treated as ambiguous: never retry POST, use GET-only recovery"',
+            'if parsed.path == "/api/discover":',
             'path not in {"/api/execute", "/api/recover"}',
             'expected_origin = f"http://127.0.0.1:{self.canary_server.server_port}"',
             'self.headers.get("X-CSRF-Token") != self.canary_server.csrf_token',
@@ -100,6 +108,13 @@ def main() -> int:
             "USD 1–5",
             "LIVE BLOCKED",
             "después de consentir o iniciar, nunca vuelvas a presionar ejecutar",
+            "Solo en ese caso lo carga automáticamente.",
+            "Detectar / revisar estado",
+            "async function discover()",
+            "'/api/discover?'",
+            "d.selection_status === 'EXACT_ONE_READY'",
+            "d.selection_status === 'AMBIGUOUS_MULTIPLE_READY'",
+            "Vuelve a PREPARAR y crea/aprueba un intento nuevo.",
             "Segundo consentimiento exacto",
             "EJECUTAR UNA VEZ EN PAPER",
             "RECUPERAR / RECONCILIAR GET-ONLY",
@@ -153,9 +168,10 @@ def main() -> int:
 
     print(
         "first-canary real PAPER Mac surface: PASS — downloaded Finder launcher relocates/reuses exact certified "
-        "installed head; separate execution-only localhost UI; restart-safe preparation + approval required; "
-        "exact second challenge; consent/start => recovery-only; no direct broker stack; launcher carries no "
-        "credentials and keeps generic write disabled; LIVE blocked"
+        "installed head; separate execution-only localhost UI; exactly-one fresh approved attempt auto-discovery; "
+        "ambiguous/expired selection fails closed; restart-safe preparation + approval required; exact second challenge; "
+        "consent/start => recovery-only; no direct broker stack; launcher carries no credentials and keeps generic write "
+        "disabled; LIVE blocked"
     )
     return 0
 
