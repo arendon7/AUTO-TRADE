@@ -5,7 +5,9 @@ import re
 
 ROOT = Path(__file__).resolve().parents[1]
 BINDING = ROOT / "scripts/mac_crypto_cold_start_final_guard_binding.py"
+ENVELOPE = ROOT / "scripts/mac_crypto_cold_start_final_guard_binding_envelope.py"
 DASHBOARD = ROOT / "scripts/mac_dashboard_cold_start_final_guard_binding.py"
+FIXED_DASHBOARD = ROOT / "scripts/mac_dashboard_cold_start_final_guard_binding_fixed.py"
 LAUNCHER = ROOT / "ABRIR_AUTO_TRADE.command"
 
 
@@ -21,9 +23,11 @@ def _text(path: Path) -> str:
 
 def main() -> int:
     binding = _text(BINDING)
+    envelope = _text(ENVELOPE)
     dashboard = _text(DASHBOARD)
+    fixed_dashboard = _text(FIXED_DASHBOARD)
     launcher = _text(LAUNCHER)
-    combined = binding + "\n" + dashboard
+    combined = binding + "\n" + envelope + "\n" + dashboard + "\n" + fixed_dashboard
 
     required = (
         "R6_CRYPTO_PAPER_COLD_START_FINAL_GUARD_BINDING_UAT",
@@ -47,6 +51,9 @@ def main() -> int:
         "qualification_and_binding_packages_are_distinct",
         "human confirmation does not exactly match binding challenge",
         "no replay permitted",
+        "binding preparation envelope differs from persisted canonical material",
+        "binding preparation filename does not match canonical hash",
+        "base.binding.seal_binding = envelope.seal_binding",
     )
     for token in required:
         if token not in combined:
@@ -81,12 +88,17 @@ def main() -> int:
 
     if re.search(r"(?m)^\s*(?:export\s+)?R6_EXTERNAL_PAPER_WRITE\s*=\s*[\"']?ENABLED", combined):
         raise BoundaryError("cold-start binding may not enable R6_EXTERNAL_PAPER_WRITE")
+    if 'SERVER="$ROOT/scripts/mac_dashboard_cold_start_final_guard_binding_fixed.py"' not in launcher:
+        raise BoundaryError("Finder launcher does not prioritize canonicalized cold-start binding dashboard")
     if "mac_dashboard_cold_start_final_guard_binding.py" not in launcher:
-        raise BoundaryError("Finder launcher does not prioritize cold-start Final Guard binding dashboard")
+        raise BoundaryError("Finder launcher lost certified cold-start binding fallback")
     if "mac_dashboard_cold_start_attestation.py" not in launcher:
         raise BoundaryError("Finder launcher lost certified attestation fallback")
 
-    print("R6 crypto cold-start Final Guard binding boundary: PASS")
+    print(
+        "R6 crypto cold-start Final Guard binding boundary: PASS "
+        "(canonical prepare envelope verified against persisted hash-bound material; NO POST/NO CONSUME preserved)"
+    )
     return 0
 
 
