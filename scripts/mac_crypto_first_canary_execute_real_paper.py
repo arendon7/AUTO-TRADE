@@ -8,6 +8,7 @@ from pathlib import Path
 import sys
 
 from autotrade.first_canary_real_paper_execution import (
+    collect_fresh_final_evidence,
     execute_real_paper_first_canary_once,
 )
 from autotrade.brokers.alpaca_paper_gateway import AlpacaPaperCredentials
@@ -72,12 +73,28 @@ def main(argv: list[str] | None = None) -> int:
         )
 
     try:
+        credentials = _credentials()
+        confirmation = _confirmation_from_stdin()
+
+        # Collect the final broker state first using GET-only gateways. Then take
+        # a new wall-clock instant. The certified execution gate compares this
+        # later instant with the evidence timestamps, so GET latency consumes
+        # the freshness TTL rather than being hidden by an earlier timestamp.
+        preflight_at = datetime.now(timezone.utc)
+        final_evidence = collect_fresh_final_evidence(
+            workspace_path=args.workspace,
+            credentials=credentials,
+            now=preflight_at,
+        )
+        execution_at = datetime.now(timezone.utc)
+
         consent, outcome = execute_real_paper_first_canary_once(
             workspace_path=args.workspace,
             attempt_id=str(args.attempt_id),
-            credentials=_credentials(),
-            confirmation=_confirmation_from_stdin(),
-            now=datetime.now(timezone.utc),
+            credentials=credentials,
+            confirmation=confirmation,
+            now=execution_at,
+            final_evidence=final_evidence,
         )
         result = {
             "status": outcome.status,
