@@ -192,7 +192,10 @@ def test_prepared_evidence_constructor_rejects_cross_account_asset() -> None:
 
 def test_prepared_evidence_constructor_rejects_cross_credential_asset() -> None:
     value = _evidence()
-    bad_asset = replace(value.asset, credential_reference="b" * 64)
+    different_reference = (
+        "0" * 64 if value.account.credential_reference != "0" * 64 else "1" * 64
+    )
+    bad_asset = replace(value.asset, credential_reference=different_reference)
     with pytest.raises(FirstCanaryPreparedEvidenceIntegrityError, match="credential provenance"):
         FirstCanaryPreparedEvidence(
             account=value.account,
@@ -251,8 +254,8 @@ def test_prepared_evidence_constructor_rejects_risk_market_drift() -> None:
 @pytest.mark.parametrize(
     ("section", "mutation", "match"),
     [
-        ("account", ("buying_power", "NaN"), "account payload is invalid"),
-        ("asset", ("min_order_size", "NaN"), "asset payload is invalid"),
+        ("account", ("buying_power", "NaN"), "buying_power must be finite"),
+        ("asset", ("min_order_size", "NaN"), "min_order_size must be finite"),
         ("market", ("location", ""), "location is missing or invalid"),
         ("risk_decision", ("status", "NOT_A_STATUS"), "RiskDecision payload is invalid"),
     ],
