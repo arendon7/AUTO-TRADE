@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 import json
 from pathlib import Path
@@ -42,6 +42,7 @@ def _account(
     account_reference: str = ACCOUNT_REFERENCE,
     credential_reference: str | None = None,
     portfolio_value: str = "100000",
+    observed_at: datetime = NOW,
 ) -> AlpacaPaperAccountAttestation:
     return AlpacaPaperAccountAttestation(
         account_id=ACCOUNT_ID,
@@ -52,7 +53,7 @@ def _account(
         buying_power=Decimal("100000"),
         portfolio_value=Decimal(portfolio_value),
         shorting_enabled=False,
-        attested_at=NOW,
+        attested_at=observed_at,
         request_id="req-account-attestation",
         source_host="paper-api.alpaca.markets",
         source_path="/v2/account",
@@ -65,6 +66,7 @@ def _flat(
     positions: int = 0,
     open_orders: int = 0,
     credential_reference: str | None = None,
+    observed_at: datetime = NOW,
 ) -> PaperFlatAccountAttestation:
     return PaperFlatAccountAttestation(
         account_attestation_fingerprint=account.fingerprint,
@@ -75,7 +77,7 @@ def _flat(
         orders_response_hash="6" * 64,
         positions_request_id="req-positions-attestation",
         orders_request_id="req-orders-attestation",
-        attested_at=NOW,
+        attested_at=observed_at,
     )
 
 
@@ -169,7 +171,7 @@ def _preview_result(*, notional: str = "2.0001") -> dict[str, object]:
 
 def _workspace(tmp_path: Path) -> Path:
     root = tmp_path / "workspace"
-    root.mkdir()
+    root.mkdir(parents=True)
     (root / "account_attestation.json").write_text(
         json.dumps(
             {
@@ -284,6 +286,19 @@ def test_attestation_refuses_nonflat_fresh_broker_account(tmp_path) -> None:
     account = _account()
     with pytest.raises(CryptoColdStartQualificationAttestationError, match="not flat"):
         _attest(root, account=account, flat=_flat(account, positions=1))
+
+
+def test_attestation_refuses_stale_freshness_evidence(tmp_path) -> None:
+    root = _workspace(tmp_path)
+    stale_time = NOW - timedelta(seconds=6)
+    stale_account = _account(observed_at=stale_time)
+    with pytest.raises(CryptoColdStartQualificationAttestationError, match="account evidence is stale"):
+        _attest(root, account=stale_account, flat=_flat(stale_account, observed_at=stale_time))
+
+    account = _account()
+    stale_flat = _flat(account, observed_at=stale_time)
+    with pytest.raises(CryptoColdStartQualificationAttestationError, match="flat-account evidence is stale"):
+        _attest(root, account=account, flat=stale_flat)
 
 
 def test_attestation_refuses_account_or_credential_rebinding(tmp_path) -> None:
