@@ -7,6 +7,7 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 MODULE = ROOT / "src/autotrade/first_canary_recovery.py"
+LIFECYCLE = ROOT / "src/autotrade/brokers/alpaca_paper_crypto_lifecycle.py"
 COLD_START_UNKNOWN = (
     ROOT
     / "src/autotrade/brokers/alpaca_paper_crypto_cold_start_unknown_recovery.py"
@@ -61,9 +62,11 @@ def _imports(path: Path) -> set[str]:
 
 
 def main() -> int:
-    for path in (MODULE, COLD_START_UNKNOWN, CLI):
+    for path in (MODULE, LIFECYCLE, COLD_START_UNKNOWN, CLI):
         if not path.is_file():
             fail(f"missing required recovery surface: {path.relative_to(ROOT)}")
+
+    for path in (MODULE, COLD_START_UNKNOWN, CLI):
         imports = _imports(path)
         roots = {module.split(".", 1)[0] for module in imports if module}
         forbidden_roots = roots & DIRECT_NETWORK_ROOTS
@@ -112,6 +115,21 @@ def main() -> int:
     if module.count("gateway.reconcile(") != 1:
         fail("canonical recovery module must contain exactly one reconciliation GET call site")
 
+    lifecycle = LIFECYCLE.read_text(encoding="utf-8")
+    for anchor in (
+        "def recover_entry_unknown_absence(",
+        '"kind": "R6_CRYPTO_COLD_START_UNKNOWN_ORDER_404_RECOVERY"',
+        "CryptoLifecycleStatus.ENTRY_SUBMISSION_UNKNOWN",
+        "state.entry_attempt_count != 1",
+        "binding.entry_client_order_id != client_order_id",
+        "CryptoLifecycleStatus.HALTED_RECONCILIATION_REQUIRED",
+        "CryptoLifecycleStatus.FLAT_RECONCILED",
+        '"retry_authorized": False',
+        "return self._mutate(",
+    ):
+        if anchor not in lifecycle:
+            fail(f"crypto lifecycle missing narrow UNKNOWN recovery transition: {anchor}")
+
     cold = COLD_START_UNKNOWN.read_text(encoding="utf-8")
     for anchor in (
         "class CryptoColdStartUnknownRecoveryCoordinator:",
@@ -121,10 +139,15 @@ def main() -> int:
         "CryptoLifecycleStatus.HALTED_RECONCILIATION_REQUIRED",
         "CryptoLifecycleStatus.FLAT_RECONCILED",
         "flat_account.clean_for_first_canary",
+        "lifecycle.recover_entry_unknown_absence(",
         '"retry_authorized": False',
     ):
         if anchor not in cold:
             fail(f"cold-start UNKNOWN recovery missing anchor: {anchor}")
+    if "._mutate(" in cold:
+        fail(
+            "cold-start UNKNOWN recovery may not call the lifecycle transaction primitive directly"
+        )
 
     cli = CLI.read_text(encoding="utf-8")
     for anchor in (
@@ -157,8 +180,8 @@ def main() -> int:
 
     print(
         "first-canary recovery boundary: PASS — irreversible execution latch before GET truth; "
-        "cold-start UNKNOWN resolves flat or halted with attempt=1; no writer/POST/raw network stack; "
-        "GET-only recovery may repeat while pending and never authorizes POST retry"
+        "lifecycle owns the only recovery transaction; cold-start UNKNOWN resolves flat or halted with attempt=1; "
+        "no writer/POST/raw network stack; GET-only recovery may repeat while pending and never authorizes POST retry"
     )
     return 0
 
