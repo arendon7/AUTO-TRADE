@@ -31,7 +31,7 @@ class _UnavailableReconciler:
         raise TimeoutError("synthetic GET-only reconciliation outage")
 
 
-def test_first_canary_reconciliation_outage_persists_halt_and_never_retries_post(tmp_path, monkeypatch) -> None:
+def test_first_canary_reconciliation_outage_persists_failure_and_never_retries_post(tmp_path, monkeypatch) -> None:
     _, session, inputs = _prepare_session(tmp_path, monkeypatch)
     execute_at = NOW + timedelta(seconds=4, milliseconds=300)
     monkeypatch.setattr(
@@ -54,11 +54,14 @@ def test_first_canary_reconciliation_outage_persists_halt_and_never_retries_post
     assert reconciler.calls == 1
     assert outcome.status == "UNKNOWN_HALTED_NO_RETRY"
     assert outcome.retry_forbidden is True
-    evidence = session.attempt.read(path=session.attempt.reconciliation_path)
-    assert evidence["status"] == "CRYPTO_PAPER_FIRST_CANARY_RECONCILIATION_UNAVAILABLE_HALT_NO_RETRY"
+    assert session.attempt.reconciliation_path.exists() is False
+    assert session.attempt.reconciliation_pending_path.exists() is False
+    evidence = session.attempt.read(path=session.attempt.reconciliation_failure_path)
+    assert evidence["status"] == "CRYPTO_PAPER_FIRST_CANARY_RECONCILIATION_FAILURE_NO_RETRY"
     assert evidence["error_type"] == "TimeoutError"
     assert evidence["retry_post"] is False
     assert evidence["reconciliation_retry_get_only"] is True
+    assert evidence["persisted_final_resolution"] is False
     assert evidence["live_trading"] == "BLOCKED"
 
 
