@@ -8,6 +8,7 @@ ROOT = Path(__file__).resolve().parents[1]
 MODULE = ROOT / "src/autotrade/brokers/alpaca_paper_operator_decision.py"
 ISSUER = ROOT / "scripts/r6_issue_operator_decision.py"
 CRYPTO_UAT_ISSUER = ROOT / "scripts/r6_issue_crypto_operator_decision_uat.py"
+CRYPTO_EXECUTION_ISSUER = ROOT / "scripts/mac_crypto_first_canary_approval.py"
 SRC = ROOT / "src"
 SCRIPTS = ROOT / "scripts"
 
@@ -34,7 +35,7 @@ R6 = ROOT / ".github/workflows/r6-authority.yml"
 
 def main() -> int:
     errors: list[str] = []
-    for path in (MODULE, ISSUER, CRYPTO_UAT_ISSUER):
+    for path in (MODULE, ISSUER, CRYPTO_UAT_ISSUER, CRYPTO_EXECUTION_ISSUER):
         if not path.is_file():
             errors.append(f"required operator-decision surface missing: {path.relative_to(ROOT)}")
             continue
@@ -98,7 +99,49 @@ def main() -> int:
         if source.count("record_operator_approval(") != 1:
             errors.append("canonical crypto UAT issuer must mint authority at exactly one audited call site")
 
-    allowed_callers = {ISSUER.resolve(), CRYPTO_UAT_ISSUER.resolve()}
+    if CRYPTO_EXECUTION_ISSUER.is_file():
+        source = CRYPTO_EXECUTION_ISSUER.read_text(encoding="utf-8")
+        for anchor in (
+            "CryptoOperatorDecisionContext.from_dict",
+            "crypto_operator_confirmation_challenge(context)",
+            "secrets.compare_digest(confirmation, challenge)",
+            "SQLiteCryptoOperatorDecisionRegistry",
+            "registry.record_operator_approval(",
+            'state.status is not CryptoOperatorDecisionStatus.ISSUED',
+            'ATTEMPT_PREFIX = "first-canary-"',
+            'MAX_APPROVAL_TTL = timedelta(seconds=30)',
+            'os.environ.get(WRITE_ENV) == "ENABLED"',
+            '"decision_consumed": False',
+            '"uat_only": False',
+            '"reusable_for_uat": False',
+            '"reusable_for_other_attempt": False',
+            '"execution_authority": "NONE_UNTIL_PRE_CONSUME_OMS_PRE_IO"',
+            '"broker_write_performed": False',
+            '"external_post_authorized": False',
+            '"capital_authority": "NONE"',
+            '"live_trading": "BLOCKED"',
+        ):
+            if anchor not in source:
+                errors.append(f"first-canary crypto execution issuer anchor missing: {anchor}")
+        for forbidden in (
+            ".consume(",
+            "alpaca_paper_writer",
+            "AlpacaPaperCredentials",
+            "FinalGuardedCryptoEntryTransport",
+            "HttpsAlpacaPaperCryptoWriteTransport",
+            "stage_external_submission",
+            "submit_once(",
+        ):
+            if forbidden in source:
+                errors.append(f"first-canary crypto execution issuer contains forbidden execution authority: {forbidden}")
+        if source.count("record_operator_approval(") != 1:
+            errors.append("first-canary crypto execution issuer must mint authority at exactly one audited call site")
+
+    allowed_callers = {
+        ISSUER.resolve(),
+        CRYPTO_UAT_ISSUER.resolve(),
+        CRYPTO_EXECUTION_ISSUER.resolve(),
+    }
     for root in (SRC, SCRIPTS):
         for path in sorted(root.rglob("*.py")):
             if path.resolve() == MODULE.resolve():
@@ -106,7 +149,7 @@ def main() -> int:
             for lineno, call in _named_calls(path, "record_operator_approval"):
                 if path.resolve() not in allowed_callers:
                     errors.append(
-                        f"{path.relative_to(ROOT)}:{lineno}: production operator authority may only be minted by a canonical issuer ({call})"
+                        f"{path.relative_to(ROOT)}:{lineno}: production operator authority may only be minted by an exact audited issuer ({call})"
                     )
 
     if MODULE.is_file():
@@ -138,8 +181,8 @@ def main() -> int:
         return 1
     print(
         "AUTO-TRADE R6 human operator decision boundary: PASS "
-        "(canonical issuer only: interactive equity issuer + exact-challenge crypto UAT issuer; "
-        "no network/OMS/AI authority; package-bound PAPER one-shot)"
+        "(exact audited issuers only: interactive equity + crypto UAT + isolated first-canary crypto execution; "
+        "issuers have no network/OMS/writer authority; package-bound PAPER one-shot)"
     )
     return 0
 

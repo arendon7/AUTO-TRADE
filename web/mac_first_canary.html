@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AUTO-TRADE · Primer Canary PAPER</title>
+<style>
+:root{color-scheme:dark;--bg:#090b10;--panel:#11151d;--panel2:#171c26;--text:#eef2f7;--muted:#9da8b7;--line:#293241;--accent:#6dd6a7;--warn:#f1c75b;--danger:#ff7a7a;--blue:#74b9ff;--radius:16px;font-family:Inter,ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+*{box-sizing:border-box}body{margin:0;background:linear-gradient(180deg,#080a0e,#0d1118 42%,#090b10);color:var(--text);min-height:100vh}.wrap{max-width:1120px;margin:0 auto;padding:28px 20px 60px}.top{display:flex;justify-content:space-between;gap:20px;align-items:flex-start;margin-bottom:22px}.eyebrow{font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--accent);font-weight:800}.title{font-size:30px;line-height:1.08;margin:7px 0 8px;font-weight:780}.subtitle{color:var(--muted);max-width:760px;line-height:1.55}.badges{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}.badge{border:1px solid var(--line);background:#0c1016;border-radius:999px;padding:7px 10px;font-size:12px;font-weight:750;white-space:nowrap}.badge.good{color:var(--accent)}.badge.warn{color:var(--warn)}.badge.danger{color:var(--danger)}.grid{display:grid;grid-template-columns:1.05fr .95fr;gap:18px}.card{background:rgba(17,21,29,.96);border:1px solid var(--line);border-radius:var(--radius);padding:18px;box-shadow:0 16px 40px rgba(0,0,0,.16)}.card h2{font-size:16px;margin:0 0 7px}.card p{margin:0;color:var(--muted);line-height:1.5;font-size:13px}.full{grid-column:1/-1}.formgrid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:16px}.field{display:flex;flex-direction:column;gap:6px}.field.full{grid-column:1/-1}label{font-size:12px;color:var(--muted);font-weight:700}input,textarea{width:100%;border:1px solid #344052;background:#0b0f15;color:var(--text);border-radius:11px;padding:11px 12px;font:inherit;outline:none}input:focus,textarea:focus{border-color:#5d7fa3;box-shadow:0 0 0 3px rgba(116,185,255,.08)}textarea{min-height:90px;resize:vertical}.actions{display:flex;gap:9px;flex-wrap:wrap;margin-top:14px}button{appearance:none;border:1px solid #3c485a;background:#1b2330;color:var(--text);border-radius:11px;padding:10px 13px;font-weight:750;cursor:pointer}button.primary{background:#16382c;border-color:#2d7357;color:#dffff1}button.warning{background:#3a3118;border-color:#766323;color:#fff2bd}button.ghost{background:#0d1118}button:disabled{cursor:not-allowed;opacity:.42}.step{display:flex;gap:12px;align-items:flex-start}.num{width:30px;height:30px;border-radius:50%;display:grid;place-items:center;background:#202938;border:1px solid #354255;font-weight:850;flex:0 0 auto}.step.active .num{background:#173a2e;border-color:#34775d;color:#dfffee}.step.blocked .num{background:#35251e;border-color:#714638;color:#ffd3c8}.statusline{display:flex;gap:9px;align-items:center;margin-top:12px;padding:11px 12px;border-radius:11px;border:1px solid var(--line);background:#0c1118;font-size:13px}.dot{width:9px;height:9px;border-radius:50%;background:#637083}.dot.good{background:var(--accent)}.dot.warn{background:var(--warn)}.dot.danger{background:var(--danger)}.challenge{margin-top:12px;padding:12px;border:1px dashed #49586d;background:#0a0e14;border-radius:11px;word-break:break-all;font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;color:#dce7f5}.summary{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:14px}.metric{background:#0c1118;border:1px solid var(--line);border-radius:11px;padding:11px}.metric .k{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);font-weight:750}.metric .v{font-size:14px;margin-top:5px;font-weight:780;overflow-wrap:anywhere}.callout{padding:13px 14px;border-radius:12px;border:1px solid #6f5a25;background:#302715;color:#fff0b8;font-size:13px;line-height:1.5;margin-top:14px}.callout.red{border-color:#70403f;background:#321d1e;color:#ffd2d2}.output{white-space:pre-wrap;word-break:break-word;background:#090d12;border:1px solid var(--line);border-radius:11px;padding:12px;font:12px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace;color:#bac7d8;max-height:230px;overflow:auto;margin-top:12px}.hidden{display:none!important}.footer{margin-top:20px;color:#7e8998;font-size:12px;line-height:1.5}.spinner{display:inline-block;width:12px;height:12px;border:2px solid #607084;border-top-color:#dce8f7;border-radius:50%;animation:spin .75s linear infinite;margin-right:7px;vertical-align:-1px}@keyframes spin{to{transform:rotate(360deg)}}
+@media(max-width:800px){.grid,.formgrid{grid-template-columns:1fr}.top{flex-direction:column}.badges{justify-content:flex-start}.summary{grid-template-columns:1fr}.full{grid-column:auto}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top">
+    <div>
+      <div class="eyebrow">AUTO-TRADE · Gate aislado</div>
+      <div class="title">Primer Canary BTC/USD · PAPER</div>
+      <div class="subtitle">Flujo separado del Control Center normal. Prepara evidencia fresca, exige una aprobación humana nueva y conserva recuperación GET-only. En esta build, el POST real sigue deliberadamente bloqueado.</div>
+    </div>
+    <div class="badges">
+      <span class="badge good">PAPER</span>
+      <span class="badge warn">máx. USD 5</span>
+      <span class="badge danger">LIVE BLOCKED</span>
+      <span class="badge">POST REAL: OFF</span>
+    </div>
+  </div>
+
+  <div class="grid">
+    <section class="card full">
+      <div class="step active"><div class="num">0</div><div><h2>Intento y credenciales efímeras</h2><p>El identificador se crea antes de cualquier acción para poder recuperar el intento incluso si se pierde una respuesta. El Key/Secret no se guarda en disco ni en localStorage.</p></div></div>
+      <div class="formgrid">
+        <div class="field full"><label>Workspace PAPER</label><input id="workspace" autocomplete="off"></div>
+        <div class="field"><label>Attempt ID</label><input id="attemptId" autocomplete="off" spellcheck="false"></div>
+        <div class="field"><label>Operador</label><input id="operatorId" autocomplete="off" placeholder="operator-001"></div>
+        <div class="field"><label>Alpaca PAPER Key ID</label><input id="paperKey" autocomplete="off" spellcheck="false"></div>
+        <div class="field"><label>Alpaca PAPER Secret</label><input id="paperSecret" type="password" autocomplete="off" spellcheck="false"></div>
+      </div>
+      <div class="actions"><button class="ghost" id="newAttempt">Nuevo intento</button><button class="ghost" id="refreshStatus">Recuperar / actualizar estado</button></div>
+      <div class="statusline"><span class="dot" id="phaseDot"></span><strong id="phase">Cargando…</strong><span id="phaseDetail" style="color:var(--muted)"></span></div>
+    </section>
+
+    <section class="card" id="prepareCard">
+      <div class="step"><div class="num">1</div><div><h2>Preparar</h2><p>Lee cuenta, asset, flatness y mercado PAPER; valida Safety/Portfolio/Health y prepara una orden BTC/USD LIMIT IOC alrededor de USD 2. No ejecuta.</p></div></div>
+      <div class="actions"><button class="primary" id="prepareBtn">1. Preparar canary</button></div>
+      <div id="prepSummary" class="summary hidden"></div>
+      <div id="prepareOutput" class="output hidden"></div>
+    </section>
+
+    <section class="card" id="approveCard">
+      <div class="step"><div class="num">2</div><div><h2>Aprobación humana nueva</h2><p>La aprobación anterior de UAT no sirve. Copia exactamente el challenge de este intento; expira rápidamente y queda ligada al package/attempt.</p></div></div>
+      <div id="challengeWrap" class="hidden">
+        <div class="challenge" id="challenge"></div>
+        <div class="actions"><button class="ghost" id="copyChallenge">Copiar challenge</button></div>
+        <div class="field" style="margin-top:10px"><label>Escribe/pega el challenge exacto para confirmar</label><textarea id="confirmation" spellcheck="false" autocomplete="off"></textarea></div>
+      </div>
+      <div class="actions"><button class="warning" id="approveBtn" disabled>2. Aprobar este intento</button></div>
+      <div id="approveOutput" class="output hidden"></div>
+    </section>
+
+    <section class="card" id="executeCard">
+      <div class="step blocked"><div class="num">3</div><div><h2>Ejecutar una sola vez</h2><p>La arquitectura PRE_CONSUME → OMS → UNKNOWN → PRE_IO → un delegate ya está certificada en simulación. El injector HTTPS PAPER desde esta pantalla todavía no está habilitado.</p></div></div>
+      <div class="callout red"><strong>POST real bloqueado en esta build.</strong><br>Este botón solo se habilitará después de certificar la capa Mac que inyecta el transporte PAPER existente. No se agregará un segundo stack HTTP ni un botón reutilizable.</div>
+      <div class="actions"><button id="executeBtn" disabled>3. Ejecutar una vez · NO DISPONIBLE</button></div>
+    </section>
+
+    <section class="card" id="recoverCard">
+      <div class="step"><div class="num">4</div><div><h2>Reconciliar / recuperar</h2><p>Si un intento ya cruzó el latch irreversible, esta acción solo consulta broker truth por GET. Nunca reenvía el POST.</p></div></div>
+      <div class="actions"><button class="primary" id="recoverBtn" disabled>4. Recuperar por GET</button></div>
+      <div id="recoverOutput" class="output hidden"></div>
+    </section>
+
+    <section class="card full">
+      <h2>Estado durable del intento</h2><p>La interfaz deriva este estado de los artefactos del intento. Cerrar o refrescar la página no reinicia la autoridad ni borra el latch de no-replay.</p>
+      <div id="durable" class="output">Sin intento preparado.</div>
+    </section>
+  </div>
+
+  <div class="footer">Credenciales: solo memoria del navegador y entorno efímero del proceso hijo. · Generic Control Center: WRITE DISABLED. · Retry POST: FALSE. · LIVE: BLOCKED.</div>
+</div>
+<script>
+const CSRF="__CSRF_TOKEN__";
+const $=id=>document.getElementById(id);
+let meta=null, state=null, busy=false;
+function attemptId(){const b=new Uint8Array(16);crypto.getRandomValues(b);return "first-canary-"+[...b].map(x=>x.toString(16).padStart(2,"0")).join("")}
+function remember(){localStorage.setItem("autotrade.firstCanary.workspace",$("workspace").value.trim());localStorage.setItem("autotrade.firstCanary.attempt",$("attemptId").value.trim())}
+function creds(){return {paper_key:$("paperKey").value.trim(),paper_secret:$("paperSecret").value}}
+function base(){return {workspace:$("workspace").value.trim(),attempt_id:$("attemptId").value.trim()}}
+function setBusy(v,label="Procesando…"){busy=v;for(const id of ["prepareBtn","approveBtn","recoverBtn","newAttempt","refreshStatus"])$(id).disabled=v||($(id).dataset.disabled==="1");if(v)$("phaseDetail").innerHTML=`<span class="spinner"></span>${label}`;else $("phaseDetail").textContent="";render()}
+async function getJSON(url){const r=await fetch(url,{cache:"no-store"});const j=await r.json();if(!r.ok)throw new Error(j.error||`HTTP ${r.status}`);return j}
+async function postJSON(url,payload){const r=await fetch(url,{method:"POST",headers:{"Content-Type":"application/json","X-CSRF-Token":CSRF},body:JSON.stringify(payload),cache:"no-store"});const j=await r.json();if(!r.ok||j.ok===false)throw new Error(j.error||j.json?.reason||`HTTP ${r.status}`);return j}
+function showOutput(id,value){const el=$(id);el.classList.remove("hidden");el.textContent=JSON.stringify(value,null,2)}
+function setPhase(text,kind=""){ $("phase").textContent=text; $("phaseDot").className="dot "+kind }
+function render(){
+  const s=state||{}; const phase=s.phase||"READY_TO_PREPARE";
+  if(phase==="RESOLVED")setPhase("RESUELTO","good");
+  else if(phase==="RECOVERY_ONLY")setPhase("INTENTO QUEMADO · SOLO RECUPERACIÓN","warn");
+  else if(phase==="APPROVED_WAITING_FOR_CERTIFIED_EXECUTION")setPhase("APROBADO · POST REAL AÚN BLOQUEADO","warn");
+  else if(phase==="APPROVAL_REQUIRED")setPhase("PREPARADO · REQUIERE APROBACIÓN","good");
+  else setPhase("LISTO PARA PREPARAR","");
+  const prep=s.preparation;
+  if(prep){
+    $("prepSummary").classList.remove("hidden");
+    $("prepSummary").innerHTML=`<div class="metric"><div class="k">Notional</div><div class="v">USD ${prep.prepared_notional??"—"}</div></div><div class="metric"><div class="k">Cantidad BTC</div><div class="v">${prep.prepared_quantity??"—"}</div></div><div class="metric"><div class="k">Limit</div><div class="v">${prep.prepared_limit_price??"—"}</div></div>`;
+  } else $("prepSummary").classList.add("hidden");
+  const challenge=s.operator_challenge;
+  $("challengeWrap").classList.toggle("hidden",!challenge); if(challenge)$("challenge").textContent=challenge;
+  $("prepareBtn").disabled=busy||!!s.prepared||!!s.execution_started;
+  $("approveBtn").disabled=busy||!s.prepared||!!s.approved||!!s.execution_started;
+  $("recoverBtn").disabled=busy||!s.execution_started||!!s.resolved;
+  $("executeBtn").disabled=true;
+  $("durable").textContent=JSON.stringify(s,null,2);
+}
+async function refresh(){remember();const w=encodeURIComponent($("workspace").value.trim()),a=encodeURIComponent($("attemptId").value.trim());try{const j=await getJSON(`/api/status?workspace=${w}&attempt_id=${a}`);state=j.status}catch(e){state={phase:"READY_TO_PREPARE",error:String(e.message||e)}}render()}
+async function init(){
+  const j=await getJSON("/api/meta");meta=j.meta;
+  $("workspace").value=localStorage.getItem("autotrade.firstCanary.workspace")||meta.default_workspace;
+  $("attemptId").value=localStorage.getItem("autotrade.firstCanary.attempt")||attemptId();
+  await refresh();
+}
+$("newAttempt").onclick=async()=>{$("attemptId").value=attemptId();$("confirmation").value="";state=null;remember();await refresh()};
+$("refreshStatus").onclick=refresh;
+$("prepareBtn").onclick=async()=>{setBusy(true,"Leyendo PAPER y preparando…");try{const j=await postJSON("/api/prepare",{...base(),...creds()});showOutput("prepareOutput",j);await refresh()}catch(e){showOutput("prepareOutput",{error:String(e.message||e)});await refresh()}finally{setBusy(false)}};
+$("copyChallenge").onclick=async()=>{try{await navigator.clipboard.writeText($("challenge").textContent)}catch(e){$("confirmation").value=$("challenge").textContent}};
+$("approveBtn").onclick=async()=>{setBusy(true,"Registrando aprobación durable…");try{const j=await postJSON("/api/approve",{...base(),operator_id:$("operatorId").value.trim(),confirmation:$("confirmation").value});showOutput("approveOutput",j);await refresh()}catch(e){showOutput("approveOutput",{error:String(e.message||e)});await refresh()}finally{setBusy(false)}};
+$("recoverBtn").onclick=async()=>{setBusy(true,"Consultando broker truth por GET…");try{const j=await postJSON("/api/recover",{...base(),...creds()});showOutput("recoverOutput",j);await refresh()}catch(e){showOutput("recoverOutput",{error:String(e.message||e)});await refresh()}finally{setBusy(false)}};
+for(const id of ["workspace","attemptId"])$(id).addEventListener("change",remember);
+init().catch(e=>{setPhase("SERVICIO BLOQUEADO","danger");$("durable").textContent=String(e.message||e)});
+</script>
+</body>
+</html>

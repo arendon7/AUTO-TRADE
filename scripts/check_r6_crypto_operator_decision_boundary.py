@@ -7,7 +7,8 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 MODULE = ROOT / "src/autotrade/brokers/alpaca_paper_crypto_operator_decision.py"
-ISSUER = ROOT / "scripts/r6_issue_crypto_operator_decision_uat.py"
+UAT_ISSUER = ROOT / "scripts/r6_issue_crypto_operator_decision_uat.py"
+EXECUTION_ISSUER = ROOT / "scripts/mac_crypto_first_canary_approval.py"
 PRODUCTION_ROOTS = (ROOT / "src", ROOT / "scripts")
 CRYPTO_OPERATOR_MODULE_FRAGMENT = "alpaca_paper_crypto_operator_decision"
 
@@ -74,49 +75,8 @@ def main() -> int:
             if needle not in text:
                 errors.append(f"crypto operator decision: {reason}")
 
-    if not ISSUER.is_file():
-        errors.append("canonical crypto UAT operator issuer is missing")
-    else:
-        source = ISSUER.read_text(encoding="utf-8")
-        tree = ast.parse(source, filename=str(ISSUER))
-        imports = _imports(tree)
-        for module in imports:
-            if any(fragment in module for fragment in FORBIDDEN_IMPORT_FRAGMENTS):
-                errors.append(f"crypto UAT issuer imports forbidden execution/equity authority: {module}")
-            if module.split(".", 1)[0] in NETWORK_ROOTS:
-                errors.append(f"crypto UAT issuer imports forbidden network stack: {module}")
-        for anchor in (
-            "CryptoOperatorDecisionContext.from_dict",
-            "crypto_operator_confirmation_challenge(context)",
-            "secrets.compare_digest(confirmation, challenge)",
-            "SQLiteCryptoOperatorDecisionRegistry",
-            "registry.record_operator_approval(",
-            'state.status is not CryptoOperatorDecisionStatus.ISSUED',
-            '"decision_consumed": False',
-            '"uat_only": True',
-            '"reusable_for_real_execution": False',
-            '"execution_authority": "NONE"',
-            '"broker_write_performed": False',
-            '"external_post_authorized": False',
-            '"capital_authority": "NONE"',
-            '"live_trading": "BLOCKED"',
-        ):
-            if anchor not in source:
-                errors.append(f"canonical crypto UAT issuer missing anchor: {anchor}")
-        for forbidden in (
-            ".consume(",
-            "AlpacaPaperCredentials",
-            "AlpacaPaperCryptoWriter",
-            "FinalGuardedCryptoEntryTransport",
-            "stage_external_submission",
-            "submit_once(",
-            "R6_EXTERNAL_PAPER_WRITE",
-        ):
-            if forbidden in source:
-                errors.append(f"canonical crypto UAT issuer contains forbidden authority: {forbidden}")
-        if source.count("record_operator_approval(") != 1:
-            errors.append("canonical crypto UAT issuer must contain exactly one issuance call")
-
+    errors.extend(_validate_uat_issuer())
+    errors.extend(_validate_execution_issuer())
     errors.extend(_scan_for_unauthorized_issuance_calls())
 
     if errors:
@@ -126,15 +86,114 @@ def main() -> int:
     print(
         "AUTO-TRADE R6 crypto operator decision boundary: PASS "
         "(HUMAN_OPERATOR only; exact package+attempt binding; <=2m and package-bounded TTL; "
-        "tamper-evident ISSUED->CONSUMED; canonical crypto UAT issuer only and unconsumed; "
-        "no credentials/network/writer/POST authority)"
+        "tamper-evident ISSUED->CONSUMED; isolated UAT issuer plus exact first-canary execution issuer; "
+        "approval issuers have no credentials/network/writer/POST/consumption authority)"
     )
     return 0
 
 
+def _validate_uat_issuer() -> list[str]:
+    errors: list[str] = []
+    if not UAT_ISSUER.is_file():
+        return ["canonical crypto UAT operator issuer is missing"]
+    source = UAT_ISSUER.read_text(encoding="utf-8")
+    tree = ast.parse(source, filename=str(UAT_ISSUER))
+    errors.extend(_validate_issuer_imports(tree, label="crypto UAT issuer"))
+    for anchor in (
+        "CryptoOperatorDecisionContext.from_dict",
+        "crypto_operator_confirmation_challenge(context)",
+        "secrets.compare_digest(confirmation, challenge)",
+        "SQLiteCryptoOperatorDecisionRegistry",
+        "registry.record_operator_approval(",
+        'state.status is not CryptoOperatorDecisionStatus.ISSUED',
+        '"decision_consumed": False',
+        '"uat_only": True',
+        '"reusable_for_real_execution": False',
+        '"execution_authority": "NONE"',
+        '"broker_write_performed": False',
+        '"external_post_authorized": False',
+        '"capital_authority": "NONE"',
+        '"live_trading": "BLOCKED"',
+    ):
+        if anchor not in source:
+            errors.append(f"canonical crypto UAT issuer missing anchor: {anchor}")
+    for forbidden in (
+        ".consume(",
+        "AlpacaPaperCredentials",
+        "AlpacaPaperCryptoWriter",
+        "FinalGuardedCryptoEntryTransport",
+        "stage_external_submission",
+        "submit_once(",
+        "R6_EXTERNAL_PAPER_WRITE",
+    ):
+        if forbidden in source:
+            errors.append(f"canonical crypto UAT issuer contains forbidden authority: {forbidden}")
+    if source.count("record_operator_approval(") != 1:
+        errors.append("canonical crypto UAT issuer must contain exactly one issuance call")
+    return errors
+
+
+def _validate_execution_issuer() -> list[str]:
+    errors: list[str] = []
+    if not EXECUTION_ISSUER.is_file():
+        return ["first-canary execution operator issuer is missing"]
+    source = EXECUTION_ISSUER.read_text(encoding="utf-8")
+    tree = ast.parse(source, filename=str(EXECUTION_ISSUER))
+    errors.extend(_validate_issuer_imports(tree, label="first-canary execution issuer"))
+    for anchor in (
+        "CryptoOperatorDecisionContext.from_dict",
+        "crypto_operator_confirmation_challenge(context)",
+        "secrets.compare_digest(confirmation, challenge)",
+        "SQLiteCryptoOperatorDecisionRegistry",
+        "registry.record_operator_approval(",
+        'state.status is not CryptoOperatorDecisionStatus.ISSUED',
+        'ATTEMPT_PREFIX = "first-canary-"',
+        'MAX_APPROVAL_TTL = timedelta(seconds=30)',
+        'EXPECTED_SYMBOL = "BTC/USD"',
+        'os.environ.get(WRITE_ENV) == "ENABLED"',
+        '"decision_consumed": False',
+        '"uat_only": False',
+        '"reusable_for_uat": False',
+        '"reusable_for_other_attempt": False',
+        '"execution_authority": "NONE_UNTIL_PRE_CONSUME_OMS_PRE_IO"',
+        '"broker_write_performed": False',
+        '"external_post_authorized": False',
+        '"capital_authority": "NONE"',
+        '"live_trading": "BLOCKED"',
+    ):
+        if anchor not in source:
+            errors.append(f"first-canary execution issuer missing anchor: {anchor}")
+    for forbidden in (
+        ".consume(",
+        "AlpacaPaperCredentials",
+        "AlpacaPaperCryptoWriter",
+        "HttpsAlpacaPaperCryptoWriteTransport",
+        "FinalGuardedCryptoEntryTransport",
+        "stage_external_submission",
+        "submit_once(",
+        "ENTRY_SUBMISSION_UNKNOWN",
+        "PROTECTION_SUBMISSION_UNKNOWN",
+    ):
+        if forbidden in source:
+            errors.append(f"first-canary execution issuer contains forbidden authority: {forbidden}")
+    if source.count("record_operator_approval(") != 1:
+        errors.append("first-canary execution issuer must contain exactly one issuance call")
+    return errors
+
+
+def _validate_issuer_imports(tree: ast.AST, *, label: str) -> list[str]:
+    errors: list[str] = []
+    for module in _imports(tree):
+        if any(fragment in module for fragment in FORBIDDEN_IMPORT_FRAGMENTS):
+            errors.append(f"{label} imports forbidden execution/equity authority: {module}")
+        if module.split(".", 1)[0] in NETWORK_ROOTS:
+            errors.append(f"{label} imports forbidden network stack: {module}")
+    return errors
+
+
 def _scan_for_unauthorized_issuance_calls() -> list[str]:
     errors: list[str] = []
-    allowed_caller = ISSUER.resolve()
+    allowed_callers = {UAT_ISSUER.resolve(), EXECUTION_ISSUER.resolve()}
     for root in PRODUCTION_ROOTS:
         if not root.is_dir():
             continue
@@ -154,9 +213,9 @@ def _scan_for_unauthorized_issuance_calls() -> list[str]:
                     continue
                 if _call_name(node.func) != "record_operator_approval":
                     continue
-                if path.resolve() != allowed_caller:
+                if path.resolve() not in allowed_callers:
                     errors.append(
-                        f"{path.relative_to(ROOT)}:{node.lineno}: crypto operator approval issuance is only authorized from the canonical UAT issuer"
+                        f"{path.relative_to(ROOT)}:{node.lineno}: crypto operator approval issuance is restricted to exact audited UAT/execution issuers"
                     )
     return errors
 

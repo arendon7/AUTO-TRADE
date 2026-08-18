@@ -6,12 +6,14 @@ on:
     paths:
       - "AUTO_TRADE_MAC.command"
       - "ABRIR_AUTO_TRADE.command"
+      - "ABRIR_PRIMER_CANARY_PAPER.command"
       - "INSTALAR_AUTO_TRADE.command"
       - "LEEME_PRIMERO_MAC.md"
       - "web/**"
       - "scripts/mac_*.sh"
       - "scripts/mac_*.py"
       - "scripts/check_mac_*.py"
+      - "scripts/check_r6_first_canary_*.py"
       - "scripts/r6_*.py"
       - "src/autotrade/**"
       - "tests/test_mac_*.py"
@@ -22,12 +24,14 @@ on:
     paths:
       - "AUTO_TRADE_MAC.command"
       - "ABRIR_AUTO_TRADE.command"
+      - "ABRIR_PRIMER_CANARY_PAPER.command"
       - "INSTALAR_AUTO_TRADE.command"
       - "LEEME_PRIMERO_MAC.md"
       - "web/**"
       - "scripts/mac_*.sh"
       - "scripts/mac_*.py"
       - "scripts/check_mac_*.py"
+      - "scripts/check_r6_first_canary_*.py"
       - "scripts/r6_*.py"
       - "src/autotrade/**"
       - "tests/test_mac_*.py"
@@ -58,6 +62,9 @@ jobs:
 
       - name: Static Control Center safety boundary
         run: python scripts/check_mac_dashboard_boundary.py
+
+      - name: Static first-canary Mac no-POST boundary
+        run: python scripts/check_r6_first_canary_mac_dashboard.py
 
       - name: Build universal offline wheelhouse
         shell: bash
@@ -146,7 +153,7 @@ jobs:
           cp "$ASSETS/wheels/"*.whl "$PKG/vendor/wheels/"
           cp "$ASSETS/wheels/SHA256SUMS" "$PKG/vendor/wheels/SHA256SUMS"
 
-          chmod +x "$PKG/AUTO_TRADE_MAC.command" "$PKG/ABRIR_AUTO_TRADE.command" "$PKG/INSTALAR_AUTO_TRADE.command"
+          chmod +x "$PKG/AUTO_TRADE_MAC.command" "$PKG/ABRIR_AUTO_TRADE.command" "$PKG/ABRIR_PRIMER_CANARY_PAPER.command" "$PKG/INSTALAR_AUTO_TRADE.command"
           chmod +x "$PKG/scripts/mac_bootstrap.sh" "$PKG/scripts/mac_rehearsal.sh" "$PKG/scripts/mac_start.sh"
 
           cat > "$PKG/MAC_STANDALONE_MANIFEST.txt" <<EOF
@@ -162,6 +169,8 @@ jobs:
           homebrew_required=NO
           system_python_required=NO
           pypi_required_at_first_launch=NO
+          first_canary_dashboard=PREPARE_APPROVE_GET_RECOVER_ONLY
+          first_canary_real_post=DISABLED
           external_post_authorized=NO
           live_trading=BLOCKED
           EOF
@@ -179,6 +188,7 @@ jobs:
           system_python_required=NO
           pypi_required_at_first_launch=NO
           control_center=LOCALHOST_ONLY
+          first_canary_control=SEPARATE_LOCALHOST_NO_POST
           external_paper_write=DISABLED_BY_LAUNCHER
           live_trading=BLOCKED
           broker_credentials_in_package=NO
@@ -211,9 +221,12 @@ jobs:
           unzip -l AUTO-TRADE-R6-MAC-FULL.zip | grep -q 'AUTO-TRADE-R6-MAC-FULL/vendor/runtime/cpython-3.12.13-20260718-x86_64.tar.gz'
           unzip -l AUTO-TRADE-R6-MAC-FULL.zip | grep -q 'AUTO-TRADE-R6-MAC-FULL/vendor/wheels/auto_trade_core-0.4.0.dev0-py3-none-any.whl'
           unzip -l AUTO-TRADE-R6-MAC-FULL.zip | grep -q 'AUTO-TRADE-R6-MAC-FULL/ABRIR_AUTO_TRADE.command'
+          unzip -l AUTO-TRADE-R6-MAC-FULL.zip | grep -q 'AUTO-TRADE-R6-MAC-FULL/ABRIR_PRIMER_CANARY_PAPER.command'
           unzip -l AUTO-TRADE-R6-MAC-FULL.zip | grep -q 'AUTO-TRADE-R6-MAC-FULL/INSTALAR_AUTO_TRADE.command'
           unzip -l AUTO-TRADE-R6-MAC-FULL.zip | grep -q 'AUTO-TRADE-R6-MAC-FULL/web/mac_dashboard.html'
+          unzip -l AUTO-TRADE-R6-MAC-FULL.zip | grep -q 'AUTO-TRADE-R6-MAC-FULL/web/mac_first_canary.html'
           unzip -l AUTO-TRADE-R6-MAC-FULL.zip | grep -q 'AUTO-TRADE-R6-MAC-FULL/scripts/mac_dashboard.py'
+          unzip -l AUTO-TRADE-R6-MAC-FULL.zip | grep -q 'AUTO-TRADE-R6-MAC-FULL/scripts/mac_first_canary_dashboard.py'
           unzip -p AUTO-TRADE-R6-MAC-FULL.zip AUTO-TRADE-R6-MAC-FULL/MAC_BUILD_INFO.txt > /tmp/MAC_BUILD_INFO.txt
           grep -Fq "source_head=${EXPECTED_SOURCE_SHA}" /tmp/MAC_BUILD_INFO.txt
           grep -Fq 'offline_install=YES' /tmp/MAC_BUILD_INFO.txt
@@ -224,11 +237,12 @@ jobs:
           grep -Fq 'system_python_required=NO' /tmp/MAC_BUILD_INFO.txt
           grep -Fq 'pypi_required_at_first_launch=NO' /tmp/MAC_BUILD_INFO.txt
           grep -Fq 'control_center=LOCALHOST_ONLY' /tmp/MAC_BUILD_INFO.txt
+          grep -Fq 'first_canary_control=SEPARATE_LOCALHOST_NO_POST' /tmp/MAC_BUILD_INFO.txt
           if unzip -l AUTO-TRADE-R6-MAC-FULL.zip | grep -Eq '(^|/)(\.env|\.venv|\.runtime)(/|$)'; then
             echo 'ERROR: standalone package contains forbidden operational environment material' >&2
             exit 1
           fi
-          for launcher in AUTO_TRADE_MAC.command ABRIR_AUTO_TRADE.command INSTALAR_AUTO_TRADE.command; do
+          for launcher in AUTO_TRADE_MAC.command ABRIR_AUTO_TRADE.command ABRIR_PRIMER_CANARY_PAPER.command INSTALAR_AUTO_TRADE.command; do
             unzip -p AUTO-TRADE-R6-MAC-FULL.zip "AUTO-TRADE-R6-MAC-FULL/${launcher}" > "/tmp/${launcher}"
             for forbidden in \
               'r6_execute_paper_canary.py' \
@@ -244,6 +258,9 @@ jobs:
             done
           done
           grep -Fq 'scripts/mac_dashboard.py' /tmp/ABRIR_AUTO_TRADE.command
+          grep -Fq 'scripts/mac_first_canary_dashboard.py' /tmp/ABRIR_PRIMER_CANARY_PAPER.command
+          grep -Fq 'R6_EXTERNAL_PAPER_WRITE=DISABLED' /tmp/ABRIR_PRIMER_CANARY_PAPER.command
+          grep -Fq 'POST real: NO EXPUESTO EN ESTA BUILD' /tmp/ABRIR_PRIMER_CANARY_PAPER.command
           grep -Fq 'ditto --norsrc --noqtn' /tmp/INSTALAR_AUTO_TRADE.command
           grep -Fq 'scripts/mac_bootstrap.sh' /tmp/INSTALAR_AUTO_TRADE.command
 
@@ -271,6 +288,7 @@ jobs:
     env:
       PIP_NO_INDEX: '1'
       PIP_DISABLE_PIP_VERSION_CHECK: '1'
+      PYTHONUNBUFFERED: '1'
       R6_EXTERNAL_PAPER_WRITE: DISABLED
     steps:
       - name: Download exact candidate
@@ -298,6 +316,7 @@ jobs:
 
           test -f "$SOURCE/MAC_STANDALONE_MANIFEST.txt"
           test -x "$SOURCE/ABRIR_AUTO_TRADE.command"
+          test -x "$SOURCE/ABRIR_PRIMER_CANARY_PAPER.command"
           test -x "$SOURCE/INSTALAR_AUTO_TRADE.command"
           test ! -e "$SOURCE/.venv"
           test ! -e "$SOURCE/.runtime"
@@ -340,8 +359,9 @@ jobs:
           .venv/bin/python scripts/check_mac_standalone_boundary.py
           .venv/bin/python scripts/check_mac_click_launcher_boundary.py
           .venv/bin/python scripts/check_mac_dashboard_boundary.py
+          .venv/bin/python scripts/check_r6_first_canary_mac_dashboard.py
           .venv/bin/python scripts/check_r6_precanary_status_boundary.py
-          .venv/bin/pytest -q tests/test_mac_safe_console.py tests/test_mac_click_launcher.py tests/test_mac_dashboard.py tests/test_mac_doctor_provenance.py tests/test_r6_precanary_status.py
+          .venv/bin/pytest -q tests/test_mac_safe_console.py tests/test_mac_click_launcher.py tests/test_mac_dashboard.py tests/test_mac_doctor_provenance.py tests/test_r6_first_canary_mac_dashboard_boundary.py tests/test_r6_precanary_status.py
 
       - name: Control Center localhost smoke test from installed home
         shell: bash
@@ -366,6 +386,34 @@ jobs:
           grep -Fq '"live_trading":"BLOCKED"' /tmp/autotrade-dashboard-meta.json
           grep -Fq '"external_paper_write":"DISABLED"' /tmp/autotrade-dashboard-meta.json
           grep -Fq 'Order execution from dashboard: UNAVAILABLE' /tmp/autotrade-dashboard.log
+
+      - name: First-canary localhost no-POST smoke test from installed home
+        shell: bash
+        run: |
+          set -euo pipefail
+          INSTALL_ROOT="$HOME/Applications/AUTO-TRADE-R6"
+          cd "$INSTALL_ROOT"
+          unset APCA_API_KEY_ID APCA_API_SECRET_KEY || true
+          export R6_EXTERNAL_PAPER_WRITE=DISABLED
+          .venv/bin/python scripts/mac_first_canary_dashboard.py --no-browser --port 18767 > /tmp/autotrade-first-canary-dashboard.log 2>&1 &
+          CANARY_PID=$!
+          cleanup() { kill "$CANARY_PID" 2>/dev/null || true; wait "$CANARY_PID" 2>/dev/null || true; }
+          trap cleanup EXIT
+          READY=0
+          for _ in {1..40}; do
+            if curl --fail --silent --show-error http://127.0.0.1:18767/api/meta > /tmp/autotrade-first-canary-meta.json; then
+              READY=1
+              break
+            fi
+            sleep 0.25
+          done
+          test "$READY" = 1
+          grep -Fq '"real_execution_enabled":false' /tmp/autotrade-first-canary-meta.json
+          grep -Fq '"generic_control_center_write_enabled":false' /tmp/autotrade-first-canary-meta.json
+          grep -Fq '"credentials_persisted":false' /tmp/autotrade-first-canary-meta.json
+          grep -Fq '"retry_post":false' /tmp/autotrade-first-canary-meta.json
+          grep -Fq '"live_trading":"BLOCKED"' /tmp/autotrade-first-canary-meta.json
+          grep -Fq 'Real broker POST: NOT YET EXPOSED' /tmp/autotrade-first-canary-dashboard.log
 
       - name: Delete downloaded source and prove installed self-heal
         shell: bash

@@ -1,0 +1,42 @@
+name: R6 First Canary Restart-Safe Preparation
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  restart-safe-preparation:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout exact head
+        uses: actions/checkout@v5
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Install project
+        run: python -m pip install -e '.[dev]'
+      - name: Compile restart-safe preparation surface
+        run: >-
+          python -m compileall -q
+          src/autotrade/first_canary_prepared_evidence.py
+          scripts/mac_crypto_first_canary_prepare_restart_safe.py
+          scripts/check_r6_first_canary_restart_safe_preparation.py
+          tests/test_r6_first_canary_prepared_evidence.py
+          tests/test_r6_first_canary_restart_safe_prepare.py
+      - name: Permanent restart-safe preparation boundary
+        run: python scripts/check_r6_first_canary_restart_safe_preparation.py
+      - name: Restart-safe evidence round-trip and wrapper tests
+        run: >-
+          pytest -q
+          tests/test_r6_first_canary_prepared_evidence.py
+          tests/test_r6_first_canary_restart_safe_prepare.py
+      - name: Re-prove first-canary no-POST Mac boundary
+        run: python scripts/check_r6_first_canary_mac_dashboard.py
+      - name: Re-prove first-canary execution boundary
+        run: python scripts/check_r6_first_canary_execution_gate.py
+      - name: Re-prove permanent LIVE deny
+        run: python scripts/check_r6_live_deny_boundary.py
