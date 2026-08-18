@@ -8,6 +8,7 @@ FILES = {
     "guard": ROOT / "src/autotrade/brokers/alpaca_paper_crypto_cold_start_final_guard.py",
     "checkpoint": ROOT / "src/autotrade/brokers/alpaca_paper_crypto_cold_start_execution_attempt.py",
     "bridge": ROOT / "src/autotrade/brokers/alpaca_paper_crypto_cold_start_execution_bridge.py",
+    "pre_io_authority": ROOT / "src/autotrade/brokers/alpaca_paper_crypto_cold_start_pre_io_authority.py",
 }
 
 
@@ -26,7 +27,8 @@ def main() -> int:
     guard = _read("guard")
     checkpoint = _read("checkpoint")
     bridge = _read("bridge")
-    combined = "\n".join((guard, checkpoint, bridge))
+    pre_io_authority = _read("pre_io_authority")
+    combined = "\n".join((guard, checkpoint, bridge, pre_io_authority))
 
     required = (
         'COLD_START_SYMBOL = "BTC/USD"',
@@ -48,6 +50,12 @@ def main() -> int:
         "operator_registry.consume(",
         "OrderStatus.SUBMITTING",
         "authoritative cold-start core changed",
+        "self._checkpoints.get(attempt_id)",
+        "checkpoint.pre_consume",
+        "exact durable cold-start handoff event is missing or duplicated",
+        "CryptoColdStartFinalWritePhase.PRE_IO",
+        "previous_attestation=checkpoint.pre_consume",
+        "PRE_IO attestation predecessor differs from durable checkpoint",
     )
     for token in required:
         if token not in combined:
@@ -77,8 +85,6 @@ def main() -> int:
             raise ColdStartBoundaryError(f"forbidden authority/network bypass in cold-start path: {token}")
 
     if "broker" in bridge.lower() and "no broker" not in bridge.lower():
-        # The word may appear in comments describing the absence of a broker. The
-        # actual import/constructor surface must remain free of ExecutionBroker.
         if "ExecutionBroker" in bridge or "AlpacaPaper" in bridge:
             raise ColdStartBoundaryError("cold-start bridge acquired broker-facing dependency")
 
@@ -89,7 +95,8 @@ def main() -> int:
 
     print(
         "R6 crypto cold-start execution boundary: PASS "
-        "(isolated bootstrap authority, USD 1-5, no Health fabrication, no broker I/O)"
+        "(isolated bootstrap authority, durable PRE_CONSUME+handoff PRE_IO binding, "
+        "USD 1-5, no Health fabrication, no broker I/O)"
     )
     return 0
 
