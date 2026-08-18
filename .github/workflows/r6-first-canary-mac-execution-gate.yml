@@ -30,6 +30,7 @@ jobs:
           tests/test_r6_mac_crypto_first_canary_prepare.py
           tests/test_r6_mac_crypto_first_canary_approval.py
           tests/test_r6_first_canary_execution_gate.py
+          tests/test_r6_first_canary_execution_gate_failures.py
       - name: Permanent first-canary execution boundary
         run: python scripts/check_r6_first_canary_execution_gate.py
       - name: Re-prove guarded crypto writer boundary
@@ -46,6 +47,7 @@ jobs:
           tests/test_r6_mac_crypto_first_canary_prepare.py
           tests/test_r6_mac_crypto_first_canary_approval.py
           tests/test_r6_first_canary_execution_gate.py
+          tests/test_r6_first_canary_execution_gate_failures.py
       - name: Re-prove cold-start backend authority
         run: python scripts/check_r6_crypto_cold_start_execution_boundary.py
       - name: Re-prove global R6 PAPER authority
