@@ -120,10 +120,15 @@ def main() -> int:
             "Vuelve a PREPARAR y crea/aprueba un intento nuevo.",
             "Segundo consentimiento exacto",
             "EJECUTAR UNA VEZ EN PAPER",
+            'id="recover" disabled',
             "RECUPERAR / RECONCILIAR GET-ONLY",
+            "const discovery = await discover();",
+            "discovery.selection_status !== 'EXACT_ONE_READY'",
             "currentStatus.ready_for_real_post !== true",
+            "currentStatus.recovery_get_only !== true",
+            "$('recover').disabled = !(s && s.recovery_get_only === true);",
             "$('confirmation').value !== exact",
-            "NO REINTENTAR POST. Usa recuperación GET-only.",
+            "NO REINTENTAR POST. Usa recuperación GET-only solo si el estado la habilita.",
         ),
         "real PAPER HTML",
     )
@@ -172,9 +177,10 @@ def main() -> int:
     print(
         "first-canary real PAPER Mac surface: PASS — downloaded Finder launcher relocates/reuses exact certified "
         "installed head; separate execution-only localhost UI; exactly-one fresh approved attempt auto-discovery "
-        "is re-enforced at execute boundary; ambiguous/expired selection fails closed; restart-safe preparation + "
-        "approval required; exact second challenge; consent/start => recovery-only; no direct broker stack; launcher "
-        "carries no credentials and keeps generic write disabled; LIVE blocked"
+        "is re-enforced at execute boundary and freshly rechecked by the UI at click time; ambiguous/expired selection "
+        "fails closed; restart-safe preparation + approval required; exact second challenge; recovery stays disabled "
+        "until consent/start; no direct broker stack; launcher carries no credentials and keeps generic write disabled; "
+        "LIVE blocked"
     )
     return 0
 
