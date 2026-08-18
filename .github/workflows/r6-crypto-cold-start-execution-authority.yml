@@ -22,11 +22,13 @@ jobs:
       - name: Compile cold-start authority surface
         run: >-
           python -m compileall -q
+          src/autotrade/cold_start_oms.py
           src/autotrade/brokers/alpaca_paper_crypto_cold_start_final_guard.py
           src/autotrade/brokers/alpaca_paper_crypto_cold_start_execution_attempt.py
           src/autotrade/brokers/alpaca_paper_crypto_cold_start_execution_bridge.py
           src/autotrade/brokers/alpaca_paper_crypto_cold_start_pre_io_authority.py
           scripts/check_r6_crypto_cold_start_execution_boundary.py
+          scripts/check_r6_oms_handoff_boundary.py
           tests/test_r6_paper_crypto_cold_start_final_guard.py
           tests/test_r6_paper_crypto_cold_start_authority_adversarial.py
           tests/test_r6_paper_crypto_cold_start_execution_bridge.py
@@ -34,6 +36,8 @@ jobs:
           tests/test_r6_paper_crypto_cold_start_writer_simulation.py
       - name: Permanent isolated cold-start execution boundary
         run: python scripts/check_r6_crypto_cold_start_execution_boundary.py
+      - name: Re-prove OMS owns every SUBMITTING transition
+        run: python scripts/check_r6_oms_handoff_boundary.py
       - name: Cold-start authority + durable PRE_IO + simulated writer tests
         run: >-
           pytest -q
