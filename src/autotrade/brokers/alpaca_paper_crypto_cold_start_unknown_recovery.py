@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from hashlib import sha256
@@ -11,8 +11,6 @@ from .alpaca_paper_crypto_cold_start_execution_attempt import (
     CryptoColdStartExecutionAttemptCheckpoint,
 )
 from .alpaca_paper_crypto_lifecycle import (
-    CryptoLifecycleEventType,
-    CryptoLifecycleIntegrityError,
     CryptoLifecycleState,
     CryptoLifecycleStatus,
     SQLiteCryptoPaperLifecycle,
@@ -150,6 +148,10 @@ class CryptoColdStartUnknownRecoveryCoordinator:
             binding_hash=snapshot.binding.fingerprint,
             state=state,
         )
+        if snapshot.binding.entry_client_order_id != requested_order.client_order_id:
+            raise CryptoColdStartUnknownRecoveryBlocked(
+                "lifecycle client_order_id differs from cold-start recovery order"
+            )
         expected_account_reference = checkpoint.pre_consume.account_reference
         expected_credential_reference = checkpoint.pre_consume.credential_reference
         self._validate_account(
@@ -173,7 +175,6 @@ class CryptoColdStartUnknownRecoveryCoordinator:
                     "remaining UNKNOWN exposure must halt; flat evidence cannot override a long position"
                 )
             flat_fingerprint = None
-            event_type = CryptoLifecycleEventType.HALTED
             next_status = CryptoLifecycleStatus.HALTED_RECONCILIATION_REQUIRED
         else:
             if flat_account is None:
@@ -186,52 +187,27 @@ class CryptoColdStartUnknownRecoveryCoordinator:
                 now=instant,
             )
             flat_fingerprint = flat_account.fingerprint
-            event_type = CryptoLifecycleEventType.FLAT_RECONCILED
             next_status = CryptoLifecycleStatus.FLAT_RECONCILED
 
-        payload = {
-            "kind": "R6_CRYPTO_COLD_START_UNKNOWN_ORDER_404_RECOVERY",
-            "client_order_id": requested_order.client_order_id,
-            "checkpoint_hash": checkpoint.record_hash,
-            "order_absence_fingerprint": reconciliation.order_absence.fingerprint,
-            "unknown_reconciliation_fingerprint": reconciliation.fingerprint,
-            "position_fingerprint": position.fingerprint,
-            "observed_position_quantity": format(position.quantity, "f"),
-            "fresh_account_fingerprint": fresh_account.fingerprint,
-            "account_reference": fresh_account.account_reference,
-            "credential_reference": fresh_account.credential_reference,
-            "flat_account_fingerprint": flat_fingerprint,
-            "retry_authorized": False,
-        }
-
-        def transition(
-            _binding,
-            current: CryptoLifecycleState,
-            _payload: dict[str, object],
-        ) -> CryptoLifecycleState:
-            self._validate_unknown_state(current, requested_order)
-            return replace(
-                current,
-                status=next_status,
-                confirmed_net_long_quantity=position.quantity,
-            )
-
-        # Deliberate package-internal mutation: preserves the canonical lifecycle
-        # event chain/control hash instead of creating a second persistence path.
-        recovered = lifecycle._mutate(  # noqa: SLF001
+        recovered = lifecycle.recover_entry_unknown_absence(
             lifecycle_id,
+            client_order_id=requested_order.client_order_id,
+            position_quantity=position.quantity,
+            order_absence_fingerprint=reconciliation.order_absence.fingerprint,
+            reconciliation_fingerprint=reconciliation.fingerprint,
+            position_fingerprint=position.fingerprint,
+            fresh_account_fingerprint=fresh_account.fingerprint,
+            flat_account_fingerprint=flat_fingerprint,
+            checkpoint_hash=checkpoint.record_hash,
             at=instant,
-            event_type=event_type,
-            payload=payload,
-            transition=transition,
         )
         if recovered.entry_attempt_count != 1:
-            raise CryptoLifecycleIntegrityError(
+            raise CryptoColdStartUnknownRecoveryBlocked(
                 "cold-start UNKNOWN recovery changed durable entry attempt count"
             )
-        if snapshot.binding.entry_client_order_id != requested_order.client_order_id:
-            raise CryptoLifecycleIntegrityError(
-                "cold-start UNKNOWN recovery changed durable client_order_id binding"
+        if recovered.status is not next_status:
+            raise CryptoColdStartUnknownRecoveryBlocked(
+                "cold-start lifecycle returned unexpected recovery status"
             )
 
         values = {
@@ -289,21 +265,6 @@ class CryptoColdStartUnknownRecoveryCoordinator:
                 )
         if not lifecycle_id.strip():
             raise CryptoColdStartUnknownRecoveryBlocked("lifecycle_id is required")
-
-    @staticmethod
-    def _validate_unknown_state(
-        state: CryptoLifecycleState,
-        requested_order: AlpacaPaperCryptoOrderRequest,
-    ) -> None:
-        if (
-            state.status is not CryptoLifecycleStatus.ENTRY_SUBMISSION_UNKNOWN
-            or state.entry_attempt_count != 1
-        ):
-            raise CryptoColdStartUnknownRecoveryBlocked(
-                "ENTRY UNKNOWN state changed before recovery commit"
-            )
-        if requested_order.role is not CryptoOrderRole.ENTRY:
-            raise CryptoColdStartUnknownRecoveryBlocked("recovery order role changed")
 
     @staticmethod
     def _validate_account(
