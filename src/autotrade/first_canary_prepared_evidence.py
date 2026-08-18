@@ -12,6 +12,7 @@ from autotrade.domain import (
     MarketSnapshot,
     RiskDecision,
     RiskDecisionStatus,
+    market_fingerprint,
     risk_decision_fingerprint,
 )
 from autotrade.product_profile import ProductCapabilities
@@ -58,7 +59,7 @@ class FirstCanaryPreparedEvidence:
             raise FirstCanaryPreparedEvidenceIntegrityError(
                 "prepared market symbol differs from prepared asset"
             )
-        if self.risk_decision.market_fingerprint != self.market.market.fingerprint:
+        if self.risk_decision.market_fingerprint != market_fingerprint(self.market.market):
             raise FirstCanaryPreparedEvidenceIntegrityError(
                 "prepared RiskDecision is not bound to prepared market"
             )
