@@ -88,6 +88,10 @@ jobs:
         run: python scripts/check_mac_crypto_cold_start_portfolio_bootstrap.py
       - name: Mac crypto cold-start qualification attestation boundary
         run: python scripts/check_mac_crypto_cold_start_qualification_attestation.py
+      - name: Mac crypto cold-start Final Guard binding boundary
+        run: python scripts/check_mac_crypto_cold_start_final_guard_binding.py
+      - name: Mac crypto cold-start Final Guard binding tests
+        run: pytest -q tests/test_mac_crypto_cold_start_final_guard_binding.py
       - name: R6 unsupported-product boundary
         run: python scripts/check_r6_product_boundary.py
       - name: Debt register contract
