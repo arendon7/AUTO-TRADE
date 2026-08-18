@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
+from pathlib import Path
 from typing import Protocol
 
 from autotrade.brokers.alpaca_paper_crypto_asset import AlpacaPaperCryptoAssetAttestation
@@ -113,7 +114,7 @@ class FirstCanaryExecutionInputs:
             self.attempt_runtime, SQLiteRuntime
         ):
             raise TypeError("first-canary execution requires core + attempt SQLite runtimes")
-        if self.attempt_runtime.path.resolve() != self.attempt.database_path.resolve():
+        if Path(self.attempt_runtime.path).resolve() != self.attempt.database_path.resolve():
             raise FirstCanaryExecutionBlocked("attempt runtime is not exact attempt database")
         if not isinstance(self.credentials, AlpacaPaperCredentials):
             raise TypeError("first-canary execution requires ephemeral PAPER credentials")
