@@ -32,8 +32,8 @@ def _credentials(account):
 def _executable_asset(asset):
     return replace(
         asset,
-        min_order_size=Decimal("0.0001"),
-        min_trade_increment=Decimal("0.0001"),
+        min_order_size=Decimal("0.00001"),
+        min_trade_increment=Decimal("0.00001"),
     )
 
 
