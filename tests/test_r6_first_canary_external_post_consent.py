@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import timedelta
 from decimal import Decimal
 
@@ -58,18 +59,21 @@ def _challenge(session) -> str:
     )
 
 
-def test_exact_external_post_consent_is_durable_bounded_and_secret_free(tmp_path, monkeypatch) -> None:
+def _receipt(tmp_path, monkeypatch):
     _, session, _ = _prepare_session(tmp_path, monkeypatch)
-    restart = _restart_safe(session)
     now = NOW + timedelta(seconds=4, milliseconds=200)
-
     receipt = consume_external_post_consent(
         attempt=session.attempt,
         preparation=session.preparation_document,
-        restart_safe=restart,
+        restart_safe=_restart_safe(session),
         confirmation=_challenge(session),
         now=now,
     )
+    return session, receipt, now
+
+
+def test_exact_external_post_consent_is_durable_bounded_and_secret_free(tmp_path, monkeypatch) -> None:
+    session, receipt, now = _receipt(tmp_path, monkeypatch)
 
     assert receipt.symbol == "BTC/USD"
     assert Decimal("1") <= receipt.notional <= Decimal("5")
@@ -101,16 +105,8 @@ def test_external_post_consent_requires_exact_human_challenge(tmp_path, monkeypa
 
 
 def test_external_post_consent_is_burned_before_any_possible_replay(tmp_path, monkeypatch) -> None:
-    _, session, _ = _prepare_session(tmp_path, monkeypatch)
+    session, _, now = _receipt(tmp_path, monkeypatch)
     restart = _restart_safe(session)
-    now = NOW + timedelta(seconds=4, milliseconds=200)
-    consume_external_post_consent(
-        attempt=session.attempt,
-        preparation=session.preparation_document,
-        restart_safe=restart,
-        confirmation=_challenge(session),
-        now=now,
-    )
 
     with pytest.raises(FirstCanaryExternalPostConsentBlocked, match="already consumed"):
         consume_external_post_consent(
@@ -151,17 +147,74 @@ def test_external_post_consent_rejects_expired_prepared_package(tmp_path, monkey
 
 
 def test_external_post_consent_expiry_never_becomes_retry_permission(tmp_path, monkeypatch) -> None:
-    _, session, _ = _prepare_session(tmp_path, monkeypatch)
-    now = NOW + timedelta(seconds=4, milliseconds=200)
-    receipt = consume_external_post_consent(
-        attempt=session.attempt,
-        preparation=session.preparation_document,
-        restart_safe=_restart_safe(session),
-        confirmation=_challenge(session),
-        now=now,
-    )
+    _, receipt, _ = _receipt(tmp_path, monkeypatch)
     with pytest.raises(FirstCanaryExternalPostConsentBlocked, match="new attempt rather than retry POST"):
         require_fresh_external_post_consent(
             receipt=receipt,
             now=receipt.expires_at,
         )
+
+
+@pytest.mark.parametrize(
+    ("changes", "message"),
+    [
+        ({"package_hash": "NOT-A-SHA256"}, "package_hash must be lowercase SHA-256"),
+        ({"symbol": "ETH/USD"}, "BTC/USD only"),
+        ({"notional": Decimal("0.99")}, "within USD 1-5"),
+        ({"notional": Decimal("NaN")}, "finite Decimal"),
+        ({"source_host": "api.alpaca.markets"}, "exact Alpaca PAPER host"),
+        ({"source_path": "/v2/positions"}, "exact crypto order path"),
+        ({"receipt_hash": "0" * 64}, "consent hash mismatch"),
+    ],
+)
+def test_external_post_consent_receipt_rejects_rebinding(tmp_path, monkeypatch, changes, message) -> None:
+    _, receipt, _ = _receipt(tmp_path, monkeypatch)
+    with pytest.raises(ValueError, match=message):
+        replace(receipt, **changes)
+
+
+def test_external_post_consent_receipt_rejects_invalid_expiry_windows(tmp_path, monkeypatch) -> None:
+    _, receipt, _ = _receipt(tmp_path, monkeypatch)
+    with pytest.raises(ValueError, match="expiry must follow"):
+        replace(receipt, expires_at=receipt.consented_at)
+    with pytest.raises(ValueError, match="exceeds ten-second"):
+        replace(receipt, expires_at=receipt.consented_at + timedelta(seconds=11))
+
+
+def test_external_post_challenge_rejects_non_decimal_and_nonfinite_notional() -> None:
+    with pytest.raises(ValueError, match="finite Decimal"):
+        external_post_challenge(
+            attempt_id="first-canary-0123456789abcdef0123456789abcdef",
+            client_order_id="r6-first-canary-test",
+            notional=2,  # type: ignore[arg-type]
+        )
+    with pytest.raises(ValueError, match="finite Decimal"):
+        external_post_challenge(
+            attempt_id="first-canary-0123456789abcdef0123456789abcdef",
+            client_order_id="r6-first-canary-test",
+            notional=Decimal("Infinity"),
+        )
+
+
+def test_external_post_consent_rejects_restart_safe_policy_drift(tmp_path, monkeypatch) -> None:
+    _, session, _ = _prepare_session(tmp_path, monkeypatch)
+    for key, value, message in (
+        ("document_type", "WRONG_TYPE", "evidence type is invalid"),
+        ("credentials_persisted", True, "credential persistence policy"),
+        ("live_trading", "ENABLED", "does not preserve LIVE deny"),
+        ("external_post_authorized", True, "must not already authorize external POST"),
+    ):
+        restart = _restart_safe(session)
+        restart[key] = value
+        restart["restart_safe_hash"] = session.attempt.document_hash(
+            restart,
+            hash_key="restart_safe_hash",
+        )
+        with pytest.raises(FirstCanaryExternalPostConsentBlocked, match=message):
+            consume_external_post_consent(
+                attempt=session.attempt,
+                preparation=session.preparation_document,
+                restart_safe=restart,
+                confirmation=_challenge(session),
+                now=NOW + timedelta(seconds=4, milliseconds=200),
+            )
