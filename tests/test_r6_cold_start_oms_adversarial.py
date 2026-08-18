@@ -9,8 +9,6 @@ from autotrade.cold_start_oms import (
     COLD_START_OMS_KILL_REASON,
     COLD_START_OMS_SCOPE,
     ColdStartExternalSubmissionConflict,
-    ColdStartExternalSubmissionHandoff,
-    ColdStartOmsStageAuthorization,
     ColdStartOmsStageAuthority,
     ColdStartOrderManagementSystem,
 )
@@ -20,33 +18,32 @@ from test_r6_paper_crypto_canary_coordinator import NOW, _NoBroker, _decision, _
 from test_r6_paper_crypto_cold_start_final_guard import _setup
 
 
-class _ValidAuthority(ColdStartOmsStageAuthority):
-    def __init__(self, *, authorization_id="a" * 64, mutate=None, authorized_at=None):
+class _IssueAuthority(ColdStartOmsStageAuthority):
+    def __init__(self, *, authorization_id="a" * 64, authorized_at=None, issue_overrides=None):
         self.authorization_id = authorization_id
-        self.mutate = mutate
         self.authorized_at = authorized_at
+        self.issue_overrides = dict(issue_overrides or {})
         self.calls = 0
 
     def authorize_oms_stage(self, *, order, decision, market, now, context):
         self.calls += 1
-        authorization = self._issue_authorization(
-            authorization_id=self.authorization_id,
-            package_hash="b" * 64,
-            operator_decision_hash="c" * 64,
-            checkpoint_hash="d" * 64,
-            authority_state_fingerprint="e" * 64,
-            attempt_id="cold-start-attempt-001",
-            order_id=order.order_id,
-            client_order_id="atr6c-entry-oms-adversarial",
-            intent_fingerprint_value=intent_fingerprint(order.intent),
-            risk_decision_id=decision.decision_id,
-            market_fingerprint_value=market_fingerprint(market),
-            safety_state_version=context.safety_version,
-            authorized_at=self.authorized_at or now,
-        )
-        if self.mutate is not None:
-            return self.mutate(authorization)
-        return authorization
+        values = {
+            "authorization_id": self.authorization_id,
+            "package_hash": "b" * 64,
+            "operator_decision_hash": "c" * 64,
+            "checkpoint_hash": "d" * 64,
+            "authority_state_fingerprint": "e" * 64,
+            "attempt_id": "cold-start-attempt-001",
+            "order_id": order.order_id,
+            "client_order_id": "atr6c-entry-oms-adversarial",
+            "intent_fingerprint_value": intent_fingerprint(order.intent),
+            "risk_decision_id": decision.decision_id,
+            "market_fingerprint_value": market_fingerprint(market),
+            "safety_state_version": context.safety_version,
+            "authorized_at": self.authorized_at or now,
+        }
+        values.update(self.issue_overrides)
+        return self._issue_authorization(**values)
 
 
 class _WrongReturnAuthority(ColdStartOmsStageAuthority):
@@ -81,7 +78,7 @@ def _stage(ctx, *, authority=None, ledger=None, decision=None, market=None, now=
     decision = decision or risk
     market = market or snapshot
     now = now or (NOW + timedelta(seconds=4, milliseconds=200))
-    authority = authority or _ValidAuthority()
+    authority = authority or _IssueAuthority()
     result = oms.stage_cold_start_external_submission(
         order_id=ctx.package.order_id,
         decision=decision,
@@ -119,10 +116,9 @@ def test_cold_start_oms_rejects_non_nominal_authority_missing_order_and_terminal
             decision=risk,
             market=market,
             now=NOW + timedelta(seconds=4),
-            authority=_ValidAuthority(),
+            authority=_IssueAuthority(),
             authority_context=_Context(ctx.safety.get().version),
         )
-
     current = ctx.order_store.get_by_order_id(ctx.package.order_id)
     assert current is not None
     ctx.order_store.update(replace(current, status=OrderStatus.CANCELLED))
@@ -132,7 +128,7 @@ def test_cold_start_oms_rejects_non_nominal_authority_missing_order_and_terminal
             decision=risk,
             market=market,
             now=NOW + timedelta(seconds=4),
-            authority=_ValidAuthority(),
+            authority=_IssueAuthority(),
             authority_context=_Context(ctx.safety.get().version),
         )
 
@@ -160,45 +156,30 @@ def test_cold_start_oms_requires_authoritative_commissioning_safety_and_no_circu
 
 
 def test_cold_start_oms_rejects_every_risk_decision_identity_drift(tmp_path) -> None:
-    cases = []
-    base = _setup(tmp_path / "base")
-    risk, market = _risk_and_market(base)
-    cases.append(("not APPROVED", replace(risk, status=RiskDecisionStatus.DENIED), market))
-    cases.append(("intent mismatch", replace(risk, intent_id="different-intent"), market))
-    cases.append(("fingerprint mismatch", replace(risk, intent_fingerprint="0" * 64), market))
-    cases.append(("market changed", risk, replace(market, last=market.last + 1)))
-    cases.append(("expired", replace(risk, valid_until=NOW + timedelta(seconds=1)), market))
-    cases.append(("RiskDecision id mismatch", replace(risk, decision_id="different-decision"), market))
-
-    for index, (message, changed_decision, changed_market) in enumerate(cases):
+    for index, case in enumerate(("status", "intent_id", "intent_hash", "market", "expired", "decision_id")):
         ctx = _setup(tmp_path / f"case-{index}")
-        # Rebuild modifications from this context's exact decision where needed.
-        fresh_risk, fresh_market = _risk_and_market(ctx)
-        if message == "not APPROVED":
-            changed_decision = replace(fresh_risk, status=RiskDecisionStatus.DENIED)
-            changed_market = fresh_market
-        elif message == "intent mismatch":
-            changed_decision = replace(fresh_risk, intent_id="different-intent")
-            changed_market = fresh_market
-        elif message == "fingerprint mismatch":
-            changed_decision = replace(fresh_risk, intent_fingerprint="0" * 64)
-            changed_market = fresh_market
-        elif message == "market changed":
-            changed_decision = fresh_risk
-            changed_market = replace(fresh_market, last=fresh_market.last + 1)
-        elif message == "expired":
-            changed_decision = replace(fresh_risk, valid_until=NOW + timedelta(seconds=1))
-            changed_market = fresh_market
+        risk, market = _risk_and_market(ctx)
+        expected = ""
+        if case == "status":
+            risk = replace(risk, status=RiskDecisionStatus.REJECTED)
+            expected = "not APPROVED"
+        elif case == "intent_id":
+            risk = replace(risk, intent_id="different-intent")
+            expected = "intent mismatch"
+        elif case == "intent_hash":
+            risk = replace(risk, intent_fingerprint="0" * 64)
+            expected = "fingerprint mismatch"
+        elif case == "market":
+            market = replace(market, last=market.last + 1)
+            expected = "market changed"
+        elif case == "expired":
+            risk = replace(risk, valid_until=NOW + timedelta(seconds=1))
+            expected = "expired"
         else:
-            changed_decision = replace(fresh_risk, decision_id="different-decision")
-            changed_market = fresh_market
-        with pytest.raises(ColdStartExternalSubmissionConflict, match=message):
-            _stage(
-                ctx,
-                decision=changed_decision,
-                market=changed_market,
-                now=NOW + timedelta(seconds=4),
-            )
+            risk = replace(risk, decision_id="different-decision")
+            expected = "RiskDecision id mismatch"
+        with pytest.raises(ColdStartExternalSubmissionConflict, match=expected):
+            _stage(ctx, decision=risk, market=market, now=NOW + timedelta(seconds=4))
 
 
 def test_cold_start_oms_rejects_wrong_authorization_type_binding_and_time(tmp_path) -> None:
@@ -207,28 +188,38 @@ def test_cold_start_oms_rejects_wrong_authorization_type_binding_and_time(tmp_pa
         _stage(wrong_type, authority=_WrongReturnAuthority())
 
     binding = _setup(tmp_path / "binding")
-    bad_binding = _ValidAuthority(mutate=lambda value: replace(value, order_id="different-order"))
     with pytest.raises(ColdStartExternalSubmissionConflict, match="authorization binding mismatch"):
-        _stage(binding, authority=bad_binding)
+        _stage(binding, authority=_IssueAuthority(issue_overrides={"order_id": "different-order"}))
 
     future = _setup(tmp_path / "future")
-    future_time = NOW + timedelta(seconds=5)
     with pytest.raises(ColdStartExternalSubmissionConflict, match="future-dated"):
         _stage(
             future,
-            authority=_ValidAuthority(authorized_at=future_time),
+            authority=_IssueAuthority(authorized_at=NOW + timedelta(seconds=5)),
             now=NOW + timedelta(seconds=4),
         )
 
     outlives = _setup(tmp_path / "outlives")
     risk, market = _risk_and_market(outlives)
+    order = outlives.order_store.get_by_order_id(outlives.package.order_id)
+    assert order is not None
     authorized = risk.valid_until + timedelta(milliseconds=1)
+    authority = _IssueAuthority(authorized_at=authorized)
+    auth = authority.authorize_oms_stage(
+        order=order,
+        decision=risk,
+        market=market,
+        now=authorized,
+        context=_Context(outlives.safety.get().version),
+    )
     with pytest.raises(ColdStartExternalSubmissionConflict, match="outlives RiskDecision"):
-        _stage(
-            outlives,
-            authority=_ValidAuthority(authorized_at=authorized),
+        ColdStartOrderManagementSystem._validate_authorization(
+            authorization=auth,
+            order=order,
             decision=risk,
             market=market,
+            intent_hash=intent_fingerprint(order.intent),
+            safety_version=outlives.safety.get().version,
             now=authorized,
         )
 
@@ -238,26 +229,23 @@ def test_cold_start_authorization_and_handoff_dataclasses_detect_tamper(tmp_path
     oms, (order, handoff), _, _, authority = _stage(ctx)
     assert order.status is OrderStatus.SUBMITTING
     assert authority.calls == 1
-
+    auth = ColdStartOmsStageAuthority._issue_authorization(
+        authorization_id="1" * 64,
+        package_hash="2" * 64,
+        operator_decision_hash="3" * 64,
+        checkpoint_hash="4" * 64,
+        authority_state_fingerprint="5" * 64,
+        attempt_id="attempt",
+        order_id=ctx.package.order_id,
+        client_order_id="client",
+        intent_fingerprint_value=intent_fingerprint(order.intent),
+        risk_decision_id=order.risk_decision_id or "risk",
+        market_fingerprint_value="6" * 64,
+        safety_state_version=ctx.safety.get().version,
+        authorized_at=NOW,
+    )
     with pytest.raises(ValueError, match="hash mismatch"):
-        replace(
-            authority._issue_authorization(
-                authorization_id="1" * 64,
-                package_hash="2" * 64,
-                operator_decision_hash="3" * 64,
-                checkpoint_hash="4" * 64,
-                authority_state_fingerprint="5" * 64,
-                attempt_id="attempt",
-                order_id=ctx.package.order_id,
-                client_order_id="client",
-                intent_fingerprint_value=intent_fingerprint(order.intent),
-                risk_decision_id=order.risk_decision_id or "risk",
-                market_fingerprint_value="6" * 64,
-                safety_state_version=ctx.safety.get().version,
-                authorized_at=NOW,
-            ),
-            package_hash="7" * 64,
-        )
+        replace(auth, package_hash="7" * 64)
     with pytest.raises(ValueError, match="handoff hash mismatch"):
         replace(handoff, package_hash="8" * 64)
     with pytest.raises(ValueError, match="event_id mismatch"):
@@ -270,9 +258,8 @@ def test_cold_start_authorization_and_handoff_dataclasses_detect_tamper(tmp_path
 
 def test_cold_start_oms_resolver_rejects_missing_status_timestamp_intent_risk_and_safety_drift(tmp_path) -> None:
     missing = _setup(tmp_path / "missing")
-    oms = _oms(missing)
     with pytest.raises(ColdStartExternalSubmissionConflict, match="missing or duplicated"):
-        oms.resolve_cold_start_external_submission_handoff(
+        _oms(missing).resolve_cold_start_external_submission_handoff(
             order_id=missing.package.order_id,
             authorization_id="a" * 64,
         )
@@ -291,7 +278,7 @@ def test_cold_start_oms_resolver_rejects_missing_status_timestamp_intent_risk_an
     time_ctx = _setup(tmp_path / "time")
     time_oms, (_, time_handoff), _, _, _ = _stage(time_ctx)
     order = time_ctx.order_store.get_by_order_id(time_ctx.package.order_id)
-    assert order is not None
+    assert order is not None and order.submitted_at is not None
     time_ctx.order_store.update(replace(order, submitted_at=order.submitted_at + timedelta(milliseconds=1)))
     with pytest.raises(ColdStartExternalSubmissionConflict, match="timestamp mismatch"):
         time_oms.resolve_cold_start_external_submission_handoff(
@@ -346,10 +333,7 @@ def test_cold_start_oms_rejects_duplicate_tampered_and_wrong_type_handoff_events
             return (event, event)
 
     duplicate_oms = ColdStartOrderManagementSystem(
-        broker=_NoBroker(),
-        ledger=DuplicateLedger(),
-        order_store=source.order_store,
-        safety_state_store=source.safety,
+        broker=_NoBroker(), ledger=DuplicateLedger(), order_store=source.order_store, safety_state_store=source.safety
     )
     with pytest.raises(ColdStartExternalSubmissionConflict, match="missing or duplicated"):
         duplicate_oms.resolve_cold_start_external_submission_handoff(
@@ -359,12 +343,7 @@ def test_cold_start_oms_rejects_duplicate_tampered_and_wrong_type_handoff_events
 
     wrong_type_ledger = InMemoryEventLedger()
     wrong_type_ledger.append(
-        LedgerEvent(
-            event_id=event.event_id,
-            event_type="WRONG_TYPE",
-            occurred_at=event.occurred_at,
-            payload=event.payload,
-        )
+        LedgerEvent(event_id=event.event_id, event_type="WRONG_TYPE", occurred_at=event.occurred_at, payload=event.payload)
     )
     wrong_type_oms = ColdStartOrderManagementSystem(
         broker=_NoBroker(), ledger=wrong_type_ledger, order_store=source.order_store, safety_state_store=source.safety
@@ -379,12 +358,7 @@ def test_cold_start_oms_rejects_duplicate_tampered_and_wrong_type_handoff_events
     payload = dict(event.payload)
     payload["handoff_hash"] = "0" * 64
     tampered_ledger.append(
-        LedgerEvent(
-            event_id=event.event_id,
-            event_type=event.event_type,
-            occurred_at=event.occurred_at,
-            payload=payload,
-        )
+        LedgerEvent(event_id=event.event_id, event_type=event.event_type, occurred_at=event.occurred_at, payload=payload)
     )
     tampered_oms = ColdStartOrderManagementSystem(
         broker=_NoBroker(), ledger=tampered_ledger, order_store=source.order_store, safety_state_store=source.safety
