@@ -34,7 +34,7 @@ Abre:
 
 En la pantalla:
 
-1. Conserva o crea un `Attempt ID` nuevo.
+1. Crea un `Attempt ID` nuevo.
 2. Introduce las credenciales de **Alpaca PAPER**, nunca LIVE.
 3. Pulsa **1. Preparar canary**.
 4. Revisa el resumen: BTC/USD, alrededor de USD 2 y siempre <= USD 5.
@@ -43,22 +43,30 @@ En la pantalla:
 
 La sección 3 de esta pantalla seguirá diciendo que el POST real está bloqueado. **Es correcto:** esta interfaz es deliberadamente no-POST. La preparación queda guardada con evidencia tipada restart-safe.
 
-Guarda el mismo `Workspace` y `Attempt ID`.
+No necesitas copiar manualmente el `Attempt ID` a la pantalla REAL PAPER.
 
 ## 3. Ejecutar el único POST PAPER permitido
 
-Abre por separado:
+Abre por separado e inmediatamente después de aprobar:
 
 `ABRIR_PRIMER_CANARY_REAL_PAPER.command`
 
-1. Introduce el mismo `Workspace` y `Attempt ID`.
-2. Pulsa **Revisar estado**.
-3. El estado debe ser `READY_FOR_SECOND_EXACT_POST_CONFIRMATION`.
-4. Verifica nuevamente BTC/USD, notional, cantidad, limit price, `client_order_id` y deadline.
-5. Introduce de nuevo las credenciales PAPER.
-6. Copia exactamente el **segundo challenge** mostrado en rojo.
-7. Pégalo en el campo correspondiente.
-8. Pulsa **EJECUTAR UNA VEZ EN PAPER** una sola vez.
+La pantalla consulta el `Workspace` durable y aplica una regla fail-closed:
+
+- si existe **exactamente un** intento aprobado, restart-safe, no iniciado y todavía vigente, lo carga automáticamente;
+- si no existe ninguno vigente, no habilita ejecución y pide volver a PREPARAR;
+- si existen dos o más intentos válidos simultáneamente, **no elige por ti** y bloquea por ambigüedad;
+- intentos cuyo package o aprobación ya expiraron no son elegibles para autoselección.
+
+Después:
+
+1. Confirma que el `Attempt ID` completo apareció automáticamente.
+2. El estado debe ser `READY_FOR_SECOND_EXACT_POST_CONFIRMATION`.
+3. Verifica nuevamente BTC/USD, notional, cantidad, limit price, `client_order_id` y deadline.
+4. Introduce de nuevo las credenciales PAPER.
+5. Copia exactamente el **segundo challenge** mostrado en rojo.
+6. Pégalo en el campo correspondiente.
+7. Pulsa **EJECUTAR UNA VEZ EN PAPER** una sola vez.
 
 Antes del POST el sistema vuelve a consultar por GET cuenta, asset, flatness y mercado. Esa latencia consume el TTL de frescura. Si la evidencia queda vieja, la ejecución falla cerrada.
 
@@ -83,10 +91,11 @@ Este canary certifica conectividad y control operativo. **No demuestra rentabili
 - No usar credenciales LIVE.
 - No habilitar `R6_EXTERNAL_PAPER_WRITE=ENABLED`.
 - No reutilizar un `Attempt ID` consumido.
+- No copiar a mano un ID parcial como `first-canary-…`.
 - No repetir el botón de ejecución.
 - No interpretar un 404 de orden como autorización para reenviar POST.
 - No mover esta autoridad al Control Center genérico.
 
 ## Flujo resumido
 
-`Instalar → Preparar restart-safe → Aprobar → Cerrar pantalla segura → Abrir REAL PAPER → Revisar → Segundo challenge → Ejecutar una vez → Reconciliar por GET`
+`Instalar → Preparar restart-safe → Aprobar → Abrir REAL PAPER → Autodetectar único intento vigente → Revisar → Segundo challenge → Ejecutar una vez → Reconciliar por GET`
