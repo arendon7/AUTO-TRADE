@@ -17,6 +17,7 @@ on:
       - "scripts/check_r6_first_canary_real_paper_dashboard.py"
       - "tests/test_r6_first_canary_external_post_consent.py"
       - "tests/test_r6_first_canary_real_paper_execution.py"
+      - "tests/test_r6_first_canary_real_paper_autodiscovery.py"
       - ".github/workflows/r6-first-canary-real-paper-delegate.yml"
   pull_request:
     paths:
@@ -33,6 +34,7 @@ on:
       - "scripts/check_r6_first_canary_real_paper_dashboard.py"
       - "tests/test_r6_first_canary_external_post_consent.py"
       - "tests/test_r6_first_canary_real_paper_execution.py"
+      - "tests/test_r6_first_canary_real_paper_autodiscovery.py"
       - ".github/workflows/r6-first-canary-real-paper-delegate.yml"
   workflow_dispatch:
 
@@ -70,7 +72,8 @@ jobs:
             scripts/check_r6_first_canary_real_paper_delegate.py \
             scripts/check_r6_first_canary_real_paper_dashboard.py \
             tests/test_r6_first_canary_external_post_consent.py \
-            tests/test_r6_first_canary_real_paper_execution.py
+            tests/test_r6_first_canary_real_paper_execution.py \
+            tests/test_r6_first_canary_real_paper_autodiscovery.py
 
       - name: Static restart-safe preparation UX boundary
         run: python scripts/check_r6_first_canary_restart_safe_dashboard.py
@@ -85,7 +88,8 @@ jobs:
         run: |
           pytest -q \
             tests/test_r6_first_canary_external_post_consent.py \
-            tests/test_r6_first_canary_real_paper_execution.py
+            tests/test_r6_first_canary_real_paper_execution.py \
+            tests/test_r6_first_canary_real_paper_autodiscovery.py
 
       - name: Re-prove restart-safe preparation backend
         run: |
