@@ -17,6 +17,8 @@ def test_crypto_execution_simulation_boundary_passes_repository() -> None:
     )
     assert result.returncode == 0, result.stderr
     assert "crypto execution simulation boundary: PASS" in result.stdout
-    assert "UNKNOWN -> PRE_IO -> delegated transport" in result.stdout
-    assert "deterministic in-memory delegate only" in result.stdout
-    assert "Mac remains disconnected" in result.stdout
+    assert "isolated first-canary orchestrator only" in result.stdout
+    assert "durable replay latch before writer" in result.stdout
+    assert "UNKNOWN -> reconciliation" in result.stdout
+    assert "injected delegate only" in result.stdout
+    assert "generic Mac remains disconnected" in result.stdout
