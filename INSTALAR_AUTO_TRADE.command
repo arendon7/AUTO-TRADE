@@ -161,8 +161,16 @@ bash "$ACTIVE_ROOT/scripts/mac_bootstrap.sh"
 PY="$ACTIVE_ROOT/.venv/bin/python"
 [[ -x "$PY" ]] || { echo "ERROR: .venv no quedó instalado." >&2; exit 2; }
 
-"$PY" "$ACTIVE_ROOT/scripts/check_mac_standalone_boundary.py"
-"$PY" "$ACTIVE_ROOT/scripts/check_mac_dashboard_boundary.py"
+if [[ -f "$ACTIVE_ROOT/MAC_STANDALONE_MANIFEST.txt" ]] && grep -Fq 'first_canary_unified_surface=ONE_APP' "$ACTIVE_ROOT/MAC_STANDALONE_MANIFEST.txt"; then
+  "$PY" "$ACTIVE_ROOT/scripts/check_r6_first_canary_unified_dashboard.py"
+  "$PY" "$ACTIVE_ROOT/scripts/check_r6_first_canary_restart_safe_dashboard.py"
+  "$PY" "$ACTIVE_ROOT/scripts/check_r6_first_canary_real_paper_delegate.py"
+  "$PY" "$ACTIVE_ROOT/scripts/check_r6_first_canary_real_paper_dashboard.py"
+  "$PY" "$ACTIVE_ROOT/scripts/check_r6_live_deny_boundary.py"
+else
+  "$PY" "$ACTIVE_ROOT/scripts/check_mac_standalone_boundary.py"
+  "$PY" "$ACTIVE_ROOT/scripts/check_mac_dashboard_boundary.py"
+fi
 "$PY" "$ACTIVE_ROOT/scripts/mac_doctor.py"
 
 cat <<EOF
