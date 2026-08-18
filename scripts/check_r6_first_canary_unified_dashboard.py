@@ -70,12 +70,17 @@ def main() -> int:
         '"live_trading": "BLOCKED"',
         "self._action_lock = threading.Lock()",
         "if not self.lock.acquire(blocking=False):",
+        "self.review_token: str | None = None",
+        "self.execute_token: str | None = None",
+        "secrets.compare_digest(supplied_token, self.review_token)",
+        "secrets.compare_digest(supplied_token, self.execute_token)",
+        "self.execute_token = None",
     )
     for token in required_server:
         if token not in server:
             fail(f"unified server missing boundary anchor: {token}")
 
-    # The operator should not type or transport internal authority identifiers.
+    # Internal authority identifiers/challenges never become operator-entered fields.
     forbidden_html_inputs = (
         'id="attempt',
         'name="attempt',
@@ -95,7 +100,11 @@ def main() -> int:
         "Aprobar preparación",
         "EJECUTAR UNA VEZ EN PAPER",
         "review_confirmed:true",
+        "review_token:token",
         "execute_confirmed:true",
+        "execute_token:token",
+        "state.reviewToken=null",
+        "state.executeToken=null",
         "NO vuelvas a pulsar ejecutar",
         "LIVE BLOCKED",
     )
@@ -125,8 +134,8 @@ def main() -> int:
             fail(f"unified launcher leaks old/manual flow or credentials: {forbidden}")
 
     print(
-        "unified first-canary Mac boundary: PASS — one launcher/one window; hidden Attempt IDs/challenges; "
-        "two explicit human actions; existing certified prepare/approval/execute/recovery authority only; "
+        "unified first-canary Mac boundary: PASS — one launcher/one window; hidden internal authority identifiers; "
+        "two explicit human actions with invisible one-shot click bindings; existing certified prepare/approval/execute/recovery authority only; "
         "no direct broker transport; credentials memory-only; retry POST false; LIVE blocked"
     )
     return 0
