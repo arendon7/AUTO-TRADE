@@ -55,8 +55,8 @@ from test_r6_paper_crypto_canary_coordinator import NOW, _NoBroker, _account, _a
 from test_r6_paper_crypto_cold_start_final_guard import _flat_attestation, _profile
 
 
-KEY_ID = "cold-start-simulation-paper-key"
-SECRET = "cold-start-simulation-paper-secret"
+KEY_ID = "simulation-paper-key"
+SECRET = "simulation-paper-secret"
 CREDENTIAL_REFERENCE = sha256(KEY_ID.encode("utf-8")).hexdigest()
 ZERO = Decimal("0")
 
@@ -262,7 +262,7 @@ def test_cold_start_transport_rejects_wrong_effective_key_before_delegate(tmp_pa
     writer = AlpacaPaperCryptoWriter(
         config=AlpacaPaperCryptoWriterConfig(enabled=True), transport=transport
     )
-    with pytest.raises(CryptoColdStartPreIoInterlockError, match="credential reference"):
+    with pytest.raises(CryptoPaperWriterAmbiguous) as captured:
         writer.submit_once(
             lifecycle=ctx.lifecycle,
             lifecycle_id=ctx.package.lifecycle_id,
@@ -270,6 +270,8 @@ def test_cold_start_transport_rejects_wrong_effective_key_before_delegate(tmp_pa
             credentials=AlpacaPaperCredentials(key_id="different-paper-key", secret_key=SECRET),
             now=NOW + timedelta(seconds=4, milliseconds=400),
         )
+    assert isinstance(captured.value.__cause__, CryptoColdStartPreIoInterlockError)
+    assert "credential reference" in str(captured.value.__cause__)
     assert delegate.calls == 0
     assert transport.last_attestation is None
     assert ctx.lifecycle.snapshot(ctx.package.lifecycle_id).state.status is CryptoLifecycleStatus.ENTRY_SUBMISSION_UNKNOWN
