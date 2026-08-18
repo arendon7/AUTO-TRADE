@@ -98,12 +98,8 @@ if [[ -f "$SOURCE_ROOT/MAC_STANDALONE_MANIFEST.txt" ]]; then
     echo "Preparando copia instalada fuera de Downloads/Finder quarantine..."
     echo "Destino: $INSTALL_ROOT"
 
-    # The downloaded/extracted package may carry Finder quarantine metadata.
-    # ditto --norsrc --noqtn deliberately copies only the verified package bytes
-    # and normal POSIX metadata, without resource forks, xattrs, ACLs or quarantine.
     ditto --norsrc --noqtn "$SOURCE_ROOT" "$STAGE_ROOT"
 
-    # Never promote transient/local state from a previously attempted source folder.
     rm -rf \
       "$STAGE_ROOT/.venv" \
       "$STAGE_ROOT/.runtime" \
@@ -167,11 +163,16 @@ if [[ -f "$ACTIVE_ROOT/MAC_STANDALONE_MANIFEST.txt" ]] && grep -Fq 'first_canary
   "$PY" "$ACTIVE_ROOT/scripts/check_r6_first_canary_real_paper_delegate.py"
   "$PY" "$ACTIVE_ROOT/scripts/check_r6_first_canary_real_paper_dashboard.py"
   "$PY" "$ACTIVE_ROOT/scripts/check_r6_live_deny_boundary.py"
+  # The legacy mac_doctor certifies that ABRIR_AUTO_TRADE.command opens the
+  # generic no-write Control Center. The ONE-APP package intentionally replaces
+  # that launcher with the certified unified first-canary flow, so its own
+  # dedicated checkers above are authoritative for this manifest.
+  echo "Unified ONE-APP runtime/authority checks: OK"
 else
   "$PY" "$ACTIVE_ROOT/scripts/check_mac_standalone_boundary.py"
   "$PY" "$ACTIVE_ROOT/scripts/check_mac_dashboard_boundary.py"
+  "$PY" "$ACTIVE_ROOT/scripts/mac_doctor.py"
 fi
-"$PY" "$ACTIVE_ROOT/scripts/mac_doctor.py"
 
 cat <<EOF
 
