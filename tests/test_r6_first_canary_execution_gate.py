@@ -130,8 +130,8 @@ class _UnknownReconciler:
 def _small_asset(account, *, observed):
     return replace(
         _asset(account, observed=observed),
-        min_order_size=Decimal("0.0001"),
-        min_trade_increment=Decimal("0.0001"),
+        min_order_size=Decimal("0.00001"),
+        min_trade_increment=Decimal("0.00001"),
     )
 
 
