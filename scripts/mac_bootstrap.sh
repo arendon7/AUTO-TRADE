@@ -123,9 +123,6 @@ fi
 "$VENV_PY" scripts/check_mac_safety_rehearsal_boundary.py
 
 if [[ "$UNIFIED_ONE_APP" == "YES" ]]; then
-  # All legacy PREPARAR/REAL-PAPER surfaces were certified on the exact source
-  # head before packaging and are intentionally pruned from the operator ZIP.
-  # Validate only what physically remains installed plus global authority.
   "$VENV_PY" scripts/check_r6_first_canary_unified_dashboard.py
   "$VENV_PY" scripts/check_r6_live_deny_boundary.py
   "$VENV_PY" scripts/check_r6_authority.py
@@ -166,6 +163,11 @@ cat <<EOF
 MAC BOOTSTRAP: PASS
 standalone_mode=${STANDALONE_MODE}
 unified_one_app=${UNIFIED_ONE_APP}
+Recommended single safe entry point:
+  bash scripts/mac_start.sh
+Safe diagnostics and rehearsal remain available internally:
+  bash scripts/mac_start.sh doctor
+  bash scripts/mac_start.sh rehearsal
 No Alpaca credential was read by this bootstrap.
 No broker endpoint was called by this bootstrap.
 No PAPER order was submitted.
