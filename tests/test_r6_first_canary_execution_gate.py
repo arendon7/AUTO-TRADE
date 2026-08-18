@@ -228,8 +228,9 @@ def test_first_canary_gate_crosses_delegate_once_then_reconciles_terminal_no_fil
     assert delegate.calls == 1
     assert reconciler.calls == 1
     assert outcome.retry_forbidden is True
+    assert outcome.status == "RECONCILED_FINAL"
     assert outcome.broker_post_outcome == "BROKER_RESPONSE_RECEIVED"
-    assert outcome.lifecycle_status != "ENTRY_SUBMISSION_UNKNOWN"
+    assert outcome.lifecycle_status == "ENTRY_TERMINAL_NO_FILL"
     started = session.attempt.read(path=session.attempt.execution_started_path)
     assert started["operator_decision_consumed"] is True
     assert started["retry_forbidden"] is True
@@ -237,8 +238,11 @@ def test_first_canary_gate_crosses_delegate_once_then_reconciles_terminal_no_fil
     assert result["broker_delegate_boundary_crossed"] is True
     assert result["entry_attempt_count"] == 1
     reconciliation = session.attempt.read(path=session.attempt.reconciliation_path)
-    assert reconciliation["status"] == "CRYPTO_PAPER_FIRST_CANARY_RECONCILED_NO_RETRY"
+    assert reconciliation["status"] == "CRYPTO_PAPER_FIRST_CANARY_RECONCILED_FINAL_NO_RETRY"
     assert reconciliation["retry_post"] is False
+    assert reconciliation["persisted_final_resolution"] is True
+    assert session.attempt.reconciliation_pending_path.exists() is False
+    assert session.attempt.reconciliation_failure_path.exists() is False
 
     with pytest.raises(CryptoFirstCanaryAttemptConflict, match="POST replay is forbidden"):
         execute_first_canary_once(
@@ -248,6 +252,29 @@ def test_first_canary_gate_crosses_delegate_once_then_reconciles_terminal_no_fil
             reconciler=_FoundReconciler(),
             now=execute_at + timedelta(seconds=1),
         )
+
+
+def test_first_canary_gate_open_broker_order_is_pending_not_final(tmp_path, monkeypatch) -> None:
+    _, session, inputs = _prepare_session(tmp_path, monkeypatch)
+    execute_at = NOW + timedelta(seconds=4, milliseconds=300)
+    monkeypatch.setattr(cold_pre_io, "_utc_now", lambda: execute_at + timedelta(milliseconds=35))
+
+    outcome = execute_first_canary_once(
+        inputs=inputs,
+        final_evidence=_final(inputs, at=execute_at),
+        delegate=_CountingSimulationDelegate(),
+        reconciler=_FoundReconciler(status="new"),
+        now=execute_at,
+    )
+
+    assert outcome.status == "RECONCILIATION_PENDING_NO_RETRY"
+    assert outcome.lifecycle_status == "ENTRY_ACKNOWLEDGED"
+    assert session.attempt.reconciliation_path.exists() is False
+    pending = session.attempt.read(path=session.attempt.reconciliation_pending_path)
+    assert pending["status"] == "CRYPTO_PAPER_FIRST_CANARY_RECONCILIATION_PENDING_ORDER_OPEN_NO_RETRY"
+    assert pending["retry_post"] is False
+    assert pending["reconciliation_retry_get_only"] is True
+    assert pending["persisted_final_resolution"] is False
 
 
 def test_first_canary_gate_ambiguous_delegate_reconciles_404_and_never_retries(tmp_path, monkeypatch) -> None:
@@ -272,10 +299,12 @@ def test_first_canary_gate_ambiguous_delegate_reconciles_404_and_never_retries(t
     assert outcome.broker_post_outcome == "UNKNOWN_RECONCILIATION_REQUIRED"
     result = session.attempt.read(path=session.attempt.execution_result_path)
     assert result["broker_delegate_boundary_crossed"] is True
-    reconciliation = session.attempt.read(path=session.attempt.reconciliation_path)
-    assert reconciliation["status"] == "CRYPTO_PAPER_FIRST_CANARY_ORDER_404_UNKNOWN_HALT_NO_RETRY"
+    assert session.attempt.reconciliation_path.exists() is False
+    reconciliation = session.attempt.read(path=session.attempt.reconciliation_pending_path)
+    assert reconciliation["status"] == "CRYPTO_PAPER_FIRST_CANARY_RECONCILIATION_PENDING_ORDER_404_NO_RETRY"
     assert reconciliation["retry_post"] is False
     assert reconciliation["reconciliation_retry_get_only"] is True
+    assert reconciliation["persisted_final_resolution"] is False
 
 
 def test_first_canary_gate_missing_approval_blocks_before_delegate_and_latch(tmp_path, monkeypatch) -> None:
