@@ -48,6 +48,32 @@ read_source_head() {
   awk -F= '$1 == "source_head" {print $2; exit}' "$root/MAC_BUILD_INFO.txt" 2>/dev/null || true
 }
 
+prune_real_paper_surface_if_disabled() {
+  local root="$1"
+  local manifest="$root/MAC_STANDALONE_MANIFEST.txt"
+  [[ -f "$manifest" ]] || return 1
+
+  if grep -Fq 'real_paper_surface=SEPARATE_EXACT_ONE_SHOT' "$manifest"; then
+    return 0
+  fi
+
+  # Fail closed for legacy/safe manifests: unless the dedicated exact one-shot
+  # surface is affirmatively declared, remove every user-facing/CLI bridge that
+  # could reach it from the installed copy. The generic FULL package therefore
+  # stays operationally equivalent to the PR41 no-POST surface.
+  rm -f \
+    "$root/ABRIR_PRIMER_CANARY_PREPARAR.command" \
+    "$root/ABRIR_PRIMER_CANARY_REAL_PAPER.command" \
+    "$root/LEEME_PRIMER_CANARY_REAL_PAPER.md" \
+    "$root/web/mac_first_canary_real_paper.html" \
+    "$root/scripts/mac_first_canary_restart_safe_dashboard.py" \
+    "$root/scripts/mac_first_canary_real_paper_dashboard.py" \
+    "$root/scripts/mac_crypto_first_canary_execute_real_paper.py" \
+    "$root/scripts/check_r6_first_canary_restart_safe_dashboard.py" \
+    "$root/scripts/check_r6_first_canary_real_paper_delegate.py" \
+    "$root/scripts/check_r6_first_canary_real_paper_dashboard.py"
+}
+
 if [[ -f "$SOURCE_ROOT/MAC_STANDALONE_MANIFEST.txt" ]]; then
   STANDALONE_MODE="YES"
   verify_standalone_assets "$SOURCE_ROOT"
@@ -89,6 +115,7 @@ if [[ -f "$SOURCE_ROOT/MAC_STANDALONE_MANIFEST.txt" ]]; then
     find "$STAGE_ROOT" -type f \( -name '*.sqlite3' -o -name '*.sqlite3-*' -o -name '*.pyc' \) -delete 2>/dev/null || true
     find "$STAGE_ROOT" -type d -name '__pycache__' -prune -exec rm -rf {} + 2>/dev/null || true
 
+    prune_real_paper_surface_if_disabled "$STAGE_ROOT"
     verify_standalone_assets "$STAGE_ROOT"
     STAGED_HEAD="$(read_source_head "$STAGE_ROOT")"
     if [[ "$STAGED_HEAD" != "$SOURCE_HEAD" ]]; then
@@ -102,6 +129,7 @@ if [[ -f "$SOURCE_ROOT/MAC_STANDALONE_MANIFEST.txt" ]]; then
     ACTIVE_ROOT="$INSTALL_ROOT"
   else
     ACTIVE_ROOT="$SOURCE_ROOT"
+    prune_real_paper_surface_if_disabled "$ACTIVE_ROOT"
   fi
 else
   if [[ ! -d "$SOURCE_ROOT/.git" ]]; then
@@ -122,7 +150,7 @@ AUTO-TRADE R6 — INSTALACIÓN SEGURA
 • No requiere Python del sistema en el paquete FULL.
 • No usa PyPI/Internet para instalar el runtime del paquete FULL.
 • En FULL descargado, instala en: $INSTALL_ROOT
-• PAPER write permanece DISABLED.
+• PAPER write genérico permanece DISABLED.
 • LIVE permanece BLOCKED.
 • Esta instalación NO envía órdenes.
 EOF
@@ -145,8 +173,8 @@ AUTO-TRADE R6 INSTALL: OK
 Runtime: OK
 Dependencias: OK
 Control Center: OK
-PAPER write: DISABLED
-Capital authority: NONE
+PAPER write genérico: DISABLED
+Capital authority: NONE durante instalación
 LIVE: BLOCKED
 Orden enviada por instalación: NO
 install_root=$ACTIVE_ROOT
