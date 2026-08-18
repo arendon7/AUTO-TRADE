@@ -4,19 +4,27 @@ on:
   push:
     branches: ["reconstruction/**", "work/r6-crypto-paper-first-canary-real-paper-delegate"]
     paths:
+      - "ABRIR_PRIMER_CANARY_REAL_PAPER.command"
+      - "web/mac_first_canary_real_paper.html"
       - "src/autotrade/first_canary_external_post_consent.py"
       - "src/autotrade/first_canary_real_paper_execution.py"
+      - "scripts/mac_first_canary_real_paper_dashboard.py"
       - "scripts/mac_crypto_first_canary_execute_real_paper.py"
       - "scripts/check_r6_first_canary_real_paper_delegate.py"
+      - "scripts/check_r6_first_canary_real_paper_dashboard.py"
       - "tests/test_r6_first_canary_external_post_consent.py"
       - "tests/test_r6_first_canary_real_paper_execution.py"
       - ".github/workflows/r6-first-canary-real-paper-delegate.yml"
   pull_request:
     paths:
+      - "ABRIR_PRIMER_CANARY_REAL_PAPER.command"
+      - "web/mac_first_canary_real_paper.html"
       - "src/autotrade/first_canary_external_post_consent.py"
       - "src/autotrade/first_canary_real_paper_execution.py"
+      - "scripts/mac_first_canary_real_paper_dashboard.py"
       - "scripts/mac_crypto_first_canary_execute_real_paper.py"
       - "scripts/check_r6_first_canary_real_paper_delegate.py"
+      - "scripts/check_r6_first_canary_real_paper_dashboard.py"
       - "tests/test_r6_first_canary_external_post_consent.py"
       - "tests/test_r6_first_canary_real_paper_execution.py"
       - ".github/workflows/r6-first-canary-real-paper-delegate.yml"
@@ -49,19 +57,27 @@ jobs:
           python -m compileall -q \
             src/autotrade/first_canary_external_post_consent.py \
             src/autotrade/first_canary_real_paper_execution.py \
+            scripts/mac_first_canary_real_paper_dashboard.py \
             scripts/mac_crypto_first_canary_execute_real_paper.py \
             scripts/check_r6_first_canary_real_paper_delegate.py \
+            scripts/check_r6_first_canary_real_paper_dashboard.py \
             tests/test_r6_first_canary_external_post_consent.py \
             tests/test_r6_first_canary_real_paper_execution.py
 
       - name: Static real PAPER authority boundary
         run: python scripts/check_r6_first_canary_real_paper_delegate.py
 
+      - name: Static separate Mac execution surface boundary
+        run: python scripts/check_r6_first_canary_real_paper_dashboard.py
+
       - name: Real PAPER gate functional tests with injected delegates only
         run: |
           pytest -q \
             tests/test_r6_first_canary_external_post_consent.py \
             tests/test_r6_first_canary_real_paper_execution.py
+
+      - name: Re-prove PR41 no-POST Mac surface
+        run: python scripts/check_r6_first_canary_mac_dashboard.py
 
       - name: Re-prove certified first-canary execution authority
         run: python scripts/check_r6_first_canary_execution_gate.py
