@@ -34,7 +34,7 @@ if [[ -f "$SOURCE_ROOT/MAC_STANDALONE_MANIFEST.txt" ]]; then
     echo "AUTO-TRADE: source_head inválido en el paquete." >&2
     exit 2
   fi
-  if [[ ! -x "$INSTALL_ROOT/.venv/bin/python" || "$EXPECTED_HEAD" != "$INSTALLED_HEAD" || ! -f "$INSTALL_ROOT/scripts/mac_first_canary_unified_queue.py" ]]; then
+  if [[ ! -x "$INSTALL_ROOT/.venv/bin/python" || "$EXPECTED_HEAD" != "$INSTALLED_HEAD" || ! -f "$INSTALL_ROOT/scripts/mac_first_canary_unified_auto_settle.py" ]]; then
     echo "AUTO-TRADE: instalando/reparando la copia certificada..."
     bash "$SOURCE_ROOT/INSTALAR_AUTO_TRADE.command"
   fi
@@ -49,8 +49,9 @@ fi
 cd "$ROOT"
 PYTHON="$ROOT/.venv/bin/python"
 # Certified authority base remains scripts/mac_first_canary_unified_dashboard.py.
-# Operator entrypoint adds GET-only queue recovery without adding POST authority.
-DASHBOARD="$ROOT/scripts/mac_first_canary_unified_queue.py"
+# Queue recovery remains scripts/mac_first_canary_unified_queue.py and is GET-only.
+# Operator entrypoint adds only bounded GET-only auto-settlement after the one-shot POST.
+DASHBOARD="$ROOT/scripts/mac_first_canary_unified_auto_settle.py"
 PAGE="$ROOT/web/mac_first_canary_unified.html"
 
 if [[ ! -x "$PYTHON" ]]; then
@@ -64,9 +65,10 @@ fi
 
 printf '%s\n' \
   "AUTO-TRADE · Primer Canary PAPER · UNA SOLA APP" \
-  "Flujo: Conectar -> Preparar -> Revisar/Aprobar -> Ejecutar una vez -> Resultado." \
+  "Flujo: Conectar -> Preparar -> Revisar/Aprobar -> Ejecutar una vez -> Reconciliación automática -> Resultado." \
   "Attempt IDs, challenges, TTL y recovery se gestionan internamente." \
   "Si hay varios intentos pendientes, se reconcilian por cola GET-only antes de permitir otro canary." \
+  "Después del único POST, AUTO-TRADE intenta cerrar el resultado automáticamente solo por GET." \
   "PAPER ONLY · BTC/USD · máximo USD 5 · LIVE BLOCKED · RETRY POST FALSE"
 
 exec "$PYTHON" "$DASHBOARD"
