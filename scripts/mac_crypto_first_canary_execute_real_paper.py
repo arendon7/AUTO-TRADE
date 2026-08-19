@@ -11,7 +11,10 @@ from autotrade.first_canary_real_paper_execution import (
     collect_fresh_final_evidence,
     execute_real_paper_first_canary_once,
 )
+from autotrade.brokers.alpaca_paper_crypto_account_status import attest_active_crypto_account
+from autotrade.brokers.alpaca_paper_crypto_first_canary_attempt import FirstCanaryAttemptWorkspace
 from autotrade.brokers.alpaca_paper_gateway import AlpacaPaperCredentials
+from autotrade.brokers.alpaca_paper_operational import PaperOperationalWorkspace
 
 
 KEY_ENV = "APCA_API_KEY_ID"
@@ -48,6 +51,45 @@ def _confirmation_from_stdin() -> str:
     return confirmation
 
 
+def _expected_account_id(workspace_path: Path) -> str:
+    raw = workspace_path.expanduser()
+    if raw.is_symlink() or not raw.is_dir():
+        raise MacFirstCanaryRealPaperExecutionError("existing non-symlink PAPER workspace is required")
+    workspace = PaperOperationalWorkspace(root=raw.resolve())
+    path = workspace.account_attestation_path
+    if path.is_symlink() or not path.is_file():
+        raise MacFirstCanaryRealPaperExecutionError("verified PAPER account evidence is missing")
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise MacFirstCanaryRealPaperExecutionError("verified PAPER account evidence is unreadable") from exc
+    account_id = payload.get("account_id") if isinstance(payload, dict) else None
+    if not isinstance(account_id, str) or not account_id.strip():
+        raise MacFirstCanaryRealPaperExecutionError("workspace PAPER account ID is missing")
+    return account_id.strip()
+
+
+def _broker_diagnostic(workspace_path: Path, attempt_id: str) -> dict[str, object] | None:
+    try:
+        attempt = FirstCanaryAttemptWorkspace.open(
+            workspace_path=workspace_path.expanduser().resolve(),
+            attempt_id=attempt_id,
+        )
+        document = attempt.read(path=attempt.execution_result_path)
+    except Exception:
+        return None
+    error_type = document.get("writer_error_type")
+    error = document.get("writer_error")
+    if not isinstance(error_type, str) and not isinstance(error, str):
+        return None
+    return {
+        "writer_error_type": error_type if isinstance(error_type, str) else None,
+        "writer_error": error if isinstance(error, str) else None,
+        "broker_post_outcome": document.get("broker_post_outcome"),
+        "durable_lifecycle_status": document.get("durable_lifecycle_status"),
+    }
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
@@ -76,10 +118,17 @@ def main(argv: list[str] | None = None) -> int:
         credentials = _credentials()
         confirmation = _confirmation_from_stdin()
 
-        # Collect the final broker state first using GET-only gateways. Then take
-        # a new wall-clock instant. The certified execution gate compares this
-        # later instant with the evidence timestamps, so GET latency consumes
-        # the freshness TTL rather than being hidden by an earlier timestamp.
+        # Current Alpaca account truth distinguishes equity status from crypto_status.
+        # Require crypto_status=ACTIVE by GET before any POST authority can be crossed.
+        crypto_account = attest_active_crypto_account(
+            credentials=credentials,
+            expected_account_id=_expected_account_id(args.workspace),
+            now=datetime.now(timezone.utc),
+        )
+
+        # Collect final broker state after the crypto-status check. A fresh wall
+        # clock is taken here so the five-second Final Guard budget starts from
+        # this actual final evidence sequence, not from the earlier status GET.
         preflight_at = datetime.now(timezone.utc)
         final_evidence = collect_fresh_final_evidence(
             workspace_path=args.workspace,
@@ -105,6 +154,9 @@ def main(argv: list[str] | None = None) -> int:
             "reconciliation_hash": outcome.reconciliation_hash,
             "lifecycle_status": outcome.lifecycle_status,
             "broker_post_outcome": outcome.broker_post_outcome,
+            "broker_diagnostic": _broker_diagnostic(args.workspace, str(args.attempt_id)),
+            "crypto_status": crypto_account.crypto_status,
+            "crypto_account_status_fingerprint": crypto_account.fingerprint,
             "retry_forbidden": outcome.retry_forbidden,
             "external_post_consent_hash": consent.receipt_hash,
             "external_post_consent_expires_at": consent.expires_at.isoformat(),
