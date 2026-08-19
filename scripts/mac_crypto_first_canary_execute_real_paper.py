@@ -12,9 +12,6 @@ from autotrade.first_canary_real_paper_execution import (
     execute_real_paper_first_canary_once,
 )
 from autotrade.brokers.alpaca_paper_crypto_account_status import attest_active_crypto_account
-from autotrade.brokers.alpaca_paper_crypto_broker_truth_transport import (
-    BrokerTruthAlpacaPaperCryptoWriteTransport,
-)
 from autotrade.brokers.alpaca_paper_crypto_first_canary_attempt import FirstCanaryAttemptWorkspace
 from autotrade.brokers.alpaca_paper_gateway import AlpacaPaperCredentials
 from autotrade.brokers.alpaca_paper_operational import PaperOperationalWorkspace
@@ -123,17 +120,16 @@ def main(argv: list[str] | None = None) -> int:
 
         # Current Alpaca account truth distinguishes equity status from crypto_status.
         # Require crypto_status=ACTIVE by GET before any POST authority can be crossed.
-        preflight_at = datetime.now(timezone.utc)
         crypto_account = attest_active_crypto_account(
             credentials=credentials,
             expected_account_id=_expected_account_id(args.workspace),
-            now=preflight_at,
+            now=datetime.now(timezone.utc),
         )
 
-        # Collect the final broker state first using GET-only gateways. Then take
-        # a new wall-clock instant. The certified execution gate compares this
-        # later instant with the evidence timestamps, so GET latency consumes
-        # the freshness TTL rather than being hidden by an earlier timestamp.
+        # Collect final broker state after the crypto-status check. A fresh wall
+        # clock is taken here so the five-second Final Guard budget starts from
+        # this actual final evidence sequence, not from the earlier status GET.
+        preflight_at = datetime.now(timezone.utc)
         final_evidence = collect_fresh_final_evidence(
             workspace_path=args.workspace,
             credentials=credentials,
@@ -148,7 +144,6 @@ def main(argv: list[str] | None = None) -> int:
             confirmation=confirmation,
             now=execution_at,
             final_evidence=final_evidence,
-            delegate=BrokerTruthAlpacaPaperCryptoWriteTransport(),
         )
         result = {
             "status": outcome.status,
