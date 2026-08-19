@@ -3,7 +3,10 @@ name: R6 First Canary Unified Mac Flow
 on:
   pull_request:
     paths:
+      - 'ABRIR_AUTO_TRADE_CANARY.command'
       - 'scripts/mac_first_canary_unified_dashboard.py'
+      - 'scripts/mac_first_canary_unified_queue.py'
+      - 'scripts/check_r6_first_canary_unified_dashboard.py'
       - 'scripts/mac_crypto_first_canary_reconcile.py'
       - 'src/autotrade/first_canary_recovery_transport.py'
       - 'web/mac_first_canary_unified.html'
