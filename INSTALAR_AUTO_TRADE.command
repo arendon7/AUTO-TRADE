@@ -21,26 +21,11 @@ export R6_EXTERNAL_PAPER_WRITE=DISABLED
 
 verify_standalone_assets() {
   local root="$1"
-  [[ -f "$root/MAC_STANDALONE_MANIFEST.txt" ]] || {
-    echo "ERROR: falta MAC_STANDALONE_MANIFEST.txt en $root" >&2
-    return 1
-  }
-  [[ -f "$root/vendor/runtime/SHA256SUMS" ]] || {
-    echo "ERROR: falta el manifiesto SHA-256 del runtime." >&2
-    return 1
-  }
-  [[ -f "$root/vendor/wheels/SHA256SUMS" ]] || {
-    echo "ERROR: falta el manifiesto SHA-256 del wheelhouse." >&2
-    return 1
-  }
-  (
-    cd "$root/vendor/runtime"
-    shasum -a 256 -c SHA256SUMS
-  )
-  (
-    cd "$root/vendor/wheels"
-    shasum -a 256 -c SHA256SUMS
-  )
+  [[ -f "$root/MAC_STANDALONE_MANIFEST.txt" ]] || { echo "ERROR: falta MAC_STANDALONE_MANIFEST.txt en $root" >&2; return 1; }
+  [[ -f "$root/vendor/runtime/SHA256SUMS" ]] || { echo "ERROR: falta el manifiesto SHA-256 del runtime." >&2; return 1; }
+  [[ -f "$root/vendor/wheels/SHA256SUMS" ]] || { echo "ERROR: falta el manifiesto SHA-256 del wheelhouse." >&2; return 1; }
+  (cd "$root/vendor/runtime" && shasum -a 256 -c SHA256SUMS)
+  (cd "$root/vendor/wheels" && shasum -a 256 -c SHA256SUMS)
 }
 
 read_source_head() {
@@ -52,15 +37,7 @@ prune_real_paper_surface_if_disabled() {
   local root="$1"
   local manifest="$root/MAC_STANDALONE_MANIFEST.txt"
   [[ -f "$manifest" ]] || return 1
-
-  if grep -Fq 'real_paper_surface=SEPARATE_EXACT_ONE_SHOT' "$manifest"; then
-    return 0
-  fi
-
-  # Fail closed for legacy/safe manifests: unless the dedicated exact one-shot
-  # surface is affirmatively declared, remove every user-facing/CLI bridge that
-  # could reach it from the installed copy. The generic FULL package therefore
-  # stays operationally equivalent to the PR41 no-POST surface.
+  if grep -Fq 'real_paper_surface=SEPARATE_EXACT_ONE_SHOT' "$manifest"; then return 0; fi
   rm -f \
     "$root/ABRIR_PRIMER_CANARY_PREPARAR.command" \
     "$root/ABRIR_PRIMER_CANARY_REAL_PAPER.command" \
@@ -77,13 +54,11 @@ prune_real_paper_surface_if_disabled() {
 if [[ -f "$SOURCE_ROOT/MAC_STANDALONE_MANIFEST.txt" ]]; then
   STANDALONE_MODE="YES"
   verify_standalone_assets "$SOURCE_ROOT"
-
   SOURCE_HEAD="$(read_source_head "$SOURCE_ROOT")"
   if [[ ! "$SOURCE_HEAD" =~ ^[0-9a-f]{40}$ ]]; then
     echo "ERROR: el paquete FULL no contiene un source_head SHA-1 válido." >&2
     exit 2
   fi
-
   if [[ -L "$INSTALL_ROOT" ]]; then
     echo "ERROR: $INSTALL_ROOT es un symlink; instalación bloqueada por seguridad." >&2
     exit 2
@@ -93,28 +68,13 @@ if [[ -f "$SOURCE_ROOT/MAC_STANDALONE_MANIFEST.txt" ]]; then
   if [[ "$SOURCE_ROOT" != "$INSTALL_ROOT" ]]; then
     STAGE_ROOT="$HOME/Applications/.AUTO-TRADE-R6.install.$$"
     rm -rf "$STAGE_ROOT"
-
     echo
     echo "Preparando copia instalada fuera de Downloads/Finder quarantine..."
     echo "Destino: $INSTALL_ROOT"
-
-    # The downloaded/extracted package may carry Finder quarantine metadata.
-    # ditto --norsrc --noqtn deliberately copies only the verified package bytes
-    # and normal POSIX metadata, without resource forks, xattrs, ACLs or quarantine.
     ditto --norsrc --noqtn "$SOURCE_ROOT" "$STAGE_ROOT"
-
-    # Never promote transient/local state from a previously attempted source folder.
-    rm -rf \
-      "$STAGE_ROOT/.venv" \
-      "$STAGE_ROOT/.runtime" \
-      "$STAGE_ROOT/.git" \
-      "$STAGE_ROOT/.pytest_cache" \
-      "$STAGE_ROOT/.coverage" \
-      "$STAGE_ROOT/coverage.json" \
-      "$STAGE_ROOT/.env"
+    rm -rf "$STAGE_ROOT/.venv" "$STAGE_ROOT/.runtime" "$STAGE_ROOT/.git" "$STAGE_ROOT/.pytest_cache" "$STAGE_ROOT/.coverage" "$STAGE_ROOT/coverage.json" "$STAGE_ROOT/.env"
     find "$STAGE_ROOT" -type f \( -name '*.sqlite3' -o -name '*.sqlite3-*' -o -name '*.pyc' \) -delete 2>/dev/null || true
     find "$STAGE_ROOT" -type d -name '__pycache__' -prune -exec rm -rf {} + 2>/dev/null || true
-
     prune_real_paper_surface_if_disabled "$STAGE_ROOT"
     verify_standalone_assets "$STAGE_ROOT"
     STAGED_HEAD="$(read_source_head "$STAGE_ROOT")"
@@ -123,7 +83,6 @@ if [[ -f "$SOURCE_ROOT/MAC_STANDALONE_MANIFEST.txt" ]]; then
       echo "ERROR: source_head cambió durante la copia de instalación." >&2
       exit 2
     fi
-
     rm -rf "$INSTALL_ROOT"
     mv "$STAGE_ROOT" "$INSTALL_ROOT"
     ACTIVE_ROOT="$INSTALL_ROOT"
@@ -140,14 +99,12 @@ else
 fi
 
 cd "$ACTIVE_ROOT"
-
 clear || true
 cat <<EOF
 AUTO-TRADE R6 — INSTALACIÓN SEGURA
 
 • FULL/STANDALONE usa el CPython y wheelhouse embebidos.
-• No requiere Homebrew.
-• No requiere Python del sistema en el paquete FULL.
+• No requiere Homebrew ni Python del sistema.
 • No usa PyPI/Internet para instalar el runtime del paquete FULL.
 • En FULL descargado, instala en: $INSTALL_ROOT
 • PAPER write genérico permanece DISABLED.
@@ -161,9 +118,21 @@ bash "$ACTIVE_ROOT/scripts/mac_bootstrap.sh"
 PY="$ACTIVE_ROOT/.venv/bin/python"
 [[ -x "$PY" ]] || { echo "ERROR: .venv no quedó instalado." >&2; exit 2; }
 
-"$PY" "$ACTIVE_ROOT/scripts/check_mac_standalone_boundary.py"
-"$PY" "$ACTIVE_ROOT/scripts/check_mac_dashboard_boundary.py"
-"$PY" "$ACTIVE_ROOT/scripts/mac_doctor.py"
+if [[ -f "$ACTIVE_ROOT/MAC_STANDALONE_MANIFEST.txt" ]] && grep -Fq 'first_canary_unified_surface=ONE_APP' "$ACTIVE_ROOT/MAC_STANDALONE_MANIFEST.txt"; then
+  # The source candidate has already certified every inherited PREPARAR/REAL
+  # PAPER boundary before the old launchers are physically removed. The installed
+  # operator package certifies the surface that actually exists plus global
+  # PAPER/LIVE authority; it must not demand deleted legacy UI entrypoints.
+  "$PY" "$ACTIVE_ROOT/scripts/check_r6_first_canary_unified_dashboard.py"
+  "$PY" "$ACTIVE_ROOT/scripts/check_r6_live_deny_boundary.py"
+  "$PY" "$ACTIVE_ROOT/scripts/check_r6_authority.py"
+  "$PY" -m pytest -q "$ACTIVE_ROOT/tests/test_r6_first_canary_unified_dashboard.py"
+  echo "Unified ONE-APP installed runtime/authority checks: OK"
+else
+  "$PY" "$ACTIVE_ROOT/scripts/check_mac_standalone_boundary.py"
+  "$PY" "$ACTIVE_ROOT/scripts/check_mac_dashboard_boundary.py"
+  "$PY" "$ACTIVE_ROOT/scripts/mac_doctor.py"
+fi
 
 cat <<EOF
 

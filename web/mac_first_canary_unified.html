@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>AUTO-TRADE · Primer Canary PAPER</title>
+  <style>
+    :root{color-scheme:dark;--bg:#0b0e13;--panel:#121720;--panel2:#0e131b;--line:#273142;--text:#f5f7fb;--muted:#9da8b8;--green:#56d6a0;--amber:#f4c66a;--red:#ff6464;--blue:#7db7ff}
+    *{box-sizing:border-box} body{margin:0;background:linear-gradient(180deg,#090c11,#0c1118 45%,#090c11);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:var(--text)}
+    .wrap{max-width:980px;margin:0 auto;padding:34px 22px 64px}.hero{border:1px solid #303d50;border-radius:24px;padding:28px;background:rgba(15,20,29,.94);box-shadow:0 22px 70px rgba(0,0,0,.28)}
+    .eyebrow{font-size:13px;letter-spacing:.16em;font-weight:800;color:var(--green)}h1{font-size:34px;margin:8px 0 10px;line-height:1.06}p{color:var(--muted);line-height:1.5}
+    .chips{display:flex;gap:8px;flex-wrap:wrap;margin-top:16px}.chip{font-size:12px;padding:8px 11px;border:1px solid #344158;border-radius:999px;background:#111722}.chip.paper{color:var(--green)}.chip.live{color:#ff8a8a}.chip.cap{color:var(--amber)}
+    .steps{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:22px 0}.step{padding:11px 12px;border-radius:14px;background:#10151e;border:1px solid #202b3b;color:#667287;font-size:13px;font-weight:700}.step.active{border-color:#446185;color:#e9f2ff;background:#132033}.step.done{border-color:#2f6954;color:#b8f7dc;background:#10231d}
+    .card{border:1px solid var(--line);border-radius:20px;background:rgba(18,23,32,.96);padding:22px;margin-top:18px}.card h2{margin:0 0 8px;font-size:21px}.hidden{display:none!important}
+    .grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}.field label{display:block;font-size:13px;font-weight:700;margin:0 0 7px;color:#c7d0dc}.field input{width:100%;border-radius:12px;border:1px solid #303a4a;background:#0b1017;color:white;padding:13px 14px;font-size:15px;outline:none}.field input:focus{border-color:#5c7da9}
+    button{border:0;border-radius:12px;padding:13px 17px;font-weight:800;font-size:14px;cursor:pointer;background:#263447;color:white}button.primary{background:#26755b}button.primary:hover{background:#2e8668}button.danger{background:#7b2529}button.danger:hover{background:#903036}button.secondary{background:#273244}button:disabled{cursor:not-allowed;opacity:.42}
+    .actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:16px}.status{margin-top:14px;border-radius:12px;padding:13px 15px;background:#0a0f16;border:1px solid #202a38;color:#cdd7e4;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;white-space:pre-wrap}.status.good{border-color:#2d6a53;color:#b7f5dc}.status.warn{border-color:#6f562a;color:#f7dba1}.status.bad{border-color:#77363b;color:#ffc0c3}
+    .summary{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:16px}.metric{background:#0c1118;border:1px solid #273142;border-radius:14px;padding:14px}.metric span{display:block;font-size:11px;color:#8290a4;text-transform:uppercase;letter-spacing:.1em;font-weight:800}.metric strong{display:block;margin-top:6px;font-size:18px}.review{display:flex;gap:10px;align-items:flex-start;padding:14px;border-radius:14px;background:#0d141c;border:1px solid #273142;margin-top:16px}.review input{margin-top:3px;transform:scale(1.2)}
+    .warning{padding:14px;border-radius:14px;background:#241516;border:1px solid #663033;color:#ffb2b5;margin-top:14px}.resultHero{padding:18px;border-radius:16px;background:#0d1613;border:1px solid #2c604b}.resultHero h3{margin:0 0 6px;color:#b9f7dc}.recoveryBox{margin-top:14px;padding:15px;border-radius:14px;background:#17140b;border:1px solid #6f562a;color:#f7dba1}.small{font-size:12px;color:#8995a6}.footer{margin-top:22px;text-align:center;color:#687487;font-size:12px}
+    details{margin-top:15px;border:1px solid #273142;border-radius:14px;background:#0c1118;padding:12px 14px}summary{cursor:pointer;color:#9eabbc;font-weight:700;font-size:13px}details .status{margin-bottom:0}
+    @media(max-width:760px){.steps,.summary{grid-template-columns:1fr 1fr}.grid2{grid-template-columns:1fr}h1{font-size:28px}}@media(max-width:480px){.steps,.summary{grid-template-columns:1fr}}
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <section class="hero">
+    <div class="eyebrow">AUTO-TRADE · FLUJO SIMPLIFICADO</div>
+    <h1>Primer Canary BTC/USD · PAPER</h1>
+    <p>Una sola app. AUTO-TRADE gestiona internamente todas las comprobaciones técnicas y la recuperación. Tú solo revisas la orden y haces dos confirmaciones humanas.</p>
+    <div class="chips"><span class="chip paper">PAPER ONLY</span><span class="chip">BTC/USD</span><span class="chip">BUY · LIMIT · IOC</span><span class="chip cap">máx. USD 5</span><span class="chip live">LIVE BLOCKED</span></div>
+  </section>
+
+  <div class="steps">
+    <div id="s1" class="step active">1 · Conectar</div><div id="s2" class="step">2 · Preparar</div><div id="s3" class="step">3 · Confirmar</div><div id="s4" class="step">4 · Resultado</div>
+  </div>
+
+  <section id="connectCard" class="card">
+    <h2>1. Conectar Alpaca PAPER</h2>
+    <p>Ingresa las credenciales una sola vez. Permanecen únicamente en memoria mientras esta app esté abierta; no se guardan en disco.</p>
+    <div class="grid2">
+      <div class="field"><label>APCA PAPER Key ID</label><input id="key" autocomplete="off" spellcheck="false" /></div>
+      <div class="field"><label>APCA PAPER Secret</label><input id="secret" type="password" autocomplete="off" /></div>
+    </div>
+    <div class="actions"><button id="connectBtn" class="primary">Conectar PAPER</button></div>
+    <div id="connectStatus" class="status hidden"></div>
+  </section>
+
+  <section id="prepareCard" class="card hidden">
+    <h2>2. Preparar canary</h2>
+    <p>AUTO-TRADE leerá cuenta, BTC/USD, flatness y mercado; validará Safety/Portfolio/Health y preparará una orden alrededor de USD 2. <strong>No envía ninguna orden todavía.</strong></p>
+    <div class="actions"><button id="prepareBtn" class="primary">Preparar y revisar</button><button id="resetBtn" class="secondary">Descartar y empezar de nuevo</button></div>
+    <div id="prepareStatus" class="status hidden"></div>
+  </section>
+
+  <section id="reviewCard" class="card hidden">
+    <h2>3. Revisar la orden</h2>
+    <p>Esta es la orden exacta que quedará preparada. No necesitas copiar códigos ni cambiar de pantalla.</p>
+    <div class="summary">
+      <div class="metric"><span>Mercado</span><strong id="mSymbol">BTC/USD</strong></div>
+      <div class="metric"><span>Valor</span><strong id="mNotional">—</strong></div>
+      <div class="metric"><span>Cantidad</span><strong id="mQty">—</strong></div>
+      <div class="metric"><span>Limit</span><strong id="mLimit">—</strong></div>
+    </div>
+    <div class="review"><input id="reviewCheck" type="checkbox" /><label for="reviewCheck">He revisado que es <strong>PAPER</strong>, BTC/USD, BUY LIMIT IOC y que el valor no supera USD 5.</label></div>
+    <div class="actions"><button id="approveBtn" class="primary" disabled>Aprobar preparación</button></div>
+    <div id="approveStatus" class="status hidden"></div>
+  </section>
+
+  <section id="executeCard" class="card hidden">
+    <h2>4. Ejecutar una sola vez en PAPER</h2>
+    <div class="warning"><strong>Este botón sí puede enviar una orden PAPER a Alpaca.</strong><br/>AUTO-TRADE vuelve a comprobar el único intento, cuenta, flatness, mercado y Final Guard justo antes del POST. Si algo cambió, bloquea. Después de iniciar, nunca existe retry POST.</div>
+    <div class="review"><input id="executeCheck" type="checkbox" /><label for="executeCheck">Entiendo que esta es una ejecución <strong>PAPER</strong>, no LIVE, máximo USD 5, y autorizo un solo intento.</label></div>
+    <div class="actions"><button id="executeBtn" class="danger" disabled>EJECUTAR UNA VEZ EN PAPER</button></div>
+    <div id="executeStatus" class="status hidden"></div>
+  </section>
+
+  <section id="resultCard" class="card hidden">
+    <h2>Resultado</h2>
+    <div class="resultHero"><h3 id="resultHeadline">Resultado disponible</h3><div id="resultDetail"></div></div>
+    <div id="recoveryMessage" class="recoveryBox hidden"><strong>Este intento ya no puede enviar otra orden.</strong><br/>Solo está habilitada la reconciliación de lectura con Alpaca.</div>
+    <details id="technicalDetails"><summary>Ver detalles técnicos</summary><div id="resultStatus" class="status"></div></details>
+    <div class="actions"><button id="recoverBtn" class="primary hidden">Reconciliar este intento</button><button id="newBtn" class="secondary">Nuevo canary</button></div>
+  </section>
+
+  <div class="footer">Credenciales: memoria del proceso únicamente · Retry POST: FALSE · Generic Control Center: WRITE DISABLED · LIVE: BLOCKED</div>
+</div>
+<script>
+const $=id=>document.getElementById(id);
+const state={connected:false,busy:false,reviewToken:null,executeToken:null};
+function steps(n){for(let i=1;i<=4;i++){const e=$('s'+i);e.classList.remove('active','done');if(i<n)e.classList.add('done');else if(i===n)e.classList.add('active')}}
+function show(id,on=true){$(id).classList.toggle('hidden',!on)}
+function stat(id,text,kind=''){const e=$(id);e.textContent=text;e.className='status'+(kind?' '+kind:'');e.classList.remove('hidden')}
+function busy(on){state.busy=on;for(const b of document.querySelectorAll('button'))b.disabled=on||b.dataset.locked==='1';$('approveBtn').disabled=on||!$('reviewCheck').checked||!state.reviewToken;$('executeBtn').disabled=on||!$('executeCheck').checked||!state.executeToken}
+async function api(path,body){const r=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body||{})});const j=await r.json();if(!r.ok||j.ok===false)throw new Error(j.error||'Operación bloqueada');return j}
+function money(v){if(v===null||v===undefined)return '—';return 'USD '+String(v)}
+function summary(s){$('mSymbol').textContent=s?.symbol||'BTC/USD';$('mNotional').textContent=money(s?.notional_usd);$('mQty').textContent=(s?.quantity_btc??'—')+' BTC';$('mLimit').textContent=s?.limit_price??'—'}
+function resultActions(phase){const recovery=phase==='RECOVERY_ONLY';show('recoverBtn',recovery);show('recoveryMessage',recovery);show('newBtn',!recovery)}
+function renderResult(j,technical){$('resultHeadline').textContent=j.headline||'Resultado PAPER';$('resultDetail').textContent=j.detail||'';$('resultStatus').textContent=JSON.stringify(technical||j,null,2);show('resultCard');resultActions(j.phase);steps(4);window.scrollTo({top:$('resultCard').offsetTop-20,behavior:'smooth'})}
+function renderRecoveryResume(){show('prepareCard',false);show('reviewCard',false);show('executeCard',false);renderResult({phase:'RECOVERY_ONLY',headline:'Hay un intento PAPER pendiente de reconciliación',detail:'AUTO-TRADE recuperó el intento anterior. No creará otro canary hasta resolverlo por lectura.'},{recovery_get_only:true,retry_post:false,live_trading:'BLOCKED'});}
+$('reviewCheck').addEventListener('change',()=>{$('approveBtn').disabled=state.busy||!$('reviewCheck').checked||!state.reviewToken});
+$('executeCheck').addEventListener('change',()=>{$('executeBtn').disabled=state.busy||!$('executeCheck').checked||!state.executeToken});
+$('connectBtn').onclick=async()=>{busy(true);try{const key=$('key').value.trim(),secret=$('secret').value.trim();if(!key||!secret)throw new Error('Ingresa Key ID y Secret PAPER');const j=await api('/api/connect',{paper_key:key,paper_secret:secret});state.connected=true;$('key').value='';$('secret').value='';stat('connectStatus','PAPER conectado. Credenciales cargadas solo en memoria.','good');if(j.active_recovery_resumed){renderRecoveryResume()}else{show('prepareCard');steps(2)}}catch(e){stat('connectStatus',e.message,'bad')}finally{busy(false)}};
+$('prepareBtn').onclick=async()=>{busy(true);try{state.reviewToken=null;state.executeToken=null;stat('prepareStatus','Leyendo evidencia PAPER y preparando…');const j=await api('/api/prepare',{});state.reviewToken=j.review_token||null;if(!state.reviewToken)throw new Error('No se pudo vincular la revisión actual');summary(j.summary);stat('prepareStatus','Preparación lista. No se envió ninguna orden.','good');show('reviewCard');show('executeCard',false);show('resultCard',false);$('reviewCheck').checked=false;steps(3)}catch(e){stat('prepareStatus',e.message,'bad')}finally{busy(false)}};
+$('approveBtn').onclick=async()=>{busy(true);try{const token=state.reviewToken;if(!token)throw new Error('La revisión actual ya no es válida');const j=await api('/api/approve',{review_confirmed:true,review_token:token});state.reviewToken=null;state.executeToken=j.execute_token||null;if(!state.executeToken)throw new Error('No se pudo vincular la confirmación final');summary(j.summary);stat('approveStatus','Preparación aprobada. La confirmación final está lista.','good');show('executeCard');$('executeCheck').checked=false;window.scrollTo({top:$('executeCard').offsetTop-20,behavior:'smooth'})}catch(e){stat('approveStatus',e.message,'bad')}finally{busy(false)}};
+$('executeBtn').onclick=async()=>{if(!confirm('Confirmación final: enviar UNA orden BTC/USD en Alpaca PAPER, máximo USD 5. ¿Continuar?'))return;busy(true);$('executeBtn').dataset.locked='1';const token=state.executeToken;state.executeToken=null;try{if(!token)throw new Error('La confirmación final ya no es válida');stat('executeStatus','Revalidando evidencia final y ejecutando el one-shot PAPER…','warn');const j=await api('/api/execute',{execute_confirmed:true,execute_token:token});stat('executeStatus','Proceso finalizado. Retry POST permanece bloqueado.','good');renderResult(j,{phase:j.phase,execution:j.execution,recovery:j.recovery,retry_post:false,live_trading:'BLOCKED'})}catch(e){stat('executeStatus',e.message+'\nNO vuelvas a pulsar ejecutar. AUTO-TRADE mantiene retry POST bloqueado.','bad');renderResult({phase:'RECOVERY_ONLY',headline:'Ejecución bloqueada / recuperación',detail:'No reintentes el POST. Usa únicamente la reconciliación segura de este intento.'},{error:e.message,retry_post:false,live_trading:'BLOCKED'})}finally{busy(false)}};
+$('recoverBtn').onclick=async()=>{busy(true);try{stat('executeStatus','Consultando Alpaca únicamente por GET…','warn');const j=await api('/api/recover',{});renderResult(j,{phase:j.phase,recovery:j.recovery,retry_post:false,live_trading:'BLOCKED'});if(j.phase!=='RECOVERY_ONLY'){show('prepareCard');stat('executeStatus','Reconciliación finalizada. No hubo un segundo POST.','good')}}catch(e){renderResult({phase:'RECOVERY_ONLY',headline:'Reconciliación bloqueada',detail:'No se envió ninguna orden. Conserva este intento y vuelve a reconciliarlo.'},{error:e.message,retry_post:false,live_trading:'BLOCKED'})}finally{busy(false)}};
+async function reset(){busy(true);try{await api('/api/reset',{});state.reviewToken=null;state.executeToken=null;show('reviewCard',false);show('executeCard',false);show('resultCard',false);$('executeBtn').dataset.locked='0';$('reviewCheck').checked=false;$('executeCheck').checked=false;show('prepareCard',state.connected);steps(state.connected?2:1)}catch(e){alert(e.message)}finally{busy(false)}}
+$('resetBtn').onclick=reset;$('newBtn').onclick=reset;
+(async()=>{try{await fetch('/api/meta').then(r=>r.json());const s=await fetch('/api/state').then(r=>r.json());state.connected=!!s.connected;if(s.connected&&s.phase==='RECOVERY_ONLY'){renderRecoveryResume()}else if(s.connected){show('prepareCard');steps(2)}}catch(e){}})();
+</script>
+</body></html>
