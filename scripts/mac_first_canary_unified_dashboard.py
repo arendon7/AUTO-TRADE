@@ -46,18 +46,32 @@ class UnifiedCanarySession:
         credentials = safe._credentials(payload)
         self.workspace = workspace
         self.credentials = credentials
-        resumed = self._resume_exact_ready_attempt()
+        self.active_attempt_id = None
+        self.review_token = None
+        self.execute_token = None
+        recovery_resumed = self._resume_exact_recovery_attempt()
+        ready_resumed = False if recovery_resumed else self._resume_exact_ready_attempt()
         return {
             "ok": True,
             "connected": True,
             "workspace": str(workspace),
             "credentials_persisted": False,
-            "active_attempt_resumed": resumed,
+            "active_attempt_resumed": ready_resumed,
+            "active_recovery_resumed": recovery_resumed,
+            "phase": (
+                "RECOVERY_ONLY"
+                if recovery_resumed
+                else "FINAL_CONFIRMATION_READY"
+                if ready_resumed
+                else "CONNECTED_READY_TO_PREPARE"
+            ),
+            "retry_post": False,
             "live_trading": "BLOCKED",
         }
 
     def prepare(self) -> dict[str, object]:
         with self._exclusive_action("prepare"):
+            self._assert_no_unresolved_recovery()
             credentials = self._require_credentials()
             attempt_id = "first-canary-" + secrets.token_hex(16)
             result = safe._run_child(
@@ -90,6 +104,7 @@ class UnifiedCanarySession:
                 "review_token": self.review_token,
                 "credentials_persisted": False,
                 "broker_write_performed": False,
+                "retry_post": False,
                 "live_trading": "BLOCKED",
             }
 
@@ -140,6 +155,7 @@ class UnifiedCanarySession:
                 "execute_token": self.execute_token,
                 "credentials_persisted": False,
                 "broker_write_performed": False,
+                "retry_post": False,
                 "live_trading": "BLOCKED",
             }
 
@@ -206,6 +222,59 @@ class UnifiedCanarySession:
                 "live_trading": "BLOCKED",
             }
 
+    def recover(self) -> dict[str, object]:
+        """Repeat only GET reconciliation for the already-burned active attempt."""
+        with self._exclusive_action("recover"):
+            credentials = self._require_credentials()
+            attempt_id = self._require_active_attempt()
+            before = safe._attempt_status(workspace=self.workspace, attempt_id=attempt_id)
+            if before.get("phase") == "RESOLVED":
+                return {
+                    "ok": True,
+                    "phase": "RECOVERED_GET_ONLY",
+                    "headline": "Resultado ya reconciliado",
+                    "detail": "El intento ya tiene una resolución durable. No existe retry POST.",
+                    "recovery": None,
+                    "retry_post": False,
+                    "credentials_persisted": False,
+                    "live_trading": "BLOCKED",
+                }
+            if before.get("phase") != "RECOVERY_ONLY":
+                raise UnifiedCanaryError("the active attempt is not eligible for GET-only recovery")
+            result = safe._recover(
+                {
+                    "workspace": str(self.workspace),
+                    "attempt_id": attempt_id,
+                    "paper_key": credentials[0],
+                    "paper_secret": credentials[1],
+                }
+            )
+            recovery = _sanitize_recovery(result)
+            after = safe._attempt_status(workspace=self.workspace, attempt_id=attempt_id)
+            resolved = after.get("phase") == "RESOLVED" or after.get("resolved") is True
+            if resolved:
+                headline = "Resultado reconciliado"
+                detail = "AUTO-TRADE resolvió el intento usando únicamente broker truth por GET. El POST sigue quemado y no puede repetirse."
+                phase = "RECOVERED_GET_ONLY"
+            elif result.get("ok") is True:
+                headline = "Reconciliación GET-only pendiente"
+                detail = "El broker todavía no aporta una resolución final. Puedes volver a reconciliar este mismo intento; nunca se repetirá el POST."
+                phase = "RECOVERY_ONLY"
+            else:
+                headline = "Reconciliación temporalmente bloqueada"
+                detail = "No se envió ninguna orden. Conserva este intento y vuelve a usar únicamente Reconciliar este intento."
+                phase = "RECOVERY_ONLY"
+            return {
+                "ok": True,
+                "phase": phase,
+                "headline": headline,
+                "detail": detail,
+                "recovery": recovery,
+                "retry_post": False,
+                "credentials_persisted": False,
+                "live_trading": "BLOCKED",
+            }
+
     def state(self) -> dict[str, object]:
         attempt_id = self.active_attempt_id
         if attempt_id is None:
@@ -218,14 +287,14 @@ class UnifiedCanarySession:
             }
         safe_status = safe._attempt_status(workspace=self.workspace, attempt_id=attempt_id)
         real_status = self._safe_real_status(attempt_id)
-        if real_status.get("recovery_get_only") is True:
+        if safe_status.get("phase") == "RESOLVED":
+            phase = "RESOLVED"
+        elif real_status.get("recovery_get_only") is True or safe_status.get("phase") == "RECOVERY_ONLY":
             phase = "RECOVERY_ONLY"
         elif real_status.get("ready_for_real_post") is True:
             phase = "FINAL_CONFIRMATION_READY"
         elif safe_status.get("phase") == "APPROVAL_REQUIRED":
             phase = "REVIEW_READY"
-        elif safe_status.get("phase") == "RESOLVED":
-            phase = "RESOLVED"
         else:
             phase = str(safe_status.get("phase") or "UNKNOWN")
         preparation = safe_status.get("preparation")
@@ -240,6 +309,11 @@ class UnifiedCanarySession:
     def reset(self) -> dict[str, object]:
         if self._action_lock.locked():
             raise UnifiedCanaryError("an operation is in progress")
+        unresolved = self._recovery_candidates()
+        if unresolved:
+            raise UnifiedCanaryError(
+                "an earlier PAPER attempt is still unresolved; reconcile that attempt before starting a new canary"
+            )
         self.active_attempt_id = None
         self.review_token = None
         self.execute_token = None
@@ -250,6 +324,49 @@ class UnifiedCanarySession:
             "retry_post": False,
             "live_trading": "BLOCKED",
         }
+
+    def _recovery_candidates(self) -> list[str]:
+        execution_root = self.workspace / safe.EXECUTION_DIR
+        if not execution_root.exists():
+            return []
+        if execution_root.is_symlink() or not execution_root.is_dir():
+            raise UnifiedCanaryError("unsafe first-canary execution workspace")
+        candidates: list[str] = []
+        for path in execution_root.iterdir():
+            try:
+                attempt_id = safe._attempt_id(path.name)
+            except Exception:
+                continue
+            if path.is_symlink() or not path.is_dir():
+                raise UnifiedCanaryError("unsafe unresolved first-canary attempt path")
+            status = safe._attempt_status(workspace=self.workspace, attempt_id=attempt_id)
+            if status.get("phase") == "RECOVERY_ONLY" and status.get("resolved") is not True:
+                candidates.append(attempt_id)
+        return sorted(candidates)
+
+    def _resume_exact_recovery_attempt(self) -> bool:
+        candidates = self._recovery_candidates()
+        if len(candidates) > 1:
+            raise UnifiedCanaryError(
+                "multiple unresolved first-canary attempts exist; no new POST authority will be created"
+            )
+        if len(candidates) == 1:
+            self.active_attempt_id = candidates[0]
+            self.review_token = None
+            self.execute_token = None
+            return True
+        return False
+
+    def _assert_no_unresolved_recovery(self) -> None:
+        candidates = self._recovery_candidates()
+        if candidates:
+            if len(candidates) == 1:
+                self.active_attempt_id = candidates[0]
+            self.review_token = None
+            self.execute_token = None
+            raise UnifiedCanaryError(
+                "an earlier PAPER attempt is unresolved; use Reconciliar este intento before preparing another canary"
+            )
 
     def _resume_exact_ready_attempt(self) -> bool:
         try:
@@ -511,6 +628,7 @@ class UnifiedHandler(BaseHTTPRequestHandler):
                     "one_window": True,
                     "user_visible_attempt_id": False,
                     "user_visible_hash_copying": False,
+                    "recovery_get_only": True,
                     "retry_post": False,
                     "live_trading": "BLOCKED",
                     "default_workspace": str(safe.DEFAULT_WORKSPACE),
@@ -530,6 +648,8 @@ class UnifiedHandler(BaseHTTPRequestHandler):
                 result = self.app.approve(payload)
             elif self.path == "/api/execute":
                 result = self.app.execute(payload)
+            elif self.path == "/api/recover":
+                result = self.app.recover()
             elif self.path == "/api/reset":
                 result = self.app.reset()
             else:
