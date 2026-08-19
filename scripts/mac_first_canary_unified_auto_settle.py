@@ -85,7 +85,7 @@ class AutoSettlementSession(queue.QueuedRecoverySession):
             if recovery.get("manual_review_required") is True:
                 result.update(
                     {
-                        "phase": "REVIEW_REQUIRED",
+                        "phase": "RECOVERY_ONLY",
                         "headline": "Canary PAPER requiere revisión",
                         "detail": (
                             "AUTO-TRADE obtuvo broker truth fail-closed durante la reconciliación automática. "
