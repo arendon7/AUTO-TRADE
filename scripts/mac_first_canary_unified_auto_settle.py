@@ -10,6 +10,7 @@ import mac_first_canary_unified_queue as queue
 
 
 AUTO_SETTLE_DELAYS_SECONDS = (0.0, 1.0, 2.0, 4.0)
+SAFETY_INVARIANTS = {"retry_post": False, "live_trading": "BLOCKED"}
 
 
 class AutoSettlementSession(queue.QueuedRecoverySession):
@@ -42,6 +43,7 @@ class AutoSettlementSession(queue.QueuedRecoverySession):
                 }
             )
             sanitized = base._sanitize_recovery(result)
+            sanitized.update(SAFETY_INVARIANTS)
             sanitized["auto_settlement_attempts"] = index
 
             after = base.safe._attempt_status(workspace=self.workspace, attempt_id=attempt_id)
@@ -69,10 +71,12 @@ class AutoSettlementSession(queue.QueuedRecoverySession):
         last["ok"] = False
         last["auto_settlement_resolved"] = False
         last["auto_settlement_exhausted"] = True
+        last.update(SAFETY_INVARIANTS)
         return last
 
     def execute(self, payload: dict[str, object]) -> dict[str, object]:
         result = super().execute(payload)
+        result.update(SAFETY_INVARIANTS)
         result["auto_settlement"] = True
 
         recovery = result.get("recovery")
