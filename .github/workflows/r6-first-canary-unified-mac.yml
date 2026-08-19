@@ -2,14 +2,20 @@ name: R6 First Canary Unified Mac Flow
 
 on:
   pull_request:
+    paths:
+      - 'scripts/mac_first_canary_unified_dashboard.py'
+      - 'scripts/mac_crypto_first_canary_reconcile.py'
+      - 'src/autotrade/first_canary_recovery_transport.py'
+      - 'web/mac_first_canary_unified.html'
+      - 'tests/test_r6_first_canary_unified_dashboard.py'
+      - 'tests/test_r6_first_canary_unified_recovery.py'
+      - 'tests/test_first_canary_recovery_transport.py'
+      - '.github/workflows/r6-first-canary-unified-mac.yml'
   workflow_dispatch:
-
-permissions:
-  contents: read
 
 jobs:
   unified-flow:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout exact head
         uses: actions/checkout@v5
@@ -20,15 +26,11 @@ jobs:
       - name: Install project
         run: python -m pip install -e '.[dev]'
       - name: Compile unified operator surface
-        run: >-
-          python -m compileall -q
-          scripts/mac_first_canary_unified_dashboard.py
-          scripts/check_r6_first_canary_unified_dashboard.py
-          tests/test_r6_first_canary_unified_dashboard.py
+        run: python -m compileall -q src tests scripts
       - name: Unified one-window authority boundary
         run: python scripts/check_r6_first_canary_unified_dashboard.py
       - name: Unified flow adversarial tests
-        run: pytest -q tests/test_r6_first_canary_unified_dashboard.py
+        run: pytest -q tests/test_r6_first_canary_unified_dashboard.py tests/test_r6_first_canary_unified_recovery.py tests/test_first_canary_recovery_transport.py
       - name: Re-prove restart-safe preparation
         run: python scripts/check_r6_first_canary_restart_safe_dashboard.py
       - name: Re-prove real PAPER delegate
