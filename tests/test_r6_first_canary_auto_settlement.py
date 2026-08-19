@@ -137,6 +137,37 @@ def test_auto_settlement_stops_immediately_on_manual_review(tmp_path, monkeypatc
     assert calls == [1]
 
 
+def test_execute_maps_manual_review_to_recovery_only_operator_state(tmp_path, monkeypatch) -> None:
+    namespace = _module(monkeypatch)
+    session, workspace = _session(namespace, tmp_path)
+    monkeypatch.setattr(
+        namespace["queue"].QueuedRecoverySession,
+        "execute",
+        lambda self, payload: {
+            "ok": False,
+            "phase": "RECOVERY_ONLY",
+            "recovery": {
+                "ok": True,
+                "auto_settlement_attempts": 1,
+                "auto_settlement_resolved": True,
+                "auto_settlement_exhausted": False,
+                "manual_review_required": True,
+                "retry_post": False,
+                "broker_write_performed": False,
+                "json": {"status": "CRYPTO_PAPER_FIRST_CANARY_HALTED_MANUAL_REVIEW"},
+            },
+            "retry_post": False,
+            "credentials_persisted": False,
+            "live_trading": "BLOCKED",
+        },
+    )
+    result = session.execute({"execute_confirmed": True})
+    assert result["phase"] == "RECOVERY_ONLY"
+    assert result["headline"] == "Canary PAPER requiere revisión"
+    assert result["auto_settlement"] is True
+    assert result["retry_post"] is False
+
+
 def test_execute_maps_terminal_flat_recovery_to_simple_operator_result(tmp_path, monkeypatch) -> None:
     namespace = _module(monkeypatch)
     session, workspace = _session(namespace, tmp_path)
