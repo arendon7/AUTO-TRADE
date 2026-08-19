@@ -7,6 +7,7 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 SERVER = ROOT / "scripts/mac_first_canary_unified_dashboard.py"
+QUEUE = ROOT / "scripts/mac_first_canary_unified_queue.py"
 HTML = ROOT / "web/mac_first_canary_unified.html"
 SOURCE_LAUNCHER = ROOT / "ABRIR_AUTO_TRADE_CANARY.command"
 INSTALLED_LAUNCHER = ROOT / "ABRIR_AUTO_TRADE.command"
@@ -51,21 +52,23 @@ def _launcher() -> Path:
 
 def main() -> int:
     launcher_path = _launcher()
-    for path in (SERVER, HTML, launcher_path):
+    for path in (SERVER, QUEUE, HTML, launcher_path):
         if not path.is_file():
             fail(f"missing required unified surface: {path.relative_to(ROOT)}")
 
     server = SERVER.read_text(encoding="utf-8")
+    queue = QUEUE.read_text(encoding="utf-8")
     html = HTML.read_text(encoding="utf-8")
     launcher = launcher_path.read_text(encoding="utf-8")
 
-    roots = {module.split(".", 1)[0] for module in imports(SERVER) if module}
-    forbidden_network = roots & NETWORK_ROOTS
-    if forbidden_network:
-        fail(f"unified server owns forbidden external network stack: {sorted(forbidden_network)}")
-    for token in FORBIDDEN_DIRECT_AUTHORITY:
-        if token in server:
-            fail(f"unified server contains direct execution authority: {token}")
+    for path, source in ((SERVER, server), (QUEUE, queue)):
+        roots = {module.split(".", 1)[0] for module in imports(path) if module}
+        forbidden_network = roots & NETWORK_ROOTS
+        if forbidden_network:
+            fail(f"{path.name} owns forbidden external network stack: {sorted(forbidden_network)}")
+        for token in FORBIDDEN_DIRECT_AUTHORITY:
+            if token in source:
+                fail(f"{path.name} contains direct execution authority: {token}")
 
     required_server = (
         "class UnifiedCanarySession:",
@@ -92,6 +95,32 @@ def main() -> int:
         if token not in server:
             fail(f"unified server missing boundary anchor: {token}")
 
+    required_queue = (
+        "class QueuedRecoverySession(base.UnifiedCanarySession):",
+        "candidates = self._ordered_recovery_candidates()",
+        "self.active_attempt_id = candidates[0]",
+        "base.safe._recover(",
+        '"pending_recovery_count"',
+        '"retry_post": False',
+        '"credentials_persisted": False',
+        '"live_trading": "BLOCKED"',
+        "for attempt_id in candidates:",
+        '"MANUAL_REVIEW" in status_text',
+        '"HALTED" in status_text',
+    )
+    for token in required_queue:
+        if token not in queue:
+            fail(f"unified recovery queue missing boundary anchor: {token}")
+    for forbidden in (
+        "real._run_execute(",
+        "EXECUTE_SCRIPT",
+        "R6_EXTERNAL_PAPER_WRITE=ENABLED",
+        "APCA_API_SECRET_KEY",
+        "APCA_API_KEY_ID",
+    ):
+        if forbidden in queue:
+            fail(f"GET-only recovery queue contains forbidden execution/credential authority: {forbidden}")
+
     forbidden_html_inputs = (
         'id="attempt',
         'name="attempt',
@@ -110,6 +139,7 @@ def main() -> int:
         "Preparar y revisar",
         "Aprobar preparación",
         "EJECUTAR UNA VEZ EN PAPER",
+        "Reconciliar este intento",
         "review_confirmed:true",
         "review_token:token",
         "execute_confirmed:true",
@@ -129,6 +159,7 @@ def main() -> int:
         "unset APCA_API_SECRET_KEY",
         "first_canary_unified_surface=ONE_APP",
         "mac_first_canary_unified_dashboard.py",
+        "mac_first_canary_unified_queue.py",
         "UNA SOLA APP",
         "LIVE BLOCKED",
         "RETRY POST FALSE",
@@ -146,8 +177,8 @@ def main() -> int:
 
     print(
         "unified first-canary Mac boundary: PASS — one launcher/one window; hidden internal authority identifiers; "
-        "two explicit human actions with invisible one-shot click bindings; existing certified prepare/approval/execute/recovery authority only; "
-        "no direct broker transport; credentials memory-only; retry POST false; LIVE blocked"
+        "two explicit human actions; multiple burned attempts drain only through certified GET recovery; "
+        "no direct broker transport in UI/queue; credentials memory-only; retry POST false; LIVE blocked"
     )
     return 0
 
