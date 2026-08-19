@@ -8,6 +8,7 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 SERVER = ROOT / "scripts/mac_first_canary_unified_dashboard.py"
 QUEUE = ROOT / "scripts/mac_first_canary_unified_queue.py"
+AUTO_SETTLE = ROOT / "scripts/mac_first_canary_unified_auto_settle.py"
 HTML = ROOT / "web/mac_first_canary_unified.html"
 SOURCE_LAUNCHER = ROOT / "ABRIR_AUTO_TRADE_CANARY.command"
 INSTALLED_LAUNCHER = ROOT / "ABRIR_AUTO_TRADE.command"
@@ -52,16 +53,17 @@ def _launcher() -> Path:
 
 def main() -> int:
     launcher_path = _launcher()
-    for path in (SERVER, QUEUE, HTML, launcher_path):
+    for path in (SERVER, QUEUE, AUTO_SETTLE, HTML, launcher_path):
         if not path.is_file():
             fail(f"missing required unified surface: {path.relative_to(ROOT)}")
 
     server = SERVER.read_text(encoding="utf-8")
     queue = QUEUE.read_text(encoding="utf-8")
+    auto_settle = AUTO_SETTLE.read_text(encoding="utf-8")
     html = HTML.read_text(encoding="utf-8")
     launcher = launcher_path.read_text(encoding="utf-8")
 
-    for path, source in ((SERVER, server), (QUEUE, queue)):
+    for path, source in ((SERVER, server), (QUEUE, queue), (AUTO_SETTLE, auto_settle)):
         roots = {module.split(".", 1)[0] for module in imports(path) if module}
         forbidden_network = roots & NETWORK_ROOTS
         if forbidden_network:
@@ -121,6 +123,33 @@ def main() -> int:
         if forbidden in queue:
             fail(f"GET-only recovery queue contains forbidden execution/credential authority: {forbidden}")
 
+    required_auto_settle = (
+        "class AutoSettlementSession(queue.QueuedRecoverySession):",
+        "AUTO_SETTLE_DELAYS_SECONDS = (0.0, 1.0, 2.0, 4.0)",
+        "base.safe._recover(",
+        'sanitized["auto_settlement_attempts"] = index',
+        'sanitized["auto_settlement_resolved"] = resolved',
+        'last["auto_settlement_exhausted"] = True',
+        'last["ok"] = False',
+        '"retry_post": False',
+        '"live_trading": "BLOCKED"',
+        '"SETTLED_FLAT"',
+        '"SETTLED_FILLED"',
+        '"SETTLED_CANCELED"',
+    )
+    for token in required_auto_settle:
+        if token not in auto_settle:
+            fail(f"automatic settlement missing fail-closed anchor: {token}")
+    for forbidden in (
+        "real._run_execute(",
+        "EXECUTE_SCRIPT",
+        "R6_EXTERNAL_PAPER_WRITE=ENABLED",
+        "APCA_API_SECRET_KEY",
+        "APCA_API_KEY_ID",
+    ):
+        if forbidden in auto_settle:
+            fail(f"automatic settlement contains forbidden execution/credential authority: {forbidden}")
+
     forbidden_html_inputs = (
         'id="attempt',
         'name="attempt',
@@ -160,6 +189,7 @@ def main() -> int:
         "first_canary_unified_surface=ONE_APP",
         "mac_first_canary_unified_dashboard.py",
         "mac_first_canary_unified_queue.py",
+        "mac_first_canary_unified_auto_settle.py",
         "UNA SOLA APP",
         "LIVE BLOCKED",
         "RETRY POST FALSE",
@@ -178,7 +208,8 @@ def main() -> int:
     print(
         "unified first-canary Mac boundary: PASS — one launcher/one window; hidden internal authority identifiers; "
         "two explicit human actions; multiple burned attempts drain only through certified GET recovery; "
-        "no direct broker transport in UI/queue; credentials memory-only; retry POST false; LIVE blocked"
+        "post-execution auto-settlement is bounded GET-only; no direct broker transport in UI/queue/settlement; "
+        "credentials memory-only; retry POST false; LIVE blocked"
     )
     return 0
 
