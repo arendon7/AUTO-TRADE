@@ -11,12 +11,9 @@ from autotrade.brokers.alpaca_paper_crypto_account_status import (
     AlpacaPaperCryptoAccountNotActive,
     attest_active_crypto_account,
 )
-from autotrade.brokers.alpaca_paper_crypto_broker_truth_transport import (
-    BrokerTruthAlpacaPaperCryptoWriteTransport,
-)
 from autotrade.brokers.alpaca_paper_crypto_writer import (
     AlpacaPaperCryptoWriteResponse,
-    CryptoPaperWriterAmbiguous,
+    _broker_rejection_detail,
 )
 from autotrade.brokers.alpaca_paper_gateway import (
     ALPACA_PAPER_ACCOUNT_PATH,
@@ -48,16 +45,6 @@ class FakeReadTransport:
                 "x-request-id": "req-crypto-status-1",
             },
         )
-
-
-class FakeWriteTransport:
-    def __init__(self, response: AlpacaPaperCryptoWriteResponse) -> None:
-        self.response = response
-        self.calls = 0
-
-    def post(self, **kwargs):
-        self.calls += 1
-        return self.response
 
 
 def _credentials() -> AlpacaPaperCredentials:
@@ -102,56 +89,39 @@ def test_crypto_status_account_identity_mismatch_fails_closed() -> None:
         )
 
 
-def test_broker_truth_transport_preserves_sanitized_422_without_retry() -> None:
-    delegate = FakeWriteTransport(
-        AlpacaPaperCryptoWriteResponse(
-            status_code=422,
-            body=json.dumps(
-                {"code": 40010001, "message": "qty must respect broker minimum"}
-            ).encode("utf-8"),
-            headers={
-                "content-type": "application/json",
-                "x-request-id": "req-order-reject-422",
-            },
-        )
+def test_audited_writer_preserves_sanitized_422_rejection_truth() -> None:
+    response = AlpacaPaperCryptoWriteResponse(
+        status_code=422,
+        body=json.dumps(
+            {"code": 40010001, "message": "qty must respect broker minimum"}
+        ).encode("utf-8"),
+        headers={
+            "content-type": "application/json",
+            "x-request-id": "req-order-reject-422",
+        },
     )
-    transport = BrokerTruthAlpacaPaperCryptoWriteTransport(delegate=delegate)
-    with pytest.raises(CryptoPaperWriterAmbiguous) as caught:
-        transport.post(
-            host="paper-api.alpaca.markets",
-            path="/v2/orders",
-            headers={},
-            body=b"{}",
-            timeout_seconds=5.0,
-            max_response_bytes=1024,
-        )
-    text = str(caught.value)
+    text = _broker_rejection_detail(response)
     assert "http_status=422" in text
     assert "broker_code=40010001" in text
     assert "qty must respect broker minimum" in text
+    assert "request_id=req-order-reject-422" in text
     assert "GET-only" in text
     assert "paper-secret-key" not in text
-    assert delegate.calls == 1
 
 
-def test_broker_truth_transport_leaves_success_response_unchanged() -> None:
+def test_rejection_truth_filters_control_characters_and_unknown_payloads() -> None:
     response = AlpacaPaperCryptoWriteResponse(
-        status_code=200,
-        body=b"{}",
-        headers={"content-type": "application/json", "x-request-id": "req-ok"},
+        status_code=403,
+        body=json.dumps({"code": {"nested": True}, "message": "blocked\nreason\ttext"}).encode("utf-8"),
+        headers={"content-type": "application/json", "x-request-id": "bad request id"},
     )
-    delegate = FakeWriteTransport(response)
-    transport = BrokerTruthAlpacaPaperCryptoWriteTransport(delegate=delegate)
-    returned = transport.post(
-        host="paper-api.alpaca.markets",
-        path="/v2/orders",
-        headers={},
-        body=b"{}",
-        timeout_seconds=5.0,
-        max_response_bytes=1024,
-    )
-    assert returned is response
-    assert delegate.calls == 1
+    text = _broker_rejection_detail(response)
+    assert "http_status=403" in text
+    assert "broker_code=unavailable" in text
+    assert "message=blocked reason text" in text
+    assert "request_id=unavailable" in text
+    assert "\n" not in text
+    assert "\t" not in text
 
 
 def test_auto_settlement_recognizes_sanitized_broker_rejection(monkeypatch) -> None:
@@ -163,9 +133,11 @@ def test_auto_settlement_recognizes_sanitized_broker_rejection(monkeypatch) -> N
             "json": {
                 "broker_diagnostic": {
                     "writer_error": (
+                        "crypto POST returned untrusted/ambiguous acknowledgement: "
                         "Alpaca PAPER order response rejected; http_status=422; "
                         "broker_code=40010001; message=qty too small; request_id=req-1; "
-                        "POST outcome remains burned and reconciliation is GET-only"
+                        "POST outcome remains burned and reconciliation is GET-only; "
+                        "reconcile by durable client_order_id"
                     )
                 }
             }
@@ -177,16 +149,16 @@ def test_auto_settlement_recognizes_sanitized_broker_rejection(monkeypatch) -> N
     assert "qty too small" in message
 
 
-def test_broker_truth_surface_reuses_existing_network_stacks_only() -> None:
-    diagnostic_source = (
-        ROOT / "src/autotrade/brokers/alpaca_paper_crypto_broker_truth_transport.py"
+def test_broker_truth_does_not_add_a_second_write_transport() -> None:
+    execution_source = (
+        ROOT / "scripts/mac_crypto_first_canary_execute_real_paper.py"
     ).read_text(encoding="utf-8")
     status_source = (
         ROOT / "src/autotrade/brokers/alpaca_paper_crypto_account_status.py"
     ).read_text(encoding="utf-8")
-    assert "HttpsAlpacaPaperCryptoWriteTransport" in diagnostic_source
-    for forbidden in ("http.client", "requests", "httpx", "socket", "HTTPSConnection"):
-        assert forbidden not in diagnostic_source
+    assert "BrokerTruthAlpacaPaperCryptoWriteTransport" not in execution_source
+    assert "HttpsAlpacaPaperCryptoWriteTransport" not in execution_source
+    assert "http.client" not in execution_source
     assert "UrllibAlpacaPaperReadTransport" in status_source
     for forbidden in ("requests", "httpx", "HTTPSConnection"):
         assert forbidden not in status_source
