@@ -271,7 +271,8 @@ class AlpacaPaperCryptoWriter:
             )
         except CryptoPaperWriterIntegrityError as exc:
             raise CryptoPaperWriterAmbiguous(
-                "crypto POST returned untrusted/ambiguous acknowledgement; reconcile by durable client_order_id"
+                f"crypto POST returned untrusted/ambiguous acknowledgement: {exc}; "
+                "reconcile by durable client_order_id"
             ) from exc
 
     @staticmethod
@@ -309,7 +310,7 @@ def _parse_ack(
     now: datetime,
 ) -> CryptoPaperWriteReceipt:
     if response.status_code != 200:
-        raise CryptoPaperWriterIntegrityError(f"unexpected crypto order HTTP status {response.status_code}")
+        raise CryptoPaperWriterIntegrityError(_broker_rejection_detail(response))
     content_type = response.headers.get("content-type", "").split(";", 1)[0].strip().lower()
     if content_type != "application/json":
         raise CryptoPaperWriterIntegrityError("crypto order acknowledgement must be application/json")
@@ -366,6 +367,45 @@ def _parse_ack(
         response_sha256=sha256(response.body).hexdigest(),
         submitted_at=now.astimezone(timezone.utc),
     )
+
+
+def _broker_rejection_detail(response: AlpacaPaperCryptoWriteResponse) -> str:
+    status = int(response.status_code)
+    request_id = response.headers.get("x-request-id", "").strip()
+    if not _REQUEST_ID_RE.fullmatch(request_id):
+        request_id = "unavailable"
+    code = "unavailable"
+    message = "unavailable"
+    content_type = response.headers.get("content-type", "").split(";", 1)[0].strip().lower()
+    if content_type == "application/json":
+        try:
+            payload = json.loads(response.body.decode("utf-8", errors="strict"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            payload = None
+        if isinstance(payload, dict):
+            code = _safe_rejection_scalar(payload.get("code"))
+            message = _safe_rejection_text(payload.get("message"))
+    return (
+        "Alpaca PAPER order response rejected; "
+        f"http_status={status}; broker_code={code}; message={message}; request_id={request_id}; "
+        "POST outcome remains burned and reconciliation is GET-only"
+    )
+
+
+def _safe_rejection_scalar(value: object) -> str:
+    if isinstance(value, bool) or value is None:
+        return "unavailable"
+    if isinstance(value, (int, float, str)):
+        return _safe_rejection_text(str(value))
+    return "unavailable"
+
+
+def _safe_rejection_text(value: object) -> str:
+    if not isinstance(value, str):
+        return "unavailable"
+    text = " ".join(value.strip().split())
+    text = "".join(char for char in text if 32 <= ord(char) < 127)
+    return text[:320] if text else "unavailable"
 
 
 def _validate_headers(headers: Mapping[str, str]) -> None:
