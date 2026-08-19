@@ -1,12 +1,18 @@
 from __future__ import annotations
 
 import argparse
+from datetime import datetime, timezone
+import json
 import threading
 import time
 import webbrowser
 
 import mac_first_canary_unified_dashboard as base
 import mac_first_canary_unified_queue as queue
+
+from autotrade.brokers.alpaca_paper_crypto_account_status import attest_active_crypto_account
+from autotrade.brokers.alpaca_paper_gateway import AlpacaPaperCredentials
+from autotrade.brokers.alpaca_paper_operational import PaperOperationalWorkspace
 
 
 AUTO_SETTLE_DELAYS_SECONDS = (0.0, 1.0, 2.0, 4.0)
@@ -21,6 +27,23 @@ class AutoSettlementSession(queue.QueuedRecoverySession):
     authority has already been consumed/burned. It never mints, restores or
     retries POST authority.
     """
+
+    def connect(self, payload: dict[str, object]) -> dict[str, object]:
+        result = super().connect(payload)
+        credentials = self._require_credentials()
+        attestation = attest_active_crypto_account(
+            credentials=AlpacaPaperCredentials(
+                key_id=credentials[0],
+                secret_key=credentials[1],
+            ),
+            expected_account_id=_workspace_account_id(self.workspace),
+            now=datetime.now(timezone.utc),
+        )
+        result["crypto_status"] = attestation.crypto_status
+        result["crypto_ready"] = True
+        result["crypto_status_fingerprint"] = attestation.fingerprint
+        result.update(SAFETY_INVARIANTS)
+        return result
 
     def _auto_recover_if_needed(self, status: dict[str, object]) -> dict[str, object] | None:
         if status.get("recovery_get_only") is not True:
@@ -96,6 +119,20 @@ class AutoSettlementSession(queue.QueuedRecoverySession):
                 return result
 
             if recovery.get("auto_settlement_resolved") is True:
+                rejection = _broker_rejection(result)
+                if rejection is not None:
+                    result.update(
+                        {
+                            "ok": True,
+                            "phase": "SETTLED_REJECTED",
+                            "headline": "Alpaca rechazó la orden · sin exposición",
+                            "detail": (
+                                f"{rejection} La reconciliación confirmó posición BTC/USD igual a cero. "
+                                "El intento quedó cerrado y no existe retry POST."
+                            ),
+                        }
+                    )
+                    return result
                 phase, headline, detail = _terminal_operator_result(recovery)
                 result.update({"ok": True, "phase": phase, "headline": headline, "detail": detail})
                 return result
@@ -129,6 +166,41 @@ class AutoSettlementSession(queue.QueuedRecoverySession):
                     }
                 )
         return result
+
+
+def _workspace_account_id(workspace_path) -> str:
+    workspace = PaperOperationalWorkspace(root=workspace_path.expanduser().resolve())
+    path = workspace.account_attestation_path
+    if path.is_symlink() or not path.is_file():
+        raise base.UnifiedCanaryError("verified PAPER account evidence is missing")
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise base.UnifiedCanaryError("verified PAPER account evidence is unreadable") from exc
+    account_id = payload.get("account_id") if isinstance(payload, dict) else None
+    if not isinstance(account_id, str) or not account_id.strip():
+        raise base.UnifiedCanaryError("workspace PAPER account ID is missing")
+    return account_id.strip()
+
+
+def _broker_rejection(result: dict[str, object]) -> str | None:
+    execution = result.get("execution")
+    if not isinstance(execution, dict):
+        return None
+    parsed = execution.get("json")
+    if not isinstance(parsed, dict):
+        return None
+    diagnostic = parsed.get("broker_diagnostic")
+    if not isinstance(diagnostic, dict):
+        return None
+    message = diagnostic.get("writer_error")
+    if not isinstance(message, str):
+        return None
+    marker = "Alpaca PAPER order response rejected;"
+    if marker not in message:
+        return None
+    safe = " ".join(message.strip().split())[:600]
+    return safe
 
 
 def _terminal_operator_result(recovery: dict[str, object]) -> tuple[str, str, str]:
@@ -193,8 +265,8 @@ def main(argv: list[str] | None = None) -> int:
     print("AUTO-TRADE · Primer Canary PAPER · UNA SOLA APP")
     print(f"Abrir: {url}")
     print(
-        "PAPER ONLY · BTC/USD BUY LIMIT IOC · USD 1-5 · AUTO SETTLEMENT GET-ONLY · "
-        "LIVE BLOCKED · RETRY POST FALSE"
+        "PAPER ONLY · BTC/USD BUY LIMIT IOC · USD 1-5 · CRYPTO STATUS ACTIVE REQUIRED · "
+        "AUTO SETTLEMENT GET-ONLY · LIVE BLOCKED · RETRY POST FALSE"
     )
     if not args.no_browser:
         threading.Timer(0.35, lambda: webbrowser.open(url, new=1)).start()
