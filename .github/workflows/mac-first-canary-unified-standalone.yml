@@ -62,6 +62,25 @@ jobs:
           rm -rf dist
           mkdir -p "$PKG/vendor/runtime" "$PKG/vendor/wheels"
           rsync -a ./ "$PKG/" --exclude '.git' --exclude '.venv' --exclude '.runtime' --exclude '.env' --exclude 'dist' --exclude '.pytest_cache' --exclude '.coverage' --exclude 'coverage.json' --exclude '__pycache__' --exclude '*.pyc' --exclude '*.sqlite3' --exclude '*.sqlite3-*'
+
+          # Normalize operator-visible metadata to the isolated broker-minimum policy.
+          # Execution authority remains in the certified preparation/execution gates; this removes stale USD2/USD5 UI truth.
+          python - "$PKG/scripts/mac_first_canary_unified_dashboard.py" <<'PY'
+          from pathlib import Path
+          import sys
+
+          path = Path(sys.argv[1])
+          source = path.read_text(encoding="utf-8")
+          source = source.replace('\"target_notional_usd\": \"2\"', '\"target_notional_usd\": \"10.50\"')
+          source = source.replace('\"hard_max_notional_usd\": \"5\"', '\"hard_max_notional_usd\": \"12\"')
+          source = source.replace(
+              'PAPER ONLY · BTC/USD BUY LIMIT IOC · USD 1-5 · LIVE BLOCKED · RETRY POST FALSE',
+              'PAPER ONLY · BTC/USD BUY LIMIT IOC · USD 10-12 · TARGET ~USD 10.50 · LIVE BLOCKED · RETRY POST FALSE',
+          )
+          if '\"target_notional_usd\": \"2\"' in source or '\"hard_max_notional_usd\": \"5\"' in source:
+              raise SystemExit('stale first-canary operator metadata survived package normalization')
+          path.write_text(source, encoding="utf-8")
+          PY
           cp "$ASSETS/runtime/"*.tar.gz "$PKG/vendor/runtime/"
           cp "$ASSETS/runtime/SHA256SUMS" "$PKG/vendor/runtime/SHA256SUMS"
           cp "$ASSETS/wheels/"*.whl "$PKG/vendor/wheels/"
@@ -69,6 +88,7 @@ jobs:
 
           cp "$PKG/ABRIR_AUTO_TRADE_CANARY.command" "$PKG/ABRIR_AUTO_TRADE.command"
           rm -f "$PKG/ABRIR_AUTO_TRADE_CANARY.command" "$PKG/ABRIR_PRIMER_CANARY_PREPARAR.command" "$PKG/ABRIR_PRIMER_CANARY_REAL_PAPER.command" "$PKG/ABRIR_PRIMER_CANARY_PAPER.command" "$PKG/AUTO_TRADE_MAC.command"
+          rm -f "$PKG/LEEME_PRIMERO_MAC.md"
           chmod +x "$PKG/ABRIR_AUTO_TRADE.command" "$PKG/INSTALAR_AUTO_TRADE.command"
           chmod +x "$PKG/scripts/mac_bootstrap.sh" "$PKG/scripts/mac_rehearsal.sh" "$PKG/scripts/mac_start.sh"
 
@@ -87,7 +107,9 @@ jobs:
           first_canary_unified_surface=ONE_APP
           operator_visible_launchers=ONE
           credentials_persisted=NO
-          max_notional_usd=5
+          min_notional_usd=10
+          target_notional_usd=10.50
+          max_notional_usd=12
           retry_post=NO
           live_trading=BLOCKED
           EOF
@@ -117,7 +139,7 @@ jobs:
           3. Dentro de la app: Conectar PAPER -> Preparar -> Revisar/Aprobar -> Ejecutar una vez -> Resultado.
 
           No abras otras herramientas. No necesitas copiar códigos ni identificadores.
-          PAPER ONLY · BTC/USD · máximo USD 5 · LIVE BLOCKED · RETRY POST FALSE.
+          PAPER ONLY · BTC/USD · objetivo ~USD 10.50 · rango permitido USD 10-12 · LIVE BLOCKED · RETRY POST FALSE.
           EOF
 
           ditto -c -k --sequesterRsrc --keepParent "$PKG" "$ZIP"
@@ -140,6 +162,14 @@ jobs:
           unzip -p "$ZIP" "$ROOT/MAC_STANDALONE_MANIFEST.txt" | grep -Fq 'first_canary_unified_surface=ONE_APP'
           unzip -p "$ZIP" "$ROOT/MAC_BUILD_INFO.txt" | grep -Fq 'operator_attempt_id_input=NO'
           unzip -p "$ZIP" "$ROOT/MAC_BUILD_INFO.txt" | grep -Fq 'operator_challenge_copy=NO'
+          unzip -p "$ZIP" "$ROOT/MAC_STANDALONE_MANIFEST.txt" | grep -Fq 'target_notional_usd=10.50'
+          unzip -p "$ZIP" "$ROOT/MAC_STANDALONE_MANIFEST.txt" | grep -Fq 'max_notional_usd=12'
+          unzip -p "$ZIP" "$ROOT/LEEME.txt" | grep -Fq 'objetivo ~USD 10.50'
+          unzip -p "$ZIP" "$ROOT/scripts/mac_first_canary_unified_dashboard.py" | grep -Fq '"target_notional_usd": "10.50"'
+          unzip -p "$ZIP" "$ROOT/scripts/mac_first_canary_unified_dashboard.py" | grep -Fq '"hard_max_notional_usd": "12"'
+          if unzip -p "$ZIP" "$ROOT/scripts/mac_first_canary_unified_dashboard.py" | grep -Fq '"target_notional_usd": "2"'; then echo 'ERROR: stale USD2 operator metadata leaked' >&2; exit 1; fi
+          if unzip -p "$ZIP" "$ROOT/scripts/mac_first_canary_unified_dashboard.py" | grep -Fq '"hard_max_notional_usd": "5"'; then echo 'ERROR: stale USD5 operator metadata leaked' >&2; exit 1; fi
+          if unzip -l "$ZIP" | grep -Fq "$ROOT/LEEME_PRIMERO_MAC.md"; then echo 'ERROR: legacy generic runbook leaked into one-app package' >&2; exit 1; fi
           if unzip -l "$ZIP" | grep -Eq '(^|/)(\.env|\.venv|\.runtime)(/|$)'; then echo 'ERROR: package contains transient environment material' >&2; exit 1; fi
       - name: Upload one-app candidate
         uses: actions/upload-artifact@v4
@@ -226,7 +256,8 @@ jobs:
           import json
           p=json.load(open('/tmp/meta.json'))
           assert p['environment']=='PAPER'
-          assert p['hard_max_notional_usd']=='5'
+          assert p['target_notional_usd']=='10.50'
+          assert p['hard_max_notional_usd']=='12'
           assert p['user_visible_attempt_id'] is False
           assert p['user_visible_hash_copying'] is False
           assert p['retry_post'] is False
