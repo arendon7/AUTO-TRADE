@@ -61,7 +61,10 @@ def main() -> int:
         'CONSENT_FILENAME = "external_post_consent.json"',
         "CONSENT_TTL = timedelta(seconds=10)",
         'self.symbol != "BTC/USD"',
-        'self.notional < Decimal("1") or self.notional > Decimal("5")',
+        'MIN_NOTIONAL = Decimal("1")',
+        'MAX_NOTIONAL = Decimal("5")',
+        'not MIN_NOTIONAL <= self.notional <= MAX_NOTIONAL',
+        'not MIN_NOTIONAL <= notional <= MAX_NOTIONAL',
         "self.source_host != ALPACA_PAPER_TRADING_HOST",
         "self.source_path != CRYPTO_ORDERS_PATH",
         '"EXECUTE ONCE PAPER BTC/USD USD "',
@@ -115,6 +118,12 @@ def main() -> int:
         "if not args.allow_exact_paper_post:", 'if os.environ.get(WRITE_ENV) == "ENABLED":',
         '"generic R6_EXTERNAL_PAPER_WRITE must remain disabled',
         "credentials = _credentials()", "confirmation = _confirmation_from_stdin()",
+        "_bind_isolated_execution_policy()",
+        '(first_canary_execution_gate, "MIN_NOTIONAL", "MAX_NOTIONAL")',
+        '(first_canary_external_post_consent, "MIN_NOTIONAL", "MAX_NOTIONAL")',
+        '(cold_start_execution_bridge, "COLD_START_MIN_NOTIONAL", "COLD_START_MAX_NOTIONAL")',
+        '(cold_start_final_guard, "COLD_START_MIN_NOTIONAL", "COLD_START_MAX_NOTIONAL")',
+        "FIRST_CANARY_PAPER_MIN_NOTIONAL", "FIRST_CANARY_PAPER_MAX_NOTIONAL",
         "preflight_at = datetime.now(timezone.utc)", "final_evidence = collect_fresh_final_evidence(",
         "execution_at = datetime.now(timezone.utc)", "now=execution_at", "final_evidence=final_evidence",
         "execute_real_paper_first_canary_once(",
@@ -148,7 +157,7 @@ def main() -> int:
             if forbidden in text:
                 fail(f"generic Mac surface acquired first-canary real POST authority: {path.name}: {forbidden}")
 
-    print("first-canary real PAPER delegate: PASS — exact BTC/USD BUY LIMIT IOC USD1-5; final GET latency counts against freshness TTL; durable second consent precedes one audited HTTPS delegate; replay/UNKNOWN recovery protected; PR41 safe UI and generic Control Center remain no-POST; LIVE blocked")
+    print("first-canary real PAPER delegate: PASS — baseline consent remains fail-closed USD1-5 while the dedicated exact BTC/USD BUY LIMIT IOC PAPER process binds the full execution chain to USD10-12; final GET latency counts against freshness TTL; durable second consent precedes one audited HTTPS delegate; replay/UNKNOWN recovery protected; PR41 safe UI and generic Control Center remain no-POST; LIVE blocked")
     return 0
 
 
