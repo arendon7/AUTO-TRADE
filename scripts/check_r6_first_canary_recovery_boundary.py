@@ -7,6 +7,7 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 MODULE = ROOT / "src/autotrade/first_canary_recovery.py"
+FEE_AWARE = ROOT / "src/autotrade/first_canary_fee_aware_recovery.py"
 LIFECYCLE = ROOT / "src/autotrade/brokers/alpaca_paper_crypto_lifecycle.py"
 COLD_START_UNKNOWN = (
     ROOT
@@ -62,11 +63,11 @@ def _imports(path: Path) -> set[str]:
 
 
 def main() -> int:
-    for path in (MODULE, LIFECYCLE, COLD_START_UNKNOWN, CLI):
+    for path in (MODULE, FEE_AWARE, LIFECYCLE, COLD_START_UNKNOWN, CLI):
         if not path.is_file():
             fail(f"missing required recovery surface: {path.relative_to(ROOT)}")
 
-    for path in (MODULE, COLD_START_UNKNOWN, CLI):
+    for path in (MODULE, FEE_AWARE, COLD_START_UNKNOWN, CLI):
         imports = _imports(path)
         roots = {module.split(".", 1)[0] for module in imports if module}
         forbidden_roots = roots & DIRECT_NETWORK_ROOTS
@@ -149,13 +150,26 @@ def main() -> int:
             "cold-start UNKNOWN recovery may not call the lifecycle transaction primitive directly"
         )
 
+    fee_aware = FEE_AWARE.read_text(encoding="utf-8")
+    for anchor in (
+        'MAX_RECEIVED_ASSET_FEE_RATE = Decimal("0.0025")',
+        'POSITION_ROUNDING_TOLERANCE = Decimal("0.000000001")',
+        "class FirstCanaryFeeAwareRecoveryLifecycle(base.SQLiteCryptoPaperLifecycle):",
+        "confirmed_net_long_quantity > filled_quantity",
+        "deficit > maximum",
+        "canonical_recovery.SQLiteCryptoPaperLifecycle = FirstCanaryFeeAwareRecoveryLifecycle",
+        "canonical_recovery.SQLiteCryptoPaperLifecycle = original",
+    ):
+        if anchor not in fee_aware:
+            fail(f"fee-aware GET-only recovery missing fail-closed anchor: {anchor}")
+
     cli = CLI.read_text(encoding="utf-8")
     for anchor in (
-        "from autotrade.first_canary_recovery import recover_first_canary",
+        "from autotrade.first_canary_fee_aware_recovery import recover_first_canary_fee_aware",
         'WRITE_ENV = "R6_EXTERNAL_PAPER_WRITE"',
         'os.environ.get(WRITE_ENV) == "ENABLED"',
         '"--allow-paper-recovery-read"',
-        "recover_first_canary(",
+        "recover_first_canary_fee_aware(",
         '"retry_post": False',
         '"recovery_get_only": True',
         '"capital_authority": "NONE"',
@@ -180,8 +194,9 @@ def main() -> int:
 
     print(
         "first-canary recovery boundary: PASS — irreversible execution latch before GET truth; "
-        "lifecycle owns the only recovery transaction; cold-start UNKNOWN resolves flat or halted with attempt=1; "
-        "no writer/POST/raw network stack; GET-only recovery may repeat while pending and never authorizes POST retry"
+        "fee-aware adapter is limited to burned first-canary GET-only recovery; generic lifecycle remains strict; "
+        "cold-start UNKNOWN resolves flat or halted with attempt=1; no writer/POST/raw network stack; "
+        "recovery may repeat while pending and never authorizes POST retry"
     )
     return 0
 
