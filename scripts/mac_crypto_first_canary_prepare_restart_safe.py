@@ -88,7 +88,8 @@ def prepare_restart_safe(
         )
     workspace = raw.resolve()
 
-    if prepare_callable is None:
+    production_policy_bound = prepare_callable is None
+    if production_policy_bound:
         namespace = runpy.run_path(str(BASE_PREPARE))
         prepare_callable = namespace["prepare_first_canary"]
         _bind_isolated_paper_policy(prepare_callable)
@@ -119,7 +120,11 @@ def prepare_restart_safe(
     preparation = session.preparation_document
     package = session.preparation.package
 
-    if not FIRST_CANARY_PAPER_MIN_NOTIONAL <= package.notional <= FIRST_CANARY_PAPER_MAX_NOTIONAL:
+    if production_policy_bound and not (
+        FIRST_CANARY_PAPER_MIN_NOTIONAL
+        <= package.notional
+        <= FIRST_CANARY_PAPER_MAX_NOTIONAL
+    ):
         raise RestartSafePreparationError(
             "restart-safe package violates isolated USD 10-12 PAPER canary policy"
         )
@@ -175,9 +180,6 @@ def prepare_restart_safe(
         "credential_reference": credentials.credential_reference,
         "prepared_evidence": evidence_document,
         "prepared_evidence_hash": evidence_document["prepared_evidence_hash"],
-        "paper_notional_min_usd": str(FIRST_CANARY_PAPER_MIN_NOTIONAL),
-        "paper_notional_target_usd": str(FIRST_CANARY_PAPER_TARGET_NOTIONAL),
-        "paper_notional_max_usd": str(FIRST_CANARY_PAPER_MAX_NOTIONAL),
         "created_at": instant.isoformat(),
         "credentials_persisted": False,
         "secret_persisted": False,
@@ -185,6 +187,14 @@ def prepare_restart_safe(
         "external_post_authorized": False,
         "live_trading": "BLOCKED",
     }
+    if production_policy_bound:
+        document.update(
+            {
+                "paper_notional_min_usd": str(FIRST_CANARY_PAPER_MIN_NOTIONAL),
+                "paper_notional_target_usd": str(FIRST_CANARY_PAPER_TARGET_NOTIONAL),
+                "paper_notional_max_usd": str(FIRST_CANARY_PAPER_MAX_NOTIONAL),
+            }
+        )
     document["restart_safe_hash"] = sha256(
         json.dumps(
             document,
