@@ -6,7 +6,7 @@ import json
 import os
 from pathlib import Path
 
-from autotrade.first_canary_recovery import recover_first_canary
+from autotrade.first_canary_fee_aware_recovery import recover_first_canary_fee_aware
 from autotrade.first_canary_recovery_transport import FirstCanaryRecoveryReadTransport
 from autotrade.brokers.alpaca_paper_crypto_reconciliation import (
     AlpacaPaperCryptoReconciliationGateway,
@@ -64,7 +64,7 @@ def main(argv: list[str] | None = None) -> int:
         recovery_transport = FirstCanaryRecoveryReadTransport(
             max_response_bytes=config.max_response_bytes
         )
-        result = recover_first_canary(
+        result = recover_first_canary_fee_aware(
             workspace_path=args.workspace,
             attempt_id=str(args.attempt_id),
             credentials=_credentials(),
