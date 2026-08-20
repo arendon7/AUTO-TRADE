@@ -8,6 +8,12 @@ import os
 from pathlib import Path
 import runpy
 
+from autotrade.first_canary_paper_policy import (
+    FIRST_CANARY_PAPER_MAX_ACCOUNT_FRACTION,
+    FIRST_CANARY_PAPER_MAX_NOTIONAL,
+    FIRST_CANARY_PAPER_MIN_NOTIONAL,
+    FIRST_CANARY_PAPER_TARGET_NOTIONAL,
+)
 from autotrade.first_canary_prepared_evidence import FirstCanaryPreparedEvidence
 from autotrade.brokers.alpaca_paper_crypto_first_canary_attempt import (
     ATTEMPT_ID_RE,
@@ -37,6 +43,22 @@ def _credentials() -> AlpacaPaperCredentials:
             "PAPER Key + Secret are required for restart-safe first-canary preparation"
         )
     return AlpacaPaperCredentials(key_id=key, secret_key=secret)
+
+
+def _bind_isolated_paper_policy(prepare_callable) -> None:
+    overrides = {
+        "DECISION_TTL_MS": HUMAN_STAGING_TTL_MS,
+        "TARGET_NOTIONAL": FIRST_CANARY_PAPER_TARGET_NOTIONAL,
+        "MIN_NOTIONAL": FIRST_CANARY_PAPER_MIN_NOTIONAL,
+        "MAX_NOTIONAL": FIRST_CANARY_PAPER_MAX_NOTIONAL,
+        "MAX_ACCOUNT_FRACTION": FIRST_CANARY_PAPER_MAX_ACCOUNT_FRACTION,
+    }
+    prepare_callable.__globals__.update(overrides)
+    for name, expected in overrides.items():
+        if prepare_callable.__globals__.get(name) != expected:
+            raise RestartSafePreparationError(
+                f"first-canary isolated PAPER policy override failed closed: {name}"
+            )
 
 
 def prepare_restart_safe(
@@ -69,9 +91,7 @@ def prepare_restart_safe(
     if prepare_callable is None:
         namespace = runpy.run_path(str(BASE_PREPARE))
         prepare_callable = namespace["prepare_first_canary"]
-        prepare_callable.__globals__["DECISION_TTL_MS"] = HUMAN_STAGING_TTL_MS
-        if prepare_callable.__globals__.get("DECISION_TTL_MS") != HUMAN_STAGING_TTL_MS:
-            raise RestartSafePreparationError("first-canary human staging TTL override failed closed")
+        _bind_isolated_paper_policy(prepare_callable)
     session = prepare_callable(
         workspace_path=workspace,
         attempt_id=attempt_id,
@@ -98,6 +118,11 @@ def prepare_restart_safe(
     evidence_document = evidence.document()
     preparation = session.preparation_document
     package = session.preparation.package
+
+    if not FIRST_CANARY_PAPER_MIN_NOTIONAL <= package.notional <= FIRST_CANARY_PAPER_MAX_NOTIONAL:
+        raise RestartSafePreparationError(
+            "restart-safe package violates isolated USD 10-12 PAPER canary policy"
+        )
 
     bindings = (
         (preparation.get("prepared_account_fingerprint"), evidence.account.fingerprint, "account"),
@@ -150,6 +175,9 @@ def prepare_restart_safe(
         "credential_reference": credentials.credential_reference,
         "prepared_evidence": evidence_document,
         "prepared_evidence_hash": evidence_document["prepared_evidence_hash"],
+        "paper_notional_min_usd": str(FIRST_CANARY_PAPER_MIN_NOTIONAL),
+        "paper_notional_target_usd": str(FIRST_CANARY_PAPER_TARGET_NOTIONAL),
+        "paper_notional_max_usd": str(FIRST_CANARY_PAPER_MAX_NOTIONAL),
         "created_at": instant.isoformat(),
         "credentials_persisted": False,
         "secret_persisted": False,
