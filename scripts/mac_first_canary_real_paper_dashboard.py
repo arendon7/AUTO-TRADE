@@ -14,6 +14,12 @@ import sys
 from urllib.parse import parse_qs, urlparse
 
 from autotrade.first_canary_external_post_consent import external_post_challenge
+from autotrade.first_canary_paper_policy import (
+    FIRST_CANARY_PAPER_MAX_NOTIONAL,
+    FIRST_CANARY_PAPER_MIN_NOTIONAL,
+    FIRST_CANARY_PAPER_TARGET_NOTIONAL,
+    validate_first_canary_notional,
+)
 from autotrade.brokers.alpaca_paper_crypto_first_canary_attempt import (
     ATTEMPT_ID_RE,
     EXECUTION_DIR,
@@ -135,8 +141,10 @@ def _status(*, workspace: Path, attempt_id: str) -> dict[str, object]:
         if symbol != "BTC/USD":
             raise FirstCanaryRealPaperDashboardError("real first-canary surface accepts BTC/USD only")
         notional = _decimal_text(package.get("notional"), "prepared notional")
-        if not Decimal("1") <= notional <= Decimal("5"):
-            raise FirstCanaryRealPaperDashboardError("prepared notional is outside USD 1-5")
+        try:
+            validate_first_canary_notional(notional)
+        except ValueError as exc:
+            raise FirstCanaryRealPaperDashboardError(str(exc)) from exc
         client_order_id = package.get("client_order_id")
         if not isinstance(client_order_id, str) or not client_order_id:
             raise FirstCanaryRealPaperDashboardError("prepared client_order_id is missing")
@@ -360,7 +368,9 @@ def _meta() -> dict[str, object]:
         "approval_here": False,
         "real_execution_enabled": True,
         "one_shot_only": True,
-        "hard_max_notional_usd": "5",
+        "paper_notional_min_usd": str(FIRST_CANARY_PAPER_MIN_NOTIONAL),
+        "target_notional_usd": str(FIRST_CANARY_PAPER_TARGET_NOTIONAL),
+        "hard_max_notional_usd": str(FIRST_CANARY_PAPER_MAX_NOTIONAL),
         "automatic_attempt_discovery": "EXACTLY_ONE_FRESH_READY_ONLY",
         "generic_control_center_write_enabled": False,
         "credentials_persisted": False,
