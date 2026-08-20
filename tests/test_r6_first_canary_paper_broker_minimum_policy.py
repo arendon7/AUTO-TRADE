@@ -7,6 +7,9 @@ import runpy
 import pytest
 
 import autotrade.first_canary_execution_gate as execution_gate
+import autotrade.first_canary_external_post_consent as external_post_consent
+import autotrade.brokers.alpaca_paper_crypto_cold_start_execution_bridge as cold_start_execution_bridge
+import autotrade.brokers.alpaca_paper_crypto_cold_start_final_guard as cold_start_final_guard
 from autotrade.first_canary_paper_policy import (
     FIRST_CANARY_PAPER_MAX_ACCOUNT_FRACTION,
     FIRST_CANARY_PAPER_MAX_NOTIONAL,
@@ -55,17 +58,49 @@ def test_restart_safe_policy_lifts_qty_above_broker_cost_basis_even_if_asset_min
     assert quantity > Decimal("0.000029108")
 
 
-def test_execution_process_binds_same_isolated_notional_window() -> None:
+def test_execution_process_binds_same_isolated_notional_window_end_to_end() -> None:
     namespace = runpy.run_path(str(ROOT / "scripts/mac_crypto_first_canary_execute_real_paper.py"))
-    old_min = execution_gate.MIN_NOTIONAL
-    old_max = execution_gate.MAX_NOTIONAL
+    snapshots = {
+        "gate": (execution_gate.MIN_NOTIONAL, execution_gate.MAX_NOTIONAL),
+        "consent": (external_post_consent.MIN_NOTIONAL, external_post_consent.MAX_NOTIONAL),
+        "bridge": (
+            cold_start_execution_bridge.COLD_START_MIN_NOTIONAL,
+            cold_start_execution_bridge.COLD_START_MAX_NOTIONAL,
+        ),
+        "guard": (
+            cold_start_final_guard.COLD_START_MIN_NOTIONAL,
+            cold_start_final_guard.COLD_START_MAX_NOTIONAL,
+        ),
+    }
     try:
         namespace["_bind_isolated_execution_policy"]()
-        assert execution_gate.MIN_NOTIONAL == FIRST_CANARY_PAPER_MIN_NOTIONAL
-        assert execution_gate.MAX_NOTIONAL == FIRST_CANARY_PAPER_MAX_NOTIONAL
+        assert (execution_gate.MIN_NOTIONAL, execution_gate.MAX_NOTIONAL) == (
+            FIRST_CANARY_PAPER_MIN_NOTIONAL,
+            FIRST_CANARY_PAPER_MAX_NOTIONAL,
+        )
+        assert (external_post_consent.MIN_NOTIONAL, external_post_consent.MAX_NOTIONAL) == (
+            FIRST_CANARY_PAPER_MIN_NOTIONAL,
+            FIRST_CANARY_PAPER_MAX_NOTIONAL,
+        )
+        assert (
+            cold_start_execution_bridge.COLD_START_MIN_NOTIONAL,
+            cold_start_execution_bridge.COLD_START_MAX_NOTIONAL,
+        ) == (FIRST_CANARY_PAPER_MIN_NOTIONAL, FIRST_CANARY_PAPER_MAX_NOTIONAL)
+        assert (
+            cold_start_final_guard.COLD_START_MIN_NOTIONAL,
+            cold_start_final_guard.COLD_START_MAX_NOTIONAL,
+        ) == (FIRST_CANARY_PAPER_MIN_NOTIONAL, FIRST_CANARY_PAPER_MAX_NOTIONAL)
     finally:
-        execution_gate.MIN_NOTIONAL = old_min
-        execution_gate.MAX_NOTIONAL = old_max
+        execution_gate.MIN_NOTIONAL, execution_gate.MAX_NOTIONAL = snapshots["gate"]
+        external_post_consent.MIN_NOTIONAL, external_post_consent.MAX_NOTIONAL = snapshots["consent"]
+        (
+            cold_start_execution_bridge.COLD_START_MIN_NOTIONAL,
+            cold_start_execution_bridge.COLD_START_MAX_NOTIONAL,
+        ) = snapshots["bridge"]
+        (
+            cold_start_final_guard.COLD_START_MIN_NOTIONAL,
+            cold_start_final_guard.COLD_START_MAX_NOTIONAL,
+        ) = snapshots["guard"]
 
 
 def test_one_app_operator_copy_exposes_new_cap_and_never_old_five_dollar_cap() -> None:
@@ -76,3 +111,10 @@ def test_one_app_operator_copy_exposes_new_cap_and_never_old_five_dollar_cap() -
     assert "máx. USD 5" not in html
     assert "máximo USD 5" not in html
     assert "no supera USD 5" not in html
+
+
+def test_real_paper_status_surface_accepts_only_isolated_ten_to_twelve_policy() -> None:
+    source = (ROOT / "scripts/mac_first_canary_real_paper_dashboard.py").read_text(encoding="utf-8")
+    assert "validate_first_canary_notional(notional)" in source
+    assert 'Decimal("1") <= notional <= Decimal("5")' not in source
+    assert 'hard_max_notional_usd": str(FIRST_CANARY_PAPER_MAX_NOTIONAL)' in source
