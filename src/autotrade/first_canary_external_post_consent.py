@@ -18,6 +18,8 @@ from autotrade.brokers.alpaca_paper_gateway import ALPACA_PAPER_TRADING_HOST
 CONSENT_FILENAME = "external_post_consent.json"
 CONSENT_TTL = timedelta(seconds=10)
 DOCUMENT_TYPE = "R6_CRYPTO_PAPER_FIRST_CANARY_EXTERNAL_POST_CONSENT"
+MIN_NOTIONAL = Decimal("1")
+MAX_NOTIONAL = Decimal("5")
 _HASH_RE = re.compile(r"^[0-9a-f]{64}$")
 
 
@@ -57,8 +59,10 @@ class FirstCanaryExternalPostConsent:
             raise ValueError("first-canary external POST consent is BTC/USD only")
         if not isinstance(self.notional, Decimal) or not self.notional.is_finite():
             raise ValueError("first-canary consent notional must be finite Decimal")
-        if self.notional < Decimal("1") or self.notional > Decimal("5"):
-            raise ValueError("first-canary consent notional must remain within USD 1-5")
+        if not MIN_NOTIONAL <= self.notional <= MAX_NOTIONAL:
+            raise ValueError(
+                f"first-canary consent notional must remain within USD {MIN_NOTIONAL}-{MAX_NOTIONAL}"
+            )
         if self.source_host != ALPACA_PAPER_TRADING_HOST:
             raise ValueError("first-canary consent host must be exact Alpaca PAPER host")
         if self.source_path != CRYPTO_ORDERS_PATH:
@@ -187,8 +191,10 @@ def consume_external_post_consent(
         raise FirstCanaryExternalPostConsentBlocked("prepared package cannot pre-authorize network write")
 
     notional = _decimal(package.get("notional"), "notional")
-    if notional < Decimal("1") or notional > Decimal("5"):
-        raise FirstCanaryExternalPostConsentBlocked("prepared notional is outside USD 1-5")
+    if not MIN_NOTIONAL <= notional <= MAX_NOTIONAL:
+        raise FirstCanaryExternalPostConsentBlocked(
+            f"prepared notional is outside USD {MIN_NOTIONAL}-{MAX_NOTIONAL}"
+        )
     deadline = _datetime(package.get("execution_deadline"), "execution_deadline")
     if instant >= deadline:
         raise FirstCanaryExternalPostConsentBlocked("prepared first-canary package expired before POST consent")
