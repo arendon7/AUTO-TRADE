@@ -27,7 +27,8 @@ def test_human_staging_window_is_usable_but_within_existing_operator_authority()
     source = (ROOT / "scripts/mac_crypto_first_canary_prepare_restart_safe.py").read_text(
         encoding="utf-8"
     )
-    assert 'prepare_callable.__globals__["DECISION_TTL_MS"] = HUMAN_STAGING_TTL_MS' in source
+    assert '"DECISION_TTL_MS": HUMAN_STAGING_TTL_MS' in source
+    assert "_bind_isolated_paper_policy(prepare_callable)" in source
 
 
 def test_final_pre_post_freshness_controls_are_not_relaxed() -> None:
