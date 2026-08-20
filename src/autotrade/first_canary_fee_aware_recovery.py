@@ -10,10 +10,6 @@ from autotrade.brokers import alpaca_paper_crypto_lifecycle as base
 from autotrade.brokers import alpaca_paper_crypto_reconciliation as recon
 
 
-# Alpaca publishes a Tier-1 taker fee of 25 bps and charges a crypto BUY fee
-# from the credited base asset. One broker quantity tick is allowed solely for
-# decimal representation/rounding. This adapter is GET-only recovery scope: it
-# cannot prepare, authorize, submit, or retry any broker POST.
 MAX_RECEIVED_ASSET_FEE_RATE = Decimal("0.0025")
 POSITION_ROUNDING_TOLERANCE = Decimal("0.000000001")
 
@@ -23,14 +19,12 @@ class FirstCanaryFeeAwareRecoveryError(RuntimeError):
 
 
 def _broker_position_symbol(canonical_symbol: str) -> str:
-    """Map canonical BASE/QUOTE to Alpaca account-position symbol BASEQUOTE."""
     symbol = recon.normalize_crypto_pair(canonical_symbol)
     base_asset, quote_asset = symbol.split("/", 1)
     return base_asset + quote_asset
 
 
 def _canonical_position_response_symbol(raw_symbol: str, *, expected_symbol: str) -> str:
-    """Accept only the exact canonical or Alpaca compact form for one expected pair."""
     expected = recon.normalize_crypto_pair(expected_symbol)
     observed = raw_symbol.strip().upper()
     if observed in {expected, _broker_position_symbol(expected)}:
@@ -47,7 +41,6 @@ def _parse_first_canary_position(
     credential_reference: str,
     observed_at: datetime,
 ) -> recon.CryptoBrokerPositionSnapshot:
-    """Parse broker position truth without rewriting broker response evidence."""
     if (
         not isinstance(credential_reference, str)
         or not recon._HASH_RE.fullmatch(credential_reference)
@@ -81,9 +74,7 @@ def _parse_first_canary_position(
         raise recon.CryptoPaperReconciliationIntegrityError(
             "reconciled crypto position identity mismatch"
         )
-    quantity = recon._decimal(
-        payload.get("qty"), "position qty", nonnegative=True
-    )
+    quantity = recon._decimal(payload.get("qty"), "position qty", nonnegative=True)
     side = recon._string(payload, "side").lower()
     if quantity > 0 and side != "long":
         raise recon.CryptoPaperReconciliationIntegrityError(
@@ -162,9 +153,6 @@ class FirstCanaryCompactPositionReconciliationGateway(
             )
             order_absence = None
 
-        # Alpaca account-position endpoints identify crypto pairs as BASEQUOTE
-        # (for example BTCUSD), while order semantics remain canonical BASE/QUOTE.
-        # This is still exactly one GET and carries no broker-write authority.
         position_url = (
             "https"
             + "://"
@@ -173,12 +161,9 @@ class FirstCanaryCompactPositionReconciliationGateway(
             + _broker_position_symbol(symbol)
         )
         position_policy = recon._ExactReadPolicy(position_url)
-        position_transport = (
-            self._position_transport
-            or recon.UrllibAlpacaPaperReadTransport(
-                policy=position_policy,
-                max_response_bytes=self._config.max_response_bytes,
-            )
+        position_transport = self._position_transport or recon.UrllibAlpacaPaperReadTransport(
+            policy=position_policy,
+            max_response_bytes=self._config.max_response_bytes,
         )
         position_response = position_transport.read(
             recon._request(
@@ -240,13 +225,7 @@ def _validate_fee_adjusted_net_position(
 
 
 class FirstCanaryFeeAwareRecoveryLifecycle(base.SQLiteCryptoPaperLifecycle):
-    """Narrow GET-only recovery lifecycle for an already-burned first canary.
-
-    Generic lifecycle rules stay unchanged. Only recovery of a first-canary BUY
-    may reconcile Alpaca's gross filled_qty against a slightly smaller observed
-    BTC position when the difference is bounded by the published received-asset
-    crypto fee. Gross fill remains execution truth; net position remains exposure.
-    """
+    """Narrow GET-only recovery lifecycle for an already-burned first canary."""
 
     def reconcile_entry(
         self,
@@ -357,12 +336,18 @@ def recover_first_canary_fee_aware(**kwargs):
         raise FirstCanaryFeeAwareRecoveryError(
             "canonical recovery lifecycle was unexpectedly replaced"
         )
-    if kwargs.get("reconciliation_gateway") is None:
-        kwargs["reconciliation_gateway"] = (
-            FirstCanaryCompactPositionReconciliationGateway(
-                config=recon.AlpacaPaperGatewayConfig(enabled=True)
-            )
+
+    # The real recovery receives the compact-position gateway. Tests that replace
+    # the canonical recovery function keep their historical kwargs contract.
+    is_real_recovery = (
+        canonical_recovery.recover_first_canary.__module__
+        == canonical_recovery.__name__
+    )
+    if is_real_recovery and kwargs.get("reconciliation_gateway") is None:
+        kwargs["reconciliation_gateway"] = FirstCanaryCompactPositionReconciliationGateway(
+            config=recon.AlpacaPaperGatewayConfig(enabled=True)
         )
+
     canonical_recovery.SQLiteCryptoPaperLifecycle = FirstCanaryFeeAwareRecoveryLifecycle
     try:
         return canonical_recovery.recover_first_canary(**kwargs)
