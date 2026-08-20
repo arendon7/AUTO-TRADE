@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal
+from hashlib import sha256
 
 import autotrade.first_canary_recovery as canonical_recovery
 from autotrade.brokers import alpaca_paper_crypto_lifecycle as base
+from autotrade.brokers import alpaca_paper_crypto_reconciliation as recon
 
 
 # Alpaca publishes a Tier-1 taker fee of 25 bps and charges a crypto BUY fee
@@ -18,6 +20,192 @@ POSITION_ROUNDING_TOLERANCE = Decimal("0.000000001")
 
 class FirstCanaryFeeAwareRecoveryError(RuntimeError):
     pass
+
+
+def _broker_position_symbol(canonical_symbol: str) -> str:
+    """Map canonical BASE/QUOTE to Alpaca account-position symbol BASEQUOTE."""
+    symbol = recon.normalize_crypto_pair(canonical_symbol)
+    base_asset, quote_asset = symbol.split("/", 1)
+    return base_asset + quote_asset
+
+
+def _canonical_position_response_symbol(raw_symbol: str, *, expected_symbol: str) -> str:
+    """Accept only the exact canonical or Alpaca compact form for one expected pair."""
+    expected = recon.normalize_crypto_pair(expected_symbol)
+    observed = raw_symbol.strip().upper()
+    if observed in {expected, _broker_position_symbol(expected)}:
+        return expected
+    raise recon.CryptoPaperReconciliationIntegrityError(
+        "reconciled crypto position identity mismatch"
+    )
+
+
+def _parse_first_canary_position(
+    *,
+    response: recon.AlpacaPaperHttpResponse,
+    expected_symbol: str,
+    credential_reference: str,
+    observed_at: datetime,
+) -> recon.CryptoBrokerPositionSnapshot:
+    """Parse broker position truth without rewriting broker response evidence."""
+    if (
+        not isinstance(credential_reference, str)
+        or not recon._HASH_RE.fullmatch(credential_reference)
+    ):
+        raise recon.CryptoPaperReconciliationIntegrityError(
+            "crypto position credential reference is invalid"
+        )
+    if response.status_code == 404:
+        return recon.CryptoBrokerPositionSnapshot(
+            symbol=expected_symbol,
+            quantity=Decimal("0"),
+            market_value=None,
+            average_entry_price=None,
+            credential_reference=credential_reference,
+            request_id=recon._request_id(response),
+            response_sha256=sha256(response.body).hexdigest(),
+            observed_at=observed_at,
+            absent=True,
+        )
+    if response.status_code != 200:
+        raise recon.AlpacaPaperUnavailable(
+            f"unexpected crypto position reconciliation status: {response.status_code}"
+        )
+    payload, request_id = recon._json_payload(
+        response, "first-canary crypto position reconciliation"
+    )
+    symbol = _canonical_position_response_symbol(
+        recon._string(payload, "symbol"), expected_symbol=expected_symbol
+    )
+    if recon._string(payload, "asset_class").lower() != "crypto":
+        raise recon.CryptoPaperReconciliationIntegrityError(
+            "reconciled crypto position identity mismatch"
+        )
+    quantity = recon._decimal(
+        payload.get("qty"), "position qty", nonnegative=True
+    )
+    side = recon._string(payload, "side").lower()
+    if quantity > 0 and side != "long":
+        raise recon.CryptoPaperReconciliationIntegrityError(
+            "R6 crypto position must be long-only"
+        )
+    market_value = recon._optional_decimal(
+        payload.get("market_value"), "market_value", allow_negative=False
+    )
+    average_entry_price = recon._optional_decimal(
+        payload.get("avg_entry_price"), "avg_entry_price", allow_negative=False
+    )
+    return recon.CryptoBrokerPositionSnapshot(
+        symbol=symbol,
+        quantity=quantity,
+        market_value=market_value,
+        average_entry_price=average_entry_price,
+        credential_reference=credential_reference,
+        request_id=request_id,
+        response_sha256=sha256(response.body).hexdigest(),
+        observed_at=observed_at,
+        absent=False,
+    )
+
+
+class FirstCanaryCompactPositionReconciliationGateway(
+    recon.AlpacaPaperCryptoReconciliationGateway
+):
+    """GET-only first-canary gateway using Alpaca's BASEQUOTE position identifier."""
+
+    def reconcile(self, *, credentials, order, now):
+        if not self._config.enabled:
+            raise recon.CryptoPaperReconciliationDisabled(
+                "crypto PAPER reconciliation is disabled"
+            )
+        if now.tzinfo is None or now.utcoffset() is None:
+            raise ValueError("now must be timezone-aware")
+        if not recon._CLIENT_ID_RE.fullmatch(order.client_order_id):
+            raise ValueError("crypto client_order_id is invalid")
+        symbol = recon.normalize_crypto_pair(order.symbol)
+        observed_at = now.astimezone(timezone.utc)
+
+        order_url = (
+            "https"
+            + "://"
+            + recon.ALPACA_PAPER_TRADING_HOST
+            + recon.ORDER_BY_CLIENT_PATH
+            + "?client_order_id="
+            + order.client_order_id
+        )
+        order_policy = recon._ExactReadPolicy(order_url)
+        order_transport = self._order_transport or recon.UrllibAlpacaPaperReadTransport(
+            policy=order_policy,
+            max_response_bytes=self._config.max_response_bytes,
+        )
+        order_response = order_transport.read(
+            recon._request(
+                credentials=credentials,
+                url=order_url,
+                timeout=self._config.timeout_seconds,
+            )
+        )
+        order_policy.validate_final_url(order_response.final_url)
+        if order_response.status_code == 404:
+            broker_order = None
+            order_absence = recon._parse_order_absence(
+                response=order_response,
+                expected_client_order_id=order.client_order_id,
+                credential_reference=credentials.credential_reference,
+                observed_at=observed_at,
+            )
+        else:
+            broker_order = recon._parse_order(
+                response=order_response,
+                expected=order,
+                observed_at=observed_at,
+            )
+            order_absence = None
+
+        # Alpaca account-position endpoints identify crypto pairs as BASEQUOTE
+        # (for example BTCUSD), while order semantics remain canonical BASE/QUOTE.
+        # This is still exactly one GET and carries no broker-write authority.
+        position_url = (
+            "https"
+            + "://"
+            + recon.ALPACA_PAPER_TRADING_HOST
+            + recon.POSITION_PATH_PREFIX
+            + _broker_position_symbol(symbol)
+        )
+        position_policy = recon._ExactReadPolicy(position_url)
+        position_transport = (
+            self._position_transport
+            or recon.UrllibAlpacaPaperReadTransport(
+                policy=position_policy,
+                max_response_bytes=self._config.max_response_bytes,
+            )
+        )
+        position_response = position_transport.read(
+            recon._request(
+                credentials=credentials,
+                url=position_url,
+                timeout=self._config.timeout_seconds,
+            )
+        )
+        position_policy.validate_final_url(position_response.final_url)
+        position = _parse_first_canary_position(
+            response=position_response,
+            expected_symbol=symbol,
+            credential_reference=credentials.credential_reference,
+            observed_at=observed_at,
+        )
+        if order_absence is not None:
+            return recon.CryptoBrokerUnknownReconciliation(
+                order_absence=order_absence,
+                position=position,
+                observed_at=observed_at,
+            )
+        assert broker_order is not None
+        return recon.CryptoBrokerReconciliation(
+            order=broker_order,
+            position=position,
+            observed_at=observed_at,
+        )
 
 
 def _validate_fee_adjusted_net_position(
@@ -163,11 +351,17 @@ class FirstCanaryFeeAwareRecoveryLifecycle(base.SQLiteCryptoPaperLifecycle):
 
 
 def recover_first_canary_fee_aware(**kwargs):
-    """Run canonical GET-only recovery with a narrow lifecycle adapter."""
+    """Run canonical GET-only recovery with narrow lifecycle and position adapters."""
     original = canonical_recovery.SQLiteCryptoPaperLifecycle
     if original is not base.SQLiteCryptoPaperLifecycle:
         raise FirstCanaryFeeAwareRecoveryError(
             "canonical recovery lifecycle was unexpectedly replaced"
+        )
+    if kwargs.get("reconciliation_gateway") is None:
+        kwargs["reconciliation_gateway"] = (
+            FirstCanaryCompactPositionReconciliationGateway(
+                config=recon.AlpacaPaperGatewayConfig(enabled=True)
+            )
         )
     canonical_recovery.SQLiteCryptoPaperLifecycle = FirstCanaryFeeAwareRecoveryLifecycle
     try:
@@ -177,6 +371,7 @@ def recover_first_canary_fee_aware(**kwargs):
 
 
 __all__ = [
+    "FirstCanaryCompactPositionReconciliationGateway",
     "FirstCanaryFeeAwareRecoveryError",
     "FirstCanaryFeeAwareRecoveryLifecycle",
     "MAX_RECEIVED_ASSET_FEE_RATE",
