@@ -19,7 +19,7 @@ from autotrade.brokers.alpaca_paper_gateway import (
     AlpacaPaperCredentials,
     AlpacaPaperGatewayConfig,
 )
-from autotrade.brokers.paper_portfolio import AlpacaPaperPortfolioGateway, PaperPortfolioSnapshot
+from autotrade.brokers.paper_portfolio import AlpacaPaperPortfolioGateway
 from autotrade.domain import MarketSnapshot, OrderType
 from autotrade.paper_close_attempt import (
     PaperCloseAttemptWorkspace,
@@ -86,13 +86,7 @@ class _NoBrokerSurface:
 
 
 class ReadOnlyCanonicalSafetyStateStore(SafetyStateStore):
-    """Read-through canonical Safety state; all mutation methods are denied.
-
-    Each ``get`` re-opens the commissioned workspace core in immutable/query-only
-    mode through the certified R7 read-model helper. This lets Safety evaluate
-    the exact current version and lets OMS re-check it immediately before its
-    external handoff without granting this close path authority to mutate Safety.
-    """
+    """Read-through canonical Safety state; all mutation methods are denied."""
 
     def __init__(self, *, workspace_path: Path, now_provider: Callable[[], datetime]) -> None:
         self._workspace = workspace_path
@@ -161,9 +155,8 @@ class PreparedPaperCloseOperatorSession:
 class PaperCloseOperator:
     """Production facade for one risk-reducing R7 PAPER close attempt.
 
-    The facade is intentionally narrower than the underlying components: the
-    first operator close is FULL BTC/USD only. It never retries a POST. A restart
-    after the writer crosses durable UNKNOWN can only enter ``recover``.
+    The first operator close is FULL BTC/USD only. It never retries a POST. A
+    restart after the writer crosses durable UNKNOWN can only enter ``recover``.
     """
 
     def __init__(
@@ -363,27 +356,53 @@ class PaperCloseOperator:
         )
         writer = self._writer_factory()
         bridge = PaperCloseExecutionBridge(writer=writer)
-        receipt = bridge.execute_once(
-            authority=authority,
-            plan=prepared.plan,
-            operator_decision=prepared.decision,
-            control_plane=prepared.control_plane,
-            lifecycle=prepared.lifecycle,
-            fresh_portfolio=fresh_portfolio,
-            credentials=credentials,
-            now=self._now(),
-        )
-        prepared.attempt.write_receipt(_receipt_document(receipt))
-        settlement = self._bounded_reconcile(
-            attempt=prepared.attempt,
-            plan=prepared.plan,
-            credentials=credentials,
-            expected_account_id=prepared.operations.account_anchor.attestation.account_id,
-        )
+        receipt: PaperCloseWriteReceipt | None = None
+        try:
+            receipt = bridge.execute_once(
+                authority=authority,
+                plan=prepared.plan,
+                operator_decision=prepared.decision,
+                control_plane=prepared.control_plane,
+                lifecycle=prepared.lifecycle,
+                fresh_portfolio=fresh_portfolio,
+                credentials=credentials,
+                now=self._now(),
+            )
+            prepared.attempt.write_receipt(_receipt_document(receipt))
+            settlement = self._bounded_reconcile(
+                attempt=prepared.attempt,
+                plan=prepared.plan,
+                credentials=credentials,
+                expected_account_id=prepared.operations.account_anchor.attestation.account_id,
+            )
+        except Exception as exc:
+            burned = prepared.lifecycle.snapshot(prepared.attempt.attempt_id).state
+            if burned.submission_attempt_count != 1:
+                raise
+            settlement = _settlement_document(
+                state=burned,
+                reconciliation=None,
+                error=str(exc),
+            )
+            return {
+                "ok": False,
+                "phase": "RECOVERY_ONLY",
+                "broker_write_performed": "UNKNOWN_AFTER_DURABLE_PRE_IO",
+                "broker_post_attempt_burned": True,
+                "attempt_id_internal": prepared.attempt.attempt_id,
+                "client_order_id": None if receipt is None else receipt.client_order_id,
+                "broker_order_id": None if receipt is None else receipt.broker_order_id,
+                "broker_post_status": None if receipt is None else receipt.broker_status,
+                "settlement": settlement,
+                "retry_post": False,
+                "credentials_persisted": False,
+                "live_trading": "BLOCKED",
+            }
         return {
             "ok": settlement["terminal"],
             "phase": "CLOSE_RECONCILED" if settlement["terminal"] else "RECOVERY_ONLY",
             "broker_write_performed": True,
+            "broker_post_attempt_burned": True,
             "attempt_id_internal": prepared.attempt.attempt_id,
             "client_order_id": receipt.client_order_id,
             "broker_order_id": receipt.broker_order_id,
@@ -426,6 +445,7 @@ class PaperCloseOperator:
             "ok": True,
             "phase": "CLOSE_RECONCILED" if settlement["terminal"] else "RECOVERY_ONLY",
             "broker_write_performed": False,
+            "broker_post_attempt_burned": True,
             "attempt_id_internal": attempt_id,
             "settlement": settlement,
             "retry_post": False,
