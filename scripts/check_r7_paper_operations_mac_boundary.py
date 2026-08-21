@@ -140,7 +140,7 @@ def main() -> int:
         "Aún no está habilitado.",
         "Close write: DISABLED",
         "NO vuelvas a pulsar ejecutar",
-        "fetch('/api/operations'",
+        "get('/api/operations')",
     )
     for token in required_html:
         require(token in html, f"R7 UI missing operator/read-only anchor: {token}")
