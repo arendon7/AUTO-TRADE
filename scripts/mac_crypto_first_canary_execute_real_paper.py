@@ -7,6 +7,14 @@ import os
 from pathlib import Path
 import sys
 
+import autotrade.first_canary_execution_gate as first_canary_execution_gate
+import autotrade.first_canary_external_post_consent as first_canary_external_post_consent
+import autotrade.brokers.alpaca_paper_crypto_cold_start_execution_bridge as cold_start_execution_bridge
+import autotrade.brokers.alpaca_paper_crypto_cold_start_final_guard as cold_start_final_guard
+from autotrade.first_canary_paper_policy import (
+    FIRST_CANARY_PAPER_MAX_NOTIONAL,
+    FIRST_CANARY_PAPER_MIN_NOTIONAL,
+)
 from autotrade.first_canary_real_paper_execution import (
     collect_fresh_final_evidence,
     execute_real_paper_first_canary_once,
@@ -90,6 +98,32 @@ def _broker_diagnostic(workspace_path: Path, attempt_id: str) -> dict[str, objec
     }
 
 
+def _bind_isolated_execution_policy() -> None:
+    # This process is the dedicated one-shot PAPER canary gate. The baseline
+    # first-canary module historically encoded USD 1-5; Alpaca's current
+    # crypto/USD broker floor is USD 10. Bind only this isolated PAPER process
+    # to the certified USD 10-12 policy. LIVE and generic writer authority stay
+    # unchanged/blocked.
+    bindings = (
+        (first_canary_execution_gate, "MIN_NOTIONAL", "MAX_NOTIONAL"),
+        (first_canary_external_post_consent, "MIN_NOTIONAL", "MAX_NOTIONAL"),
+        (cold_start_execution_bridge, "COLD_START_MIN_NOTIONAL", "COLD_START_MAX_NOTIONAL"),
+        (cold_start_final_guard, "COLD_START_MIN_NOTIONAL", "COLD_START_MAX_NOTIONAL"),
+    )
+    for module, minimum_name, maximum_name in bindings:
+        setattr(module, minimum_name, FIRST_CANARY_PAPER_MIN_NOTIONAL)
+        setattr(module, maximum_name, FIRST_CANARY_PAPER_MAX_NOTIONAL)
+
+    if any(
+        getattr(module, minimum_name) != FIRST_CANARY_PAPER_MIN_NOTIONAL
+        or getattr(module, maximum_name) != FIRST_CANARY_PAPER_MAX_NOTIONAL
+        for module, minimum_name, maximum_name in bindings
+    ):
+        raise MacFirstCanaryRealPaperExecutionError(
+            "isolated PAPER execution notional policy failed closed"
+        )
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
@@ -115,6 +149,7 @@ def main(argv: list[str] | None = None) -> int:
         )
 
     try:
+        _bind_isolated_execution_policy()
         credentials = _credentials()
         confirmation = _confirmation_from_stdin()
 
@@ -157,6 +192,8 @@ def main(argv: list[str] | None = None) -> int:
             "broker_diagnostic": _broker_diagnostic(args.workspace, str(args.attempt_id)),
             "crypto_status": crypto_account.crypto_status,
             "crypto_account_status_fingerprint": crypto_account.fingerprint,
+            "paper_notional_min_usd": str(FIRST_CANARY_PAPER_MIN_NOTIONAL),
+            "paper_notional_max_usd": str(FIRST_CANARY_PAPER_MAX_NOTIONAL),
             "retry_forbidden": outcome.retry_forbidden,
             "external_post_consent_hash": consent.receipt_hash,
             "external_post_consent_expires_at": consent.expires_at.isoformat(),
