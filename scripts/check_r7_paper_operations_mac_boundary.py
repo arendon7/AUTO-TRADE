@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+from html import unescape
 from pathlib import Path
 import sys
 
@@ -64,6 +65,7 @@ def main() -> int:
 
     overlay = OVERLAY.read_text(encoding="utf-8")
     html = HTML.read_text(encoding="utf-8")
+    html_visible = unescape(html)
     tree = ast.parse(overlay, filename=str(OVERLAY))
 
     required_overlay = (
@@ -145,7 +147,7 @@ def main() -> int:
                 f"overlay calls forbidden external mutation method: {node.func.attr}",
             )
 
-    required_html = (
+    required_visible_html = (
         "AUTO-TRADE · R7 OPERATIONS",
         "PORTFOLIO GET-ONLY",
         "ENTRY USD 10–12",
@@ -154,15 +156,18 @@ def main() -> int:
         "Safety kill switch",
         "Safety circuit",
         "P&L no realizado",
-        "ready_for_close_preparation",
         "Cierre de posición",
         "Aún no está habilitado.",
         "Close write: DISABLED",
         "NO vuelvas a pulsar ejecutar",
-        "get('/api/operations')",
     )
-    for token in required_html:
-        require(token in html, f"R7 UI missing operator/read-only anchor: {token}")
+    for token in required_visible_html:
+        require(token in html_visible, f"R7 UI missing operator/read-only anchor: {token}")
+
+    # These are source-code anchors rather than visible text, so check the raw
+    # HTML/JavaScript instead of the decoded presentation text.
+    for token in ("ready_for_close_preparation", "get('/api/operations')"):
+        require(token in html, f"R7 UI missing source/read-only anchor: {token}")
 
     # The UI may explain that /api/close does not exist. What is forbidden is
     # executable JavaScript that attempts to call such a route.
@@ -187,8 +192,8 @@ def main() -> int:
         "R7 PAPER operations Mac boundary: PASS — R7 subclasses the certified R6 session without "
         "redefining connect/prepare/approve/execute/recover; adds only /api/operations GET; fresh "
         "broker exposure interlocks new BUY preparation; policy metadata comes from canonical "
-        "10/10.50/12 constants; only localhost self.wfile.write is permitted; no close "
-        "writer/POST/cancel/replace/LIVE authority"
+        "10/10.50/12 constants; visible HTML is entity-decoded for operator anchors; only localhost "
+        "self.wfile.write is permitted; no close writer/POST/cancel/replace/LIVE authority"
     )
     return 0
 
