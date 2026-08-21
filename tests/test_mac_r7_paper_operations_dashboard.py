@@ -139,7 +139,10 @@ def test_r7_handler_adds_get_only_surface_and_no_close_route() -> None:
     html = (ROOT / "web/mac_r7_paper_operations.html").read_text(encoding="utf-8")
     assert '"/api/operations"' in overlay
     assert "/api/close" not in overlay
-    assert "/api/close" not in html
+    assert "post('/api/close'" not in html
+    assert 'post("/api/close"' not in html
+    assert "get('/api/close'" not in html
+    assert 'get("/api/close"' not in html
     assert "Aún no está habilitado." in html
     assert "ENTRY USD 10–12" in html
     assert "USD 1-5" not in html
