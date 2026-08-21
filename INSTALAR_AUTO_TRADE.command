@@ -2,11 +2,13 @@
 set -euo pipefail
 
 SOURCE_ROOT="$(cd "$(dirname "$0")" && pwd -P)"
-# Keep the historical install path so an upgrade preserves the existing workspace
-# contract and does not create a second parallel app tree.
+# Keep the historical install path so upgrades preserve the existing workspace
+# contract and do not create a second parallel app tree.
 INSTALL_ROOT="$HOME/Applications/AUTO-TRADE-R6"
 ACTIVE_ROOT="$SOURCE_ROOT"
 STANDALONE_MODE="NO"
+ONE_APP_MODE="NO"
+R7_OPERATIONS_MODE="NO"
 
 if [[ "$(uname -s)" != "Darwin" ]]; then
   echo "AUTO-TRADE FULL INSTALL: este instalador es exclusivamente para macOS." >&2
@@ -100,9 +102,22 @@ else
   fi
 fi
 
+ACTIVE_MANIFEST="$ACTIVE_ROOT/MAC_STANDALONE_MANIFEST.txt"
+if [[ -f "$ACTIVE_MANIFEST" ]] && grep -Fq 'first_canary_unified_surface=ONE_APP' "$ACTIVE_MANIFEST"; then
+  ONE_APP_MODE="YES"
+fi
+if [[ -f "$ACTIVE_MANIFEST" ]] && grep -Fq 'r7_paper_operations_surface=GET_ONLY' "$ACTIVE_MANIFEST"; then
+  R7_OPERATIONS_MODE="YES"
+fi
+if [[ "$R7_OPERATIONS_MODE" == "YES" && "$ONE_APP_MODE" != "YES" ]]; then
+  echo "ERROR: R7 PAPER Operations requiere first_canary_unified_surface=ONE_APP." >&2
+  exit 2
+fi
+
 cd "$ACTIVE_ROOT"
 clear || true
-cat <<EOF
+if [[ "$R7_OPERATIONS_MODE" == "YES" ]]; then
+  cat <<EOF
 AUTO-TRADE R7 PAPER OPERATIONS — INSTALACIÓN SEGURA
 
 • La autoridad de entrada permanece en la ruta R6 certificada e idempotente.
@@ -116,6 +131,19 @@ AUTO-TRADE R7 PAPER OPERATIONS — INSTALACIÓN SEGURA
 • LIVE permanece BLOCKED.
 • Esta instalación NO envía órdenes.
 EOF
+else
+  cat <<EOF
+AUTO-TRADE R6 — INSTALACIÓN SEGURA
+
+• FULL/STANDALONE usa el CPython y wheelhouse embebidos.
+• No requiere Homebrew ni Python del sistema.
+• No usa PyPI/Internet para instalar el runtime del paquete FULL.
+• En FULL descargado, instala en: $INSTALL_ROOT
+• PAPER write genérico permanece DISABLED.
+• LIVE permanece BLOCKED.
+• Esta instalación NO envía órdenes.
+EOF
+fi
 
 echo
 bash "$ACTIVE_ROOT/scripts/mac_bootstrap.sh"
@@ -123,16 +151,12 @@ bash "$ACTIVE_ROOT/scripts/mac_bootstrap.sh"
 PY="$ACTIVE_ROOT/.venv/bin/python"
 [[ -x "$PY" ]] || { echo "ERROR: .venv no quedó instalado." >&2; exit 2; }
 
-if [[ -f "$ACTIVE_ROOT/MAC_STANDALONE_MANIFEST.txt" ]] && grep -Fq 'first_canary_unified_surface=ONE_APP' "$ACTIVE_ROOT/MAC_STANDALONE_MANIFEST.txt"; then
-  if ! grep -Fq 'r7_paper_operations_surface=GET_ONLY' "$ACTIVE_ROOT/MAC_STANDALONE_MANIFEST.txt"; then
-    echo "ERROR: el artefacto ONE-APP no declara R7 PAPER Operations GET-only." >&2
-    exit 2
-  fi
+if [[ "$ONE_APP_MODE" == "YES" && "$R7_OPERATIONS_MODE" == "YES" ]]; then
   [[ -f "$ACTIVE_ROOT/scripts/mac_r7_paper_operations_dashboard.py" ]] || { echo "ERROR: falta dashboard R7." >&2; exit 2; }
   [[ -f "$ACTIVE_ROOT/web/mac_r7_paper_operations.html" ]] || { echo "ERROR: falta UI R7." >&2; exit 2; }
 
-  # The installed package certifies both layers: historical R6 entry authority
-  # and the R7 read-only operator overlay. No close writer is enabled here.
+  # R7 certifies both layers: historical R6 entry authority and the read-only
+  # operations overlay. No close writer is enabled by this package.
   "$PY" "$ACTIVE_ROOT/scripts/check_r6_first_canary_unified_dashboard.py"
   "$PY" "$ACTIVE_ROOT/scripts/check_r6_live_deny_boundary.py"
   "$PY" "$ACTIVE_ROOT/scripts/check_r6_authority.py"
@@ -141,13 +165,21 @@ if [[ -f "$ACTIVE_ROOT/MAC_STANDALONE_MANIFEST.txt" ]] && grep -Fq 'first_canary
     "$ACTIVE_ROOT/tests/test_r6_first_canary_unified_dashboard.py" \
     "$ACTIVE_ROOT/tests/test_mac_r7_paper_operations_dashboard.py"
   echo "R7 PAPER Operations + inherited R6 authority installed checks: OK"
+elif [[ "$ONE_APP_MODE" == "YES" ]]; then
+  # Backward-compatible certification for historical R6 ONE-APP artifacts.
+  "$PY" "$ACTIVE_ROOT/scripts/check_r6_first_canary_unified_dashboard.py"
+  "$PY" "$ACTIVE_ROOT/scripts/check_r6_live_deny_boundary.py"
+  "$PY" "$ACTIVE_ROOT/scripts/check_r6_authority.py"
+  "$PY" -m pytest -q "$ACTIVE_ROOT/tests/test_r6_first_canary_unified_dashboard.py"
+  echo "Unified ONE-APP installed runtime/authority checks: OK"
 else
   "$PY" "$ACTIVE_ROOT/scripts/check_mac_standalone_boundary.py"
   "$PY" "$ACTIVE_ROOT/scripts/check_mac_dashboard_boundary.py"
   "$PY" "$ACTIVE_ROOT/scripts/mac_doctor.py"
 fi
 
-cat <<EOF
+if [[ "$R7_OPERATIONS_MODE" == "YES" ]]; then
+  cat <<EOF
 
 ============================================================
 AUTO-TRADE R7 OPERATIONS INSTALL: OK
@@ -168,3 +200,24 @@ Ahora abre:
   $ACTIVE_ROOT/ABRIR_AUTO_TRADE.command
 ============================================================
 EOF
+else
+  cat <<EOF
+
+============================================================
+AUTO-TRADE R6 INSTALL: OK
+============================================================
+Runtime: OK
+Dependencias: OK
+Control Center: OK
+PAPER write genérico: DISABLED
+Capital authority: NONE durante instalación
+LIVE: BLOCKED
+Orden enviada por instalación: NO
+install_root=$ACTIVE_ROOT
+standalone_install_relocated=$([[ "$STANDALONE_MODE" == "YES" && "$SOURCE_ROOT" != "$ACTIVE_ROOT" ]] && echo YES || echo NO)
+
+Ahora abre:
+  $ACTIVE_ROOT/ABRIR_AUTO_TRADE.command
+============================================================
+EOF
+fi
