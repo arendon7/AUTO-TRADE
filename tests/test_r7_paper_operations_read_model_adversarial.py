@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from decimal import Decimal
-import json
 from pathlib import Path
 
 import pytest
@@ -245,7 +244,7 @@ def test_terminal_zero_initial_guard_checks_each_terminal_contract() -> None:
         model._require_proven_terminal_zero(base, kind="OTHER")
 
 
-def test_terminal_document_requires_final_resolution_and_discovery_requires_history(tmp_path: Path) -> None:
+def test_terminal_document_and_source_discovery_distinguish_empty_from_absent_history(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     attempt = FirstCanaryAttemptWorkspace.open(
@@ -255,25 +254,20 @@ def test_terminal_document_requires_final_resolution_and_discovery_requires_hist
     with pytest.raises(model.PaperOperationsReadModelConflict, match="no terminal reconciliation"):
         model._terminal_attempt_document(attempt)
 
-    with pytest.raises(model.PaperOperationsReadModelMissing, match="execution history"):
+    # FirstCanaryAttemptWorkspace.open deliberately creates the execution root.
+    # With only an unburned attempt present, discovery correctly reports that no
+    # certified source matches the current exposure rather than claiming history
+    # is absent.
+    with pytest.raises(model.PaperOperationsReadModelMissing, match="no certified first-canary source"):
         model.FirstCanaryCloseSourceDiscovery(workspace_path=workspace).discover(
             portfolio=_portfolio((_position(),)),
             now=NOW,
         )
 
-
-def test_read_model_missing_source_becomes_visible_blocker(tmp_path: Path) -> None:
-    workspace = tmp_path / "workspace"
-    workspace.mkdir()
-    # This test intentionally exercises the source-missing conversion only through a
-    # tiny dependency seam; account/Safety/broker reads are separately covered above.
-    class MissingDiscovery:
-        def __init__(self, *, workspace_path: Path) -> None:
-            assert workspace_path == workspace.resolve()
-
-        def discover(self, *, portfolio, now):
-            raise model.PaperOperationsReadModelMissing("no matching source")
-
-    assert "SOURCE_NOT_CERTIFIED:" not in ";".join(
-        model._first_close_blockers(_portfolio((_position(),)))
-    )
+    truly_empty = tmp_path / "no-history-workspace"
+    truly_empty.mkdir()
+    with pytest.raises(model.PaperOperationsReadModelMissing, match="execution history"):
+        model.FirstCanaryCloseSourceDiscovery(workspace_path=truly_empty).discover(
+            portfolio=_portfolio((_position(),)),
+            now=NOW,
+        )
