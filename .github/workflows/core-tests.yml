@@ -108,6 +108,8 @@ jobs:
         run: python scripts/check_r7_paper_close_control_plane_boundary.py
       - name: R7 PAPER first-canary close source provenance boundary
         run: python scripts/check_r7_paper_close_source_provenance_boundary.py
+      - name: R7 PAPER operations read-model boundary
+        run: python scripts/check_r7_paper_operations_read_model_boundary.py
       - name: Debt register contract
         run: python scripts/check_debt_register.py
       - name: Canonical knowledge contract
