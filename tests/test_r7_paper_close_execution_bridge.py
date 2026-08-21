@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from datetime import timedelta
+from decimal import Decimal
 
 import pytest
 
@@ -12,6 +13,7 @@ from autotrade.paper_close_execution_bridge import (
     PaperCloseExecutionBridgeBlocked,
     bind_paper_close_execution_authority,
 )
+from autotrade.paper_close_plan import prepare_crypto_close_plan
 from autotrade.paper_close_writer import (
     PaperCloseWriteReceipt,
     PaperCloseWriter,
@@ -106,38 +108,84 @@ def test_bridge_is_only_wrapper_that_invokes_low_level_writer_once() -> None:
     assert writer.calls[0]["decision"] == operator
 
 
-@pytest.mark.parametrize(
-    ("mutation", "match"),
-    [
-        ("operator_attempt", "attempt differs"),
-        ("operator_plan", "plan hash"),
-        ("handoff_order", "handoff order"),
-        ("handoff_safety", "Safety version"),
-        ("handoff_risk", "RiskDecision"),
-    ],
-)
-def test_binding_rejects_broken_authority_chain(mutation: str, match: str) -> None:
-    _, plan, prepared, operator, handoff, _ = _authority_chain()
-    if mutation == "operator_attempt":
-        operator = issue_paper_close_operator_decision(
-            attempt_id="r7-close-bridge-other", plan=plan, confirmation="CERRAR PAPER", now=NOW
-        )
-    elif mutation == "operator_plan":
-        operator = replace(operator, plan_hash="f" * 64, decision_hash=operator.decision_hash)
-    elif mutation == "handoff_order":
-        handoff = replace(handoff, order_id="different-order")
-    elif mutation == "handoff_safety":
-        handoff = replace(handoff, safety_state_version=handoff.safety_state_version + 1)
-    elif mutation == "handoff_risk":
-        handoff = replace(handoff, risk_decision_id="different-risk")
-    with pytest.raises((PaperCloseExecutionBridgeBlocked, ValueError), match=match):
+def test_binding_rejects_valid_human_decision_for_other_attempt() -> None:
+    _, plan, prepared, _operator, handoff, _ = _authority_chain()
+    other = issue_paper_close_operator_decision(
+        attempt_id="r7-close-bridge-other",
+        plan=plan,
+        confirmation="CERRAR PAPER",
+        now=NOW,
+    )
+    with pytest.raises(PaperCloseExecutionBridgeBlocked, match="attempt differs"):
         bind_paper_close_execution_authority(
             plan=plan,
-            operator_decision=operator,
+            operator_decision=other,
             control_plane=prepared,
             oms_handoff=handoff,
             now=NOW + timedelta(milliseconds=2),
         )
+
+
+def test_binding_rejects_valid_human_decision_for_other_plan() -> None:
+    portfolio, plan, prepared, _operator, handoff, _ = _authority_chain()
+    other_plan = prepare_crypto_close_plan(
+        portfolio=portfolio,
+        symbol="BTC/USD",
+        now=NOW,
+        limit_price=Decimal("72770"),
+    )
+    other = issue_paper_close_operator_decision(
+        attempt_id=prepared.attempt_id,
+        plan=other_plan,
+        confirmation="CERRAR PAPER",
+        now=NOW,
+    )
+    with pytest.raises(PaperCloseExecutionBridgeBlocked, match="plan hash"):
+        bind_paper_close_execution_authority(
+            plan=plan,
+            operator_decision=other,
+            control_plane=prepared,
+            oms_handoff=handoff,
+            now=NOW + timedelta(milliseconds=2),
+        )
+
+
+def test_binding_rejects_valid_handoff_from_other_oms_order() -> None:
+    _, plan, prepared, operator, _handoff, _ = _authority_chain()
+    _, _, _, _other_operator, other_handoff, _ = _authority_chain()
+    assert other_handoff.order_id != prepared.order.order_id
+    with pytest.raises(PaperCloseExecutionBridgeBlocked, match="handoff order"):
+        bind_paper_close_execution_authority(
+            plan=plan,
+            operator_decision=operator,
+            control_plane=prepared,
+            oms_handoff=other_handoff,
+            now=NOW + timedelta(milliseconds=2),
+        )
+
+
+@pytest.mark.parametrize(
+    ("mutation", "match"),
+    [
+        ("operator_plan", "decision hash mismatch"),
+        ("handoff_order", "event_id mismatch"),
+        ("handoff_safety", "handoff hash mismatch"),
+        ("handoff_risk", "handoff hash mismatch"),
+    ],
+)
+def test_hash_sealed_authority_objects_reject_direct_tamper(mutation: str, match: str) -> None:
+    _, _plan, _prepared, operator, handoff, _ = _authority_chain()
+    with pytest.raises(ValueError, match=match):
+        if mutation == "operator_plan":
+            replace(operator, plan_hash="f" * 64)
+        elif mutation == "handoff_order":
+            replace(handoff, order_id="different-order")
+        elif mutation == "handoff_safety":
+            replace(handoff, safety_state_version=handoff.safety_state_version + 1)
+        elif mutation == "handoff_risk":
+            replace(handoff, risk_decision_id="different-risk")
+        else:  # pragma: no cover - parametrization is closed above
+            raise AssertionError(mutation)
 
 
 def test_execute_rejects_tampered_authority_before_writer() -> None:
@@ -145,7 +193,7 @@ def test_execute_rejects_tampered_authority_before_writer() -> None:
     writer = _CapturingWriter()
     bridge = PaperCloseExecutionBridge(writer=writer)
     tampered = replace(authority, plan_hash="f" * 64)
-    with pytest.raises(PaperCloseExecutionBridgeBlocked):
+    with pytest.raises(PaperCloseExecutionBridgeBlocked, match="authority hash mismatch"):
         bridge.execute_once(
             authority=tampered,
             plan=plan,
