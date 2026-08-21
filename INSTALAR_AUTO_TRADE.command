@@ -9,6 +9,7 @@ ACTIVE_ROOT="$SOURCE_ROOT"
 STANDALONE_MODE="NO"
 ONE_APP_MODE="NO"
 R7_OPERATIONS_MODE="NO"
+R7_CLOSE_MODE="NO"
 
 if [[ "$(uname -s)" != "Darwin" ]]; then
   echo "AUTO-TRADE FULL INSTALL: este instalador es exclusivamente para macOS." >&2
@@ -21,7 +22,9 @@ fi
 
 unset APCA_API_KEY_ID 2>/dev/null || true
 unset APCA_API_SECRET_KEY 2>/dev/null || true
+# Installation itself never receives broker write authority.
 export R6_EXTERNAL_PAPER_WRITE=DISABLED
+export R7_CLOSE_PAPER_WRITE=DISABLED
 
 verify_standalone_assets() {
   local root="$1"
@@ -109,8 +112,15 @@ fi
 if [[ -f "$ACTIVE_MANIFEST" ]] && grep -Fq 'r7_paper_operations_surface=GET_ONLY' "$ACTIVE_MANIFEST"; then
   R7_OPERATIONS_MODE="YES"
 fi
+if [[ -f "$ACTIVE_MANIFEST" ]] && grep -Fq 'r7_close_write=EXACT_ONE_SHOT_RISK_REDUCING' "$ACTIVE_MANIFEST"; then
+  R7_CLOSE_MODE="YES"
+fi
 if [[ "$R7_OPERATIONS_MODE" == "YES" && "$ONE_APP_MODE" != "YES" ]]; then
   echo "ERROR: R7 PAPER Operations requiere first_canary_unified_surface=ONE_APP." >&2
+  exit 2
+fi
+if [[ "$R7_CLOSE_MODE" == "YES" && ( "$R7_OPERATIONS_MODE" != "YES" || "$ONE_APP_MODE" != "YES" ) ]]; then
+  echo "ERROR: R7 close one-shot requiere ONE_APP + R7 PAPER Operations." >&2
   exit 2
 fi
 
@@ -122,12 +132,13 @@ AUTO-TRADE R7 PAPER OPERATIONS — INSTALACIÓN SEGURA
 
 • La autoridad de entrada permanece en la ruta R6 certificada e idempotente.
 • R7 añade Portfolio/Safety GET-only y bloqueo de nuevo BUY si existe exposición.
+• El paquete puede contener la autoridad de cierre risk-reducing one-shot, pero la instalación la fuerza DISABLED.
 • FULL/STANDALONE usa el CPython y wheelhouse embebidos.
 • No requiere Homebrew ni Python del sistema.
 • No usa PyPI/Internet para instalar el runtime del paquete FULL.
 • En FULL descargado, instala en: $INSTALL_ROOT
 • PAPER write genérico permanece DISABLED.
-• Cierre de posición write permanece DISABLED en esta build.
+• R7 close write durante instalación: DISABLED.
 • LIVE permanece BLOCKED.
 • Esta instalación NO envía órdenes.
 EOF
@@ -155,15 +166,24 @@ if [[ "$ONE_APP_MODE" == "YES" && "$R7_OPERATIONS_MODE" == "YES" ]]; then
   [[ -f "$ACTIVE_ROOT/scripts/mac_r7_paper_operations_dashboard.py" ]] || { echo "ERROR: falta dashboard R7." >&2; exit 2; }
   [[ -f "$ACTIVE_ROOT/web/mac_r7_paper_operations.html" ]] || { echo "ERROR: falta UI R7." >&2; exit 2; }
 
-  # R7 certifies both layers: historical R6 entry authority and the read-only
-  # operations overlay. No close writer is enabled by this package.
   "$PY" "$ACTIVE_ROOT/scripts/check_r6_first_canary_unified_dashboard.py"
   "$PY" "$ACTIVE_ROOT/scripts/check_r6_live_deny_boundary.py"
   "$PY" "$ACTIVE_ROOT/scripts/check_r6_authority.py"
   "$PY" "$ACTIVE_ROOT/scripts/check_r7_paper_operations_mac_boundary.py"
+  if [[ "$R7_CLOSE_MODE" == "YES" ]]; then
+    [[ -f "$ACTIVE_ROOT/src/autotrade/paper_close_operator.py" ]] || { echo "ERROR: falta orquestador R7 close." >&2; exit 2; }
+    [[ -f "$ACTIVE_ROOT/src/autotrade/paper_close_attempt.py" ]] || { echo "ERROR: falta workspace R7 close." >&2; exit 2; }
+    "$PY" "$ACTIVE_ROOT/scripts/check_r7_paper_close_operator_boundary.py"
+  fi
   "$PY" -m pytest -q \
     "$ACTIVE_ROOT/tests/test_r6_first_canary_unified_dashboard.py" \
     "$ACTIVE_ROOT/tests/test_mac_r7_paper_operations_dashboard.py"
+  if [[ "$R7_CLOSE_MODE" == "YES" ]]; then
+    "$PY" -m pytest -q \
+      "$ACTIVE_ROOT/tests/test_r7_paper_close_attempt.py" \
+      "$ACTIVE_ROOT/tests/test_r7_paper_close_operator.py"
+    echo "R7 close operator + restart-safe recovery installed checks: OK"
+  fi
   echo "R7 PAPER Operations + inherited R6 authority installed checks: OK"
 elif [[ "$ONE_APP_MODE" == "YES" ]]; then
   # Backward-compatible certification for historical R6 ONE-APP artifacts.
@@ -189,7 +209,8 @@ Dependencias: OK
 R7 Portfolio/Safety read model: GET-ONLY
 Entrada first-canary: R6 authority inherited
 PAPER write genérico: DISABLED
-Close write: DISABLED
+R7 close authority in package: $([[ "$R7_CLOSE_MODE" == "YES" ]] && echo EXACT_ONE_SHOT_RISK_REDUCING || echo DISABLED)
+R7 close write durante instalación: DISABLED
 Capital authority durante instalación: NONE
 LIVE: BLOCKED
 Orden enviada por instalación: NO
