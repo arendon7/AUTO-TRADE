@@ -6,15 +6,10 @@ import json
 import os
 from pathlib import Path
 
-from autotrade.first_canary_fee_aware_recovery import recover_first_canary_fee_aware
-from autotrade.first_canary_recovery_transport import FirstCanaryRecoveryReadTransport
-from autotrade.brokers.alpaca_paper_crypto_reconciliation import (
-    AlpacaPaperCryptoReconciliationGateway,
+from autotrade.first_canary_rotated_credential_recovery import (
+    recover_first_canary_with_safe_credential_rotation,
 )
-from autotrade.brokers.alpaca_paper_gateway import (
-    AlpacaPaperCredentials,
-    AlpacaPaperGatewayConfig,
-)
+from autotrade.brokers.alpaca_paper_gateway import AlpacaPaperCredentials
 
 
 WRITE_ENV = "R6_EXTERNAL_PAPER_WRITE"
@@ -40,6 +35,7 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
             "GET-only recovery/reconciliation for a burned BTC/USD PAPER first-canary attempt. "
+            "A rotated PAPER key is accepted only after GET /v2/account proves the same anchored account. "
             "This command has no writer/POST surface and can never authorize retry."
         )
     )
@@ -60,20 +56,11 @@ def main(argv: list[str] | None = None) -> int:
             raise CryptoFirstCanaryRecoveryCliError(
                 "GET-only recovery refuses broker-write enabled environment"
             )
-        config = AlpacaPaperGatewayConfig(enabled=True)
-        recovery_transport = FirstCanaryRecoveryReadTransport(
-            max_response_bytes=config.max_response_bytes
-        )
-        result = recover_first_canary_fee_aware(
+        result = recover_first_canary_with_safe_credential_rotation(
             workspace_path=args.workspace,
             attempt_id=str(args.attempt_id),
             credentials=_credentials(),
             now=datetime.now(timezone.utc),
-            reconciliation_gateway=AlpacaPaperCryptoReconciliationGateway(
-                config=config,
-                order_transport=recovery_transport,
-                position_transport=recovery_transport,
-            ),
         )
     except Exception as exc:
         result = {
