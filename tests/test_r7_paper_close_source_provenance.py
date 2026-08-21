@@ -614,7 +614,7 @@ def test_missing_lifecycle_rows_are_rejected(tmp_path: Path) -> None:
         _reader(case).verify(now=NOW + timedelta(seconds=1))
 
 
-def test_valid_rehashed_package_cannot_rebind_another_lifecycle(tmp_path: Path) -> None:
+def test_valid_rehashed_package_is_rejected_by_pre_post_package_latch(tmp_path: Path) -> None:
     case = _build_case(tmp_path)
 
     def mutate(document: dict[str, object]) -> None:
@@ -634,7 +634,10 @@ def test_valid_rehashed_package_cannot_rebind_another_lifecycle(tmp_path: Path) 
         "preparation_hash",
         mutate,
     )
-    with pytest.raises(PaperCloseSourceProvenanceConflict, match="lifecycle binding"):
+    with pytest.raises(
+        PaperCloseSourceProvenanceConflict,
+        match="execution-start source binding mismatch: package_hash",
+    ):
         _reader(case).verify(now=NOW + timedelta(seconds=1))
 
 
