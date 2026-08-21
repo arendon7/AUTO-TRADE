@@ -20,6 +20,7 @@ class PaperExitOrderError(ValueError):
 @dataclass(frozen=True, slots=True)
 class PaperExitOrder:
     attempt_id: str
+    owner_strategy_id: str
     plan_hash: str
     client_order_id: str
     symbol: str
@@ -37,6 +38,7 @@ class PaperExitOrder:
 
     def __post_init__(self) -> None:
         _id(self.attempt_id, "attempt_id")
+        _id(self.owner_strategy_id, "owner_strategy_id")
         _id(self.client_order_id, "client_order_id")
         _hash(self.plan_hash, "plan_hash")
         if self.symbol.count("/") != 1 or self.symbol != self.symbol.upper():
@@ -76,17 +78,27 @@ class PaperExitOrder:
         return _order_payload(self, include_hash=True)
 
 
-def build_paper_exit_order(*, plan: PaperCryptoClosePlan, attempt_id: str) -> PaperExitOrder:
+def build_paper_exit_order(
+    *,
+    plan: PaperCryptoClosePlan,
+    attempt_id: str,
+    owner_strategy_id: str,
+) -> PaperExitOrder:
     if not isinstance(plan, PaperCryptoClosePlan):
         raise PaperExitOrderError("exact PaperCryptoClosePlan is required")
     _id(attempt_id, "attempt_id")
+    _id(owner_strategy_id, "owner_strategy_id")
     if plan.asset_class != "crypto" or plan.side != "sell":
         raise PaperExitOrderError("R7 first exit supports long crypto close plans only")
     if plan.network_write_authorized is not False:
         raise PaperExitOrderError("prepared close plan may not itself carry network authority")
     if plan.retry_post is not False or plan.live_trading != "BLOCKED":
         raise PaperExitOrderError("close plan retry/LIVE invariants are invalid")
-    client_order_id = deterministic_exit_client_order_id(attempt_id=attempt_id, plan_hash=plan.plan_hash)
+    client_order_id = deterministic_exit_client_order_id(
+        attempt_id=attempt_id,
+        plan_hash=plan.plan_hash,
+        owner_strategy_id=owner_strategy_id,
+    )
     broker_payload = {
         "symbol": plan.symbol,
         "qty": _decimal(plan.quantity),
@@ -98,6 +110,7 @@ def build_paper_exit_order(*, plan: PaperCryptoClosePlan, attempt_id: str) -> Pa
     }
     values = {
         "attempt_id": attempt_id,
+        "owner_strategy_id": owner_strategy_id,
         "plan_hash": plan.plan_hash,
         "client_order_id": client_order_id,
         "symbol": plan.symbol,
@@ -116,10 +129,13 @@ def build_paper_exit_order(*, plan: PaperCryptoClosePlan, attempt_id: str) -> Pa
     return PaperExitOrder(**values, order_hash=order_hash)
 
 
-def deterministic_exit_client_order_id(*, attempt_id: str, plan_hash: str) -> str:
+def deterministic_exit_client_order_id(*, attempt_id: str, plan_hash: str, owner_strategy_id: str) -> str:
     _id(attempt_id, "attempt_id")
     _hash(plan_hash, "plan_hash")
-    digest = sha256(f"AUTO-TRADE:R7:EXIT:{attempt_id}:{plan_hash}".encode()).hexdigest()
+    _id(owner_strategy_id, "owner_strategy_id")
+    digest = sha256(
+        f"AUTO-TRADE:R7:EXIT:{attempt_id}:{owner_strategy_id}:{plan_hash}".encode()
+    ).hexdigest()
     value = f"atr7x-{digest[:48]}"
     _id(value, "client_order_id")
     return value
@@ -128,6 +144,7 @@ def deterministic_exit_client_order_id(*, attempt_id: str, plan_hash: str) -> st
 def _order_payload(value: PaperExitOrder, *, include_hash: bool) -> dict[str, object]:
     payload = {
         "attempt_id": value.attempt_id,
+        "owner_strategy_id": value.owner_strategy_id,
         "plan_hash": value.plan_hash,
         "client_order_id": value.client_order_id,
         "symbol": value.symbol,
