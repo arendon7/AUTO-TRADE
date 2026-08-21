@@ -1,92 +1,72 @@
 # ESTADO ACTUAL — AUTO-TRADE
 
-Fecha: 2026-08-12
-Estado canónico: **v0.28R reconstruction — R0–R5 CERTIFIED; R6 PRE-FIRST-CANARY / MAC GUIDED UAT**
+Fecha: 2026-08-21
+Estado canónico: **R0–R5 CERTIFIED; R6 FIRST PAPER CANARY BROKER-TRUTH CLOSED; R7 ACTIVE**.
 
-## Base
-R5 quedó integrado y post-merge recertificado en exact `main` `75dcbef65b061f742745ba7be0665521967e0587`.
+## R6 — hito real alcanzado
+El primer canary crypto PAPER compatible con el mínimo real de Alpaca terminó reconciliado por verdad del broker.
 
-R6 sigue sin merge sobre `reconstruction/r6-external-paper-protection`. La experiencia Mac se desarrolla en:
-- branch `work/r6-mac-control-center`;
-- PR #29 DRAFT;
-- último checkpoint UX completamente certificado antes de esta sincronización de canon: `2c2e5ebef9bf01f13cf9bed477e670ba79fa2b29`.
+Evidencia de operador:
+- `attempt_id=first-canary-57d01d35e8b25f4babc57695ac87d962`;
+- `broker_order_id=2fa68a01-7408-48c5-b3c2-0b387987d2b6`;
+- `client_order_id=atr6c-entry-72c2b075ad9c96a71108664a5919dca3be326109`;
+- broker status `filled`;
+- broker fill `0.00014432 BTC`;
+- net broker position `0.000143959 BTC`;
+- reconciliation `ORDER_PLUS_POSITION`;
+- `entry_attempt_count=1`;
+- `phase=RECOVERED_GET_ONLY`;
+- `retry_post=false`;
+- `credentials_persisted=false`;
+- `LIVE=BLOCKED`;
+- lifecycle `ENTRY_FILLED_UNPROTECTED`.
 
-Certificación de ese checkpoint:
-- Core Safety `31649170421`: PASS;
-- Knowledge Contract `31649170446`: PASS;
-- Mac Rehearsal Artifact `31649170429`: PASS;
-- R6 PAPER Authority `31649170448`: PASS;
-- Mac FULL Standalone `31649170468`: PASS;
-- FULL boot/install/Control Center/self-heal: PASS en arm64 y x86_64.
+No hubo segundo POST durante recovery. La rotación de PAPER key quedó validada sólo después de same-account GET proof y el lookup de posición usa la semántica real `BTCUSD` de Alpaca.
 
-## R6 implementado estructuralmente
-- exact Alpaca PAPER account gateway;
-- durable client_order_id/idempotency + UNKNOWN/reconciliation semantics;
-- bounded PAPER canary gate and one-shot permit;
-- US-equity bracket builder + nested-bracket validation;
-- PAPER `trade_updates` receive-only protection evidence;
-- qualification evaluator;
-- durable human-only execution decision;
-- OMS-owned `VALIDATED -> SUBMITTING` external handoff;
-- crash-safe same-attempt resume;
-- operational workspace + same-core provenance;
-- separate preparation / execution / evidence-capture surfaces;
-- manual single-shot execution runtime, disabled by default;
-- local/read-only readiness inspector;
-- Mac FULL standalone dual-arch with embedded CPython 3.12.13;
-- safe installer relocation outside Downloads/quarantine;
-- localhost-only browser Control Center;
-- account, asset, flat-account and IEX GET-only preflights;
-- connectivity candidate produced through real Capital Safety Kernel + OMS;
-- offline deterministic preparation/review surfaces.
+Exact-head R6: `0cbb782015eeed200b9851b53764ac6389c3d9ff`.
+Certificación: 16/16 workflows green; Core Safety 2,469 tests; coverage 85.08%.
 
-## Mac guided UAT — cambio 2026-08-12
-La prueba real del paquete anterior mostró que la seguridad técnica funcionaba, pero la UI permitía pulsar acciones fuera de orden y exponía tracebacks de implementación al operador.
+## Qué significa y qué no
+Ya no necesitamos tratar “¿podemos tocar Alpaca PAPER con seguridad?” como la pregunta principal. El plumbing de entrada/recovery real está demostrado.
 
-Corregido en PR #29:
-- onboarding explícito `Empieza aquí`;
-- `1 · Probar la app sin broker`: workspace -> Doctor -> Capital Safety rehearsal;
-- `2 · Conectar Alpaca PAPER`: Account -> Asset -> Flat Account -> Market IEX;
-- acciones posteriores bloqueadas hasta cumplir el gate anterior;
-- errores frecuentes traducidos a explicación operacional y traceback relegado a diagnóstico técnico;
-- separación visible entre:
-  - ensayo local;
-  - Alpaca PAPER read-only;
-  - futura experiencia `Strategy Lab`;
-- TradingView no es requisito de R6; cualquier futura integración será visual/advisory y no podrá saltar Safety/OMS/reconciliation.
+Esto **no** demuestra edge, Sharpe sostenible, capacidad LIVE ni rentabilidad. R1–R5 contienen motores de research/backtest/walk-forward/holdout/tournament/shadow/forward/Health que ahora deben convertirse en producto operativo.
 
-## Qué prueba R6 y qué no
-R6 valida infraestructura de broker, account/asset/market evidence, Capital Safety, OMS, bracket preparation, authority boundaries y futuro canary PAPER.
+## Exposición actual
+Existe una posición PAPER BTC neta observada `0.000143959`, marcada por lifecycle como `ENTRY_FILLED_UNPROTECTED`.
 
-R6 **no** demuestra edge/rentabilidad. R1–R5 ya certifican motores de research/backtest/holdout/walk-forward/shadow/forward/Health, pero todavía falta integrarlos en una experiencia Mac de estrategia usable. Ese `Strategy Lab` queda como siguiente capa de producto después de cerrar la UAT guiada R6, no como bypass del proceso de promoción.
+Por eso la primera prioridad R7 no es otra entrada: es broker-truth portfolio visibility y capacidad risk-reducing de proteger/reducir/cerrar.
 
-## Deuda R6
-CLOSED structurally: `TD-R6-007..013`.
+## R7 activo
+Branch: `work/r7-paper-operations-strategy-lab`.
+Documento: `docs/R7_PAPER_OPERATIONS_STRATEGY_LAB.md`.
 
-OPEN/blocking — sólo evidencia PAPER externa real puede cerrarlas:
-- `TD-R6-001` — account/environment attestation evidence;
-- `TD-R6-002` — real submit ambiguity/idempotency/reconciliation evidence;
-- `TD-R6-003` — bounded real PAPER canary evidence;
-- `TD-R6-004` — terminality/fills/slippage/qualification evidence;
-- `TD-R6-005` — broker-side nested US-equity bracket evidence;
-- `TD-R6-006` — authenticated PAPER `trade_updates` evidence.
+R7 se divide en:
+- R7A Portfolio Truth / Positions;
+- R7B Reduce/Close/Protection PAPER;
+- R7C Strategy Lab;
+- R7D Auto-Paper Runner;
+- R7E Paper probation.
 
-OPEN/nonblocking:
-- `TD-OPS-001` Graphify P3/OPS.
+La primera pieza R7A es un gateway GET-only para account + posiciones + órdenes abiertas. No incorpora writer, cancel, replace ni LIVE authority.
 
-## Próximo gate
-1. usar el nuevo FULL guiado en el Mac real;
-2. completar UAT local sin broker;
-3. completar, si el operador lo decide, los cuatro GET-only de Alpaca PAPER en orden;
-4. corregir cualquier defecto de UX/operación que aparezca;
-5. sólo después decidir la primera canary PAPER real mediante la ceremonia separada ya certificada;
-6. después de estabilizar R6, abrir la integración `Strategy Lab` de R1–R5 en la app Mac.
+## Modelo de automatización
+La IA puede generar hipótesis, variantes, experimentos y análisis. No puede tener un camino directo a POST.
 
-## Capital y no-claims
-- External PAPER order enviado por el proyecto: **0**.
-- Capital authority desde Control Center: **NONE**.
-- PAPER evidence no es profitability proof.
-- Una connectivity canary no es una estrategia rentable.
-- LIVE permanece fuera de R6/v0.28R.
+Una estrategia que opere automáticamente debe estar:
+- versionada y fingerprinted;
+- reproducible;
+- promovida por gates research/forward;
+- acotada por `PaperStrategyPermit`;
+- evaluada por Portfolio + Capital Safety;
+- stageada por OMS;
+- enviada por writer PAPER one-shot;
+- reconciliada contra broker truth;
+- vigilada por Health/kill switch/loss limits.
+
+## Negative tests permanentes
+Se mantienen los Negative tests de acciones fuera de orden, stale/tampered evidence, wrong account, credential drift, unsupported asset, over-notional, risk limits, kill switch, broker ambiguity, UNKNOWN restart, reconciliation mismatch, direct writer access y cualquier intento LIVE.
+
+## Capital
+R6 ejecutó un canary PAPER real y actualmente existe exposición PAPER BTC pequeña. Esto es sandbox broker capital, no capital LIVE.
 
 **LIVE TRADING: BLOQUEADO.**
