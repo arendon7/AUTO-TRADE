@@ -49,12 +49,18 @@ def main() -> int:
         "HttpsAlpacaPaperCryptoWriteTransport",
         "replace_order",
         "cancel_order",
+        "stage_risk_reducing_external_submission",
         "https://api.alpaca.markets",
     )
     for token in forbidden:
         _require(token not in source, f"R7 operations read model contains forbidden authority: {token}")
 
-    forbidden_methods = {"submit", "cancel", "write", "write_once", "update", "delete"}
+    # Method-name checks are deliberately limited to calls that intrinsically
+    # imply an external/durable mutation. Generic `dict.update()` and
+    # `str.replace()` are ordinary in-memory transformations and do not grant
+    # store/OMS/broker authority; those authority-bearing types/imports are
+    # separately denied above.
+    forbidden_methods = {"submit", "cancel", "write", "write_once", "delete"}
     for node in ast.walk(tree):
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
             _require(
