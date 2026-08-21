@@ -5,7 +5,7 @@ from pathlib import Path
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
-MODULE = ROOT / "src/autotrade/brokers/alpaca_paper_portfolio.py"
+MODULE = ROOT / "src/autotrade/brokers/paper_portfolio.py"
 FORBIDDEN = (
     "AlpacaPaperCryptoWriter",
     "AlpacaPaperWriter",
@@ -39,6 +39,8 @@ def main() -> int:
     bad = roots & DIRECT_NETWORK
     if bad:
         fail(f"portfolio module imports direct network stack: {sorted(bad)}")
+    if "urllib" in roots and "urllib.parse" not in imports:
+        fail("portfolio may use urllib.parse only; urllib network clients are forbidden")
     for token in FORBIDDEN:
         if token in text:
             fail(f"portfolio module contains broker-write authority: {token}")
@@ -52,6 +54,7 @@ def main() -> int:
         '"credentials_persisted": False',
         '"live_trading": "BLOCKED"',
         "credentials.credential_reference",
+        "self._transport.read(request)",
     ):
         if anchor not in text:
             fail(f"missing fail-closed portfolio anchor: {anchor}")
