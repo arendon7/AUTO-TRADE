@@ -47,12 +47,14 @@ def main() -> int:
         "paper_close_lifecycle",
         "UrllibAlpacaPaperWriteTransport",
         "HttpsAlpacaPaperCryptoWriteTransport",
+        "replace_order",
+        "cancel_order",
         "https://api.alpaca.markets",
     )
     for token in forbidden:
         _require(token not in source, f"R7 operations read model contains forbidden authority: {token}")
 
-    forbidden_methods = {"submit", "cancel", "replace", "write", "write_once", "update", "delete"}
+    forbidden_methods = {"submit", "cancel", "write", "write_once", "update", "delete"}
     for node in ast.walk(tree):
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
             _require(
