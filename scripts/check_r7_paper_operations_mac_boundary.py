@@ -46,6 +46,18 @@ def class_methods(tree: ast.AST, class_name: str) -> set[str]:
     return set()
 
 
+def _is_local_http_response_write(node: ast.Call) -> bool:
+    if not isinstance(node.func, ast.Attribute) or node.func.attr != "write":
+        return False
+    receiver = node.func.value
+    return (
+        isinstance(receiver, ast.Attribute)
+        and receiver.attr == "wfile"
+        and isinstance(receiver.value, ast.Name)
+        and receiver.value.id == "self"
+    )
+
+
 def main() -> int:
     for path in (OVERLAY, HTML):
         require(path.is_file(), f"missing R7 Mac surface: {path.relative_to(ROOT)}")
@@ -117,12 +129,17 @@ def main() -> int:
         "cancel",
         "cancel_order",
         "replace_order",
-        "write",
         "write_once",
         "stage_risk_reducing_external_submission",
     }
     for node in ast.walk(tree):
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+            if node.func.attr == "write":
+                require(
+                    _is_local_http_response_write(node),
+                    "overlay calls non-local write method",
+                )
+                continue
             require(
                 node.func.attr not in dangerous_attrs,
                 f"overlay calls forbidden external mutation method: {node.func.attr}",
@@ -170,7 +187,8 @@ def main() -> int:
         "R7 PAPER operations Mac boundary: PASS — R7 subclasses the certified R6 session without "
         "redefining connect/prepare/approve/execute/recover; adds only /api/operations GET; fresh "
         "broker exposure interlocks new BUY preparation; policy metadata comes from canonical "
-        "10/10.50/12 constants; no close writer/POST/cancel/replace/LIVE authority"
+        "10/10.50/12 constants; only localhost self.wfile.write is permitted; no close "
+        "writer/POST/cancel/replace/LIVE authority"
     )
     return 0
 
