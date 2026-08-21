@@ -16,6 +16,7 @@ from autotrade.brokers.alpaca_paper_gateway import AlpacaPaperAccountAttestation
 from autotrade.brokers.paper_portfolio import PaperPortfolioPosition, PaperPortfolioSnapshot
 from autotrade.domain import MarketSnapshot, OrderIntent, OrderRecord, OrderStatus, OrderType, Side
 from autotrade.ledger import InMemoryEventLedger
+from autotrade.oms import OrderRejectedByControlPlane
 from autotrade.paper_close_control_plane import (
     PaperCloseControlPlaneBlocked,
     R7RiskReducingOrderManagementSystem,
@@ -244,7 +245,7 @@ def test_safety_state_version_change_blocks_after_preparation() -> None:
         now=NOW,
     )
     safety.activate_kill_switch(reason="changed after decision", now=NOW + timedelta(microseconds=100))
-    with pytest.raises(Exception, match="Safety state version|control-plane"):
+    with pytest.raises(OrderRejectedByControlPlane, match="safety state changed after risk approval"):
         oms.stage_risk_reducing_external_submission(
             prepared=prepared, market=market, now=NOW + timedelta(milliseconds=1)
         )
@@ -256,7 +257,7 @@ def test_safety_state_version_change_blocks_after_preparation() -> None:
         ("lifecycle_qty", "lifecycle exposure"),
         ("lifecycle_status", "unprotected"),
         ("source_side", "matching long entry"),
-        ("position_drift", "quantity drifted"),
+        ("position_drift", "broker Portfolio differs from close plan truth"),
     ],
 )
 def test_attribution_mismatch_fails_before_safety_or_oms(mutation: str, match: str) -> None:
@@ -291,13 +292,13 @@ def test_attribution_mismatch_fails_before_safety_or_oms(mutation: str, match: s
         )
 
 
-def test_first_r7_close_requires_single_position_zero_orders() -> None:
+def test_first_r7_close_rejects_changed_broker_truth_before_attribution() -> None:
     _, _, safety, oms, portfolio, plan, market, source, lifecycle = _setup()
     second = __import__("dataclasses").replace(
         portfolio.positions[0], asset_id="eth", broker_symbol="ETHUSD", symbol="ETH/USD"
     )
     bad = __import__("dataclasses").replace(portfolio, positions=portfolio.positions + (second,))
-    with pytest.raises(PaperCloseControlPlaneBlocked, match="exactly one"):
+    with pytest.raises(PaperCloseControlPlaneBlocked, match="broker Portfolio differs from close plan truth"):
         prepare_paper_close_control_plane(
             attempt_id="r7-close-control-multi",
             plan=plan,
