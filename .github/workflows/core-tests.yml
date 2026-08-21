@@ -94,6 +94,24 @@ jobs:
         run: pytest -q tests/test_mac_crypto_cold_start_final_guard_binding.py
       - name: R6 unsupported-product boundary
         run: python scripts/check_r6_product_boundary.py
+      - name: R7 PAPER broker-truth portfolio boundary
+        run: python scripts/check_r7_paper_portfolio_boundary.py
+      - name: R7 PAPER risk-reducing close-plan boundary
+        run: python scripts/check_r7_paper_close_plan_boundary.py
+      - name: R7 PAPER durable close lifecycle boundary
+        run: python scripts/check_r7_paper_close_lifecycle_boundary.py
+      - name: R7 PAPER one-shot close writer boundary
+        run: python scripts/check_r7_paper_close_writer_boundary.py
+      - name: R7 PAPER GET-only close reconciliation boundary
+        run: python scripts/check_r7_paper_close_reconciliation_boundary.py
+      - name: R7 PAPER Safety + OMS close binding boundary
+        run: python scripts/check_r7_paper_close_control_plane_boundary.py
+      - name: R7 PAPER first-canary close source provenance boundary
+        run: python scripts/check_r7_paper_close_source_provenance_boundary.py
+      - name: R7 PAPER operations read-model boundary
+        run: python scripts/check_r7_paper_operations_read_model_boundary.py
+      - name: R7 PAPER operations Mac boundary
+        run: python scripts/check_r7_paper_operations_mac_boundary.py
       - name: Debt register contract
         run: python scripts/check_debt_register.py
       - name: Canonical knowledge contract
