@@ -9,6 +9,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SERVER = ROOT / "scripts/mac_first_canary_unified_dashboard.py"
 QUEUE = ROOT / "scripts/mac_first_canary_unified_queue.py"
 AUTO_SETTLE = ROOT / "scripts/mac_first_canary_unified_auto_settle.py"
+R7_OVERLAY = ROOT / "scripts/mac_r7_paper_operations_dashboard.py"
 HTML = ROOT / "web/mac_first_canary_unified.html"
 SOURCE_LAUNCHER = ROOT / "ABRIR_AUTO_TRADE_CANARY.command"
 INSTALLED_LAUNCHER = ROOT / "ABRIR_AUTO_TRADE.command"
@@ -51,6 +52,16 @@ def _launcher() -> Path:
     return SOURCE_LAUNCHER
 
 
+def _check_no_direct_authority(path: Path, source: str) -> None:
+    roots = {module.split(".", 1)[0] for module in imports(path) if module}
+    forbidden_network = roots & NETWORK_ROOTS
+    if forbidden_network:
+        fail(f"{path.name} owns forbidden external network stack: {sorted(forbidden_network)}")
+    for token in FORBIDDEN_DIRECT_AUTHORITY:
+        if token in source:
+            fail(f"{path.name} contains direct execution authority: {token}")
+
+
 def main() -> int:
     launcher_path = _launcher()
     for path in (SERVER, QUEUE, AUTO_SETTLE, HTML, launcher_path):
@@ -62,15 +73,10 @@ def main() -> int:
     auto_settle = AUTO_SETTLE.read_text(encoding="utf-8")
     html = HTML.read_text(encoding="utf-8")
     launcher = launcher_path.read_text(encoding="utf-8")
+    launcher_uses_r7 = "mac_r7_paper_operations_dashboard.py" in launcher
 
     for path, source in ((SERVER, server), (QUEUE, queue), (AUTO_SETTLE, auto_settle)):
-        roots = {module.split(".", 1)[0] for module in imports(path) if module}
-        forbidden_network = roots & NETWORK_ROOTS
-        if forbidden_network:
-            fail(f"{path.name} owns forbidden external network stack: {sorted(forbidden_network)}")
-        for token in FORBIDDEN_DIRECT_AUTHORITY:
-            if token in source:
-                fail(f"{path.name} contains direct execution authority: {token}")
+        _check_no_direct_authority(path, source)
 
     required_server = (
         "class UnifiedCanarySession:",
@@ -150,6 +156,26 @@ def main() -> int:
         if forbidden in auto_settle:
             fail(f"automatic settlement contains forbidden execution/credential authority: {forbidden}")
 
+    if launcher_uses_r7:
+        if not R7_OVERLAY.is_file():
+            fail("R7 launcher selected but operations overlay is missing")
+        r7_overlay = R7_OVERLAY.read_text(encoding="utf-8")
+        _check_no_direct_authority(R7_OVERLAY, r7_overlay)
+        required_r7_chain = (
+            "import mac_first_canary_unified_auto_settle as r6",
+            "class PaperOperationsSession(r6.AutoSettlementSession):",
+            "class PaperOperationsHandler(r6.base.UnifiedHandler):",
+            "super()._assert_no_unresolved_recovery()",
+            "snapshot.portfolio.positions or snapshot.portfolio.open_orders",
+            '"broker_write_authorized": False',
+            '"retry_post": False',
+            '"credentials_persisted": False',
+            '"live_trading": "BLOCKED"',
+        )
+        for token in required_r7_chain:
+            if token not in r7_overlay:
+                fail(f"R7 launcher chain missing inherited R6/fail-closed anchor: {token}")
+
     forbidden_html_inputs = (
         'id="attempt',
         'name="attempt',
@@ -182,20 +208,38 @@ def main() -> int:
         if token not in html:
             fail(f"unified UI missing operator anchor: {token}")
 
-    for token in (
+    common_launcher = (
         "R6_EXTERNAL_PAPER_WRITE=DISABLED",
         "unset APCA_API_KEY_ID",
         "unset APCA_API_SECRET_KEY",
         "first_canary_unified_surface=ONE_APP",
-        "mac_first_canary_unified_dashboard.py",
-        "mac_first_canary_unified_queue.py",
-        "mac_first_canary_unified_auto_settle.py",
         "UNA SOLA APP",
         "LIVE BLOCKED",
         "RETRY POST FALSE",
-    ):
+    )
+    for token in common_launcher:
         if token not in launcher:
             fail(f"unified launcher missing fail-closed anchor: {token}")
+
+    if launcher_uses_r7:
+        for token in (
+            "r7_paper_operations_surface=GET_ONLY",
+            "mac_r7_paper_operations_dashboard.py",
+            "Portfolio y Safety: broker truth GET-only",
+            "Cierre de posición: WRITE DISABLED",
+            "USD 10-12 · TARGET ~USD 10.50",
+        ):
+            if token not in launcher:
+                fail(f"R7 launcher missing fail-closed/inherited-authority anchor: {token}")
+    else:
+        for token in (
+            "mac_first_canary_unified_dashboard.py",
+            "mac_first_canary_unified_queue.py",
+            "mac_first_canary_unified_auto_settle.py",
+        ):
+            if token not in launcher:
+                fail(f"legacy unified launcher missing fail-closed anchor: {token}")
+
     for forbidden in (
         "APCA_API_SECRET_KEY=",
         "APCA_API_KEY_ID=",
@@ -208,7 +252,8 @@ def main() -> int:
     print(
         "unified first-canary Mac boundary: PASS — one launcher/one window; hidden internal authority identifiers; "
         "two explicit human actions; multiple burned attempts drain only through certified GET recovery; "
-        "post-execution auto-settlement is bounded GET-only; no direct broker transport in UI/queue/settlement; "
+        "post-execution auto-settlement is bounded GET-only; R7 launcher, when selected, is cryptographically/source-bound "
+        "through AutoSettlementSession to the same R6 authority and adds only GET-only exposure interlock; "
         "credentials memory-only; retry POST false; LIVE blocked"
     )
     return 0
