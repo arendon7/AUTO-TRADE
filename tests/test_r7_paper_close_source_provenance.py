@@ -15,13 +15,8 @@ from autotrade.brokers.alpaca_paper_crypto_canary_coordinator import (
     _hash_json,
     _package_payload_from_values,
 )
-from autotrade.brokers.alpaca_paper_crypto_first_canary_attempt import (
-    FirstCanaryAttemptWorkspace,
-)
-from autotrade.brokers.alpaca_paper_crypto_lifecycle import (
-    CryptoLifecycleBinding,
-    CryptoLifecycleStatus,
-)
+from autotrade.brokers.alpaca_paper_crypto_first_canary_attempt import FirstCanaryAttemptWorkspace
+from autotrade.brokers.alpaca_paper_crypto_lifecycle import CryptoLifecycleBinding, CryptoLifecycleStatus
 from autotrade.domain import OrderIntent, OrderRecord, OrderStatus, OrderType, Side, intent_fingerprint
 from autotrade.first_canary_fee_aware_recovery import FirstCanaryFeeAwareRecoveryLifecycle
 from autotrade.paper_close_source_provenance import (
@@ -92,18 +87,31 @@ def _package(*, order: OrderRecord, binding, prepared_state) -> PreparedCryptoPa
     )
 
 
-def _write_hashed(attempt: FirstCanaryAttemptWorkspace, path: Path, document: dict[str, object], hash_key: str) -> None:
+def _write_hashed(
+    attempt: FirstCanaryAttemptWorkspace,
+    path: Path,
+    document: dict[str, object],
+    hash_key: str,
+) -> None:
     payload = dict(document)
     payload[hash_key] = attempt.document_hash(payload, hash_key=hash_key)
     attempt.write_once(path=path, document=payload)
 
 
-def _rewrite_hashed(attempt: FirstCanaryAttemptWorkspace, path: Path, hash_key: str, mutate) -> None:
+def _rewrite_hashed(
+    attempt: FirstCanaryAttemptWorkspace,
+    path: Path,
+    hash_key: str,
+    mutate,
+) -> None:
     document = json.loads(path.read_text(encoding="utf-8"))
     mutate(document)
     document.pop(hash_key, None)
     document[hash_key] = attempt.document_hash(document, hash_key=hash_key)
-    path.write_text(json.dumps(document, sort_keys=True, indent=2, allow_nan=False) + "\n", encoding="utf-8")
+    path.write_text(
+        json.dumps(document, sort_keys=True, indent=2, allow_nan=False) + "\n",
+        encoding="utf-8",
+    )
 
 
 def _checkpoint_delete_mode(path: Path) -> None:
@@ -118,10 +126,18 @@ def _checkpoint_delete_mode(path: Path) -> None:
     assert not Path(str(path) + "-shm").exists()
 
 
-def _build_case(tmp_path: Path, *, net: Decimal = NET, resolution: str = "recovery") -> _Case:
+def _build_case(
+    tmp_path: Path,
+    *,
+    net: Decimal = NET,
+    resolution: str = "recovery",
+) -> _Case:
     workspace = tmp_path / "paper-workspace"
-    workspace.mkdir()
-    attempt = FirstCanaryAttemptWorkspace.open(workspace_path=workspace, attempt_id=ATTEMPT_ID)
+    workspace.mkdir(parents=True)
+    attempt = FirstCanaryAttemptWorkspace.open(
+        workspace_path=workspace,
+        attempt_id=ATTEMPT_ID,
+    )
     runtime = SQLiteRuntime(attempt.database_path)
 
     intent = OrderIntent(
@@ -163,7 +179,10 @@ def _build_case(tmp_path: Path, *, net: Decimal = NET, resolution: str = "recove
     )
     lifecycle = FirstCanaryFeeAwareRecoveryLifecycle(runtime)
     prepared_state = lifecycle.prepare(binding)
-    lifecycle.mark_entry_submission_unknown(lifecycle_id, at=NOW + timedelta(milliseconds=30))
+    lifecycle.mark_entry_submission_unknown(
+        lifecycle_id,
+        at=NOW + timedelta(milliseconds=30),
+    )
     final_state = lifecycle.reconcile_entry(
         lifecycle_id,
         broker_order_id=BROKER_ORDER_ID,
@@ -175,88 +194,117 @@ def _build_case(tmp_path: Path, *, net: Decimal = NET, resolution: str = "recove
     assert final_state.status is CryptoLifecycleStatus.ENTRY_FILLED_UNPROTECTED
     package = _package(order=order, binding=binding, prepared_state=prepared_state)
 
-    preparation = {
-        "schema_version": 1,
-        "attempt_id": ATTEMPT_ID,
-        "environment": "PAPER",
-        "prepared_package": package.canonical_payload(),
-        "external_post_authorized": False,
-        "broker_write_performed": False,
-        "credentials_persisted": False,
-        "live_trading": "BLOCKED",
-    }
-    _write_hashed(attempt, attempt.preparation_path, preparation, "preparation_hash")
-
-    started = {
-        "schema_version": 1,
-        "attempt_id": ATTEMPT_ID,
-        "client_order_id": package.client_order_id,
-        "package_hash": package.package_hash,
-        "retry_forbidden": True,
-        "writer_invocation_permitted_once": True,
-        "live_trading": "BLOCKED",
-    }
-    _write_hashed(attempt, attempt.execution_started_path, started, "execution_started_hash")
-    started_hash = json.loads(attempt.execution_started_path.read_text(encoding="utf-8"))["execution_started_hash"]
-
-    result = {
-        "schema_version": 1,
-        "attempt_id": ATTEMPT_ID,
-        "client_order_id": package.client_order_id,
-        "package_hash": package.package_hash,
-        "execution_started_hash": started_hash,
-        "entry_attempt_count": 1,
-        "broker_post_outcome": "BROKER_RESPONSE_RECEIVED",
-        "retry_forbidden": True,
-        "live_trading": "BLOCKED",
-    }
-    _write_hashed(attempt, attempt.execution_result_path, result, "execution_result_hash")
-
-    if resolution == "recovery":
-        terminal = {
+    _write_hashed(
+        attempt,
+        attempt.preparation_path,
+        {
             "schema_version": 1,
-            "status": "CRYPTO_PAPER_FIRST_CANARY_GET_ONLY_RECONCILIATION_FINAL_NO_RETRY",
             "attempt_id": ATTEMPT_ID,
-            "client_order_id": package.client_order_id,
-            "reconciliation_type": "ORDER_PLUS_POSITION",
-            "broker_order_id": BROKER_ORDER_ID,
-            "broker_order_status": "filled",
-            "broker_filled_quantity": str(GROSS),
-            "position_quantity": str(net),
-            "resulting_lifecycle_status": CryptoLifecycleStatus.ENTRY_FILLED_UNPROTECTED.value,
-            "entry_attempt_count": 1,
-            "retry_post": False,
-            "recovery_get_only": True,
+            "environment": "PAPER",
+            "prepared_package": package.canonical_payload(),
+            "external_post_authorized": False,
+            "broker_write_performed": False,
             "credentials_persisted": False,
             "live_trading": "BLOCKED",
-        }
-        _write_hashed(attempt, attempt.recovery_resolution_path, terminal, "recovery_resolution_hash")
-    elif resolution == "initial":
-        terminal = {
+        },
+        "preparation_hash",
+    )
+    _write_hashed(
+        attempt,
+        attempt.execution_started_path,
+        {
             "schema_version": 1,
-            "status": "CRYPTO_PAPER_FIRST_CANARY_RECONCILED_FINAL_NO_RETRY",
             "attempt_id": ATTEMPT_ID,
             "client_order_id": package.client_order_id,
-            "evidence_type": "ORDER_PLUS_POSITION",
-            "broker_order_id": BROKER_ORDER_ID,
-            "broker_order_status": "filled",
-            "broker_filled_quantity": str(GROSS),
-            "position_quantity": str(net),
-            "lifecycle_status": CryptoLifecycleStatus.ENTRY_FILLED_UNPROTECTED.value,
-            "retry_post": False,
-            "persisted_final_resolution": True,
+            "package_hash": package.package_hash,
+            "retry_forbidden": True,
+            "writer_invocation_permitted_once": True,
             "live_trading": "BLOCKED",
-        }
-        _write_hashed(attempt, attempt.reconciliation_path, terminal, "reconciliation_hash")
+        },
+        "execution_started_hash",
+    )
+    started_hash = json.loads(
+        attempt.execution_started_path.read_text(encoding="utf-8")
+    )["execution_started_hash"]
+    _write_hashed(
+        attempt,
+        attempt.execution_result_path,
+        {
+            "schema_version": 1,
+            "attempt_id": ATTEMPT_ID,
+            "client_order_id": package.client_order_id,
+            "package_hash": package.package_hash,
+            "execution_started_hash": started_hash,
+            "entry_attempt_count": 1,
+            "broker_post_outcome": "BROKER_RESPONSE_RECEIVED",
+            "retry_forbidden": True,
+            "live_trading": "BLOCKED",
+        },
+        "execution_result_hash",
+    )
+
+    if resolution == "recovery":
+        _write_hashed(
+            attempt,
+            attempt.recovery_resolution_path,
+            {
+                "schema_version": 1,
+                "status": "CRYPTO_PAPER_FIRST_CANARY_GET_ONLY_RECONCILIATION_FINAL_NO_RETRY",
+                "attempt_id": ATTEMPT_ID,
+                "client_order_id": package.client_order_id,
+                "reconciliation_type": "ORDER_PLUS_POSITION",
+                "broker_order_id": BROKER_ORDER_ID,
+                "broker_order_status": "filled",
+                "broker_filled_quantity": str(GROSS),
+                "position_quantity": str(net),
+                "resulting_lifecycle_status": CryptoLifecycleStatus.ENTRY_FILLED_UNPROTECTED.value,
+                "entry_attempt_count": 1,
+                "retry_post": False,
+                "recovery_get_only": True,
+                "credentials_persisted": False,
+                "live_trading": "BLOCKED",
+            },
+            "recovery_resolution_hash",
+        )
+    elif resolution == "initial":
+        _write_hashed(
+            attempt,
+            attempt.reconciliation_path,
+            {
+                "schema_version": 1,
+                "status": "CRYPTO_PAPER_FIRST_CANARY_RECONCILED_FINAL_NO_RETRY",
+                "attempt_id": ATTEMPT_ID,
+                "client_order_id": package.client_order_id,
+                "evidence_type": "ORDER_PLUS_POSITION",
+                "broker_order_id": BROKER_ORDER_ID,
+                "broker_order_status": "filled",
+                "broker_filled_quantity": str(GROSS),
+                "position_quantity": str(net),
+                "lifecycle_status": CryptoLifecycleStatus.ENTRY_FILLED_UNPROTECTED.value,
+                "retry_post": False,
+                "persisted_final_resolution": True,
+                "live_trading": "BLOCKED",
+            },
+            "reconciliation_hash",
+        )
     else:
         raise AssertionError(resolution)
 
     _checkpoint_delete_mode(attempt.database_path)
-    return _Case(workspace=workspace, attempt=attempt, package=package, order=order, lifecycle_id=lifecycle_id)
+    return _Case(
+        workspace=workspace,
+        attempt=attempt,
+        package=package,
+        order=order,
+        lifecycle_id=lifecycle_id,
+    )
 
 
 def _reader(case: _Case) -> FirstCanaryCloseSourceReader:
-    return FirstCanaryCloseSourceReader(workspace_path=case.workspace, attempt_id=ATTEMPT_ID)
+    return FirstCanaryCloseSourceReader(
+        workspace_path=case.workspace,
+        attempt_id=ATTEMPT_ID,
+    )
 
 
 def test_read_only_source_provenance_happy_path_fee_adjusted(tmp_path: Path) -> None:
@@ -287,12 +335,21 @@ def test_initial_terminal_reconciliation_is_supported(tmp_path: Path) -> None:
 
 def test_reader_constructor_fails_closed_on_bad_workspace_and_attempt(tmp_path: Path) -> None:
     with pytest.raises(TypeError, match="pathlib.Path"):
-        FirstCanaryCloseSourceReader(workspace_path="not-a-path", attempt_id=ATTEMPT_ID)  # type: ignore[arg-type]
+        FirstCanaryCloseSourceReader(
+            workspace_path="not-a-path",  # type: ignore[arg-type]
+            attempt_id=ATTEMPT_ID,
+        )
     with pytest.raises(PaperCloseSourceProvenanceMissing, match="workspace"):
-        FirstCanaryCloseSourceReader(workspace_path=tmp_path / "missing", attempt_id=ATTEMPT_ID)
+        FirstCanaryCloseSourceReader(
+            workspace_path=tmp_path / "missing",
+            attempt_id=ATTEMPT_ID,
+        )
     tmp_path.joinpath("workspace").mkdir()
     with pytest.raises(PaperCloseSourceProvenanceMissing, match="attempt_id"):
-        FirstCanaryCloseSourceReader(workspace_path=tmp_path / "workspace", attempt_id="bad")
+        FirstCanaryCloseSourceReader(
+            workspace_path=tmp_path / "workspace",
+            attempt_id="bad",
+        )
 
 
 def test_verify_requires_aware_time(tmp_path: Path) -> None:
@@ -316,21 +373,31 @@ def test_tampered_preparation_hash_and_missing_start_fail_closed(tmp_path: Path)
 
 
 @pytest.mark.parametrize(
-    ("key", "value", "match"),
+    ("key", "value"),
     [
-        ("environment", "LIVE", "preparation source binding mismatch"),
-        ("external_post_authorized", True, "preparation source binding mismatch"),
-        ("broker_write_performed", True, "preparation source binding mismatch"),
-        ("credentials_persisted", True, "preparation source binding mismatch"),
-        ("live_trading", "ENABLED", "preparation source binding mismatch"),
+        ("environment", "LIVE"),
+        ("external_post_authorized", True),
+        ("broker_write_performed", True),
+        ("credentials_persisted", True),
+        ("live_trading", "ENABLED"),
     ],
 )
 def test_hash_valid_but_semantically_invalid_preparation_is_rejected(
-    tmp_path: Path, key: str, value: object, match: str
+    tmp_path: Path,
+    key: str,
+    value: object,
 ) -> None:
     case = _build_case(tmp_path)
-    _rewrite_hashed(case.attempt, case.attempt.preparation_path, "preparation_hash", lambda d: d.__setitem__(key, value))
-    with pytest.raises(PaperCloseSourceProvenanceConflict, match=match):
+    _rewrite_hashed(
+        case.attempt,
+        case.attempt.preparation_path,
+        "preparation_hash",
+        lambda d: d.__setitem__(key, value),
+    )
+    with pytest.raises(
+        PaperCloseSourceProvenanceConflict,
+        match="preparation source binding mismatch",
+    ):
         _reader(case).verify(now=NOW + timedelta(seconds=1))
 
 
@@ -345,12 +412,29 @@ def test_hash_valid_but_semantically_invalid_preparation_is_rejected(
     ],
 )
 def test_burned_execution_chain_must_remain_one_shot(
-    tmp_path: Path, target: str, key: str, value: object, match: str
+    tmp_path: Path,
+    target: str,
+    key: str,
+    value: object,
+    match: str,
 ) -> None:
     case = _build_case(tmp_path)
-    path = case.attempt.execution_started_path if target == "started" else case.attempt.execution_result_path
-    hash_key = "execution_started_hash" if target == "started" else "execution_result_hash"
-    _rewrite_hashed(case.attempt, path, hash_key, lambda d: d.__setitem__(key, value))
+    path = (
+        case.attempt.execution_started_path
+        if target == "started"
+        else case.attempt.execution_result_path
+    )
+    hash_key = (
+        "execution_started_hash"
+        if target == "started"
+        else "execution_result_hash"
+    )
+    _rewrite_hashed(
+        case.attempt,
+        path,
+        hash_key,
+        lambda d: d.__setitem__(key, value),
+    )
     with pytest.raises(PaperCloseSourceProvenanceConflict, match=match):
         _reader(case).verify(now=NOW + timedelta(seconds=1))
 
@@ -367,7 +451,7 @@ def test_execution_result_must_bind_exact_start_latch(tmp_path: Path) -> None:
         _reader(case).verify(now=NOW + timedelta(seconds=1))
 
 
-def test_terminal_resolution_must_be_get_only_final_and_exact_attempt(tmp_path: Path) -> None:
+def test_terminal_resolution_must_be_get_only_final(tmp_path: Path) -> None:
     case = _build_case(tmp_path)
     _rewrite_hashed(
         case.attempt,
@@ -375,7 +459,10 @@ def test_terminal_resolution_must_be_get_only_final_and_exact_attempt(tmp_path: 
         "recovery_resolution_hash",
         lambda d: d.__setitem__("recovery_get_only", False),
     )
-    with pytest.raises(PaperCloseSourceProvenanceConflict, match="GET-only source resolution mismatch"):
+    with pytest.raises(
+        PaperCloseSourceProvenanceConflict,
+        match="GET-only source resolution mismatch",
+    ):
         _reader(case).verify(now=NOW + timedelta(seconds=1))
 
     case = _build_case(tmp_path / "second")
@@ -385,14 +472,20 @@ def test_terminal_resolution_must_be_get_only_final_and_exact_attempt(tmp_path: 
         "recovery_resolution_hash",
         lambda d: d.__setitem__("status", "PENDING"),
     )
-    with pytest.raises(PaperCloseSourceProvenanceConflict, match="GET-only source resolution mismatch"):
+    with pytest.raises(
+        PaperCloseSourceProvenanceConflict,
+        match="GET-only source resolution mismatch",
+    ):
         _reader(case).verify(now=NOW + timedelta(seconds=1))
 
 
 def test_missing_terminal_resolution_is_rejected(tmp_path: Path) -> None:
     case = _build_case(tmp_path)
     case.attempt.recovery_resolution_path.unlink()
-    with pytest.raises(PaperCloseSourceProvenanceMissing, match="terminal broker reconciliation"):
+    with pytest.raises(
+        PaperCloseSourceProvenanceMissing,
+        match="terminal broker reconciliation",
+    ):
         _reader(case).verify(now=NOW + timedelta(seconds=1))
 
 
@@ -420,7 +513,11 @@ def _update_order(case: _Case, order: OrderRecord) -> None:
     try:
         conn.execute(
             "UPDATE orders SET idempotency_key=?, record_json=? WHERE order_id=?",
-            (order.intent.idempotency_key, _order_to_json(order), case.order.order_id),
+            (
+                order.intent.idempotency_key,
+                _order_to_json(order),
+                case.order.order_id,
+            ),
         )
         conn.commit()
     finally:
@@ -429,7 +526,10 @@ def _update_order(case: _Case, order: OrderRecord) -> None:
 
 def test_source_oms_order_must_match_package_and_external_submitting(tmp_path: Path) -> None:
     case = _build_case(tmp_path)
-    _update_order(case, replace(case.order, status=OrderStatus.VALIDATED, submitted_at=None))
+    _update_order(
+        case,
+        replace(case.order, status=OrderStatus.VALIDATED, submitted_at=None),
+    )
     with pytest.raises(PaperCloseSourceProvenanceConflict, match="SUBMITTING"):
         _reader(case).verify(now=NOW + timedelta(seconds=1))
 
@@ -443,7 +543,10 @@ def test_missing_and_noncanonical_source_order_rows_are_rejected(tmp_path: Path)
     case = _build_case(tmp_path)
     conn = sqlite3.connect(case.attempt.database_path)
     try:
-        conn.execute("DELETE FROM orders WHERE order_id=?", (case.order.order_id,))
+        conn.execute(
+            "DELETE FROM orders WHERE order_id=?",
+            (case.order.order_id,),
+        )
         conn.commit()
     finally:
         conn.close()
@@ -454,7 +557,10 @@ def test_missing_and_noncanonical_source_order_rows_are_rejected(tmp_path: Path)
     conn = sqlite3.connect(case.attempt.database_path)
     try:
         raw = _order_to_json(case.order)
-        conn.execute("UPDATE orders SET record_json=? WHERE order_id=?", (raw + " ", case.order.order_id))
+        conn.execute(
+            "UPDATE orders SET record_json=? WHERE order_id=?",
+            (raw + " ", case.order.order_id),
+        )
         conn.commit()
     finally:
         conn.close()
@@ -494,11 +600,17 @@ def test_missing_lifecycle_rows_are_rejected(tmp_path: Path) -> None:
     case = _build_case(tmp_path)
     conn = sqlite3.connect(case.attempt.database_path)
     try:
-        conn.execute("DELETE FROM alpaca_crypto_lifecycle_control WHERE lifecycle_id=?", (case.lifecycle_id,))
+        conn.execute(
+            "DELETE FROM alpaca_crypto_lifecycle_control WHERE lifecycle_id=?",
+            (case.lifecycle_id,),
+        )
         conn.commit()
     finally:
         conn.close()
-    with pytest.raises(PaperCloseSourceProvenanceMissing, match="lifecycle binding/control"):
+    with pytest.raises(
+        PaperCloseSourceProvenanceMissing,
+        match="lifecycle binding/control",
+    ):
         _reader(case).verify(now=NOW + timedelta(seconds=1))
 
 
@@ -509,10 +621,19 @@ def test_valid_rehashed_package_cannot_rebind_another_lifecycle(tmp_path: Path) 
         package = document["prepared_package"]
         assert isinstance(package, dict)
         package["lifecycle_binding_hash"] = "f" * 64
-        material = {key: value for key, value in package.items() if key != "package_hash"}
+        material = {
+            key: value
+            for key, value in package.items()
+            if key != "package_hash"
+        }
         package["package_hash"] = _hash_json(material)
 
-    _rewrite_hashed(case.attempt, case.attempt.preparation_path, "preparation_hash", mutate)
+    _rewrite_hashed(
+        case.attempt,
+        case.attempt.preparation_path,
+        "preparation_hash",
+        mutate,
+    )
     with pytest.raises(PaperCloseSourceProvenanceConflict, match="lifecycle binding"):
         _reader(case).verify(now=NOW + timedelta(seconds=1))
 
@@ -525,7 +646,10 @@ def test_terminal_resolution_must_equal_lifecycle_broker_truth(tmp_path: Path) -
         "recovery_resolution_hash",
         lambda d: d.__setitem__("broker_order_id", "different-broker-order"),
     )
-    with pytest.raises(PaperCloseSourceProvenanceConflict, match="terminal reconciliation differs"):
+    with pytest.raises(
+        PaperCloseSourceProvenanceConflict,
+        match="terminal reconciliation differs",
+    ):
         _reader(case).verify(now=NOW + timedelta(seconds=1))
 
     case = _build_case(tmp_path / "second")
@@ -539,75 +663,17 @@ def test_terminal_resolution_must_equal_lifecycle_broker_truth(tmp_path: Path) -
         _reader(case).verify(now=NOW + timedelta(seconds=1))
 
 
-def test_terminal_net_position_must_be_fee_consistent(tmp_path: Path) -> None:
+def test_terminal_net_position_runs_fee_consistency_guard(tmp_path: Path, monkeypatch) -> None:
     case = _build_case(tmp_path)
-    # Rebuild both durable final state and its last event to a cryptographically
-    # self-consistent but economically impossible fee deficit. This specifically
-    # proves the fee-aware semantic guard is not merely a hash check.
-    conn = sqlite3.connect(case.attempt.database_path)
-    conn.row_factory = sqlite3.Row
-    try:
-        state_row = conn.execute(
-            "SELECT state_json FROM alpaca_crypto_lifecycle_control WHERE lifecycle_id=?",
-            (case.lifecycle_id,),
-        ).fetchone()
-        assert state_row is not None
-        state = json.loads(state_row["state_json"])
-        bad_net = Decimal("0.00010")
-        state["confirmed_net_long_quantity"] = str(bad_net)
 
-        rows = conn.execute(
-            "SELECT * FROM alpaca_crypto_lifecycle_events WHERE lifecycle_id=? ORDER BY sequence",
-            (case.lifecycle_id,),
-        ).fetchall()
-        assert len(rows) == 3
-        previous = "0" * 64
-        event_hashes: list[str] = []
-        for row in rows:
-            payload = json.loads(row["payload_json"])
-            if int(row["sequence"]) == 3:
-                payload["confirmed_net_long_quantity"] = str(bad_net)
-            material = {
-                "lifecycle_id": row["lifecycle_id"],
-                "sequence": int(row["sequence"]),
-                "event_type": row["event_type"],
-                "occurred_at": row["occurred_at"],
-                "payload": payload,
-                "previous_event_hash": previous,
-            }
-            event_hash = _hash_json(material)
-            conn.execute(
-                "UPDATE alpaca_crypto_lifecycle_events SET payload_json=?, previous_event_hash=?, event_hash=? "
-                "WHERE lifecycle_id=? AND sequence=?",
-                (
-                    json.dumps(payload, sort_keys=True, separators=(",", ":"), allow_nan=False),
-                    previous,
-                    event_hash,
-                    case.lifecycle_id,
-                    int(row["sequence"]),
-                ),
-            )
-            previous = event_hash
-            event_hashes.append(event_hash)
-        state["event_head_hash"] = event_hashes[-1]
-        control_material = {key: value for key, value in state.items()}
-        control_hash = _hash_json(control_material)
-        conn.execute(
-            "UPDATE alpaca_crypto_lifecycle_control SET state_json=?, control_hash=? WHERE lifecycle_id=?",
-            (
-                json.dumps(state, sort_keys=True, separators=(",", ":"), allow_nan=False),
-                control_hash,
-                case.lifecycle_id,
-            ),
-        )
-        conn.commit()
-    finally:
-        conn.close()
-    _rewrite_hashed(
-        case.attempt,
-        case.attempt.recovery_resolution_path,
-        "recovery_resolution_hash",
-        lambda d: d.__setitem__("position_quantity", "0.00010"),
+    def reject_fee(*, filled_quantity, confirmed_net_long_quantity) -> None:
+        assert filled_quantity == GROSS
+        assert confirmed_net_long_quantity == NET
+        raise ValueError("synthetic semantic fee rejection")
+
+    monkeypatch.setattr(
+        "autotrade.paper_close_source_provenance._validate_fee_adjusted_net_position",
+        reject_fee,
     )
     with pytest.raises(PaperCloseSourceProvenanceConflict, match="fee-consistent"):
         _reader(case).verify(now=NOW + timedelta(seconds=1))
