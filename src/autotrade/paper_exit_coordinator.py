@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from hashlib import sha256
 import json
+import re
 
 from autotrade.domain import (
     MarketSnapshot,
@@ -24,7 +25,7 @@ from autotrade.paper_exit_attempt import PaperExitSnapshot, SQLitePaperExitAttem
 from autotrade.paper_exit_order import PaperExitOrder, build_paper_exit_order
 
 
-MANUAL_EXIT_STRATEGY_ID = "R7_MANUAL_RISK_REDUCTION"
+_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 
 
 class PaperExitCoordinatorError(RuntimeError):
@@ -38,6 +39,7 @@ class PaperExitCoordinatorBlocked(PaperExitCoordinatorError):
 @dataclass(frozen=True, slots=True)
 class PreparedPaperExitPackage:
     attempt_id: str
+    owner_strategy_id: str
     plan_hash: str
     exit_order_hash: str
     broker_payload_hash: str
@@ -57,6 +59,8 @@ class PreparedPaperExitPackage:
     package_hash: str
 
     def __post_init__(self) -> None:
+        if not _ID_RE.fullmatch(self.owner_strategy_id):
+            raise ValueError("prepared R7 exit owner_strategy_id is invalid")
         if self.risk_reducing is not True or self.network_write_authorized is not False:
             raise ValueError("prepared R7 exit package must be risk reducing and write inert")
         if self.retry_post is not False or self.live_trading != "BLOCKED":
@@ -81,14 +85,23 @@ class PaperExitPreparationResult:
     lifecycle: PaperExitSnapshot
 
 
-def build_manual_exit_intent(*, plan: PaperCryptoClosePlan, attempt_id: str) -> OrderIntent:
+def build_exit_intent(
+    *,
+    plan: PaperCryptoClosePlan,
+    attempt_id: str,
+    owner_strategy_id: str,
+) -> OrderIntent:
     if not isinstance(plan, PaperCryptoClosePlan):
         raise PaperExitCoordinatorBlocked("exact close plan is required")
-    digest = sha256(f"AUTO-TRADE:R7:MANUAL-EXIT:{attempt_id}:{plan.plan_hash}".encode()).hexdigest()
+    if not isinstance(owner_strategy_id, str) or not _ID_RE.fullmatch(owner_strategy_id):
+        raise PaperExitCoordinatorBlocked("verifiable owner_strategy_id is required")
+    digest = sha256(
+        f"AUTO-TRADE:R7:EXIT:{attempt_id}:{owner_strategy_id}:{plan.plan_hash}".encode()
+    ).hexdigest()
     return OrderIntent(
         intent_id=f"r7-exit-{digest[:32]}",
         idempotency_key=f"r7-exit-idem-{digest[:40]}",
-        strategy_id=MANUAL_EXIT_STRATEGY_ID,
+        strategy_id=owner_strategy_id,
         symbol=plan.symbol,
         side=Side.SELL,
         quantity=plan.quantity,
@@ -102,6 +115,7 @@ def prepare_paper_exit(
     *,
     plan: PaperCryptoClosePlan,
     attempt_id: str,
+    owner_strategy_id: str,
     intent: OrderIntent,
     decision: RiskDecision,
     market: MarketSnapshot,
@@ -114,13 +128,21 @@ def prepare_paper_exit(
     instant = now.astimezone(timezone.utc)
     if not isinstance(plan, PaperCryptoClosePlan):
         raise PaperExitCoordinatorBlocked("exact close plan is required")
+    if not isinstance(owner_strategy_id, str) or not _ID_RE.fullmatch(owner_strategy_id):
+        raise PaperExitCoordinatorBlocked("verifiable owner_strategy_id is required")
     if not isinstance(intent, OrderIntent) or not isinstance(decision, RiskDecision) or not isinstance(market, MarketSnapshot):
         raise PaperExitCoordinatorBlocked("exact intent, RiskDecision and MarketSnapshot are required")
     if not isinstance(oms, OrderManagementSystem) or not isinstance(lifecycle, SQLitePaperExitAttempt):
         raise PaperExitCoordinatorBlocked("authoritative OMS and exit lifecycle are required")
-    expected_intent = build_manual_exit_intent(plan=plan, attempt_id=attempt_id)
+    expected_intent = build_exit_intent(
+        plan=plan,
+        attempt_id=attempt_id,
+        owner_strategy_id=owner_strategy_id,
+    )
     if intent != expected_intent:
-        raise PaperExitCoordinatorBlocked("R7 manual exit intent differs from deterministic close plan intent")
+        raise PaperExitCoordinatorBlocked("R7 exit intent differs from deterministic owner-bound close intent")
+    if intent.strategy_id != owner_strategy_id:
+        raise PaperExitCoordinatorBlocked("R7 exit intent is not attributed to owning strategy")
     if instant < plan.prepared_at.astimezone(timezone.utc) or instant >= plan.expires_at.astimezone(timezone.utc):
         raise PaperExitCoordinatorBlocked("R7 close plan is expired or not yet valid")
     if decision.status is not RiskDecisionStatus.APPROVED or decision.risk_reducing is not True:
@@ -142,7 +164,11 @@ def prepare_paper_exit(
     )
     if oms_order.status is not OrderStatus.VALIDATED:
         raise PaperExitCoordinatorBlocked("R7 exit OMS did not remain VALIDATED")
-    exit_order = build_paper_exit_order(plan=plan, attempt_id=attempt_id)
+    exit_order = build_paper_exit_order(
+        plan=plan,
+        attempt_id=attempt_id,
+        owner_strategy_id=owner_strategy_id,
+    )
     lifecycle_snapshot = lifecycle.prepare(plan=plan, order=exit_order, at=instant)
     if lifecycle_snapshot.state.attempt_count != 0:
         raise PaperExitCoordinatorBlocked("prepared R7 exit already consumed POST authority")
@@ -152,6 +178,7 @@ def prepare_paper_exit(
         raise PaperExitCoordinatorBlocked("R7 exit execution deadline is exhausted")
     values = {
         "attempt_id": attempt_id,
+        "owner_strategy_id": owner_strategy_id,
         "plan_hash": plan.plan_hash,
         "exit_order_hash": exit_order.order_hash,
         "broker_payload_hash": exit_order.payload_hash,
@@ -182,6 +209,7 @@ def prepare_paper_exit(
 def _package_payload(value: PreparedPaperExitPackage, *, include_hash: bool) -> dict[str, object]:
     payload = {
         "attempt_id": value.attempt_id,
+        "owner_strategy_id": value.owner_strategy_id,
         "plan_hash": value.plan_hash,
         "exit_order_hash": value.exit_order_hash,
         "broker_payload_hash": value.broker_payload_hash,
@@ -216,11 +244,10 @@ def _hash(value: object) -> str:
 
 
 __all__ = [
-    "MANUAL_EXIT_STRATEGY_ID",
     "PaperExitCoordinatorBlocked",
     "PaperExitCoordinatorError",
     "PaperExitPreparationResult",
     "PreparedPaperExitPackage",
-    "build_manual_exit_intent",
+    "build_exit_intent",
     "prepare_paper_exit",
 ]
