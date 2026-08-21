@@ -2,6 +2,8 @@
 set -euo pipefail
 
 SOURCE_ROOT="$(cd "$(dirname "$0")" && pwd -P)"
+# Keep the historical install path so an upgrade preserves the existing workspace
+# contract and does not create a second parallel app tree.
 INSTALL_ROOT="$HOME/Applications/AUTO-TRADE-R6"
 ACTIVE_ROOT="$SOURCE_ROOT"
 STANDALONE_MODE="NO"
@@ -93,7 +95,7 @@ if [[ -f "$SOURCE_ROOT/MAC_STANDALONE_MANIFEST.txt" ]]; then
 else
   if [[ ! -d "$SOURCE_ROOT/.git" ]]; then
     echo "ERROR: este paquete no contiene el manifest FULL/STANDALONE." >&2
-    echo "Descarga AUTO-TRADE-R6-MAC-FULL; no uses el bundle source/rehearsal para instalar." >&2
+    echo "Descarga el artefacto Mac certificado; no uses el bundle source/rehearsal para instalar." >&2
     exit 2
   fi
 fi
@@ -101,13 +103,16 @@ fi
 cd "$ACTIVE_ROOT"
 clear || true
 cat <<EOF
-AUTO-TRADE R6 — INSTALACIÓN SEGURA
+AUTO-TRADE R7 PAPER OPERATIONS — INSTALACIÓN SEGURA
 
+• La autoridad de entrada permanece en la ruta R6 certificada e idempotente.
+• R7 añade Portfolio/Safety GET-only y bloqueo de nuevo BUY si existe exposición.
 • FULL/STANDALONE usa el CPython y wheelhouse embebidos.
 • No requiere Homebrew ni Python del sistema.
 • No usa PyPI/Internet para instalar el runtime del paquete FULL.
 • En FULL descargado, instala en: $INSTALL_ROOT
 • PAPER write genérico permanece DISABLED.
+• Cierre de posición write permanece DISABLED en esta build.
 • LIVE permanece BLOCKED.
 • Esta instalación NO envía órdenes.
 EOF
@@ -119,15 +124,23 @@ PY="$ACTIVE_ROOT/.venv/bin/python"
 [[ -x "$PY" ]] || { echo "ERROR: .venv no quedó instalado." >&2; exit 2; }
 
 if [[ -f "$ACTIVE_ROOT/MAC_STANDALONE_MANIFEST.txt" ]] && grep -Fq 'first_canary_unified_surface=ONE_APP' "$ACTIVE_ROOT/MAC_STANDALONE_MANIFEST.txt"; then
-  # The source candidate has already certified every inherited PREPARAR/REAL
-  # PAPER boundary before the old launchers are physically removed. The installed
-  # operator package certifies the surface that actually exists plus global
-  # PAPER/LIVE authority; it must not demand deleted legacy UI entrypoints.
+  if ! grep -Fq 'r7_paper_operations_surface=GET_ONLY' "$ACTIVE_ROOT/MAC_STANDALONE_MANIFEST.txt"; then
+    echo "ERROR: el artefacto ONE-APP no declara R7 PAPER Operations GET-only." >&2
+    exit 2
+  fi
+  [[ -f "$ACTIVE_ROOT/scripts/mac_r7_paper_operations_dashboard.py" ]] || { echo "ERROR: falta dashboard R7." >&2; exit 2; }
+  [[ -f "$ACTIVE_ROOT/web/mac_r7_paper_operations.html" ]] || { echo "ERROR: falta UI R7." >&2; exit 2; }
+
+  # The installed package certifies both layers: historical R6 entry authority
+  # and the R7 read-only operator overlay. No close writer is enabled here.
   "$PY" "$ACTIVE_ROOT/scripts/check_r6_first_canary_unified_dashboard.py"
   "$PY" "$ACTIVE_ROOT/scripts/check_r6_live_deny_boundary.py"
   "$PY" "$ACTIVE_ROOT/scripts/check_r6_authority.py"
-  "$PY" -m pytest -q "$ACTIVE_ROOT/tests/test_r6_first_canary_unified_dashboard.py"
-  echo "Unified ONE-APP installed runtime/authority checks: OK"
+  "$PY" "$ACTIVE_ROOT/scripts/check_r7_paper_operations_mac_boundary.py"
+  "$PY" -m pytest -q \
+    "$ACTIVE_ROOT/tests/test_r6_first_canary_unified_dashboard.py" \
+    "$ACTIVE_ROOT/tests/test_mac_r7_paper_operations_dashboard.py"
+  echo "R7 PAPER Operations + inherited R6 authority installed checks: OK"
 else
   "$PY" "$ACTIVE_ROOT/scripts/check_mac_standalone_boundary.py"
   "$PY" "$ACTIVE_ROOT/scripts/check_mac_dashboard_boundary.py"
@@ -137,13 +150,15 @@ fi
 cat <<EOF
 
 ============================================================
-AUTO-TRADE R6 INSTALL: OK
+AUTO-TRADE R7 OPERATIONS INSTALL: OK
 ============================================================
 Runtime: OK
 Dependencias: OK
-Control Center: OK
+R7 Portfolio/Safety read model: GET-ONLY
+Entrada first-canary: R6 authority inherited
 PAPER write genérico: DISABLED
-Capital authority: NONE durante instalación
+Close write: DISABLED
+Capital authority durante instalación: NONE
 LIVE: BLOCKED
 Orden enviada por instalación: NO
 install_root=$ACTIVE_ROOT
