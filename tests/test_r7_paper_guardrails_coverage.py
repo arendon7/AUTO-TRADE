@@ -389,7 +389,7 @@ def test_strict_json_and_scalar_helpers_reject_nonfinite_or_control_data() -> No
     )
     with pytest.raises(PaperPortfolioIntegrityError, match="strict JSON"):
         _strict_json_array(response, "positions")
-    with pytest.raises(PaperPortfolioIntegrityError, match="request"):
+    with pytest.raises(PaperPortfolioIntegrityError, match="X-Request-ID"):
         _request_id(replace(response, headers={"content-type": "application/json"}))
     with pytest.raises(PaperPortfolioIntegrityError, match="control"):
         _string({"symbol": "BTC\nUSD"}, "symbol")
