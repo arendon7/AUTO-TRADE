@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
-import json
 
 import pytest
 
@@ -19,7 +18,6 @@ from autotrade.brokers.alpaca_paper_gateway import (
 )
 from autotrade.brokers.paper_portfolio import (
     AlpacaPaperPortfolioGateway,
-    OPEN_ORDERS_QUERY,
     PaperPortfolioIntegrityError,
     PaperPortfolioPosition,
     PaperPortfolioReadPolicy,
@@ -136,11 +134,9 @@ class _ResponseTransport:
         self.request_id = request_id
 
     def read(self, request: AlpacaPaperReadRequest) -> AlpacaPaperHttpResponse:
-        is_positions = request.url.endswith("/v2/positions")
-        default_body = b"[]"
         return AlpacaPaperHttpResponse(
             status_code=self.status_code,
-            body=self.body if self.body is not None else default_body,
+            body=self.body if self.body is not None else b"[]",
             final_url=self.final_url or request.url,
             headers={"content-type": self.content_type, "x-request-id": self.request_id},
         )
@@ -253,7 +249,7 @@ def test_close_plan_rejects_naive_expiry_bad_ttl_and_tampered_hash() -> None:
 
 
 @pytest.mark.parametrize(
-    "request",
+    "read_request",
     [
         AlpacaPaperReadRequest("GET", "http://paper-api.alpaca.markets/v2/positions", 5, _auth_headers()),
         AlpacaPaperReadRequest("GET", "https://paper-api.alpaca.markets:444/v2/positions", 5, _auth_headers()),
@@ -264,9 +260,9 @@ def test_close_plan_rejects_naive_expiry_bad_ttl_and_tampered_hash() -> None:
         AlpacaPaperReadRequest("GET", "https://paper-api.alpaca.markets/v2/positions", 16, _auth_headers()),
     ],
 )
-def test_portfolio_policy_rejects_noncanonical_requests(request) -> None:
+def test_portfolio_policy_rejects_noncanonical_requests(read_request) -> None:
     with pytest.raises(AlpacaPaperPolicyError):
-        PaperPortfolioReadPolicy().validate(request)
+        PaperPortfolioReadPolicy().validate(read_request)
 
 
 def test_portfolio_policy_rejects_bad_headers_and_redirect_targets() -> None:
