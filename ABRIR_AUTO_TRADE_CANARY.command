@@ -14,7 +14,11 @@ if [[ "${R6_EXTERNAL_PAPER_WRITE:-DISABLED}" == "ENABLED" ]]; then
   exit 2
 fi
 
+# A user/environment variable can never self-enable either authority. Generic R6
+# write is always disabled here. R7 close write starts disabled and is enabled
+# only after the exact installed manifest is verified below.
 export R6_EXTERNAL_PAPER_WRITE=DISABLED
+export R7_CLOSE_PAPER_WRITE=DISABLED
 unset APCA_API_KEY_ID 2>/dev/null || true
 unset APCA_API_SECRET_KEY 2>/dev/null || true
 
@@ -32,13 +36,17 @@ if [[ -f "$SOURCE_ROOT/MAC_STANDALONE_MANIFEST.txt" ]]; then
     echo "AUTO-TRADE: este paquete no declara la superficie R7 PAPER Operations GET-only." >&2
     exit 2
   fi
+  if ! grep -Fq 'r7_close_write=EXACT_ONE_SHOT_RISK_REDUCING' "$SOURCE_ROOT/MAC_STANDALONE_MANIFEST.txt"; then
+    echo "AUTO-TRADE: este paquete no declara la autoridad exacta R7 de cierre risk-reducing one-shot." >&2
+    exit 2
+  fi
   EXPECTED_HEAD="$(read_source_head "$SOURCE_ROOT")"
   INSTALLED_HEAD="$(read_source_head "$INSTALL_ROOT")"
   if [[ ! "$EXPECTED_HEAD" =~ ^[0-9a-f]{40}$ ]]; then
     echo "AUTO-TRADE: source_head inválido en el paquete." >&2
     exit 2
   fi
-  if [[ ! -x "$INSTALL_ROOT/.venv/bin/python" || "$EXPECTED_HEAD" != "$INSTALLED_HEAD" || ! -f "$INSTALL_ROOT/scripts/mac_r7_paper_operations_dashboard.py" || ! -f "$INSTALL_ROOT/web/mac_r7_paper_operations.html" ]]; then
+  if [[ ! -x "$INSTALL_ROOT/.venv/bin/python" || "$EXPECTED_HEAD" != "$INSTALLED_HEAD" || ! -f "$INSTALL_ROOT/scripts/mac_r7_paper_operations_dashboard.py" || ! -f "$INSTALL_ROOT/web/mac_r7_paper_operations.html" || ! -f "$INSTALL_ROOT/src/autotrade/paper_close_operator.py" ]]; then
     echo "AUTO-TRADE: instalando/reparando la copia certificada..."
     bash "$SOURCE_ROOT/INSTALAR_AUTO_TRADE.command"
   fi
@@ -52,9 +60,6 @@ fi
 
 cd "$ROOT"
 PYTHON="$ROOT/.venv/bin/python"
-# R7 is an operator/read-model overlay only. Certified entry authority remains
-# inherited from the R6 unified auto-settlement session. R7 adds Portfolio/Safety
-# broker truth via GET and an exposure interlock before preparing any new BUY.
 DASHBOARD="$ROOT/scripts/mac_r7_paper_operations_dashboard.py"
 PAGE="$ROOT/web/mac_r7_paper_operations.html"
 
@@ -67,12 +72,18 @@ if [[ ! -f "$DASHBOARD" || ! -f "$PAGE" ]]; then
   exit 2
 fi
 
+# Source/dev runs have no manifest and remain close-write disabled. Only the
+# exact packaged/installed artifact may turn on the dedicated close gate.
+if [[ -f "$ROOT/MAC_STANDALONE_MANIFEST.txt" ]] && grep -Fq 'r7_close_write=EXACT_ONE_SHOT_RISK_REDUCING' "$ROOT/MAC_STANDALONE_MANIFEST.txt"; then
+  export R7_CLOSE_PAPER_WRITE=ENABLED
+fi
+
 printf '%s\n' \
   "AUTO-TRADE · R7 PAPER OPERATIONS · UNA SOLA APP" \
-  "Portfolio y Safety: broker truth GET-only. Una posición u orden abierta bloquea preparar otro BUY." \
-  "Entrada heredada R6: Conectar -> Preparar -> Revisar/Aprobar -> Ejecutar una vez -> Reconciliar por GET." \
-  "Attempt IDs, challenges, TTL y recovery se gestionan internamente." \
-  "Cierre de posición: WRITE DISABLED en esta build." \
-  "PAPER ONLY · BTC/USD BUY LIMIT IOC · USD 10-12 · TARGET ~USD 10.50 · LIVE BLOCKED · RETRY POST FALSE"
+  "Portfolio y Safety: broker truth GET-only. Exposición u órdenes abiertas bloquean un nuevo BUY." \
+  "Entrada R6: Preparar -> Revisar/Aprobar -> BUY one-shot -> Reconciliar GET-only." \
+  "Cierre R7: Preparar cierre total -> Revisar/Aprobar -> SELL one-shot -> Reconciliar GET-only." \
+  "El cierre sólo reduce la posición BTC/USD existente; no abre short y no repite POST." \
+  "PAPER ONLY · ENTRY USD 10-12 TARGET ~10.50 · CLOSE FULL SELL LIMIT IOC 25 BPS · LIVE BLOCKED · RETRY POST FALSE"
 
 exec "$PYTHON" "$DASHBOARD"
