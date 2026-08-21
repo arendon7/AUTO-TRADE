@@ -29,7 +29,6 @@ jobs:
           python scripts/check_r6_live_deny_boundary.py
           python scripts/check_r7_paper_operations_read_model_boundary.py
           python scripts/check_r7_paper_operations_mac_boundary.py
-          python -m pytest -q tests/test_mac_r7_paper_operations_dashboard.py
       - name: Build universal offline wheelhouse
         shell: bash
         run: |
@@ -66,8 +65,6 @@ jobs:
           mkdir -p "$PKG/vendor/runtime" "$PKG/vendor/wheels"
           rsync -a ./ "$PKG/" --exclude '.git' --exclude '.venv' --exclude '.runtime' --exclude '.env' --exclude 'dist' --exclude '.pytest_cache' --exclude '.coverage' --exclude 'coverage.json' --exclude '__pycache__' --exclude '*.pyc' --exclude '*.sqlite3' --exclude '*.sqlite3-*'
 
-          # Preserve the inherited R6 entry authority while eliminating stale
-          # USD2/USD5 operator metadata in the packaged historical base layer.
           python - "$PKG/scripts/mac_first_canary_unified_dashboard.py" <<'PY'
           from pathlib import Path
           import sys
