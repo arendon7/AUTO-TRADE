@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 import json
@@ -317,8 +316,6 @@ def test_final_guard_blocks_before_post(tmp_path, fresh_factory, credentials_fac
 def test_mismatched_decision_and_expired_plan_block_before_post(tmp_path) -> None:
     credentials, plan, lifecycle, decision, fresh = _setup(tmp_path)
     writer = PaperCloseWriter(config=PaperCloseWriterConfig(enabled=True), transport=_Transport())
-    bad_decision = replace(decision, attempt_id="r7-close-writer-other")
-    # Restore internal hash consistency by using a valid decision for another attempt.
     bad_decision = issue_paper_close_operator_decision(
         attempt_id="r7-close-writer-other",
         plan=plan,
