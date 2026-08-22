@@ -10,6 +10,9 @@ permissions:
 jobs:
   build:
     runs-on: macos-15
+    env:
+      R6_EXTERNAL_PAPER_WRITE: DISABLED
+      R7_CLOSE_PAPER_WRITE: DISABLED
     steps:
       - name: Checkout exact head
         uses: actions/checkout@v5
@@ -19,8 +22,13 @@ jobs:
         uses: actions/setup-python@v6
         with:
           python-version: '3.12'
-      - name: Certify R7 operations and inherited R6 authority
+      - name: Install build certification dependencies
+        run: python -m pip install -e '.[dev]'
+      - name: Certify R7 close and inherited R6 authority
         run: |
+          set -euo pipefail
+          test "${R6_EXTERNAL_PAPER_WRITE}" = 'DISABLED'
+          test "${R7_CLOSE_PAPER_WRITE}" = 'DISABLED'
           python scripts/check_r6_first_canary_unified_dashboard.py
           python scripts/check_r6_first_canary_restart_safe_dashboard.py
           python scripts/check_r6_first_canary_real_paper_delegate.py
@@ -29,6 +37,25 @@ jobs:
           python scripts/check_r6_live_deny_boundary.py
           python scripts/check_r7_paper_operations_read_model_boundary.py
           python scripts/check_r7_paper_operations_mac_boundary.py
+          python scripts/check_r7_paper_close_operator_boundary.py
+          python -m pytest -q tests/test_r7_paper_close_attempt.py tests/test_r7_paper_close_operator.py tests/test_mac_r7_paper_operations_dashboard.py
+      - name: Prove CI contains no R7 close execute invocation
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('.github/workflows/mac-first-canary-unified-standalone.yml')
+          lines = path.read_text(encoding='utf-8').splitlines()
+          execute_path = '/api/close/' + 'execute'
+          offenders = [line for line in lines if 'curl ' in line and execute_path in line]
+          if offenders:
+              raise SystemExit('CI must never invoke the R7 close execute endpoint')
+          enabled_env = 'R7_CLOSE_PAPER_WRITE' + ': ENABLED'
+          if any(enabled_env in line for line in lines):
+              raise SystemExit('CI must never set the R7 close write environment gate to ENABLED')
+          print('CI close boundary: PASS — no execute endpoint call and close write env stays DISABLED')
+          PY
       - name: Build universal offline wheelhouse
         shell: bash
         run: |
@@ -57,13 +84,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          test "${R7_CLOSE_PAPER_WRITE}" = 'DISABLED'
           SOURCE_SHA="$(git rev-parse HEAD)"
           ASSETS="$RUNNER_TEMP/autotrade-unified-assets"
           PKG="dist/AUTO-TRADE-R6-MAC-FIRST-CANARY-ONE-APP"
           ZIP="dist/AUTO-TRADE-R6-MAC-FIRST-CANARY-ONE-APP.zip"
           rm -rf dist
           mkdir -p "$PKG/vendor/runtime" "$PKG/vendor/wheels"
-          rsync -a ./ "$PKG/" --exclude '.git' --exclude '.venv' --exclude '.runtime' --exclude '.env' --exclude 'dist' --exclude '.pytest_cache' --exclude '.coverage' --exclude 'coverage.json' --exclude '__pycache__' --exclude '*.pyc' --exclude '*.sqlite3' --exclude '*.sqlite3-*'
+          rsync -a ./ "$PKG/" --exclude '.git' --exclude '.venv' --exclude '.runtime' --exclude '.env' --exclude '.env.example' --exclude 'build' --exclude '.r2*' --exclude 'LEEME_PRIMER_CANARY_REAL_PAPER.md' --exclude 'dist' --exclude '.pytest_cache' --exclude '.coverage' --exclude 'coverage.json' --exclude '__pycache__' --exclude '*.pyc' --exclude '*.sqlite3' --exclude '*.sqlite3-*'
 
           python - "$PKG/scripts/mac_first_canary_unified_dashboard.py" <<'PY'
           from pathlib import Path
@@ -88,14 +116,15 @@ jobs:
           cp "$ASSETS/wheels/SHA256SUMS" "$PKG/vendor/wheels/SHA256SUMS"
 
           cp "$PKG/ABRIR_AUTO_TRADE_CANARY.command" "$PKG/ABRIR_AUTO_TRADE.command"
-          rm -f "$PKG/ABRIR_AUTO_TRADE_CANARY.command" "$PKG/ABRIR_PRIMER_CANARY_PREPARAR.command" "$PKG/ABRIR_PRIMER_CANARY_REAL_PAPER.command" "$PKG/ABRIR_PRIMER_CANARY_PAPER.command" "$PKG/AUTO_TRADE_MAC.command"
-          rm -f "$PKG/LEEME_PRIMERO_MAC.md"
+          rm -f "$PKG/ABRIR_AUTO_TRADE_CANARY.command" "$PKG/ABRIR_CRYPTO_PAPER.command" "$PKG/ABRIR_PRIMER_CANARY_PREPARAR.command" "$PKG/ABRIR_PRIMER_CANARY_REAL_PAPER.command" "$PKG/ABRIR_PRIMER_CANARY_PAPER.command" "$PKG/AUTO_TRADE_MAC.command"
+          rm -f "$PKG/LEEME_PRIMERO_MAC.md" "$PKG/LEEME_PRIMER_CANARY_REAL_PAPER.md" "$PKG/.env.example"
+          rm -rf "$PKG/build" "$PKG/.r2cert" "$PKG/.r2close" "$PKG/.r2final2" "$PKG/.r2micro"
           chmod +x "$PKG/ABRIR_AUTO_TRADE.command" "$PKG/INSTALAR_AUTO_TRADE.command"
           chmod +x "$PKG/scripts/mac_bootstrap.sh" "$PKG/scripts/mac_rehearsal.sh" "$PKG/scripts/mac_start.sh"
 
           cat > "$PKG/MAC_STANDALONE_MANIFEST.txt" <<EOF
-          AUTO-TRADE R7 PAPER OPERATIONS ONE-APP/STANDALONE
-          manifest_version=3
+          AUTO-TRADE R7 PAPER OPERATIONS + CLOSE ONE-APP/STANDALONE
+          manifest_version=4
           source_head=${SOURCE_SHA}
           python_version=3.12.13
           python_build_release=20260718
@@ -109,7 +138,12 @@ jobs:
           r7_paper_operations_surface=GET_ONLY
           r7_entry_authority=R6_INHERITED_EXACT_ONE_SHOT
           r7_existing_exposure_interlock=FAIL_CLOSED
-          r7_close_write=DISABLED
+          r7_close_write=EXACT_ONE_SHOT_RISK_REDUCING
+          r7_close_mode=FULL_BTCUSD_SELL_LIMIT_IOC
+          r7_close_max_slippage_bps=25
+          r7_close_unknown_policy=RECONCILE_GET_ONLY_NEVER_RETRY_POST
+          r7_close_residual_policy=STOP_AND_CERTIFY_RESIDUAL_EXPOSURE
+          r7_close_credentials_persisted=NO
           operator_visible_launchers=ONE
           credentials_persisted=NO
           min_notional_usd=10
@@ -120,17 +154,22 @@ jobs:
           EOF
 
           cat > "$PKG/MAC_BUILD_INFO.txt" <<EOF
-          AUTO-TRADE R7 PAPER OPERATIONS ONE-APP PACKAGE
+          AUTO-TRADE R7 PAPER OPERATIONS + CLOSE ONE-APP PACKAGE
           source_head=${SOURCE_SHA}
           branch=${GITHUB_HEAD_REF:-${GITHUB_REF_NAME}}
           python_runtime=EMBEDDED_DUAL_ARCH_3.12.13
           offline_install=YES
           installed_home=HOME/Applications/AUTO-TRADE-R6
-          user_flow=ONE_APP_OPERATIONS_CONNECT_BROKER_TRUTH_ENTRY_IF_FLAT_RECONCILE
-          r7_surface=R7_PAPER_OPERATIONS_READ_ONLY
+          user_flow=ONE_APP_CONNECT_BROKER_TRUTH_ENTRY_IF_FLAT_OR_PREPARE_REVIEW_APPROVE_CLOSE_ONCE_RECONCILE
+          r7_surface=R7_PAPER_OPERATIONS_WITH_ONE_SHOT_CLOSE
           operations_get_only=YES
           entry_authority=R6_INHERITED_EXACT_ONE_SHOT
-          close_write=DISABLED
+          close_authority=EXACT_ONE_SHOT_RISK_REDUCING
+          close_mode=FULL_BTCUSD_SELL_LIMIT_IOC
+          close_max_slippage_bps=25
+          close_retry_post=NO
+          close_recovery=GET_ONLY
+          close_ci_execution=NO
           operator_attempt_id_input=NO
           operator_challenge_copy=NO
           broker_credentials_in_package=NO
@@ -141,17 +180,20 @@ jobs:
           EOF
 
           cat > "$PKG/LEEME.txt" <<'EOF'
-          AUTO-TRADE · R7 PAPER OPERATIONS · UNA SOLA APP
+          AUTO-TRADE · R7 PAPER OPERATIONS + CIERRE · UNA SOLA APP
 
           1. Ejecuta INSTALAR_AUTO_TRADE.command una sola vez.
           2. Después abre únicamente ABRIR_AUTO_TRADE.command.
-          3. Conecta PAPER para ver Portfolio/Safety con broker truth GET-only.
-          4. Si existe posición, orden abierta o recovery pendiente, NO prepares ni ejecutes otro BUY.
-          5. La entrada first-canary conserva la ruta R6 certificada: preparar -> revisar/aprobar -> ejecutar una sola vez -> reconciliar por GET.
+          3. Conecta Alpaca PAPER; las credenciales quedan sólo en memoria.
+          4. Si la cuenta está plana, la entrada first-canary conserva la ruta R6 certificada.
+          5. Si existe la posición BTC/USD certificada, la app puede preparar un cierre TOTAL SELL LIMIT IOC.
+          6. Preparar y aprobar el cierre NO envía orden. El botón final autoriza exactamente un intento PAPER.
+          7. Si el resultado es ambiguo, NO vuelvas a cerrar: usa únicamente Reconciliar cierre por GET.
+          8. Si queda exposición residual, AUTO-TRADE se detiene; no crea un segundo SELL automático.
 
           Entrada: BTC/USD BUY LIMIT IOC · objetivo ~USD 10.50 · rango USD 10-12.
-          Cierre de posición WRITE: DISABLED en esta build.
-          LIVE: BLOCKED · RETRY POST: FALSE · credenciales persistidas: NO.
+          Cierre: FULL BTC/USD SELL LIMIT IOC · máximo 25 bps · riesgo-reductor únicamente.
+          PAPER ONLY · LIVE BLOCKED · RETRY POST FALSE · credenciales persistidas: NO.
           EOF
 
           ditto -c -k --sequesterRsrc --keepParent "$PKG" "$ZIP"
@@ -161,6 +203,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          test "${R7_CLOSE_PAPER_WRITE}" = 'DISABLED'
           cd dist
           shasum -a 256 -c AUTO-TRADE-R6-MAC-FIRST-CANARY-ONE-APP.zip.sha256
           ZIP=AUTO-TRADE-R6-MAC-FIRST-CANARY-ONE-APP.zip
@@ -171,36 +214,52 @@ jobs:
             LEEME.txt \
             ABRIR_AUTO_TRADE.command \
             INSTALAR_AUTO_TRADE.command \
+            src/autotrade/paper_close_attempt.py \
+            src/autotrade/paper_close_operator.py \
             scripts/mac_first_canary_unified_dashboard.py \
             scripts/mac_first_canary_unified_auto_settle.py \
             scripts/mac_r7_paper_operations_dashboard.py \
             scripts/check_r7_paper_operations_mac_boundary.py \
+            scripts/check_r7_paper_close_operator_boundary.py \
             tests/test_mac_r7_paper_operations_dashboard.py \
+            tests/test_r7_paper_close_attempt.py \
+            tests/test_r7_paper_close_operator.py \
             web/mac_first_canary_unified.html \
             web/mac_r7_paper_operations.html \
             scripts/mac_crypto_first_canary_execute_real_paper.py; do
             unzip -l "$ZIP" | grep -Fq "$ROOT/$item"
           done
-          for forbidden in ABRIR_PRIMER_CANARY_PREPARAR.command ABRIR_PRIMER_CANARY_REAL_PAPER.command ABRIR_PRIMER_CANARY_PAPER.command ABRIR_AUTO_TRADE_CANARY.command; do
+          for forbidden in ABRIR_CRYPTO_PAPER.command ABRIR_PRIMER_CANARY_PREPARAR.command ABRIR_PRIMER_CANARY_REAL_PAPER.command ABRIR_PRIMER_CANARY_PAPER.command ABRIR_AUTO_TRADE_CANARY.command; do
             if unzip -l "$ZIP" | grep -Fq "$ROOT/$forbidden"; then echo "ERROR: legacy operator launcher leaked: $forbidden" >&2; exit 1; fi
           done
-          unzip -p "$ZIP" "$ROOT/MAC_STANDALONE_MANIFEST.txt" | grep -Fq 'manifest_version=3'
+          for forbidden_path in .env.example LEEME_PRIMER_CANARY_REAL_PAPER.md build/ .r2cert/ .r2close/ .r2final2/ .r2micro/; do
+            if unzip -l "$ZIP" | grep -Fq "$ROOT/$forbidden_path"; then echo "ERROR: development residue leaked into operator package: $forbidden_path" >&2; exit 1; fi
+          done
+          unzip -p "$ZIP" "$ROOT/MAC_STANDALONE_MANIFEST.txt" | grep -Fq 'manifest_version=4'
           unzip -p "$ZIP" "$ROOT/MAC_STANDALONE_MANIFEST.txt" | grep -Fq 'first_canary_unified_surface=ONE_APP'
           unzip -p "$ZIP" "$ROOT/MAC_STANDALONE_MANIFEST.txt" | grep -Fq 'r7_paper_operations_surface=GET_ONLY'
           unzip -p "$ZIP" "$ROOT/MAC_STANDALONE_MANIFEST.txt" | grep -Fq 'r7_entry_authority=R6_INHERITED_EXACT_ONE_SHOT'
           unzip -p "$ZIP" "$ROOT/MAC_STANDALONE_MANIFEST.txt" | grep -Fq 'r7_existing_exposure_interlock=FAIL_CLOSED'
-          unzip -p "$ZIP" "$ROOT/MAC_STANDALONE_MANIFEST.txt" | grep -Fq 'r7_close_write=DISABLED'
+          unzip -p "$ZIP" "$ROOT/MAC_STANDALONE_MANIFEST.txt" | grep -Fq 'r7_close_write=EXACT_ONE_SHOT_RISK_REDUCING'
+          unzip -p "$ZIP" "$ROOT/MAC_STANDALONE_MANIFEST.txt" | grep -Fq 'r7_close_mode=FULL_BTCUSD_SELL_LIMIT_IOC'
+          unzip -p "$ZIP" "$ROOT/MAC_STANDALONE_MANIFEST.txt" | grep -Fq 'r7_close_max_slippage_bps=25'
+          unzip -p "$ZIP" "$ROOT/MAC_STANDALONE_MANIFEST.txt" | grep -Fq 'r7_close_unknown_policy=RECONCILE_GET_ONLY_NEVER_RETRY_POST'
+          unzip -p "$ZIP" "$ROOT/MAC_STANDALONE_MANIFEST.txt" | grep -Fq 'r7_close_residual_policy=STOP_AND_CERTIFY_RESIDUAL_EXPOSURE'
+          unzip -p "$ZIP" "$ROOT/MAC_STANDALONE_MANIFEST.txt" | grep -Fq 'operator_visible_launchers=ONE'
           unzip -p "$ZIP" "$ROOT/MAC_STANDALONE_MANIFEST.txt" | grep -Fq 'target_notional_usd=10.50'
           unzip -p "$ZIP" "$ROOT/MAC_STANDALONE_MANIFEST.txt" | grep -Fq 'max_notional_usd=12'
-          unzip -p "$ZIP" "$ROOT/MAC_BUILD_INFO.txt" | grep -Fq 'r7_surface=R7_PAPER_OPERATIONS_READ_ONLY'
-          unzip -p "$ZIP" "$ROOT/MAC_BUILD_INFO.txt" | grep -Fq 'operations_get_only=YES'
-          unzip -p "$ZIP" "$ROOT/MAC_BUILD_INFO.txt" | grep -Fq 'close_write=DISABLED'
+          unzip -p "$ZIP" "$ROOT/MAC_BUILD_INFO.txt" | grep -Fq 'r7_surface=R7_PAPER_OPERATIONS_WITH_ONE_SHOT_CLOSE'
+          unzip -p "$ZIP" "$ROOT/MAC_BUILD_INFO.txt" | grep -Fq 'close_authority=EXACT_ONE_SHOT_RISK_REDUCING'
+          unzip -p "$ZIP" "$ROOT/MAC_BUILD_INFO.txt" | grep -Fq 'close_ci_execution=NO'
           unzip -p "$ZIP" "$ROOT/MAC_BUILD_INFO.txt" | grep -Fq 'operator_attempt_id_input=NO'
           unzip -p "$ZIP" "$ROOT/MAC_BUILD_INFO.txt" | grep -Fq 'operator_challenge_copy=NO'
           unzip -p "$ZIP" "$ROOT/LEEME.txt" | grep -Fq 'objetivo ~USD 10.50'
-          unzip -p "$ZIP" "$ROOT/LEEME.txt" | grep -Fq 'Cierre de posición WRITE: DISABLED'
+          unzip -p "$ZIP" "$ROOT/LEEME.txt" | grep -Fq 'FULL BTC/USD SELL LIMIT IOC'
+          unzip -p "$ZIP" "$ROOT/LEEME.txt" | grep -Fq 'NO vuelvas a cerrar'
           unzip -p "$ZIP" "$ROOT/ABRIR_AUTO_TRADE.command" | grep -Fq 'mac_r7_paper_operations_dashboard.py'
-          unzip -p "$ZIP" "$ROOT/ABRIR_AUTO_TRADE.command" | grep -Fq 'USD 10-12 · TARGET ~USD 10.50'
+          unzip -p "$ZIP" "$ROOT/ABRIR_AUTO_TRADE.command" | grep -Fq 'export R7_CLOSE_PAPER_WRITE=DISABLED'
+          unzip -p "$ZIP" "$ROOT/ABRIR_AUTO_TRADE.command" | grep -Fq 'r7_close_write=EXACT_ONE_SHOT_RISK_REDUCING'
+          unzip -p "$ZIP" "$ROOT/ABRIR_AUTO_TRADE.command" | grep -Fq 'export R7_CLOSE_PAPER_WRITE=ENABLED'
           unzip -p "$ZIP" "$ROOT/scripts/mac_first_canary_unified_dashboard.py" | grep -Fq '"target_notional_usd": "10.50"'
           unzip -p "$ZIP" "$ROOT/scripts/mac_first_canary_unified_dashboard.py" | grep -Fq '"hard_max_notional_usd": "12"'
           if unzip -p "$ZIP" "$ROOT/ABRIR_AUTO_TRADE.command" | grep -Fq 'máximo USD 5'; then echo 'ERROR: stale USD5 launcher metadata leaked' >&2; exit 1; fi
@@ -234,6 +293,7 @@ jobs:
       PIP_DISABLE_PIP_VERSION_CHECK: '1'
       PYTHONUNBUFFERED: '1'
       R6_EXTERNAL_PAPER_WRITE: DISABLED
+      R7_CLOSE_PAPER_WRITE: DISABLED
     steps:
       - name: Download exact one-app candidate
         uses: actions/download-artifact@v5
@@ -244,6 +304,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          test "${R7_CLOSE_PAPER_WRITE}" = 'DISABLED'
           cd candidate
           shasum -a 256 -c AUTO-TRADE-R6-MAC-FIRST-CANARY-ONE-APP.zip.sha256
           test "$(uname -m)" = '${{ matrix.arch }}'
@@ -254,10 +315,20 @@ jobs:
           test -x "$SOURCE/ABRIR_AUTO_TRADE.command"
           test -x "$SOURCE/INSTALAR_AUTO_TRADE.command"
           test -f "$SOURCE/scripts/mac_r7_paper_operations_dashboard.py"
+          test -f "$SOURCE/src/autotrade/paper_close_operator.py"
           test -f "$SOURCE/web/mac_r7_paper_operations.html"
+          grep -Fq 'r7_close_write=EXACT_ONE_SHOT_RISK_REDUCING' "$SOURCE/MAC_STANDALONE_MANIFEST.txt"
+          test ! -e "$SOURCE/ABRIR_CRYPTO_PAPER.command"
           test ! -e "$SOURCE/ABRIR_PRIMER_CANARY_PREPARAR.command"
           test ! -e "$SOURCE/ABRIR_PRIMER_CANARY_REAL_PAPER.command"
-      - name: Offline install with no broker credentials
+          test ! -e "$SOURCE/.env.example"
+          test ! -e "$SOURCE/LEEME_PRIMER_CANARY_REAL_PAPER.md"
+          test ! -e "$SOURCE/build"
+          test ! -e "$SOURCE/.r2cert"
+          test ! -e "$SOURCE/.r2close"
+          test ! -e "$SOURCE/.r2final2"
+          test ! -e "$SOURCE/.r2micro"
+      - name: Offline install with no broker credentials and no close authority
         shell: bash
         run: |
           set -euo pipefail
@@ -265,24 +336,38 @@ jobs:
           INSTALL_ROOT="$HOME/Applications/AUTO-TRADE-R6"
           rm -rf "$INSTALL_ROOT"
           unset APCA_API_KEY_ID APCA_API_SECRET_KEY || true
+          test "${R7_CLOSE_PAPER_WRITE}" = 'DISABLED'
           export PIP_INDEX_URL='http://127.0.0.1:9/forbidden'
           export PIP_EXTRA_INDEX_URL='http://127.0.0.1:9/forbidden'
           cd "$SOURCE"
           bash INSTALAR_AUTO_TRADE.command | tee /tmp/autotrade-r7-install.log
           grep -Fq 'AUTO-TRADE R7 OPERATIONS INSTALL: OK' /tmp/autotrade-r7-install.log
+          grep -Fq 'R7 close write durante instalación: DISABLED' /tmp/autotrade-r7-install.log
+          grep -Fq 'Orden enviada por instalación: NO' /tmp/autotrade-r7-install.log
           test -x "$INSTALL_ROOT/.runtime/${{ matrix.arch }}/python/bin/python3"
           test -x "$INSTALL_ROOT/.venv/bin/python"
           test -x "$INSTALL_ROOT/ABRIR_AUTO_TRADE.command"
           test -f "$INSTALL_ROOT/scripts/mac_r7_paper_operations_dashboard.py"
+          test -f "$INSTALL_ROOT/src/autotrade/paper_close_operator.py"
           test -f "$INSTALL_ROOT/web/mac_r7_paper_operations.html"
+          test ! -e "$INSTALL_ROOT/ABRIR_CRYPTO_PAPER.command"
           test ! -e "$INSTALL_ROOT/ABRIR_PRIMER_CANARY_PREPARAR.command"
           test ! -e "$INSTALL_ROOT/ABRIR_PRIMER_CANARY_REAL_PAPER.command"
+          test ! -e "$INSTALL_ROOT/.env.example"
+          test ! -e "$INSTALL_ROOT/LEEME_PRIMER_CANARY_REAL_PAPER.md"
+          test ! -e "$INSTALL_ROOT/build"
+          test ! -e "$INSTALL_ROOT/.r2cert"
+          test ! -e "$INSTALL_ROOT/.r2close"
+          test ! -e "$INSTALL_ROOT/.r2final2"
+          test ! -e "$INSTALL_ROOT/.r2micro"
+          test "${R7_CLOSE_PAPER_WRITE}" = 'DISABLED'
           cd "$INSTALL_ROOT"
           .venv/bin/python scripts/check_r6_first_canary_unified_dashboard.py
           .venv/bin/python scripts/check_r6_live_deny_boundary.py
           .venv/bin/python scripts/check_r6_authority.py
           .venv/bin/python scripts/check_r7_paper_operations_mac_boundary.py
-          .venv/bin/pytest -q tests/test_r6_first_canary_unified_dashboard.py tests/test_mac_r7_paper_operations_dashboard.py
+          .venv/bin/python scripts/check_r7_paper_close_operator_boundary.py
+          .venv/bin/pytest -q tests/test_r6_first_canary_unified_dashboard.py tests/test_mac_r7_paper_operations_dashboard.py tests/test_r7_paper_close_attempt.py tests/test_r7_paper_close_operator.py
       - name: R7 localhost fail-closed smoke with no credentials and no execute call
         shell: bash
         run: |
@@ -290,6 +375,7 @@ jobs:
           INSTALL_ROOT="$HOME/Applications/AUTO-TRADE-R6"
           cd "$INSTALL_ROOT"
           unset APCA_API_KEY_ID APCA_API_SECRET_KEY || true
+          test "${R7_CLOSE_PAPER_WRITE}" = 'DISABLED'
           .venv/bin/python scripts/mac_r7_paper_operations_dashboard.py --no-browser --port 8879 > /tmp/autotrade-r7-server.log 2>&1 &
           PID=$!
           trap 'kill $PID 2>/dev/null || true' EXIT
@@ -297,8 +383,9 @@ jobs:
           python - <<'PY'
           import json
           p=json.load(open('/tmp/r7-meta.json'))
-          assert p['surface']=='R7_PAPER_OPERATIONS_READ_ONLY'
+          assert p['surface']=='R7_PAPER_OPERATIONS'
           assert p['broker_write_authorized'] is False
+          assert p['close_write_gate_enabled'] is False
           assert p['retry_post'] is False
           assert p['credentials_persisted'] is False
           assert p['live_trading']=='BLOCKED'
@@ -309,7 +396,12 @@ jobs:
           assert policy['target_notional_usd']=='10.50'
           assert policy['hard_max_notional_usd']=='12'
           assert policy['operations_get_only'] is True
-          assert policy['close_execution_authorized'] is False
+          assert policy['close_mode']=='FULL_ONLY_FIRST_OPERATION'
+          assert policy['close_side']=='SELL'
+          assert policy['close_order_type']=='LIMIT'
+          assert policy['close_time_in_force']=='IOC'
+          assert policy['close_max_slippage_bps']=='25'
+          assert policy['close_write_gate_enabled'] is False
           assert policy['retry_post'] is False
           assert policy['credentials_persisted'] is False
           assert policy['live_trading']=='BLOCKED'
@@ -320,19 +412,43 @@ jobs:
           import json
           p=json.load(open('/tmp/r7-operations.json'))
           assert p['ok'] is False
-          assert p['surface']=='R7_PAPER_OPERATIONS_READ_ONLY'
+          assert p['surface']=='R7_PAPER_OPERATIONS'
           assert p['entry_preparation_allowed'] is False
           assert p['ready_for_close_preparation'] is False
+          assert p['close_preparation_allowed'] is False
           assert p['close_execution_authorized'] is False
+          assert p['close_write_gate_enabled'] is False
           assert p['broker_write_authorized'] is False
           assert p['retry_post'] is False
           assert p['credentials_persisted'] is False
           assert p['live_trading']=='BLOCKED'
           PY
           curl --fail --silent http://127.0.0.1:8879/ | grep -Fq 'R7 OPERATIONS'
+          curl --fail --silent http://127.0.0.1:8879/ | grep -Fq 'Preparar cierre total'
+          curl --fail --silent http://127.0.0.1:8879/ | grep -Fq 'CERRAR UNA VEZ EN PAPER'
+          # Intentionally do NOT call any /api/close/* POST endpoint in CI.
           kill "$PID"
           wait "$PID" || true
           trap - EXIT
+      - name: Prove packaged launcher is the only close-gate enabler
+        shell: bash
+        run: |
+          set -euo pipefail
+          INSTALL_ROOT="$HOME/Applications/AUTO-TRADE-R6"
+          cd "$INSTALL_ROOT"
+          test "${R7_CLOSE_PAPER_WRITE}" = 'DISABLED'
+          grep -Fq 'export R7_CLOSE_PAPER_WRITE=DISABLED' ABRIR_AUTO_TRADE.command
+          grep -Fq 'r7_close_write=EXACT_ONE_SHOT_RISK_REDUCING' ABRIR_AUTO_TRADE.command
+          grep -Fq 'export R7_CLOSE_PAPER_WRITE=ENABLED' ABRIR_AUTO_TRADE.command
+          grep -Fq 'r7_close_write=EXACT_ONE_SHOT_RISK_REDUCING' MAC_STANDALONE_MANIFEST.txt
+          violations=0
+          while IFS= read -r -d '' candidate; do
+            if grep -Fq 'export R7_CLOSE_PAPER_WRITE=ENABLED' "$candidate"; then
+              echo "ERROR: non-launcher executable shell surface can enable R7 close write: $candidate" >&2
+              violations=1
+            fi
+          done < <(find . -type f \( -name '*.command' -o -name '*.sh' \) ! -name 'ABRIR_AUTO_TRADE.command' ! -name 'ABRIR_AUTO_TRADE_CANARY.command' -print0)
+          test "$violations" = '0'
       - name: Offline reinstall self-heal
         shell: bash
         run: |
@@ -340,9 +456,11 @@ jobs:
           INSTALL_ROOT="$HOME/Applications/AUTO-TRADE-R6"
           rm -rf "$INSTALL_ROOT/.venv"
           cd "$INSTALL_ROOT"
+          test "${R7_CLOSE_PAPER_WRITE}" = 'DISABLED'
           bash INSTALAR_AUTO_TRADE.command > /tmp/autotrade-r7-reinstall.log
           test -x "$INSTALL_ROOT/.venv/bin/python"
           grep -Fq 'AUTO-TRADE R7 OPERATIONS INSTALL: OK' /tmp/autotrade-r7-reinstall.log
+          grep -Fq 'R7 close write durante instalación: DISABLED' /tmp/autotrade-r7-reinstall.log
 
   publish:
     needs: [build, boot]
@@ -358,7 +476,7 @@ jobs:
       - name: Publish certified one-app artifact
         uses: actions/upload-artifact@v4
         with:
-          name: AUTO-TRADE-R6-MAC-FIRST-CANARY-ONE-APP
+          name: AUTO-TRADE-R7-MAC-PAPER-OPERATIONS-CLOSE-ONE-APP
           path: |
             certified/AUTO-TRADE-R6-MAC-FIRST-CANARY-ONE-APP.zip
             certified/AUTO-TRADE-R6-MAC-FIRST-CANARY-ONE-APP.zip.sha256

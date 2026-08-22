@@ -38,14 +38,15 @@ def main() -> int:
         '"network_write_authorized": False',
         '"retry_post": False',
         '"live_trading": "BLOCKED"',
-        'CLOSE_PLAN_TTL = timedelta(seconds=15)',
+        'CLOSE_PLAN_TTL = timedelta(seconds=120)',
+        'CLOSE_PORTFOLIO_TTL = timedelta(seconds=15)',
         'MAX_CLOSE_SLIPPAGE_BPS = Decimal("50")',
     ):
         if anchor not in text:
             fail(f"missing close-plan fail-closed anchor: {anchor}")
     print(
         "R7 PAPER close-plan boundary: PASS — fresh broker position bound; quantity/slippage capped; "
-        "SELL LIMIT IOC prepared offline; no POST/retry/LIVE authority"
+        "SELL LIMIT IOC review plan is inert; 120s human-review TTL grants no POST while broker Portfolio freshness stays 15s; no retry/LIVE authority"
     )
     return 0
 

@@ -70,14 +70,26 @@ def main() -> int:
 
     required_overlay = (
         "class PaperOperationsSession(r6.AutoSettlementSession):",
+        "result = super().connect(payload)",
         "PaperOperationsReadModel(workspace_path=self.workspace).snapshot(",
         "AlpacaPaperCredentials(key_id=key_id, secret_key=secret_key)",
+        "PaperCloseOperator(workspace_path=self.workspace)",
         "FIRST_CANARY_PAPER_MIN_NOTIONAL",
         "FIRST_CANARY_PAPER_TARGET_NOTIONAL",
         "FIRST_CANARY_PAPER_MAX_NOTIONAL",
         '"/api/operations"',
+        '"/api/close/prepare"',
+        '"/api/close/approve"',
+        '"/api/close/execute"',
+        '"/api/close/recover"',
+        "secrets.compare_digest(supplied, self.close_review_token)",
+        "secrets.compare_digest(supplied, self.close_execute_token)",
+        "self.close_execute_token = None",
+        "operator.prepare_full_close(credentials=self._paper_credentials())",
+        "self._close_operator().approve(prepared=prepared)",
+        "self._close_operator().execute_once(",
+        "self._close_operator().recover(credentials=self._paper_credentials())",
         '"broker_write_authorized": False',
-        '"close_execution_authorized": False',
         '"retry_post": False',
         '"credentials_persisted": False',
         '"live_trading": "BLOCKED"',
@@ -87,26 +99,34 @@ def main() -> int:
     for token in required_overlay:
         require(token in overlay, f"overlay missing invariant: {token}")
 
-    # Server-side route/authority checks remain strict: the overlay must not
-    # define a close route or import any close writer/execution surface.
     forbidden_overlay = (
         "paper_close_writer",
         "paper_close_execution_bridge",
+        "paper_close_reconciliation",
         "PaperCloseWriter",
         "PaperCloseExecutionBridge",
+        "AlpacaPaperCloseReconciliationGateway",
         "HttpsAlpacaPaperCryptoWriteTransport",
         "UrllibAlpacaPaperWriteTransport",
         "R6_EXTERNAL_PAPER_WRITE=ENABLED",
         "ALPACA_LIVE_TRADING_HOST",
         "https://api.alpaca.markets",
-        '"/api/close"',
         "stage_risk_reducing_external_submission",
         "submit_once(",
+        "mark_submission_unknown(",
         "cancel_order(",
         "replace_order(",
     )
     for token in forbidden_overlay:
-        require(token not in overlay, f"overlay contains forbidden authority: {token}")
+        require(token not in overlay, f"overlay contains forbidden low-level authority: {token}")
+
+    for route in (
+        '"/api/close/prepare"',
+        '"/api/close/approve"',
+        '"/api/close/execute"',
+        '"/api/close/recover"',
+    ):
+        require(overlay.count(route) == 1, f"close route must occur exactly once: {route}")
 
     roots = {name.split(".", 1)[0] for name in imports(OVERLAY) if name}
     forbidden_external_network = roots & {"requests", "httpx", "aiohttp", "urllib", "websocket", "websockets"}
@@ -116,14 +136,19 @@ def main() -> int:
     )
 
     session_methods = class_methods(tree, "PaperOperationsSession")
-    for method in {"connect", "prepare", "approve", "execute", "recover", "reset"}:
+    for method in {"prepare", "approve", "execute", "recover", "reset"}:
         require(
             method not in session_methods,
-            f"R7 overlay must inherit certified R6 authority method unchanged: {method}",
+            f"R7 overlay must inherit certified R6 entry method unchanged: {method}",
         )
+    require("connect" in session_methods, "R7 session must wrap connect to discover close recovery")
+    for method in {"close_prepare", "close_approve", "close_execute", "close_recover"}:
+        require(method in session_methods, f"R7 session missing exact close facade method: {method}")
+
     handler_methods = class_methods(tree, "PaperOperationsHandler")
-    require("do_GET" in handler_methods, "R7 handler must own the read-only GET surface")
-    require("do_POST" not in handler_methods, "R7 handler may not add a POST surface")
+    require("do_GET" in handler_methods, "R7 handler must own operations GET surface")
+    require("do_POST" in handler_methods, "R7 handler must dispatch exact close facade POST routes")
+    require("super().do_POST()" in overlay, "non-close POST routes must remain inherited R6 authority")
 
     dangerous_attrs = {
         "submit",
@@ -133,6 +158,7 @@ def main() -> int:
         "replace_order",
         "write_once",
         "stage_risk_reducing_external_submission",
+        "mark_submission_unknown",
     }
     for node in ast.walk(tree):
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
@@ -156,44 +182,51 @@ def main() -> int:
         "Safety kill switch",
         "Safety circuit",
         "P&L no realizado",
-        "Cierre de posición",
-        "Aún no está habilitado.",
-        "Close write: DISABLED",
-        "NO vuelvas a pulsar ejecutar",
+        "Cierre total de la posición PAPER",
+        "Preparar cierre total",
+        "Aprobar cierre",
+        "CERRAR UNA VEZ EN PAPER",
+        "Reconciliar cierre por GET",
+        "NO vuelvas a pulsar cerrar",
+        "Retry POST: FALSE",
     )
     for token in required_visible_html:
-        require(token in html_visible, f"R7 UI missing operator/read-only anchor: {token}")
+        require(token in html_visible, f"R7 UI missing operator/close anchor: {token}")
 
-    # These are source-code anchors rather than visible text, so check the raw
-    # HTML/JavaScript instead of the decoded presentation text.
-    for token in ("ready_for_close_preparation", "get('/api/operations')"):
-        require(token in html, f"R7 UI missing source/read-only anchor: {token}")
+    for token in (
+        "ready_for_close_preparation",
+        "close_preparation_allowed",
+        "close_recovery_pending",
+        "get('/api/operations')",
+        "post('/api/close/prepare'",
+        "post('/api/close/approve'",
+        "post('/api/close/execute'",
+        "post('/api/close/recover'",
+    ):
+        require(token in html, f"R7 UI missing exact close source anchor: {token}")
 
-    # The UI may explain that /api/close does not exist. What is forbidden is
-    # executable JavaScript that attempts to call such a route.
     forbidden_html = (
-        "post('/api/close'",
-        'post("/api/close"',
-        "get('/api/close'",
-        'get("/api/close"',
-        "EJECUTAR CIERRE",
-        "CERRAR POSICIÓN AHORA",
         "APCA_API_KEY_ID",
         "APCA_API_SECRET_KEY",
         "USD 1–5",
         "USD 1-5",
         "target=2",
         "máximo USD 5",
+        "CERRAR PAPER",
+        "Attempt ID",
+        "challenge",
+        "retry close",
+        "reintentar cierre",
     )
     for token in forbidden_html:
         require(token not in html, f"R7 UI contains stale/forbidden authority text: {token}")
 
     print(
-        "R7 PAPER operations Mac boundary: PASS — R7 subclasses the certified R6 session without "
-        "redefining connect/prepare/approve/execute/recover; adds only /api/operations GET; fresh "
-        "broker exposure interlocks new BUY preparation; policy metadata comes from canonical "
-        "10/10.50/12 constants; visible HTML is entity-decoded for operator anchors; only localhost "
-        "self.wfile.write is permitted; no close writer/POST/cancel/replace/LIVE authority"
+        "R7 PAPER operations Mac boundary: PASS — R6 entry authority remains inherited; connect only wraps "
+        "recovery discovery; Portfolio/Safety remains GET broker truth; exactly four close routes call only "
+        "PaperCloseOperator; two explicit one-shot human tokens guard FULL BTC/USD SELL LIMIT IOC; dashboard "
+        "has no low-level writer/bridge/reconciler/network authority; burned close attempts recover GET-only; "
+        "credentials memory-only; no retry POST; LIVE blocked"
     )
     return 0
 
