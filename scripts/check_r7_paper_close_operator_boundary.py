@@ -82,6 +82,12 @@ def main() -> int:
         "expected_credential_reference=fresh_account.credential_reference",
         "R7RiskReducingOrderManagementSystem(",
         "prepare_paper_close_control_plane(",
+        "control_plane=None",
+        "oms=None",
+        "fresh_operations = self._operations_reader.snapshot(",
+        "approved SELL LIMIT is no longer marketable against the fresh BTC/USD bid",
+        "approved SELL LIMIT is now more aggressive than the fresh 25 bps envelope",
+        "broker_portfolio=prepared.operations.portfolio",
         'confirmation="CERRAR PAPER"',
         "stage_risk_reducing_external_submission(",
         "bind_paper_close_execution_authority(",
@@ -107,9 +113,6 @@ def main() -> int:
         if forbidden in operator:
             fail(f"close operator bypasses certified writer/authority boundary: {forbidden}")
 
-    # Before the Mac close UI is integrated, the dashboard must remain incapable
-    # of reaching low-level close write authority. After integration it may import
-    # only the high-level facade; this checker intentionally forbids every lower layer.
     for forbidden in (
         "paper_close_writer",
         "paper_close_execution_bridge",
@@ -126,8 +129,9 @@ def main() -> int:
     print(
         "R7 PAPER close operator boundary: PASS — restart-safe burned-attempt discovery is immutable/read-only; "
         "canonical Safety is read-through/no-mutation; safe key rotation is accepted only after fresh broker account "
-        "identity + current credential binding; FULL BTC/USD close composes Safety + OMS + human decision + execution "
-        "bridge; only the certified writer owns PRE_IO/POST; ambiguity becomes GET-only recovery; residual exposure "
+        "identity + current credential binding; human review carries no Safety/OMS capital decision; final broker + quote "
+        "truth rebuilds Safety/OMS immediately before the one-shot bridge; nonmarketable/stale limits block pre-POST; only "
+        "the certified writer owns PRE_IO/POST; ambiguity becomes GET-only recovery; residual exposure "
         "cannot auto-repost; Mac dashboard has no low-level close authority; LIVE blocked"
     )
     return 0
