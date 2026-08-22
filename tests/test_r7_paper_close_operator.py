@@ -144,7 +144,7 @@ def _operations():
         source_order=source_order,
         source_lifecycle=source_lifecycle,
     )
-    close_source = SimpleNamespace(source=source)
+    close_source = SimpleNamespace(source=source, binding_hash="d" * 64)
     return SimpleNamespace(
         ready_for_close_preparation=True,
         blockers=(),
@@ -163,9 +163,6 @@ def _operator(
     workspace = tmp_path / "workspace"
     workspace.mkdir(mode=0o700)
     operations = _operations()
-    # Restart recovery deliberately re-reads the durable PAPER account anchor
-    # instead of trusting an in-memory fixture. Persist the same sanitized
-    # attestation that the real Control Center would have written.
     PaperOperationalWorkspace(root=workspace.resolve()).write_account_attestation(
         operations.account_anchor.attestation
     )
@@ -197,11 +194,12 @@ def test_prepare_is_full_risk_reducing_and_has_no_post_authority(tmp_path: Path)
     assert summary["mode"] == "FULL"
     assert summary["side"] == "SELL"
     assert summary["quantity"] == "0.000143959"
-    assert summary["limit_price"] == "72790"
+    assert summary["limit_price"] == "72618.0"
     assert summary["max_slippage_bps"] == "25"
     assert summary["network_write_authorized"] is False
     assert summary["retry_post"] is False
-    assert prepared.control_plane.decision.risk_reducing is True
+    assert prepared.control_plane is None
+    assert prepared.oms is None
     assert prepared.lifecycle.snapshot(prepared.attempt.attempt_id).state.status is PaperCloseLifecycleStatus.PREPARED
     assert writer.calls == 0
 
@@ -430,3 +428,136 @@ def test_canonical_safety_store_refuses_mutations_without_touching_disk(tmp_path
     ):
         with pytest.raises(PaperCloseOperatorBlocked, match="read-only"):
             call()
+
+
+def test_execution_rebuilds_fresh_safety_after_human_review_delay(tmp_path: Path, monkeypatch) -> None:
+    class Clock:
+        def __init__(self) -> None:
+            self.value = NOW
+
+        def __call__(self):
+            return self.value
+
+    class DynamicOperationsReader:
+        def __init__(self, base) -> None:
+            self.base = base
+            self.calls = 0
+
+        def snapshot(self, **kwargs):
+            self.calls += 1
+            now = kwargs["now"]
+            return SimpleNamespace(
+                ready_for_close_preparation=True,
+                blockers=(),
+                portfolio=replace(self.base.portfolio, observed_at=now),
+                account_anchor=self.base.account_anchor,
+                close_source=self.base.close_source,
+            )
+
+    class DynamicMarketReader:
+        def attest_snapshot(self, **kwargs):
+            return SimpleNamespace(market=replace(_market(), observed_at=kwargs["now"]))
+
+    class DynamicPortfolioReader:
+        def __init__(self, base) -> None:
+            self.base = base
+            self.calls = 0
+
+        def snapshot(self, **kwargs):
+            self.calls += 1
+            return replace(self.base, observed_at=kwargs["now"])
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir(mode=0o700)
+    operations = _operations()
+    PaperOperationalWorkspace(root=workspace.resolve()).write_account_attestation(
+        operations.account_anchor.attestation
+    )
+    clock = Clock()
+    ops_reader = DynamicOperationsReader(operations)
+    portfolio_reader = DynamicPortfolioReader(operations.portfolio)
+    writer = _OneShotWriter()
+    reconciliation = _FlatReconciliationGateway()
+    operator = PaperCloseOperator(
+        workspace_path=workspace,
+        now_provider=clock,
+        sleep=lambda _seconds: None,
+        operations_reader=ops_reader,
+        asset_reader=_AssetReader(),
+        market_reader=DynamicMarketReader(),
+        portfolio_reader=portfolio_reader,
+        writer_factory=lambda: writer,
+        reconciliation_factory=lambda: reconciliation,
+        safety_store_factory=lambda _workspace, _clock: InMemorySafetyStateStore(),
+    )
+
+    prepared = operator.prepare_full_close(credentials=CREDS)
+    assert prepared.control_plane is None
+    clock.value = NOW.replace(second=25)
+    operator.approve(prepared=prepared)
+    clock.value = NOW.replace(second=40)
+    monkeypatch.setenv(CLOSE_WRITE_ENV, "ENABLED")
+
+    result = operator.execute_once(prepared=prepared, credentials=CREDS)
+
+    assert result["phase"] == "CLOSE_RECONCILED"
+    assert result["settlement"]["flat"] is True
+    assert writer.calls == 1
+    assert reconciliation.calls == 1
+    assert prepared.control_plane is not None
+    assert prepared.control_plane.decision.risk_reducing is True
+    assert prepared.control_plane.decision.evaluated_at == clock.value
+    assert ops_reader.calls >= 2
+    assert portfolio_reader.calls == 1
+
+
+def test_final_marketability_guard_blocks_before_post_and_does_not_burn_attempt(tmp_path: Path, monkeypatch) -> None:
+    class MutableMarketReader:
+        def __init__(self) -> None:
+            self.bid = Decimal("72790")
+
+        def attest_snapshot(self, **kwargs):
+            now = kwargs["now"]
+            return SimpleNamespace(
+                market=MarketSnapshot(
+                    symbol="BTC/USD",
+                    bid=self.bid,
+                    ask=self.bid + Decimal("20"),
+                    last=self.bid + Decimal("10"),
+                    observed_at=now,
+                )
+            )
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir(mode=0o700)
+    operations = _operations()
+    PaperOperationalWorkspace(root=workspace.resolve()).write_account_attestation(
+        operations.account_anchor.attestation
+    )
+    market_reader = MutableMarketReader()
+    writer = _OneShotWriter()
+    operator = PaperCloseOperator(
+        workspace_path=workspace,
+        now_provider=lambda: NOW,
+        sleep=lambda _seconds: None,
+        operations_reader=_OperationsReader(operations),
+        asset_reader=_AssetReader(),
+        market_reader=market_reader,
+        portfolio_reader=_PortfolioReader(operations.portfolio),
+        writer_factory=lambda: writer,
+        reconciliation_factory=lambda: _FlatReconciliationGateway(),
+        safety_store_factory=lambda _workspace, _clock: InMemorySafetyStateStore(),
+    )
+    prepared = operator.prepare_full_close(credentials=CREDS)
+    operator.approve(prepared=prepared)
+    market_reader.bid = Decimal("72500")
+    monkeypatch.setenv(CLOSE_WRITE_ENV, "ENABLED")
+
+    with pytest.raises(PaperCloseOperatorBlocked, match="no longer marketable"):
+        operator.execute_once(prepared=prepared, credentials=CREDS)
+
+    state = prepared.lifecycle.snapshot(prepared.attempt.attempt_id).state
+    assert state.status is PaperCloseLifecycleStatus.PREPARED
+    assert state.submission_attempt_count == 0
+    assert writer.calls == 0
+    assert pending_burned_close_attempts(workspace_path=operator.workspace) == ()
