@@ -121,8 +121,8 @@ class PreparedPaperCloseOperatorSession:
     plan: PaperCryptoClosePlan
     operations: PaperOperationsSnapshot
     market_attestation: AlpacaPaperCryptoMarketAttestation
-    control_plane: PreparedPaperCloseControlPlane
-    oms: R7RiskReducingOrderManagementSystem
+    control_plane: PreparedPaperCloseControlPlane | None
+    oms: R7RiskReducingOrderManagementSystem | None
     lifecycle: SQLitePaperCloseLifecycle
     decision: PaperCloseOperatorDecision | None = None
 
@@ -262,7 +262,14 @@ class PaperCloseOperator:
             symbol=FIRST_CLOSE_SYMBOL,
         )
         market = market_attestation.market
-        candidate_limit = _floor_to_increment(min(market.bid, market.last), asset.price_increment)
+        minimum_limit = position.current_price * (
+            Decimal("1") - FIRST_CLOSE_SLIPPAGE_BPS / Decimal("10000")
+        )
+        candidate_limit = _ceil_to_increment(minimum_limit, asset.price_increment)
+        if candidate_limit > market.bid:
+            raise PaperCloseOperatorBlocked(
+                "fresh BTC/USD bid is already below the 25 bps close floor; prepare again when a marketable limit exists"
+            )
         plan = prepare_crypto_close_plan(
             portfolio=operations.portfolio,
             symbol=FIRST_CLOSE_SYMBOL,
@@ -283,30 +290,6 @@ class PaperCloseOperator:
         )
         attempt.write_plan(plan)
         runtime = SQLiteRuntime(attempt.database_path)
-        ledger = SQLiteEventLedger(runtime)
-        safety_store = self._safety_store_factory(self.workspace, self._now_provider)
-        safety = CapitalSafetyKernel(
-            _close_safety_limits(position_quantity=position.quantity, market=market),
-            ledger,
-            state_store=safety_store,
-        )
-        oms = R7RiskReducingOrderManagementSystem(
-            broker=_NoBrokerSurface(),
-            ledger=ledger,
-            order_store=SQLiteOrderStore(runtime),
-            safety_state_store=safety_store,
-        )
-        control_plane = prepare_paper_close_control_plane(
-            attempt_id=attempt_id,
-            plan=plan,
-            broker_portfolio=operations.portfolio,
-            market=market,
-            source_entry_order=operations.close_source.source.source_order,
-            source_lifecycle=operations.close_source.source.source_lifecycle,
-            safety=safety,
-            oms=oms,
-            now=self._now(),
-        )
         lifecycle = SQLitePaperCloseLifecycle(runtime)
         lifecycle.prepare(attempt_id=attempt_id, plan=plan, at=self._now())
         return PreparedPaperCloseOperatorSession(
@@ -314,8 +297,8 @@ class PaperCloseOperator:
             plan=plan,
             operations=operations,
             market_attestation=market_attestation,
-            control_plane=control_plane,
-            oms=oms,
+            control_plane=None,
+            oms=None,
             lifecycle=lifecycle,
         )
 
@@ -350,16 +333,24 @@ class PaperCloseOperator:
         if state.status is not PaperCloseLifecycleStatus.PREPARED or state.submission_attempt_count != 0:
             raise PaperCloseOperatorBlocked("close attempt is no longer eligible for its one POST")
 
+        control_plane, oms, final_market = self._build_fresh_execution_control_plane(
+            prepared=prepared,
+            credentials=credentials,
+        )
+        prepared.control_plane = control_plane
+        prepared.oms = oms
+        prepared.market_attestation = final_market
+
         stage_time = self._now()
-        _, handoff = prepared.oms.stage_risk_reducing_external_submission(
-            prepared=prepared.control_plane,
-            market=prepared.market_attestation.market,
+        _, handoff = oms.stage_risk_reducing_external_submission(
+            prepared=control_plane,
+            market=final_market.market,
             now=stage_time,
         )
         authority = bind_paper_close_execution_authority(
             plan=prepared.plan,
             operator_decision=prepared.decision,
-            control_plane=prepared.control_plane,
+            control_plane=control_plane,
             oms_handoff=handoff,
             now=self._now(),
         )
@@ -376,7 +367,7 @@ class PaperCloseOperator:
                 authority=authority,
                 plan=prepared.plan,
                 operator_decision=prepared.decision,
-                control_plane=prepared.control_plane,
+                control_plane=control_plane,
                 lifecycle=prepared.lifecycle,
                 fresh_portfolio=fresh_portfolio,
                 credentials=credentials,
@@ -426,6 +417,115 @@ class PaperCloseOperator:
             "credentials_persisted": False,
             "live_trading": "BLOCKED",
         }
+
+    def _build_fresh_execution_control_plane(
+        self,
+        *,
+        prepared: PreparedPaperCloseOperatorSession,
+        credentials: AlpacaPaperCredentials,
+    ) -> tuple[PreparedPaperCloseControlPlane, R7RiskReducingOrderManagementSystem, AlpacaPaperCryptoMarketAttestation]:
+        """Re-authorize Safety/OMS from fresh broker and market truth immediately before POST.
+
+        Human review is bound to the exact durable plan. Capital authority is not:
+        the Safety RiskDecision and OMS order are deliberately created only here,
+        after a fresh broker/market check, so operator reading time cannot age the
+        capital decision into an unsafe or unusable state.
+        """
+        if prepared.decision is None or not prepared.decision.valid_at(self._now()):
+            raise PaperCloseOperatorBlocked(
+                "human close approval expired before final execution; prepare and approve a fresh close"
+            )
+        fresh_operations = self._operations_reader.snapshot(
+            credentials=credentials,
+            now=self._now(),
+        )
+        if not fresh_operations.ready_for_close_preparation or fresh_operations.close_source is None:
+            detail = ", ".join(fresh_operations.blockers) if fresh_operations.blockers else "source provenance unavailable"
+            raise PaperCloseOperatorBlocked(
+                f"fresh PAPER exposure is no longer ready for final close: {detail}"
+            )
+        if len(fresh_operations.portfolio.positions) != 1 or fresh_operations.portfolio.open_orders:
+            raise PaperCloseOperatorBlocked(
+                "final close authorization requires exactly one position and zero open orders"
+            )
+        fresh_position = fresh_operations.portfolio.positions[0]
+        if (
+            fresh_position.symbol != prepared.plan.symbol
+            or fresh_position.asset_class != "crypto"
+            or fresh_position.side != "long"
+            or fresh_position.quantity != prepared.plan.observed_position_quantity
+            or fresh_position.available_quantity != prepared.plan.quantity
+        ):
+            raise PaperCloseOperatorBlocked(
+                "broker position/available quantity changed after review; prepare a new close plan"
+            )
+        if (
+            fresh_operations.portfolio.account.account_id
+            != prepared.operations.portfolio.account.account_id
+            or fresh_operations.portfolio.account.account_reference
+            != prepared.plan.account_reference
+            or fresh_operations.portfolio.account.credential_reference
+            != credentials.credential_reference
+        ):
+            raise PaperCloseOperatorBlocked(
+                "final PAPER account/credential binding changed after close review"
+            )
+        original_source = prepared.operations.close_source
+        if original_source is None or fresh_operations.close_source.binding_hash != original_source.binding_hash:
+            raise PaperCloseOperatorBlocked(
+                "certified first-canary close provenance changed before final execution"
+            )
+
+        final_market = self._market_reader.attest_snapshot(
+            credentials=credentials,
+            now=self._now(),
+            symbol=prepared.plan.symbol,
+        )
+        bid = final_market.market.bid
+        minimum_marketable_limit = bid * (
+            Decimal("1") - prepared.plan.max_slippage_bps / Decimal("10000")
+        )
+        if prepared.plan.limit_price > bid:
+            raise PaperCloseOperatorBlocked(
+                "approved SELL LIMIT is no longer marketable against the fresh BTC/USD bid; prepare a new close plan"
+            )
+        if prepared.plan.limit_price < minimum_marketable_limit:
+            raise PaperCloseOperatorBlocked(
+                "approved SELL LIMIT is now more aggressive than the fresh 25 bps envelope; prepare a new close plan"
+            )
+
+        runtime = SQLiteRuntime(prepared.attempt.database_path)
+        ledger = SQLiteEventLedger(runtime)
+        safety_store = self._safety_store_factory(self.workspace, self._now_provider)
+        safety = CapitalSafetyKernel(
+            _close_safety_limits(
+                position_quantity=fresh_position.quantity,
+                market=final_market.market,
+            ),
+            ledger,
+            state_store=safety_store,
+        )
+        oms = R7RiskReducingOrderManagementSystem(
+            broker=_NoBrokerSurface(),
+            ledger=ledger,
+            order_store=SQLiteOrderStore(runtime),
+            safety_state_store=safety_store,
+        )
+        control_plane = prepare_paper_close_control_plane(
+            attempt_id=prepared.attempt.attempt_id,
+            plan=prepared.plan,
+            # The durable plan remains bound to the exact broker snapshot the
+            # human reviewed. Fresh broker truth above is a stricter execution
+            # guard; the writer independently reads broker Portfolio again.
+            broker_portfolio=prepared.operations.portfolio,
+            market=final_market.market,
+            source_entry_order=original_source.source.source_order,
+            source_lifecycle=original_source.source.source_lifecycle,
+            safety=safety,
+            oms=oms,
+            now=self._now(),
+        )
+        return control_plane, oms, final_market
 
     def recover(
         self,
@@ -536,10 +636,12 @@ def _close_safety_limits(*, position_quantity: Decimal, market: MarketSnapshot) 
     )
 
 
-def _floor_to_increment(value: Decimal, increment: Decimal) -> Decimal:
+def _ceil_to_increment(value: Decimal, increment: Decimal) -> Decimal:
     if not value.is_finite() or value <= 0 or not increment.is_finite() or increment <= 0:
         raise PaperCloseOperatorBlocked("close price/tick must be positive finite Decimal")
     units = (value / increment).to_integral_value(rounding=ROUND_FLOOR)
+    if units * increment < value:
+        units += 1
     price = units * increment
     if price <= 0:
         raise PaperCloseOperatorBlocked("tick-rounded close limit is not positive")
