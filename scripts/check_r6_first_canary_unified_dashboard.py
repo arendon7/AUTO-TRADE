@@ -222,15 +222,22 @@ def main() -> int:
             fail(f"unified launcher missing fail-closed anchor: {token}")
 
     if launcher_uses_r7:
+        # The source/dev launcher must always start with both write gates disabled.
+        # R7 close authority may be enabled only after the exact installed manifest
+        # proves it is the certified one-shot risk-reducing package.
         for token in (
             "r7_paper_operations_surface=GET_ONLY",
             "mac_r7_paper_operations_dashboard.py",
             "Portfolio y Safety: broker truth GET-only",
-            "Cierre de posición: WRITE DISABLED",
-            "USD 10-12 · TARGET ~USD 10.50",
+            "export R7_CLOSE_PAPER_WRITE=DISABLED",
+            "r7_close_write=EXACT_ONE_SHOT_RISK_REDUCING",
+            "export R7_CLOSE_PAPER_WRITE=ENABLED",
+            "Cierre R7: Preparar cierre total",
+            "no abre short y no repite POST",
+            "CLOSE FULL SELL LIMIT IOC 25 BPS",
         ):
             if token not in launcher:
-                fail(f"R7 launcher missing fail-closed/inherited-authority anchor: {token}")
+                fail(f"R7 launcher missing certified-close/fail-closed anchor: {token}")
     else:
         for token in (
             "mac_first_canary_unified_dashboard.py",
@@ -251,10 +258,9 @@ def main() -> int:
 
     print(
         "unified first-canary Mac boundary: PASS — one launcher/one window; hidden internal authority identifiers; "
-        "two explicit human actions; multiple burned attempts drain only through certified GET recovery; "
-        "post-execution auto-settlement is bounded GET-only; R7 launcher, when selected, is cryptographically/source-bound "
-        "through AutoSettlementSession to the same R6 authority and adds only GET-only exposure interlock; "
-        "credentials memory-only; retry POST false; LIVE blocked"
+        "R6 entry retains certified one-shot authority; R7 source/dev close gate starts disabled and may become enabled "
+        "only from the exact installed manifest marker; both paths burn POST authority before ambiguous I/O and drain "
+        "only through GET reconciliation; credentials memory-only; retry POST false; LIVE blocked"
     )
     return 0
 
