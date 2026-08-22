@@ -23,7 +23,10 @@ from autotrade.state import InMemorySafetyStateStore
 from test_r7_paper_close_control_plane import _lifecycle, _portfolio, _source_order
 
 
-NOW = datetime(2026, 8, 21, 22, 50, tzinfo=timezone.utc)
+# Keep the operator clock aligned with the canonical R7 Portfolio fixture. The
+# production close plan deliberately rejects broker truth older than its strict
+# TTL; tests must exercise the close authority rather than bypass freshness.
+NOW = datetime(2026, 8, 21, 15, 55, tzinfo=timezone.utc)
 CREDS = AlpacaPaperCredentials("paper-close-key", "paper-close-secret")
 
 
