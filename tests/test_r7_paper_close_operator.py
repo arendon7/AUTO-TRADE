@@ -46,6 +46,15 @@ class _AssetReader:
         return SimpleNamespace(price_increment=Decimal("0.1"))
 
 
+class _CapturingAssetReader:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+
+    def attest_asset(self, **kwargs):
+        self.calls.append(dict(kwargs))
+        return SimpleNamespace(price_increment=Decimal("0.1"))
+
+
 class _MarketReader:
     def __init__(self, market: MarketSnapshot) -> None:
         self.market = market
@@ -195,6 +204,114 @@ def test_prepare_is_full_risk_reducing_and_has_no_post_authority(tmp_path: Path)
     assert prepared.control_plane.decision.risk_reducing is True
     assert prepared.lifecycle.snapshot(prepared.attempt.attempt_id).state.status is PaperCloseLifecycleStatus.PREPARED
     assert writer.calls == 0
+
+
+def test_prepare_accepts_rotated_key_only_after_fresh_same_account_binding(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir(mode=0o700)
+    operations = _operations()
+    historical_credentials = AlpacaPaperCredentials("paper-old-key", "paper-old-secret")
+    durable_account = replace(
+        operations.account_anchor.attestation,
+        credential_reference=historical_credentials.credential_reference,
+    )
+    assert durable_account.credential_reference != CREDS.credential_reference
+    rotated_operations = SimpleNamespace(
+        ready_for_close_preparation=True,
+        blockers=(),
+        portfolio=operations.portfolio,
+        account_anchor=SimpleNamespace(attestation=durable_account),
+        close_source=operations.close_source,
+    )
+    PaperOperationalWorkspace(root=workspace.resolve()).write_account_attestation(durable_account)
+    asset_reader = _CapturingAssetReader()
+    operator = PaperCloseOperator(
+        workspace_path=workspace,
+        now_provider=lambda: NOW,
+        sleep=lambda _seconds: None,
+        operations_reader=_OperationsReader(rotated_operations),
+        asset_reader=asset_reader,
+        market_reader=_MarketReader(_market()),
+        portfolio_reader=_PortfolioReader(rotated_operations.portfolio),
+        writer_factory=lambda: _OneShotWriter(),
+        reconciliation_factory=lambda: _FlatReconciliationGateway(),
+        safety_store_factory=lambda _workspace, _clock: InMemorySafetyStateStore(),
+    )
+
+    prepared = operator.prepare_full_close(credentials=CREDS)
+
+    assert prepared.plan.credential_reference == CREDS.credential_reference
+    assert len(asset_reader.calls) == 1
+    call = asset_reader.calls[0]
+    assert call["expected_credential_reference"] == CREDS.credential_reference
+    assert call["account_attestation_fingerprint"] == operations.portfolio.account.fingerprint
+    assert call["account_attestation_fingerprint"] != durable_account.fingerprint
+
+
+def test_prepare_rejects_fresh_account_that_differs_from_durable_workspace(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir(mode=0o700)
+    operations = _operations()
+    foreign_account = replace(operations.portfolio.account, account_id="11111111-1111-1111-1111-111111111111")
+    foreign_portfolio = replace(operations.portfolio, account=foreign_account)
+    conflicting = SimpleNamespace(
+        ready_for_close_preparation=True,
+        blockers=(),
+        portfolio=foreign_portfolio,
+        account_anchor=operations.account_anchor,
+        close_source=operations.close_source,
+    )
+    asset_reader = _CapturingAssetReader()
+    operator = PaperCloseOperator(
+        workspace_path=workspace,
+        now_provider=lambda: NOW,
+        sleep=lambda _seconds: None,
+        operations_reader=_OperationsReader(conflicting),
+        asset_reader=asset_reader,
+        market_reader=_MarketReader(_market()),
+        portfolio_reader=_PortfolioReader(foreign_portfolio),
+        writer_factory=lambda: _OneShotWriter(),
+        reconciliation_factory=lambda: _FlatReconciliationGateway(),
+        safety_store_factory=lambda _workspace, _clock: InMemorySafetyStateStore(),
+    )
+    with pytest.raises(PaperCloseOperatorBlocked, match="does not match durable workspace"):
+        operator.prepare_full_close(credentials=CREDS)
+    assert asset_reader.calls == []
+
+
+def test_prepare_rejects_fresh_account_not_bound_to_current_credentials(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir(mode=0o700)
+    operations = _operations()
+    other_credentials = AlpacaPaperCredentials("different-current-key", "different-current-secret")
+    mismatched_account = replace(
+        operations.portfolio.account,
+        credential_reference=other_credentials.credential_reference,
+    )
+    mismatched_portfolio = replace(operations.portfolio, account=mismatched_account)
+    conflicting = SimpleNamespace(
+        ready_for_close_preparation=True,
+        blockers=(),
+        portfolio=mismatched_portfolio,
+        account_anchor=operations.account_anchor,
+        close_source=operations.close_source,
+    )
+    asset_reader = _CapturingAssetReader()
+    operator = PaperCloseOperator(
+        workspace_path=workspace,
+        now_provider=lambda: NOW,
+        sleep=lambda _seconds: None,
+        operations_reader=_OperationsReader(conflicting),
+        asset_reader=asset_reader,
+        market_reader=_MarketReader(_market()),
+        portfolio_reader=_PortfolioReader(mismatched_portfolio),
+        writer_factory=lambda: _OneShotWriter(),
+        reconciliation_factory=lambda: _FlatReconciliationGateway(),
+        safety_store_factory=lambda _workspace, _clock: InMemorySafetyStateStore(),
+    )
+    with pytest.raises(PaperCloseOperatorBlocked, match="does not match current credentials"):
+        operator.prepare_full_close(credentials=CREDS)
+    assert asset_reader.calls == []
 
 
 def test_write_gate_disabled_blocks_before_unknown_and_writer(tmp_path: Path, monkeypatch) -> None:
