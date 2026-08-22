@@ -403,7 +403,8 @@ jobs:
           assert p['live_trading']=='BLOCKED'
           PY
           curl --fail --silent http://127.0.0.1:8879/ | grep -Fq 'R7 OPERATIONS'
-          curl --fail --silent http://127.0.0.1:8879/ | grep -Fq 'Cierre total de posición'
+          curl --fail --silent http://127.0.0.1:8879/ | grep -Fq 'Preparar cierre total'
+          curl --fail --silent http://127.0.0.1:8879/ | grep -Fq 'CERRAR UNA VEZ EN PAPER'
           # Intentionally do NOT call any /api/close/* POST endpoint in CI.
           kill "$PID"
           wait "$PID" || true
