@@ -12,21 +12,42 @@ START = ROOT / "scripts/mac_start.sh"
 WORKSPACE_INIT = ROOT / "scripts/mac_create_workspace.py"
 ENV_EXAMPLE = ROOT / ".env.example"
 RUNBOOK = ROOT / "docs/MAC_PAPER_RUNBOOK.md"
+STANDALONE_MANIFEST = ROOT / "MAC_STANDALONE_MANIFEST.txt"
+
+
+def _is_r7_close_one_app() -> bool:
+    if not STANDALONE_MANIFEST.is_file():
+        return False
+    text = STANDALONE_MANIFEST.read_text(encoding="utf-8")
+    return (
+        "manifest_version=4" in text
+        and "first_canary_unified_surface=ONE_APP" in text
+        and "r7_close_write=EXACT_ONE_SHOT_RISK_REDUCING" in text
+        and "credentials_persisted=NO" in text
+    )
 
 
 def main() -> int:
     errors: list[str] = []
-    for path in (
+    r7_close_one_app = _is_r7_close_one_app()
+    required_paths = [
         BOOTSTRAP,
         REHEARSAL,
         DOCTOR,
         START,
         WORKSPACE_INIT,
-        ENV_EXAMPLE,
         RUNBOOK,
-    ):
+    ]
+    if not r7_close_one_app:
+        required_paths.append(ENV_EXAMPLE)
+    for path in required_paths:
         if not path.is_file():
             errors.append(f"required Mac rehearsal artifact is missing: {path.relative_to(ROOT)}")
+
+    if r7_close_one_app and ENV_EXAMPLE.exists():
+        errors.append(
+            "R7 one-app must omit .env.example so PAPER credentials remain memory-only"
+        )
 
     inert_shell_forbidden = (
         "r6_external_paper_preflight.py",
@@ -155,7 +176,7 @@ def main() -> int:
             if anchor not in text:
                 errors.append(f"Mac workspace initializer anchor missing: {anchor}")
 
-    if ENV_EXAMPLE.is_file():
+    if ENV_EXAMPLE.is_file() and not r7_close_one_app:
         text = ENV_EXAMPLE.read_text(encoding="utf-8")
         if "R6_EXTERNAL_PAPER_WRITE=DISABLED" not in text:
             errors.append(".env.example must keep external PAPER write disabled")
@@ -184,9 +205,11 @@ def main() -> int:
         for error in errors:
             print(f"ERROR: {error}", file=sys.stderr)
         return 1
+    mode = "R7 memory-only one-app" if r7_close_one_app else "legacy rehearsal"
     print(
         "AUTO-TRADE Mac rehearsal boundary: PASS "
-        "(bootstrap/rehearsal/safe-start/workspace/doctor broker-inert; credentials redacted; PAPER write disabled by default)"
+        f"({mode}; bootstrap/rehearsal/safe-start/workspace/doctor broker-inert; "
+        "credentials redacted; PAPER write disabled by default)"
     )
     return 0
 
