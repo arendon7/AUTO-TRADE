@@ -235,10 +235,24 @@ class PaperCloseOperator:
         if position.available_quantity != position.quantity:
             raise PaperCloseOperatorBlocked("full close requires the complete broker position quantity to be available")
 
+        durable_account = operations.account_anchor.attestation
+        fresh_account = operations.portfolio.account
+        if (
+            fresh_account.account_id != durable_account.account_id
+            or fresh_account.account_reference != durable_account.account_reference
+        ):
+            raise PaperCloseOperatorBlocked(
+                "fresh PAPER account does not match durable workspace account evidence"
+            )
+        if fresh_account.credential_reference != credentials.credential_reference:
+            raise PaperCloseOperatorBlocked(
+                "fresh PAPER account credential binding does not match current credentials"
+            )
+
         asset = self._asset_reader.attest_asset(
             credentials=credentials,
-            account_attestation_fingerprint=operations.account_anchor.attestation.fingerprint,
-            expected_credential_reference=operations.account_anchor.attestation.credential_reference,
+            account_attestation_fingerprint=fresh_account.fingerprint,
+            expected_credential_reference=fresh_account.credential_reference,
             now=self._now(),
             symbol=FIRST_CLOSE_SYMBOL,
         )
