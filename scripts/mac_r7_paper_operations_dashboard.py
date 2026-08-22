@@ -153,10 +153,23 @@ class PaperOperationsSession(r6.AutoSettlementSession):
         with self._exclusive_action("close_execute"):
             prepared = self._require_close_prepared()
             self.close_execute_token = None
-            result = self._close_operator().execute_once(
-                prepared=prepared,
-                credentials=self._paper_credentials(),
-            )
+            try:
+                result = self._close_operator().execute_once(
+                    prepared=prepared,
+                    credentials=self._paper_credentials(),
+                )
+            except Exception:
+                # A pre-POST block consumes the final human token but must not leave
+                # a stale in-memory plan that looks executable. Only clear it when
+                # the durable lifecycle proves submission_attempt_count is still 0.
+                try:
+                    state = prepared.lifecycle.snapshot(prepared.attempt.attempt_id).state
+                except Exception:
+                    state = None
+                if state is not None and state.submission_attempt_count == 0:
+                    self.close_prepared = None
+                    self.close_review_token = None
+                raise
             self.close_prepared = None
             self.close_review_token = None
             return _sanitize_close_result(result)
@@ -335,6 +348,8 @@ class PaperOperationsHandler(r6.base.UnifiedHandler):
                     "phase": "RECOVERY_ONLY" if pending else "CLOSE_BLOCKED_BEFORE_POST",
                     "close_recovery_pending": pending,
                     "broker_write_performed": False if not pending else "UNKNOWN_OR_ALREADY_BURNED",
+                    "broker_post_attempt_burned": pending,
+                    "settlement": None,
                     "retry_post": False,
                     "credentials_persisted": False,
                     "live_trading": "BLOCKED",
