@@ -420,10 +420,14 @@ jobs:
           grep -Fq 'r7_close_write=EXACT_ONE_SHOT_RISK_REDUCING' ABRIR_AUTO_TRADE.command
           grep -Fq 'export R7_CLOSE_PAPER_WRITE=ENABLED' ABRIR_AUTO_TRADE.command
           grep -Fq 'r7_close_write=EXACT_ONE_SHOT_RISK_REDUCING' MAC_STANDALONE_MANIFEST.txt
-          if grep -R -n --exclude='ABRIR_AUTO_TRADE.command' --exclude='ABRIR_AUTO_TRADE_CANARY.command' 'export R7_CLOSE_PAPER_WRITE=ENABLED' .; then
-            echo 'ERROR: a non-launcher file can enable R7 close write' >&2
-            exit 1
-          fi
+          violations=0
+          while IFS= read -r -d '' candidate; do
+            if grep -Fq 'export R7_CLOSE_PAPER_WRITE=ENABLED' "$candidate"; then
+              echo "ERROR: non-launcher executable shell surface can enable R7 close write: $candidate" >&2
+              violations=1
+            fi
+          done < <(find . -type f \( -name '*.command' -o -name '*.sh' \) ! -name 'ABRIR_AUTO_TRADE.command' ! -name 'ABRIR_AUTO_TRADE_CANARY.command' -print0)
+          test "$violations" = '0'
       - name: Offline reinstall self-heal
         shell: bash
         run: |
