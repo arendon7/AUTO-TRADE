@@ -9,6 +9,7 @@ from types import SimpleNamespace
 import pytest
 
 from autotrade.brokers.alpaca_paper_gateway import AlpacaPaperCredentials
+from autotrade.brokers.alpaca_paper_operational import PaperOperationalWorkspace
 from autotrade.domain import MarketSnapshot
 from autotrade.paper_close_attempt import pending_burned_close_attempts
 from autotrade.paper_close_lifecycle import PaperCloseLifecycleStatus
@@ -153,6 +154,12 @@ def _operator(
     workspace = tmp_path / "workspace"
     workspace.mkdir(mode=0o700)
     operations = _operations()
+    # Restart recovery deliberately re-reads the durable PAPER account anchor
+    # instead of trusting an in-memory fixture. Persist the same sanitized
+    # attestation that the real Control Center would have written.
+    PaperOperationalWorkspace(root=workspace.resolve()).write_account_attestation(
+        operations.account_anchor.attestation
+    )
     market = _market()
     portfolio_reader = _PortfolioReader(operations.portfolio)
     writer = writer or _OneShotWriter()
