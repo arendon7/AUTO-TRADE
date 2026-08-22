@@ -116,7 +116,7 @@ jobs:
           cp "$ASSETS/wheels/SHA256SUMS" "$PKG/vendor/wheels/SHA256SUMS"
 
           cp "$PKG/ABRIR_AUTO_TRADE_CANARY.command" "$PKG/ABRIR_AUTO_TRADE.command"
-          rm -f "$PKG/ABRIR_AUTO_TRADE_CANARY.command" "$PKG/ABRIR_PRIMER_CANARY_PREPARAR.command" "$PKG/ABRIR_PRIMER_CANARY_REAL_PAPER.command" "$PKG/ABRIR_PRIMER_CANARY_PAPER.command" "$PKG/AUTO_TRADE_MAC.command"
+          rm -f "$PKG/ABRIR_AUTO_TRADE_CANARY.command" "$PKG/ABRIR_CRYPTO_PAPER.command" "$PKG/ABRIR_PRIMER_CANARY_PREPARAR.command" "$PKG/ABRIR_PRIMER_CANARY_REAL_PAPER.command" "$PKG/ABRIR_PRIMER_CANARY_PAPER.command" "$PKG/AUTO_TRADE_MAC.command"
           rm -f "$PKG/LEEME_PRIMERO_MAC.md"
           chmod +x "$PKG/ABRIR_AUTO_TRADE.command" "$PKG/INSTALAR_AUTO_TRADE.command"
           chmod +x "$PKG/scripts/mac_bootstrap.sh" "$PKG/scripts/mac_rehearsal.sh" "$PKG/scripts/mac_start.sh"
@@ -228,7 +228,7 @@ jobs:
             scripts/mac_crypto_first_canary_execute_real_paper.py; do
             unzip -l "$ZIP" | grep -Fq "$ROOT/$item"
           done
-          for forbidden in ABRIR_PRIMER_CANARY_PREPARAR.command ABRIR_PRIMER_CANARY_REAL_PAPER.command ABRIR_PRIMER_CANARY_PAPER.command ABRIR_AUTO_TRADE_CANARY.command; do
+          for forbidden in ABRIR_CRYPTO_PAPER.command ABRIR_PRIMER_CANARY_PREPARAR.command ABRIR_PRIMER_CANARY_REAL_PAPER.command ABRIR_PRIMER_CANARY_PAPER.command ABRIR_AUTO_TRADE_CANARY.command; do
             if unzip -l "$ZIP" | grep -Fq "$ROOT/$forbidden"; then echo "ERROR: legacy operator launcher leaked: $forbidden" >&2; exit 1; fi
           done
           unzip -p "$ZIP" "$ROOT/MAC_STANDALONE_MANIFEST.txt" | grep -Fq 'manifest_version=4'
@@ -241,6 +241,7 @@ jobs:
           unzip -p "$ZIP" "$ROOT/MAC_STANDALONE_MANIFEST.txt" | grep -Fq 'r7_close_max_slippage_bps=25'
           unzip -p "$ZIP" "$ROOT/MAC_STANDALONE_MANIFEST.txt" | grep -Fq 'r7_close_unknown_policy=RECONCILE_GET_ONLY_NEVER_RETRY_POST'
           unzip -p "$ZIP" "$ROOT/MAC_STANDALONE_MANIFEST.txt" | grep -Fq 'r7_close_residual_policy=STOP_AND_CERTIFY_RESIDUAL_EXPOSURE'
+          unzip -p "$ZIP" "$ROOT/MAC_STANDALONE_MANIFEST.txt" | grep -Fq 'operator_visible_launchers=ONE'
           unzip -p "$ZIP" "$ROOT/MAC_STANDALONE_MANIFEST.txt" | grep -Fq 'target_notional_usd=10.50'
           unzip -p "$ZIP" "$ROOT/MAC_STANDALONE_MANIFEST.txt" | grep -Fq 'max_notional_usd=12'
           unzip -p "$ZIP" "$ROOT/MAC_BUILD_INFO.txt" | grep -Fq 'r7_surface=R7_PAPER_OPERATIONS_WITH_ONE_SHOT_CLOSE'
@@ -313,6 +314,7 @@ jobs:
           test -f "$SOURCE/src/autotrade/paper_close_operator.py"
           test -f "$SOURCE/web/mac_r7_paper_operations.html"
           grep -Fq 'r7_close_write=EXACT_ONE_SHOT_RISK_REDUCING' "$SOURCE/MAC_STANDALONE_MANIFEST.txt"
+          test ! -e "$SOURCE/ABRIR_CRYPTO_PAPER.command"
           test ! -e "$SOURCE/ABRIR_PRIMER_CANARY_PREPARAR.command"
           test ! -e "$SOURCE/ABRIR_PRIMER_CANARY_REAL_PAPER.command"
       - name: Offline install with no broker credentials and no close authority
@@ -337,6 +339,7 @@ jobs:
           test -f "$INSTALL_ROOT/scripts/mac_r7_paper_operations_dashboard.py"
           test -f "$INSTALL_ROOT/src/autotrade/paper_close_operator.py"
           test -f "$INSTALL_ROOT/web/mac_r7_paper_operations.html"
+          test ! -e "$INSTALL_ROOT/ABRIR_CRYPTO_PAPER.command"
           test ! -e "$INSTALL_ROOT/ABRIR_PRIMER_CANARY_PREPARAR.command"
           test ! -e "$INSTALL_ROOT/ABRIR_PRIMER_CANARY_REAL_PAPER.command"
           test "${R7_CLOSE_PAPER_WRITE}" = 'DISABLED'
