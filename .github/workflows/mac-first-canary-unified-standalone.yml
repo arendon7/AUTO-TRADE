@@ -91,7 +91,7 @@ jobs:
           ZIP="dist/AUTO-TRADE-R6-MAC-FIRST-CANARY-ONE-APP.zip"
           rm -rf dist
           mkdir -p "$PKG/vendor/runtime" "$PKG/vendor/wheels"
-          rsync -a ./ "$PKG/" --exclude '.git' --exclude '.venv' --exclude '.runtime' --exclude '.env' --exclude 'dist' --exclude '.pytest_cache' --exclude '.coverage' --exclude 'coverage.json' --exclude '__pycache__' --exclude '*.pyc' --exclude '*.sqlite3' --exclude '*.sqlite3-*'
+          rsync -a ./ "$PKG/" --exclude '.git' --exclude '.venv' --exclude '.runtime' --exclude '.env' --exclude '.env.example' --exclude 'build' --exclude '.r2*' --exclude 'LEEME_PRIMER_CANARY_REAL_PAPER.md' --exclude 'dist' --exclude '.pytest_cache' --exclude '.coverage' --exclude 'coverage.json' --exclude '__pycache__' --exclude '*.pyc' --exclude '*.sqlite3' --exclude '*.sqlite3-*'
 
           python - "$PKG/scripts/mac_first_canary_unified_dashboard.py" <<'PY'
           from pathlib import Path
@@ -117,7 +117,8 @@ jobs:
 
           cp "$PKG/ABRIR_AUTO_TRADE_CANARY.command" "$PKG/ABRIR_AUTO_TRADE.command"
           rm -f "$PKG/ABRIR_AUTO_TRADE_CANARY.command" "$PKG/ABRIR_CRYPTO_PAPER.command" "$PKG/ABRIR_PRIMER_CANARY_PREPARAR.command" "$PKG/ABRIR_PRIMER_CANARY_REAL_PAPER.command" "$PKG/ABRIR_PRIMER_CANARY_PAPER.command" "$PKG/AUTO_TRADE_MAC.command"
-          rm -f "$PKG/LEEME_PRIMERO_MAC.md"
+          rm -f "$PKG/LEEME_PRIMERO_MAC.md" "$PKG/LEEME_PRIMER_CANARY_REAL_PAPER.md" "$PKG/.env.example"
+          rm -rf "$PKG/build" "$PKG/.r2cert" "$PKG/.r2close" "$PKG/.r2final2" "$PKG/.r2micro"
           chmod +x "$PKG/ABRIR_AUTO_TRADE.command" "$PKG/INSTALAR_AUTO_TRADE.command"
           chmod +x "$PKG/scripts/mac_bootstrap.sh" "$PKG/scripts/mac_rehearsal.sh" "$PKG/scripts/mac_start.sh"
 
@@ -231,6 +232,9 @@ jobs:
           for forbidden in ABRIR_CRYPTO_PAPER.command ABRIR_PRIMER_CANARY_PREPARAR.command ABRIR_PRIMER_CANARY_REAL_PAPER.command ABRIR_PRIMER_CANARY_PAPER.command ABRIR_AUTO_TRADE_CANARY.command; do
             if unzip -l "$ZIP" | grep -Fq "$ROOT/$forbidden"; then echo "ERROR: legacy operator launcher leaked: $forbidden" >&2; exit 1; fi
           done
+          for forbidden_path in .env.example LEEME_PRIMER_CANARY_REAL_PAPER.md build/ .r2cert/ .r2close/ .r2final2/ .r2micro/; do
+            if unzip -l "$ZIP" | grep -Fq "$ROOT/$forbidden_path"; then echo "ERROR: development residue leaked into operator package: $forbidden_path" >&2; exit 1; fi
+          done
           unzip -p "$ZIP" "$ROOT/MAC_STANDALONE_MANIFEST.txt" | grep -Fq 'manifest_version=4'
           unzip -p "$ZIP" "$ROOT/MAC_STANDALONE_MANIFEST.txt" | grep -Fq 'first_canary_unified_surface=ONE_APP'
           unzip -p "$ZIP" "$ROOT/MAC_STANDALONE_MANIFEST.txt" | grep -Fq 'r7_paper_operations_surface=GET_ONLY'
@@ -317,6 +321,13 @@ jobs:
           test ! -e "$SOURCE/ABRIR_CRYPTO_PAPER.command"
           test ! -e "$SOURCE/ABRIR_PRIMER_CANARY_PREPARAR.command"
           test ! -e "$SOURCE/ABRIR_PRIMER_CANARY_REAL_PAPER.command"
+          test ! -e "$SOURCE/.env.example"
+          test ! -e "$SOURCE/LEEME_PRIMER_CANARY_REAL_PAPER.md"
+          test ! -e "$SOURCE/build"
+          test ! -e "$SOURCE/.r2cert"
+          test ! -e "$SOURCE/.r2close"
+          test ! -e "$SOURCE/.r2final2"
+          test ! -e "$SOURCE/.r2micro"
       - name: Offline install with no broker credentials and no close authority
         shell: bash
         run: |
@@ -342,6 +353,13 @@ jobs:
           test ! -e "$INSTALL_ROOT/ABRIR_CRYPTO_PAPER.command"
           test ! -e "$INSTALL_ROOT/ABRIR_PRIMER_CANARY_PREPARAR.command"
           test ! -e "$INSTALL_ROOT/ABRIR_PRIMER_CANARY_REAL_PAPER.command"
+          test ! -e "$INSTALL_ROOT/.env.example"
+          test ! -e "$INSTALL_ROOT/LEEME_PRIMER_CANARY_REAL_PAPER.md"
+          test ! -e "$INSTALL_ROOT/build"
+          test ! -e "$INSTALL_ROOT/.r2cert"
+          test ! -e "$INSTALL_ROOT/.r2close"
+          test ! -e "$INSTALL_ROOT/.r2final2"
+          test ! -e "$INSTALL_ROOT/.r2micro"
           test "${R7_CLOSE_PAPER_WRITE}" = 'DISABLED'
           cd "$INSTALL_ROOT"
           .venv/bin/python scripts/check_r6_first_canary_unified_dashboard.py
