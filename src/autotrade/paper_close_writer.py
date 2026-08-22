@@ -22,7 +22,7 @@ from autotrade.paper_close_plan import PaperCryptoClosePlan
 
 
 ORDERS_PATH = "/v2/orders"
-DECISION_TTL = timedelta(seconds=20)
+DECISION_TTL = timedelta(seconds=60)
 FINAL_PORTFOLIO_TTL = timedelta(seconds=5)
 _CONFIRMATION = "CERRAR PAPER"
 _ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:@-]{0,127}$")
