@@ -12,7 +12,8 @@ from autotrade.brokers.alpaca_paper_portfolio import (
 )
 
 
-CLOSE_PLAN_TTL = timedelta(seconds=15)
+CLOSE_PLAN_TTL = timedelta(seconds=120)
+CLOSE_PORTFOLIO_TTL = timedelta(seconds=15)
 MAX_CLOSE_SLIPPAGE_BPS = Decimal("50")
 
 
@@ -106,7 +107,7 @@ def prepare_crypto_close_plan(
         raise PaperClosePlanError("now must be timezone-aware")
     instant = now.astimezone(timezone.utc)
     age = instant - portfolio.observed_at.astimezone(timezone.utc)
-    if age < timedelta(0) or age > CLOSE_PLAN_TTL:
+    if age < timedelta(0) or age > CLOSE_PORTFOLIO_TTL:
         raise PaperClosePlanError("portfolio broker truth is stale for close preparation")
     canonical = symbol.strip().upper()
     matches = [item for item in portfolio.positions if item.symbol == canonical]
@@ -226,6 +227,7 @@ def _hash(value: object) -> str:
 
 __all__ = [
     "CLOSE_PLAN_TTL",
+    "CLOSE_PORTFOLIO_TTL",
     "MAX_CLOSE_SLIPPAGE_BPS",
     "PaperCloseMode",
     "PaperClosePlanError",
