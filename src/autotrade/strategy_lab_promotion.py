@@ -6,6 +6,7 @@ from decimal import Decimal, InvalidOperation
 from enum import StrEnum
 from hashlib import sha256
 import json
+from pathlib import Path
 import re
 
 from autotrade.domain import OrderIntent, intent_fingerprint
@@ -60,18 +61,13 @@ class PromotionAssessmentState(StrEnum):
 
 
 @dataclass(frozen=True, slots=True)
-class StrategyPromotionPolicy:
-    """Frozen candidate-specific thresholds selected before FINAL_HOLDOUT."""
+class StrategyPromotionThresholdPolicy:
+    """Promotion thresholds preregistered before DEVELOPMENT trial execution."""
 
-    policy_id: str
+    threshold_policy_id: str
     development_campaign_id: str
     holdout_campaign_id: str
     holdout_trial_id: str
-    selected_trial_id: str
-    selected_trial_fingerprint: str
-    selected_strategy_id: str
-    selected_strategy_version: str
-    tournament_fingerprint: str
     max_holm_adjusted_p: Decimal
     min_holdout_net_return: Decimal
     max_holdout_drawdown: Decimal
@@ -80,30 +76,20 @@ class StrategyPromotionPolicy:
     max_execution_adverse_slippage_bps: Decimal
     external_execution_authorized: bool
     live_trading: str
-    policy_hash: str
+    threshold_policy_hash: str
 
     def __post_init__(self) -> None:
         for label, value in (
-            ("policy_id", self.policy_id),
+            ("threshold_policy_id", self.threshold_policy_id),
             ("development_campaign_id", self.development_campaign_id),
             ("holdout_campaign_id", self.holdout_campaign_id),
             ("holdout_trial_id", self.holdout_trial_id),
-            ("selected_trial_id", self.selected_trial_id),
-            ("selected_strategy_id", self.selected_strategy_id),
-            ("selected_strategy_version", self.selected_strategy_version),
         ):
-            if not isinstance(value, str) or not _ID_RE.fullmatch(value):
-                raise StrategyPromotionIntegrityError(f"{label} must be a canonical identifier")
+            _require_id(value, label)
         if self.development_campaign_id == self.holdout_campaign_id:
             raise StrategyPromotionIntegrityError(
                 "development and HOLDOUT campaigns must be distinct"
             )
-        for label, value in (
-            ("selected_trial_fingerprint", self.selected_trial_fingerprint),
-            ("tournament_fingerprint", self.tournament_fingerprint),
-            ("policy_hash", self.policy_hash),
-        ):
-            _require_hash(value, label)
         for label, value in (
             ("max_holm_adjusted_p", self.max_holm_adjusted_p),
             ("min_holdout_net_return", self.min_holdout_net_return),
@@ -142,10 +128,68 @@ class StrategyPromotionPolicy:
             raise StrategyPromotionIntegrityError(
                 "max_execution_adverse_slippage_bps must be non-negative"
             )
-        if self.external_execution_authorized is not False or self.live_trading != "BLOCKED":
+        _require_no_authority(
+            external=self.external_execution_authorized,
+            live=self.live_trading,
+            label="W79 threshold policy",
+        )
+        _require_hash(self.threshold_policy_hash, "threshold_policy_hash")
+        if self.threshold_policy_hash != _hash(
+            _threshold_payload(self, include_hash=False)
+        ):
+            raise StrategyPromotionIntegrityError("threshold policy hash mismatch")
+
+    def to_dict(self) -> dict[str, object]:
+        return _threshold_payload(self, include_hash=True)
+
+
+@dataclass(frozen=True, slots=True)
+class StrategyPromotionPolicy:
+    """Candidate binding created after Tournament but before FINAL_HOLDOUT."""
+
+    policy_id: str
+    threshold_policy_id: str
+    threshold_policy_hash: str
+    development_campaign_id: str
+    holdout_campaign_id: str
+    holdout_trial_id: str
+    selected_trial_id: str
+    selected_trial_fingerprint: str
+    selected_strategy_id: str
+    selected_strategy_version: str
+    tournament_fingerprint: str
+    external_execution_authorized: bool
+    live_trading: str
+    policy_hash: str
+
+    def __post_init__(self) -> None:
+        for label, value in (
+            ("policy_id", self.policy_id),
+            ("threshold_policy_id", self.threshold_policy_id),
+            ("development_campaign_id", self.development_campaign_id),
+            ("holdout_campaign_id", self.holdout_campaign_id),
+            ("holdout_trial_id", self.holdout_trial_id),
+            ("selected_trial_id", self.selected_trial_id),
+            ("selected_strategy_id", self.selected_strategy_id),
+            ("selected_strategy_version", self.selected_strategy_version),
+        ):
+            _require_id(value, label)
+        if self.development_campaign_id == self.holdout_campaign_id:
             raise StrategyPromotionIntegrityError(
-                "W79 policy may not grant PAPER/LIVE authority"
+                "development and HOLDOUT campaigns must be distinct"
             )
+        for label, value in (
+            ("threshold_policy_hash", self.threshold_policy_hash),
+            ("selected_trial_fingerprint", self.selected_trial_fingerprint),
+            ("tournament_fingerprint", self.tournament_fingerprint),
+            ("policy_hash", self.policy_hash),
+        ):
+            _require_hash(value, label)
+        _require_no_authority(
+            external=self.external_execution_authorized,
+            live=self.live_trading,
+            label="W79 candidate policy",
+        )
         if self.policy_hash != _hash(_policy_payload(self, include_hash=False)):
             raise StrategyPromotionIntegrityError("promotion policy hash mismatch")
 
@@ -161,8 +205,7 @@ class PromotionGateEvidence:
     evidence_hashes: tuple[str, ...]
 
     def __post_init__(self) -> None:
-        if not isinstance(self.gate_id, str) or not _ID_RE.fullmatch(self.gate_id):
-            raise StrategyPromotionIntegrityError("gate_id must be canonical")
+        _require_id(self.gate_id, "gate_id")
         if not isinstance(self.status, PromotionGateStatus):
             raise StrategyPromotionIntegrityError(
                 "gate status must use PromotionGateStatus"
@@ -200,6 +243,7 @@ class PromotionGateEvidence:
 class StrategyPromotionEvidenceView:
     policy_id: str
     policy_hash: str
+    threshold_policy_hash: str
     selected_strategy_id: str
     selected_strategy_version: str
     gates: tuple[PromotionGateEvidence, ...]
@@ -212,19 +256,12 @@ class StrategyPromotionEvidenceView:
     view_hash: str
 
     def __post_init__(self) -> None:
-        if not isinstance(self.policy_id, str) or not _ID_RE.fullmatch(self.policy_id):
-            raise StrategyPromotionIntegrityError("policy_id must be canonical")
+        _require_id(self.policy_id, "policy_id")
         _require_hash(self.policy_hash, "policy_hash")
+        _require_hash(self.threshold_policy_hash, "threshold_policy_hash")
         _require_hash(self.view_hash, "view_hash")
-        if (
-            not isinstance(self.selected_strategy_id, str)
-            or not _ID_RE.fullmatch(self.selected_strategy_id)
-            or not isinstance(self.selected_strategy_version, str)
-            or not _ID_RE.fullmatch(self.selected_strategy_version)
-        ):
-            raise StrategyPromotionIntegrityError(
-                "selected strategy identity is invalid"
-            )
+        _require_id(self.selected_strategy_id, "selected_strategy_id")
+        _require_id(self.selected_strategy_version, "selected_strategy_version")
         if any(not isinstance(item, PromotionGateEvidence) for item in self.gates):
             raise StrategyPromotionIntegrityError(
                 "promotion gates must use PromotionGateEvidence"
@@ -233,8 +270,7 @@ class StrategyPromotionEvidenceView:
             raise StrategyPromotionIntegrityError(
                 "promotion gates must be sorted by gate_id"
             )
-        gate_ids = tuple(item.gate_id for item in self.gates)
-        if gate_ids != REQUIRED_W79_GATE_IDS:
+        if tuple(item.gate_id for item in self.gates) != REQUIRED_W79_GATE_IDS:
             raise StrategyPromotionIntegrityError(
                 "promotion evidence must contain the exact W79 gate set"
             )
@@ -257,10 +293,11 @@ class StrategyPromotionEvidenceView:
             raise StrategyPromotionIntegrityError(
                 "W79 may not authorize PAPER candidate promotion"
             )
-        if self.external_execution_authorized is not False or self.live_trading != "BLOCKED":
-            raise StrategyPromotionIntegrityError(
-                "W79 evidence may not grant execution/LIVE authority"
-            )
+        _require_no_authority(
+            external=self.external_execution_authorized,
+            live=self.live_trading,
+            label="W79 evidence",
+        )
         if self.view_hash != _hash(_view_payload(self, include_hash=False)):
             raise StrategyPromotionIntegrityError(
                 "promotion evidence view hash mismatch"
@@ -271,7 +308,7 @@ class StrategyPromotionEvidenceView:
 
 
 class SQLiteStrategyPromotionPolicyRegistry:
-    """Append-only frozen policy registry over durable SQLite."""
+    """Two-stage frozen promotion governance on one authoritative SQLite runtime."""
 
     def __init__(self, runtime: SQLiteRuntime | str) -> None:
         self._runtime = (
@@ -282,18 +319,91 @@ class SQLiteStrategyPromotionPolicyRegistry:
     def _initialize(self) -> None:
         conn = self._runtime.connect()
         try:
-            conn.execute(
+            conn.executescript(
                 """
-                CREATE TABLE IF NOT EXISTS strategy_promotion_policies (
-                    policy_id TEXT PRIMARY KEY,
-                    policy_hash TEXT NOT NULL UNIQUE,
-                    development_campaign_id TEXT NOT NULL,
+                CREATE TABLE IF NOT EXISTS strategy_promotion_threshold_policies (
+                    threshold_policy_id TEXT PRIMARY KEY,
+                    threshold_policy_hash TEXT NOT NULL UNIQUE,
+                    development_campaign_id TEXT NOT NULL UNIQUE,
                     holdout_campaign_id TEXT NOT NULL UNIQUE,
                     registered_at TEXT NOT NULL,
                     policy_json TEXT NOT NULL
-                )
+                );
+
+                CREATE TABLE IF NOT EXISTS strategy_promotion_policies (
+                    policy_id TEXT PRIMARY KEY,
+                    policy_hash TEXT NOT NULL UNIQUE,
+                    threshold_policy_id TEXT NOT NULL UNIQUE,
+                    threshold_policy_hash TEXT NOT NULL,
+                    development_campaign_id TEXT NOT NULL,
+                    holdout_campaign_id TEXT NOT NULL UNIQUE,
+                    registered_at TEXT NOT NULL,
+                    policy_json TEXT NOT NULL,
+                    FOREIGN KEY(threshold_policy_id)
+                        REFERENCES strategy_promotion_threshold_policies(threshold_policy_id)
+                );
                 """
             )
+        finally:
+            conn.close()
+
+    def register_thresholds(
+        self,
+        thresholds: StrategyPromotionThresholdPolicy,
+        *,
+        trial_ledger: SQLiteTrialLedger,
+        now: datetime,
+    ) -> StrategyPromotionThresholdPolicy:
+        _require_aware(now, "now")
+        self._require_same_runtime(trial_ledger)
+        payload = _canonical_json(thresholds.to_dict())
+        conn = self._runtime.connect()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                """
+                SELECT * FROM strategy_promotion_threshold_policies
+                WHERE threshold_policy_id = ?
+                """,
+                (thresholds.threshold_policy_id,),
+            ).fetchone()
+            if row is not None:
+                existing = _threshold_from_row(row)
+                if existing != thresholds:
+                    raise StrategyPromotionConflict(
+                        "promotion threshold policy identity conflict: "
+                        f"{thresholds.threshold_policy_id}"
+                    )
+                conn.execute("COMMIT")
+                return existing
+
+            _validate_threshold_freeze_preconditions(
+                thresholds=thresholds,
+                trial_ledger=trial_ledger,
+            )
+            conn.execute(
+                """
+                INSERT INTO strategy_promotion_threshold_policies(
+                    threshold_policy_id, threshold_policy_hash,
+                    development_campaign_id, holdout_campaign_id,
+                    registered_at, policy_json
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    thresholds.threshold_policy_id,
+                    thresholds.threshold_policy_hash,
+                    thresholds.development_campaign_id,
+                    thresholds.holdout_campaign_id,
+                    now.isoformat(),
+                    payload,
+                ),
+            )
+            conn.execute("COMMIT")
+            return thresholds
+        except Exception:
+            if conn.in_transaction:
+                conn.execute("ROLLBACK")
+            raise
         finally:
             conn.close()
 
@@ -306,6 +416,7 @@ class SQLiteStrategyPromotionPolicyRegistry:
         now: datetime,
     ) -> StrategyPromotionPolicy:
         _require_aware(now, "now")
+        self._require_same_runtime(trial_ledger)
         payload = _canonical_json(policy.to_dict())
         conn = self._runtime.connect()
         try:
@@ -323,35 +434,42 @@ class SQLiteStrategyPromotionPolicyRegistry:
                 conn.execute("COMMIT")
                 return existing
 
-            # BEGIN IMMEDIATE is intentionally acquired before checking the
-            # pre-HOLDOUT condition so a same-runtime HOLDOUT preregistration
-            # cannot race this policy freeze.
-            _validate_freeze_preconditions(
+            threshold_row = conn.execute(
+                """
+                SELECT * FROM strategy_promotion_threshold_policies
+                WHERE threshold_policy_id = ?
+                """,
+                (policy.threshold_policy_id,),
+            ).fetchone()
+            if threshold_row is None:
+                raise StrategyPromotionIntegrityError(
+                    "candidate policy requires preregistered threshold policy"
+                )
+            thresholds = _threshold_from_row(threshold_row)
+            _validate_candidate_matches_thresholds(
+                policy=policy,
+                thresholds=thresholds,
+            )
+            # Holding BEGIN IMMEDIATE on the same SQLite runtime prevents a
+            # HOLDOUT preregistration from racing the candidate binding.
+            _validate_candidate_freeze_preconditions(
                 policy=policy,
                 trial_ledger=trial_ledger,
                 tournament=tournament,
             )
-            other = conn.execute(
-                """
-                SELECT policy_id FROM strategy_promotion_policies
-                WHERE holdout_campaign_id = ?
-                """,
-                (policy.holdout_campaign_id,),
-            ).fetchone()
-            if other is not None:
-                raise StrategyPromotionConflict(
-                    f"HOLDOUT campaign already frozen by policy: {other['policy_id']}"
-                )
             conn.execute(
                 """
                 INSERT INTO strategy_promotion_policies(
-                    policy_id, policy_hash, development_campaign_id,
+                    policy_id, policy_hash, threshold_policy_id,
+                    threshold_policy_hash, development_campaign_id,
                     holdout_campaign_id, registered_at, policy_json
-                ) VALUES (?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     policy.policy_id,
                     policy.policy_hash,
+                    policy.threshold_policy_id,
+                    policy.threshold_policy_hash,
                     policy.development_campaign_id,
                     policy.holdout_campaign_id,
                     now.isoformat(),
@@ -367,6 +485,22 @@ class SQLiteStrategyPromotionPolicyRegistry:
         finally:
             conn.close()
 
+    def get_thresholds(
+        self, threshold_policy_id: str
+    ) -> StrategyPromotionThresholdPolicy | None:
+        conn = self._runtime.connect()
+        try:
+            row = conn.execute(
+                """
+                SELECT * FROM strategy_promotion_threshold_policies
+                WHERE threshold_policy_id = ?
+                """,
+                (threshold_policy_id,),
+            ).fetchone()
+            return _threshold_from_row(row) if row is not None else None
+        finally:
+            conn.close()
+
     def get(self, policy_id: str) -> StrategyPromotionPolicy | None:
         conn = self._runtime.connect()
         try:
@@ -378,36 +512,84 @@ class SQLiteStrategyPromotionPolicyRegistry:
         finally:
             conn.close()
 
-    def list_policies(self) -> tuple[StrategyPromotionPolicy, ...]:
+    def list_threshold_policies(
+        self,
+    ) -> tuple[StrategyPromotionThresholdPolicy, ...]:
         conn = self._runtime.connect()
         try:
             rows = conn.execute(
                 """
-                SELECT * FROM strategy_promotion_policies
-                ORDER BY registered_at, policy_id
+                SELECT * FROM strategy_promotion_threshold_policies
+                ORDER BY threshold_policy_id
                 """
+            ).fetchall()
+            return tuple(_threshold_from_row(row) for row in rows)
+        finally:
+            conn.close()
+
+    def list_policies(self) -> tuple[StrategyPromotionPolicy, ...]:
+        conn = self._runtime.connect()
+        try:
+            rows = conn.execute(
+                "SELECT * FROM strategy_promotion_policies ORDER BY policy_id"
             ).fetchall()
             return tuple(_policy_from_row(row) for row in rows)
         finally:
             conn.close()
 
+    def _require_same_runtime(self, trial_ledger: SQLiteTrialLedger) -> None:
+        ledger_runtime = getattr(trial_ledger, "_runtime", None)
+        if not isinstance(ledger_runtime, SQLiteRuntime):
+            raise StrategyPromotionIntegrityError(
+                "promotion governance requires a durable SQLiteTrialLedger"
+            )
+        if _resolved_path(ledger_runtime.path) != _resolved_path(self._runtime.path):
+            raise StrategyPromotionIntegrityError(
+                "promotion registry and trial ledger must share one authoritative SQLite runtime"
+            )
 
-def build_strategy_promotion_policy(
+
+def build_strategy_promotion_threshold_policy(
     *,
-    policy_id: str,
+    threshold_policy_id: str,
     development_campaign_id: str,
     holdout_campaign_id: str,
     holdout_trial_id: str,
-    trial_ledger: SQLiteTrialLedger,
-    tournament: TournamentEvidence,
     max_holm_adjusted_p: Decimal,
     min_holdout_net_return: Decimal,
     max_holdout_drawdown: Decimal,
     min_holdout_fills: int,
     min_execution_fill_ratio: Decimal,
     max_execution_adverse_slippage_bps: Decimal,
+) -> StrategyPromotionThresholdPolicy:
+    values = {
+        "threshold_policy_id": threshold_policy_id,
+        "development_campaign_id": development_campaign_id,
+        "holdout_campaign_id": holdout_campaign_id,
+        "holdout_trial_id": holdout_trial_id,
+        "max_holm_adjusted_p": max_holm_adjusted_p,
+        "min_holdout_net_return": min_holdout_net_return,
+        "max_holdout_drawdown": max_holdout_drawdown,
+        "min_holdout_fills": min_holdout_fills,
+        "min_execution_fill_ratio": min_execution_fill_ratio,
+        "max_execution_adverse_slippage_bps": max_execution_adverse_slippage_bps,
+        "external_execution_authorized": False,
+        "live_trading": "BLOCKED",
+    }
+    return StrategyPromotionThresholdPolicy(
+        **values,
+        threshold_policy_hash=_hash(_threshold_payload_from_values(values)),
+    )
+
+
+def build_strategy_promotion_policy(
+    *,
+    policy_id: str,
+    thresholds: StrategyPromotionThresholdPolicy,
+    trial_ledger: SQLiteTrialLedger,
+    tournament: TournamentEvidence,
 ) -> StrategyPromotionPolicy:
-    if tournament.campaign_id != development_campaign_id:
+    if tournament.campaign_id != thresholds.development_campaign_id:
         raise StrategyPromotionIntegrityError(
             "tournament belongs to another development campaign"
         )
@@ -415,7 +597,7 @@ def build_strategy_promotion_policy(
         raise StrategyPromotionIntegrityError(
             "promotion policy requires an eligible tournament winner"
         )
-    trial_ledger.require_complete_campaign(development_campaign_id)
+    trial_ledger.require_complete_campaign(thresholds.development_campaign_id)
     selected = trial_ledger.get_trial(tournament.winner_trial_id)
     if selected is None:
         raise StrategyPromotionIntegrityError(
@@ -449,32 +631,28 @@ def build_strategy_promotion_policy(
             "tournament winner identity does not match durable trial"
         )
 
-    holdout = trial_ledger.campaign_accounting(holdout_campaign_id)
-    if holdout.expected_trial_ids != (holdout_trial_id,):
+    holdout = trial_ledger.campaign_accounting(thresholds.holdout_campaign_id)
+    if holdout.expected_trial_ids != (thresholds.holdout_trial_id,):
         raise StrategyPromotionIntegrityError(
             "HOLDOUT campaign must freeze exactly one expected trial"
         )
     if holdout.preregistered_trial_ids:
         raise StrategyPromotionIntegrityError(
-            "promotion thresholds must be frozen before HOLDOUT trial preregistration"
+            "candidate binding must be frozen before HOLDOUT trial preregistration"
         )
 
     values = {
         "policy_id": policy_id,
-        "development_campaign_id": development_campaign_id,
-        "holdout_campaign_id": holdout_campaign_id,
-        "holdout_trial_id": holdout_trial_id,
+        "threshold_policy_id": thresholds.threshold_policy_id,
+        "threshold_policy_hash": thresholds.threshold_policy_hash,
+        "development_campaign_id": thresholds.development_campaign_id,
+        "holdout_campaign_id": thresholds.holdout_campaign_id,
+        "holdout_trial_id": thresholds.holdout_trial_id,
         "selected_trial_id": selected.spec.trial_id,
         "selected_trial_fingerprint": selected.spec.fingerprint,
         "selected_strategy_id": selected.spec.strategy_id,
         "selected_strategy_version": selected.spec.strategy_version,
         "tournament_fingerprint": tournament.fingerprint,
-        "max_holm_adjusted_p": max_holm_adjusted_p,
-        "min_holdout_net_return": min_holdout_net_return,
-        "max_holdout_drawdown": max_holdout_drawdown,
-        "min_holdout_fills": min_holdout_fills,
-        "min_execution_fill_ratio": min_execution_fill_ratio,
-        "max_execution_adverse_slippage_bps": max_execution_adverse_slippage_bps,
         "external_execution_authorized": False,
         "live_trading": "BLOCKED",
     }
@@ -499,13 +677,27 @@ def evaluate_strategy_promotion(
         raise StrategyPromotionIntegrityError(
             f"unknown frozen promotion policy: {policy_id}"
         )
+    thresholds = registry.get_thresholds(policy.threshold_policy_id)
+    if thresholds is None:
+        raise StrategyPromotionIntegrityError(
+            "frozen candidate lost its threshold policy"
+        )
+    _validate_candidate_matches_thresholds(
+        policy=policy,
+        thresholds=thresholds,
+    )
     gates = tuple(
         sorted(
             (
                 _development_gate(policy, trial_ledger, tournament),
-                _holm_gate(policy, holm),
-                _holdout_gate(policy, trial_ledger),
-                _execution_gate(policy, execution_report, execution_intent),
+                _holm_gate(policy, thresholds, holm),
+                _holdout_gate(policy, thresholds, trial_ledger),
+                _execution_gate(
+                    policy,
+                    thresholds,
+                    execution_report,
+                    execution_intent,
+                ),
             ),
             key=lambda item: item.gate_id,
         )
@@ -513,6 +705,7 @@ def evaluate_strategy_promotion(
     values = {
         "policy_id": policy.policy_id,
         "policy_hash": policy.policy_hash,
+        "threshold_policy_hash": thresholds.threshold_policy_hash,
         "selected_strategy_id": policy.selected_strategy_id,
         "selected_strategy_version": policy.selected_strategy_version,
         "gates": gates,
@@ -531,7 +724,30 @@ def evaluate_strategy_promotion(
     )
 
 
-def _validate_freeze_preconditions(
+def _validate_threshold_freeze_preconditions(
+    *,
+    thresholds: StrategyPromotionThresholdPolicy,
+    trial_ledger: SQLiteTrialLedger,
+) -> None:
+    development = trial_ledger.campaign_accounting(
+        thresholds.development_campaign_id
+    )
+    holdout = trial_ledger.campaign_accounting(thresholds.holdout_campaign_id)
+    if development.preregistered_trial_ids:
+        raise StrategyPromotionIntegrityError(
+            "promotion thresholds must be frozen before DEVELOPMENT preregistration"
+        )
+    if holdout.expected_trial_ids != (thresholds.holdout_trial_id,):
+        raise StrategyPromotionIntegrityError(
+            "HOLDOUT campaign must freeze exactly one expected trial"
+        )
+    if holdout.preregistered_trial_ids:
+        raise StrategyPromotionIntegrityError(
+            "promotion thresholds must be frozen before HOLDOUT preregistration"
+        )
+
+
+def _validate_candidate_freeze_preconditions(
     *,
     policy: StrategyPromotionPolicy,
     trial_ledger: SQLiteTrialLedger,
@@ -579,7 +795,24 @@ def _validate_freeze_preconditions(
         )
     if holdout.preregistered_trial_ids:
         raise StrategyPromotionIntegrityError(
-            "policy registration occurred after HOLDOUT preregistration"
+            "candidate policy registration occurred after HOLDOUT preregistration"
+        )
+
+
+def _validate_candidate_matches_thresholds(
+    *,
+    policy: StrategyPromotionPolicy,
+    thresholds: StrategyPromotionThresholdPolicy,
+) -> None:
+    if (
+        policy.threshold_policy_id != thresholds.threshold_policy_id
+        or policy.threshold_policy_hash != thresholds.threshold_policy_hash
+        or policy.development_campaign_id != thresholds.development_campaign_id
+        or policy.holdout_campaign_id != thresholds.holdout_campaign_id
+        or policy.holdout_trial_id != thresholds.holdout_trial_id
+    ):
+        raise StrategyPromotionIntegrityError(
+            "candidate policy does not match preregistered threshold policy"
         )
 
 
@@ -624,6 +857,7 @@ def _development_gate(
 
 def _holm_gate(
     policy: StrategyPromotionPolicy,
+    thresholds: StrategyPromotionThresholdPolicy,
     holm: HolmEvidence | None,
 ) -> PromotionGateEvidence:
     if holm is None:
@@ -663,7 +897,7 @@ def _holm_gate(
     reasons: list[str] = []
     if policy.selected_trial_id in holm.failed_trial_ids:
         reasons.append("SELECTED_TRIAL_FAILED_IN_FAMILY")
-    if adjusted > policy.max_holm_adjusted_p:
+    if adjusted > thresholds.max_holm_adjusted_p:
         reasons.append("HOLM_ADJUSTED_P_ABOVE_POLICY")
     return _gate(
         "MULTIPLE_TESTING",
@@ -675,6 +909,7 @@ def _holm_gate(
 
 def _holdout_gate(
     policy: StrategyPromotionPolicy,
+    thresholds: StrategyPromotionThresholdPolicy,
     trial_ledger: SQLiteTrialLedger,
 ) -> PromotionGateEvidence:
     accounting = trial_ledger.campaign_accounting(policy.holdout_campaign_id)
@@ -715,11 +950,11 @@ def _holdout_gate(
     net_return = _metric_decimal(record, "net_return")
     max_drawdown = _metric_decimal(record, "max_drawdown")
     fills = _metric_int(record, "fills")
-    if net_return < policy.min_holdout_net_return:
+    if net_return < thresholds.min_holdout_net_return:
         reasons.append("HOLDOUT_NET_RETURN_BELOW_POLICY")
-    if max_drawdown > policy.max_holdout_drawdown:
+    if max_drawdown > thresholds.max_holdout_drawdown:
         reasons.append("HOLDOUT_DRAWDOWN_ABOVE_POLICY")
-    if fills < policy.min_holdout_fills:
+    if fills < thresholds.min_holdout_fills:
         reasons.append("HOLDOUT_FILLS_BELOW_POLICY")
     return _gate(
         "FINAL_HOLDOUT",
@@ -731,6 +966,7 @@ def _holdout_gate(
 
 def _execution_gate(
     policy: StrategyPromotionPolicy,
+    thresholds: StrategyPromotionThresholdPolicy,
     report: PaperExecutionSensitivityReport | None,
     intent: OrderIntent | None,
 ) -> PromotionGateEvidence:
@@ -762,13 +998,13 @@ def _execution_gate(
         reasons.append("EXECUTION_BROKER_REJECTION_PRESENT")
     if report.minimum_fill_ratio is None:
         reasons.append("EXECUTION_FILL_RATIO_MISSING")
-    elif report.minimum_fill_ratio < policy.min_execution_fill_ratio:
+    elif report.minimum_fill_ratio < thresholds.min_execution_fill_ratio:
         reasons.append("EXECUTION_FILL_RATIO_BELOW_POLICY")
     if report.maximum_adverse_slippage_bps is None:
         reasons.append("EXECUTION_SLIPPAGE_MISSING")
     elif (
         report.maximum_adverse_slippage_bps
-        > policy.max_execution_adverse_slippage_bps
+        > thresholds.max_execution_adverse_slippage_bps
     ):
         reasons.append("EXECUTION_SLIPPAGE_ABOVE_POLICY")
     return _gate(
@@ -870,9 +1106,6 @@ def _assessment_state(
     gates: tuple[PromotionGateEvidence, ...],
 ) -> PromotionAssessmentState:
     statuses = {item.status for item in gates}
-    # Integrity ambiguity must dominate statistical failure. A BLOCKED view
-    # cannot safely be described as merely rejected because some evidence is
-    # untrustworthy or identity-inconsistent.
     if PromotionGateStatus.BLOCKED in statuses:
         return PromotionAssessmentState.BLOCKED
     if PromotionGateStatus.FAIL in statuses:
@@ -882,22 +1115,17 @@ def _assessment_state(
     return PromotionAssessmentState.EVIDENCE_QUALIFIED
 
 
-def _policy_payload(
-    value: StrategyPromotionPolicy,
+def _threshold_payload(
+    value: StrategyPromotionThresholdPolicy,
     *,
     include_hash: bool,
 ) -> dict[str, object]:
-    payload = _policy_payload_from_values(
+    payload = _threshold_payload_from_values(
         {
-            "policy_id": value.policy_id,
+            "threshold_policy_id": value.threshold_policy_id,
             "development_campaign_id": value.development_campaign_id,
             "holdout_campaign_id": value.holdout_campaign_id,
             "holdout_trial_id": value.holdout_trial_id,
-            "selected_trial_id": value.selected_trial_id,
-            "selected_trial_fingerprint": value.selected_trial_fingerprint,
-            "selected_strategy_id": value.selected_strategy_id,
-            "selected_strategy_version": value.selected_strategy_version,
-            "tournament_fingerprint": value.tournament_fingerprint,
             "max_holm_adjusted_p": value.max_holm_adjusted_p,
             "min_holdout_net_return": value.min_holdout_net_return,
             "max_holdout_drawdown": value.max_holdout_drawdown,
@@ -909,11 +1137,11 @@ def _policy_payload(
         }
     )
     if include_hash:
-        payload["policy_hash"] = value.policy_hash
+        payload["threshold_policy_hash"] = value.threshold_policy_hash
     return payload
 
 
-def _policy_payload_from_values(values: dict[str, object]) -> dict[str, object]:
+def _threshold_payload_from_values(values: dict[str, object]) -> dict[str, object]:
     payload = dict(values)
     for key in (
         "max_holm_adjusted_p",
@@ -926,19 +1154,45 @@ def _policy_payload_from_values(values: dict[str, object]) -> dict[str, object]:
     return payload
 
 
-def _policy_from_json(raw: str) -> StrategyPromotionPolicy:
+def _policy_payload(
+    value: StrategyPromotionPolicy,
+    *,
+    include_hash: bool,
+) -> dict[str, object]:
+    payload = _policy_payload_from_values(
+        {
+            "policy_id": value.policy_id,
+            "threshold_policy_id": value.threshold_policy_id,
+            "threshold_policy_hash": value.threshold_policy_hash,
+            "development_campaign_id": value.development_campaign_id,
+            "holdout_campaign_id": value.holdout_campaign_id,
+            "holdout_trial_id": value.holdout_trial_id,
+            "selected_trial_id": value.selected_trial_id,
+            "selected_trial_fingerprint": value.selected_trial_fingerprint,
+            "selected_strategy_id": value.selected_strategy_id,
+            "selected_strategy_version": value.selected_strategy_version,
+            "tournament_fingerprint": value.tournament_fingerprint,
+            "external_execution_authorized": value.external_execution_authorized,
+            "live_trading": value.live_trading,
+        }
+    )
+    if include_hash:
+        payload["policy_hash"] = value.policy_hash
+    return payload
+
+
+def _policy_payload_from_values(values: dict[str, object]) -> dict[str, object]:
+    return dict(values)
+
+
+def _threshold_from_json(raw: str) -> StrategyPromotionThresholdPolicy:
     try:
         value = json.loads(raw)
-        return StrategyPromotionPolicy(
-            policy_id=value["policy_id"],
+        return StrategyPromotionThresholdPolicy(
+            threshold_policy_id=value["threshold_policy_id"],
             development_campaign_id=value["development_campaign_id"],
             holdout_campaign_id=value["holdout_campaign_id"],
             holdout_trial_id=value["holdout_trial_id"],
-            selected_trial_id=value["selected_trial_id"],
-            selected_trial_fingerprint=value["selected_trial_fingerprint"],
-            selected_strategy_id=value["selected_strategy_id"],
-            selected_strategy_version=value["selected_strategy_version"],
-            tournament_fingerprint=value["tournament_fingerprint"],
             max_holm_adjusted_p=Decimal(value["max_holm_adjusted_p"]),
             min_holdout_net_return=Decimal(value["min_holdout_net_return"]),
             max_holdout_drawdown=Decimal(value["max_holdout_drawdown"]),
@@ -949,6 +1203,31 @@ def _policy_from_json(raw: str) -> StrategyPromotionPolicy:
             ),
             external_execution_authorized=value["external_execution_authorized"],
             live_trading=value["live_trading"],
+            threshold_policy_hash=value["threshold_policy_hash"],
+        )
+    except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise StrategyPromotionIntegrityError(
+            "persisted promotion threshold policy JSON is invalid"
+        ) from exc
+
+
+def _policy_from_json(raw: str) -> StrategyPromotionPolicy:
+    try:
+        value = json.loads(raw)
+        return StrategyPromotionPolicy(
+            policy_id=value["policy_id"],
+            threshold_policy_id=value["threshold_policy_id"],
+            threshold_policy_hash=value["threshold_policy_hash"],
+            development_campaign_id=value["development_campaign_id"],
+            holdout_campaign_id=value["holdout_campaign_id"],
+            holdout_trial_id=value["holdout_trial_id"],
+            selected_trial_id=value["selected_trial_id"],
+            selected_trial_fingerprint=value["selected_trial_fingerprint"],
+            selected_strategy_id=value["selected_strategy_id"],
+            selected_strategy_version=value["selected_strategy_version"],
+            tournament_fingerprint=value["tournament_fingerprint"],
+            external_execution_authorized=value["external_execution_authorized"],
+            live_trading=value["live_trading"],
             policy_hash=value["policy_hash"],
         )
     except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
@@ -957,26 +1236,48 @@ def _policy_from_json(raw: str) -> StrategyPromotionPolicy:
         ) from exc
 
 
+def _threshold_from_row(row) -> StrategyPromotionThresholdPolicy:
+    thresholds = _threshold_from_json(row["policy_json"])
+    if (
+        row["threshold_policy_id"] != thresholds.threshold_policy_id
+        or row["threshold_policy_hash"] != thresholds.threshold_policy_hash
+        or row["development_campaign_id"] != thresholds.development_campaign_id
+        or row["holdout_campaign_id"] != thresholds.holdout_campaign_id
+        or row["policy_json"] != _canonical_json(thresholds.to_dict())
+    ):
+        raise StrategyPromotionIntegrityError(
+            "persisted threshold row does not match hash-bound policy JSON"
+        )
+    _validate_registered_at(row["registered_at"], label="threshold")
+    return thresholds
+
+
 def _policy_from_row(row) -> StrategyPromotionPolicy:
     policy = _policy_from_json(row["policy_json"])
     if (
         row["policy_id"] != policy.policy_id
         or row["policy_hash"] != policy.policy_hash
+        or row["threshold_policy_id"] != policy.threshold_policy_id
+        or row["threshold_policy_hash"] != policy.threshold_policy_hash
         or row["development_campaign_id"] != policy.development_campaign_id
         or row["holdout_campaign_id"] != policy.holdout_campaign_id
         or row["policy_json"] != _canonical_json(policy.to_dict())
     ):
         raise StrategyPromotionIntegrityError(
-            "persisted promotion policy row does not match hash-bound policy JSON"
+            "persisted candidate row does not match hash-bound policy JSON"
         )
+    _validate_registered_at(row["registered_at"], label="candidate")
+    return policy
+
+
+def _validate_registered_at(raw: object, *, label: str) -> None:
     try:
-        registered_at = datetime.fromisoformat(row["registered_at"])
+        value = datetime.fromisoformat(raw)  # type: ignore[arg-type]
     except (TypeError, ValueError) as exc:
         raise StrategyPromotionIntegrityError(
-            "persisted promotion registered_at is invalid"
+            f"persisted {label} registered_at is invalid"
         ) from exc
-    _require_aware(registered_at, "persisted promotion registered_at")
-    return policy
+    _require_aware(value, f"persisted {label} registered_at")
 
 
 def _view_payload(
@@ -988,6 +1289,7 @@ def _view_payload(
         {
             "policy_id": value.policy_id,
             "policy_hash": value.policy_hash,
+            "threshold_policy_hash": value.threshold_policy_hash,
             "selected_strategy_id": value.selected_strategy_id,
             "selected_strategy_version": value.selected_strategy_version,
             "gates": value.gates,
@@ -1021,7 +1323,14 @@ def _decimal(value: Decimal) -> str:
     return text or "0"
 
 
-def _require_hash(value: str, label: str) -> None:
+def _require_id(value: object, label: str) -> None:
+    if not isinstance(value, str) or not _ID_RE.fullmatch(value):
+        raise StrategyPromotionIntegrityError(
+            f"{label} must be a canonical identifier"
+        )
+
+
+def _require_hash(value: object, label: str) -> None:
     if not isinstance(value, str) or not _HASH_RE.fullmatch(value):
         raise StrategyPromotionIntegrityError(f"{label} must be lowercase sha256")
 
@@ -1035,6 +1344,17 @@ def _require_aware(value: datetime, label: str) -> None:
         raise StrategyPromotionIntegrityError(
             f"{label} must be timezone-aware datetime"
         )
+
+
+def _require_no_authority(*, external: bool, live: str, label: str) -> None:
+    if external is not False or live != "BLOCKED":
+        raise StrategyPromotionIntegrityError(
+            f"{label} may not grant PAPER/LIVE authority"
+        )
+
+
+def _resolved_path(raw: str) -> str:
+    return str(Path(raw).expanduser().resolve())
 
 
 def _canonical_json(value: object) -> str:
@@ -1062,6 +1382,8 @@ __all__ = [
     "StrategyPromotionEvidenceView",
     "StrategyPromotionIntegrityError",
     "StrategyPromotionPolicy",
+    "StrategyPromotionThresholdPolicy",
     "build_strategy_promotion_policy",
+    "build_strategy_promotion_threshold_policy",
     "evaluate_strategy_promotion",
 ]
