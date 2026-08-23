@@ -16,6 +16,11 @@ from autotrade.strategy_lab_promotion import (
     StrategyPromotionPolicy,
     StrategyPromotionThresholdPolicy,
 )
+from autotrade.strategy_promotion_assessment_read_model import (
+    PromotionAssessmentReadError,
+    PromotionAssessmentReadModel,
+    PromotionAssessmentReadSnapshot,
+)
 
 
 _HASH_RE = re.compile(r"^[0-9a-f]{64}$")
@@ -113,6 +118,7 @@ class StrategyLabPromotionReadSnapshot:
     external_execution_authorized: bool
     capital_authority: str
     live_trading: str
+    promotion_assessments: PromotionAssessmentReadSnapshot
     observed_at: datetime
     provenance_hash: str
 
@@ -130,7 +136,7 @@ class StrategyLabPromotionReadSnapshot:
         if self.required_gate_ids != REQUIRED_W79_GATE_IDS:
             raise StrategyLabReadModelIntegrityError("Strategy Lab gate set is not canonical W79")
         if self.gate_evidence_state != "NOT_PERSISTED_BY_W79":
-            raise StrategyLabReadModelIntegrityError("read model may not synthesize gate evidence")
+            raise StrategyLabReadModelIntegrityError("read model may not synthesize W79 gate evidence")
         if self.promotion_blockers != tuple(sorted(PERMANENT_W79_PROMOTION_BLOCKERS)):
             raise StrategyLabReadModelIntegrityError("promotion blocker set is not canonical W79")
         if self.paper_candidate_authorized is not False:
@@ -139,6 +145,10 @@ class StrategyLabPromotionReadSnapshot:
             raise StrategyLabReadModelIntegrityError("read model may not authorize execution")
         if self.capital_authority != "NONE" or self.live_trading != "BLOCKED":
             raise StrategyLabReadModelIntegrityError("read model may not grant capital/LIVE authority")
+        if not isinstance(self.promotion_assessments, PromotionAssessmentReadSnapshot):
+            raise StrategyLabReadModelIntegrityError("W80 assessment projection is not canonical")
+        if self.promotion_assessments.to_dict()["paper_candidate_authorized"] is not False:
+            raise StrategyLabReadModelIntegrityError("W80 assessment projection may not authorize PAPER")
         _require_aware(self.observed_at, "observed_at")
         _require_hash(self.provenance_hash, "provenance_hash")
         if self.provenance_hash != _hash(self._provenance_payload()):
@@ -164,6 +174,7 @@ class StrategyLabPromotionReadSnapshot:
             {
                 "threshold_count": len(self.thresholds),
                 "candidate_count": len(self.candidates),
+                "promotion_assessments": self.promotion_assessments.to_dict(),
                 "observed_at": self.observed_at.astimezone(timezone.utc).isoformat(),
                 "provenance_hash": self.provenance_hash,
                 "broker_network_used": False,
@@ -175,11 +186,13 @@ class StrategyLabPromotionReadSnapshot:
 
 
 class StrategyLabPromotionReadModel:
-    """Immutable projection of W79 governance from core.sqlite3.
+    """Immutable projection of W79 governance plus independent W80 evidence.
 
-    This reader never instantiates SQLiteRuntime or SQLiteTrialLedger. It opens
-    an already-existing database with mode=ro and query_only=ON and exposes no
-    mutation, broker, OMS, Safety, credential, OrderIntent or execution surface.
+    W79 governance remains a distinct provenance domain and keeps
+    gate_evidence_state=NOT_PERSISTED_BY_W79. W80 durable assessments are
+    attached as a separately hash-bound read-only projection. Neither reader
+    instantiates SQLiteRuntime/SQLiteTrialLedger or exposes broker, OMS, Safety,
+    credential, OrderIntent or execution authority.
     """
 
     def __init__(self, core_db_path: str | Path) -> None:
@@ -268,6 +281,12 @@ class StrategyLabPromotionReadModel:
             if thresholds
             else "NO_GOVERNANCE_DATA"
         )
+        try:
+            assessment_snapshot = PromotionAssessmentReadModel(self._path).snapshot(now=observed_at)
+        except PromotionAssessmentReadError as exc:
+            raise StrategyLabReadModelIntegrityError(
+                "durable W80 assessment evidence failed independent verification"
+            ) from exc
         values = {
             "governance_state": state,
             "thresholds": thresholds,
@@ -282,6 +301,7 @@ class StrategyLabPromotionReadModel:
         }
         return StrategyLabPromotionReadSnapshot(
             **values,
+            promotion_assessments=assessment_snapshot,
             observed_at=observed_at,
             provenance_hash=_hash(_snapshot_payload(values)),
         )
