@@ -37,6 +37,22 @@ def _scenario(
     )
 
 
+def _run(*, scenario, limits, market, empty_portfolio, intent):
+    broker = scenario.build_broker()
+    ledger = InMemoryEventLedger()
+    result = TradingPipeline(
+        safety=CapitalSafetyKernel(limits, ledger),
+        oms=OrderManagementSystem(broker=broker, ledger=ledger),
+    ).process_intent(
+        intent=intent,
+        market=market,
+        portfolio=empty_portfolio,
+        now=market.observed_at,
+    )
+    assert result.order is not None
+    return result.order
+
+
 def test_scenario_hash_is_reproducible_and_changes_with_assumption():
     first = _scenario(scenario_id="baseline", slippage_bps="2", fill_fraction="1")
     replay = _scenario(scenario_id="baseline", slippage_bps="2", fill_fraction="1")
@@ -89,24 +105,18 @@ def test_partial_fill_evidence_binds_scenario_intent_market_and_execution(
     market_buy_intent,
 ):
     scenario = _scenario(scenario_id="partial", slippage_bps="2", fill_fraction="0.4")
-    broker = scenario.build_broker()
-    ledger = InMemoryEventLedger()
-    safety = CapitalSafetyKernel(limits, ledger)
-    oms = OrderManagementSystem(broker=broker, ledger=ledger)
-    pipeline = TradingPipeline(safety=safety, oms=oms)
-
-    result = pipeline.process_intent(
-        intent=market_buy_intent,
+    order = _run(
+        scenario=scenario,
+        limits=limits,
         market=market,
-        portfolio=empty_portfolio,
-        now=market.observed_at,
+        empty_portfolio=empty_portfolio,
+        intent=market_buy_intent,
     )
-    assert result.order is not None
-    assert result.order.status is OrderStatus.PARTIALLY_FILLED
+    assert order.status is OrderStatus.PARTIALLY_FILLED
 
     evidence = capture_paper_execution_evidence(
         scenario=scenario,
-        order=result.order,
+        order=order,
         market=market,
         captured_at=market.observed_at,
     )
@@ -117,7 +127,7 @@ def test_partial_fill_evidence_binds_scenario_intent_market_and_execution(
     assert evidence.fill_ratio == Decimal("0.4")
     assert evidence.reference_touch == Decimal("101")
     assert evidence.average_fill_price == Decimal("101.0202")
-    assert evidence.adverse_slippage_bps == Decimal("2.0000")
+    assert evidence.adverse_slippage_bps == Decimal("2")
     assert evidence.order_status == OrderStatus.PARTIALLY_FILLED.value
 
 
@@ -133,25 +143,19 @@ def test_zero_fill_limit_evidence_does_not_invent_price_or_slippage(
         order_type=OrderType.LIMIT,
         limit_price=Decimal("101.05"),
     )
-    broker = scenario.build_broker()
-    ledger = InMemoryEventLedger()
-    safety = CapitalSafetyKernel(limits, ledger)
-    oms = OrderManagementSystem(broker=broker, ledger=ledger)
-    pipeline = TradingPipeline(safety=safety, oms=oms)
-
-    result = pipeline.process_intent(
-        intent=intent,
+    order = _run(
+        scenario=scenario,
+        limits=limits,
         market=market,
-        portfolio=empty_portfolio,
-        now=market.observed_at,
+        empty_portfolio=empty_portfolio,
+        intent=intent,
     )
-    assert result.order is not None
-    assert result.order.status is OrderStatus.SUBMITTED
-    assert result.order.filled_quantity == Decimal("0")
+    assert order.status is OrderStatus.SUBMITTED
+    assert order.filled_quantity == Decimal("0")
 
     evidence = capture_paper_execution_evidence(
         scenario=scenario,
-        order=result.order,
+        order=order,
         market=market,
         captured_at=market.observed_at,
     )
@@ -167,27 +171,72 @@ def test_execution_evidence_hash_detects_tampering(
     market_buy_intent,
 ):
     scenario = _scenario(scenario_id="baseline", slippage_bps="2", fill_fraction="1")
-    broker = scenario.build_broker()
-    ledger = InMemoryEventLedger()
-    result = TradingPipeline(
-        safety=CapitalSafetyKernel(limits, ledger),
-        oms=OrderManagementSystem(broker=broker, ledger=ledger),
-    ).process_intent(
-        intent=market_buy_intent,
+    order = _run(
+        scenario=scenario,
+        limits=limits,
         market=market,
-        portfolio=empty_portfolio,
-        now=market.observed_at,
+        empty_portfolio=empty_portfolio,
+        intent=market_buy_intent,
     )
-    assert result.order is not None
     evidence = capture_paper_execution_evidence(
         scenario=scenario,
-        order=result.order,
+        order=order,
         market=market,
         captured_at=market.observed_at,
     )
 
     with pytest.raises(PaperExecutionEvidenceError, match="hash mismatch"):
-        replace(evidence, fill_ratio=Decimal("0.5"))
+        replace(evidence, scenario_id="tampered")
+
+
+def test_execution_evidence_rejects_semantically_impossible_status(
+    limits,
+    market,
+    empty_portfolio,
+    market_buy_intent,
+):
+    scenario = _scenario(scenario_id="partial", slippage_bps="2", fill_fraction="0.4")
+    order = _run(
+        scenario=scenario,
+        limits=limits,
+        market=market,
+        empty_portfolio=empty_portfolio,
+        intent=market_buy_intent,
+    )
+    evidence = capture_paper_execution_evidence(
+        scenario=scenario,
+        order=order,
+        market=market,
+        captured_at=market.observed_at,
+    )
+
+    with pytest.raises(PaperExecutionEvidenceError, match="FILLED evidence"):
+        replace(evidence, order_status=OrderStatus.FILLED.value)
+
+
+def test_unknown_state_cannot_be_misrepresented_as_qualification_evidence(
+    limits,
+    market,
+    empty_portfolio,
+    market_buy_intent,
+):
+    scenario = _scenario(scenario_id="baseline", slippage_bps="2", fill_fraction="1")
+    order = _run(
+        scenario=scenario,
+        limits=limits,
+        market=market,
+        empty_portfolio=empty_portfolio,
+        intent=market_buy_intent,
+    )
+    unknown = replace(order, status=OrderStatus.UNKNOWN)
+
+    with pytest.raises(PaperExecutionEvidenceError, match="UNKNOWN execution requires reconciliation"):
+        capture_paper_execution_evidence(
+            scenario=scenario,
+            order=unknown,
+            market=market,
+            captured_at=market.observed_at,
+        )
 
 
 def test_execution_evidence_rejects_symbol_mismatch(
@@ -197,24 +246,19 @@ def test_execution_evidence_rejects_symbol_mismatch(
     market_buy_intent,
 ):
     scenario = _scenario(scenario_id="baseline", slippage_bps="2", fill_fraction="1")
-    broker = scenario.build_broker()
-    ledger = InMemoryEventLedger()
-    result = TradingPipeline(
-        safety=CapitalSafetyKernel(limits, ledger),
-        oms=OrderManagementSystem(broker=broker, ledger=ledger),
-    ).process_intent(
-        intent=market_buy_intent,
+    order = _run(
+        scenario=scenario,
+        limits=limits,
         market=market,
-        portfolio=empty_portfolio,
-        now=market.observed_at,
+        empty_portfolio=empty_portfolio,
+        intent=market_buy_intent,
     )
-    assert result.order is not None
     wrong_market = replace(market, symbol="OTHER-USD")
 
     with pytest.raises(PaperExecutionEvidenceError, match="symbol mismatch"):
         capture_paper_execution_evidence(
             scenario=scenario,
-            order=result.order,
+            order=order,
             market=wrong_market,
             captured_at=market.observed_at,
         )
