@@ -1,5 +1,5 @@
 from dataclasses import replace
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 import pytest
@@ -130,21 +130,19 @@ def _assessment(*, measurement_hash: str, execution_status=promotion.PromotionGa
         view=view,
         ordinal=1,
         previous_assessment_hash=ZERO_ASSESSMENT_HASH,
-        assessed_at=view.gates[0].evidence_hashes and __import__("datetime").datetime(2026, 8, 23, 18, 0, tzinfo=__import__("datetime").timezone.utc),
+        assessed_at=datetime(2026, 8, 23, 18, 0, tzinfo=timezone.utc),
     )
 
 
+def _resolved_at(assessment):
+    return assessment.assessed_at + timedelta(seconds=1)
+
+
 def test_resolution_removes_only_continuity_blocker_for_exact_w80_candidate(
-    limits,
-    market,
-    empty_portfolio,
-    market_buy_intent,
+    limits, market, empty_portfolio, market_buy_intent
 ):
     report, continuity = _continuity(
-        limits=limits,
-        market=market,
-        empty_portfolio=empty_portfolio,
-        intent=market_buy_intent,
+        limits=limits, market=market, empty_portfolio=empty_portfolio, intent=market_buy_intent
     )
     assessment = _assessment(measurement_hash=report.measurement_report_hash)
 
@@ -153,11 +151,13 @@ def test_resolution_removes_only_continuity_blocker_for_exact_w80_candidate(
         assessment=assessment,
         continuity=continuity,
         execution_intent=market_buy_intent,
-        resolved_at=market.observed_at,
+        resolved_at=_resolved_at(assessment),
     )
 
     assert resolution.status is PromotionCostContinuityStatus.PASS
     assert resolution.reason_codes == ()
+    assert resolution.promotion_assessed_at == assessment.assessed_at
+    assert resolution.continuity_assessed_at == continuity.assessed_at
     assert resolution.resolved_promotion_blockers == ("TOTAL_EXECUTION_COST_CONTINUITY_UNPROVEN",)
     assert "TOTAL_EXECUTION_COST_CONTINUITY_UNPROVEN" not in resolution.remaining_promotion_blockers
     assert "FEE_ACCOUNTING_INCOMPLETE" in resolution.remaining_promotion_blockers
@@ -171,16 +171,10 @@ def test_resolution_removes_only_continuity_blocker_for_exact_w80_candidate(
 
 
 def test_resolution_blocks_if_w81_measurement_is_not_in_w80_execution_gate(
-    limits,
-    market,
-    empty_portfolio,
-    market_buy_intent,
+    limits, market, empty_portfolio, market_buy_intent
 ):
     _, continuity = _continuity(
-        limits=limits,
-        market=market,
-        empty_portfolio=empty_portfolio,
-        intent=market_buy_intent,
+        limits=limits, market=market, empty_portfolio=empty_portfolio, intent=market_buy_intent
     )
     assessment = _assessment(measurement_hash="e" * 64)
 
@@ -189,7 +183,7 @@ def test_resolution_blocks_if_w81_measurement_is_not_in_w80_execution_gate(
         assessment=assessment,
         continuity=continuity,
         execution_intent=market_buy_intent,
-        resolved_at=market.observed_at,
+        resolved_at=_resolved_at(assessment),
     )
 
     assert resolution.status is PromotionCostContinuityStatus.BLOCKED
@@ -199,16 +193,10 @@ def test_resolution_blocks_if_w81_measurement_is_not_in_w80_execution_gate(
 
 
 def test_resolution_blocks_if_w80_execution_gate_is_not_pass(
-    limits,
-    market,
-    empty_portfolio,
-    market_buy_intent,
+    limits, market, empty_portfolio, market_buy_intent
 ):
     report, continuity = _continuity(
-        limits=limits,
-        market=market,
-        empty_portfolio=empty_portfolio,
-        intent=market_buy_intent,
+        limits=limits, market=market, empty_portfolio=empty_portfolio, intent=market_buy_intent
     )
     assessment = _assessment(
         measurement_hash=report.measurement_report_hash,
@@ -220,7 +208,7 @@ def test_resolution_blocks_if_w80_execution_gate_is_not_pass(
         assessment=assessment,
         continuity=continuity,
         execution_intent=market_buy_intent,
-        resolved_at=market.observed_at,
+        resolved_at=_resolved_at(assessment),
     )
 
     assert resolution.status is PromotionCostContinuityStatus.BLOCKED
@@ -229,17 +217,9 @@ def test_resolution_blocks_if_w80_execution_gate_is_not_pass(
 
 
 def test_resolution_blocks_when_scientific_continuity_itself_is_not_proven(
-    limits,
-    market,
-    empty_portfolio,
-    market_buy_intent,
+    limits, market, empty_portfolio, market_buy_intent
 ):
-    tight = replace(
-        market,
-        bid=Decimal("99.99"),
-        ask=Decimal("100.01"),
-        last=Decimal("100"),
-    )
+    tight = replace(market, bid=Decimal("99.99"), ask=Decimal("100.01"), last=Decimal("100"))
     report, continuity = _continuity(
         limits=limits,
         market=tight,
@@ -254,7 +234,7 @@ def test_resolution_blocks_when_scientific_continuity_itself_is_not_proven(
         assessment=assessment,
         continuity=continuity,
         execution_intent=market_buy_intent,
-        resolved_at=tight.observed_at,
+        resolved_at=_resolved_at(assessment),
     )
 
     assert resolution.status is PromotionCostContinuityStatus.BLOCKED
@@ -263,18 +243,13 @@ def test_resolution_blocks_when_scientific_continuity_itself_is_not_proven(
 
 
 def test_resolution_rejects_strategy_or_intent_drift(
-    limits,
-    market,
-    empty_portfolio,
-    market_buy_intent,
+    limits, market, empty_portfolio, market_buy_intent
 ):
     report, continuity = _continuity(
-        limits=limits,
-        market=market,
-        empty_portfolio=empty_portfolio,
-        intent=market_buy_intent,
+        limits=limits, market=market, empty_portfolio=empty_portfolio, intent=market_buy_intent
     )
     assessment = _assessment(measurement_hash=report.measurement_report_hash)
+    resolved_at = _resolved_at(assessment)
 
     drifted = replace(market_buy_intent, idempotency_key="drift")
     with pytest.raises(PromotionCostContinuityIntegrityError, match="fingerprint mismatch"):
@@ -283,7 +258,7 @@ def test_resolution_rejects_strategy_or_intent_drift(
             assessment=assessment,
             continuity=continuity,
             execution_intent=drifted,
-            resolved_at=market.observed_at,
+            resolved_at=resolved_at,
         )
 
     other_strategy = replace(
@@ -292,10 +267,7 @@ def test_resolution_rejects_strategy_or_intent_drift(
         idempotency_key="strategy-other-idem",
     )
     _, other_continuity = _continuity(
-        limits=limits,
-        market=market,
-        empty_portfolio=empty_portfolio,
-        intent=other_strategy,
+        limits=limits, market=market, empty_portfolio=empty_portfolio, intent=other_strategy
     )
     with pytest.raises(PromotionCostContinuityIntegrityError, match="frozen W80 candidate"):
         resolve_promotion_cost_continuity(
@@ -303,21 +275,33 @@ def test_resolution_rejects_strategy_or_intent_drift(
             assessment=assessment,
             continuity=other_continuity,
             execution_intent=other_strategy,
-            resolved_at=market.observed_at,
+            resolved_at=resolved_at,
+        )
+
+
+def test_resolution_rejects_temporal_regression(
+    limits, market, empty_portfolio, market_buy_intent
+):
+    report, continuity = _continuity(
+        limits=limits, market=market, empty_portfolio=empty_portfolio, intent=market_buy_intent
+    )
+    assessment = _assessment(measurement_hash=report.measurement_report_hash)
+
+    with pytest.raises(PromotionCostContinuityIntegrityError, match="predate W80"):
+        resolve_promotion_cost_continuity(
+            resolution_id="w81-resolution-time-regression",
+            assessment=assessment,
+            continuity=continuity,
+            execution_intent=market_buy_intent,
+            resolved_at=assessment.assessed_at - timedelta(microseconds=1),
         )
 
 
 def test_resolution_hash_is_reproducible_and_cannot_be_mutated_into_authority(
-    limits,
-    market,
-    empty_portfolio,
-    market_buy_intent,
+    limits, market, empty_portfolio, market_buy_intent
 ):
     report, continuity = _continuity(
-        limits=limits,
-        market=market,
-        empty_portfolio=empty_portfolio,
-        intent=market_buy_intent,
+        limits=limits, market=market, empty_portfolio=empty_portfolio, intent=market_buy_intent
     )
     assessment = _assessment(measurement_hash=report.measurement_report_hash)
     kwargs = dict(
@@ -325,7 +309,7 @@ def test_resolution_hash_is_reproducible_and_cannot_be_mutated_into_authority(
         assessment=assessment,
         continuity=continuity,
         execution_intent=market_buy_intent,
-        resolved_at=market.observed_at,
+        resolved_at=_resolved_at(assessment),
     )
     first = resolve_promotion_cost_continuity(**kwargs)
     second = resolve_promotion_cost_continuity(**kwargs)
