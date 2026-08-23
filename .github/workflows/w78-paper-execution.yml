@@ -30,12 +30,14 @@ jobs:
           tests/test_w78_paper_execution.py
           tests/test_w78_paper_execution_scenarios.py
           tests/test_w78_paper_execution_qualification.py
+          tests/test_w78_paper_execution_durable.py
           scripts/check_w78_paper_execution_boundary.py
       - name: W78 no-network authority boundary
         run: python scripts/check_w78_paper_execution_boundary.py
-      - name: W78 execution model, evidence and qualification tests
+      - name: W78 execution model, evidence, qualification and durable integration tests
         run: >-
           pytest -q
           tests/test_w78_paper_execution.py
           tests/test_w78_paper_execution_scenarios.py
           tests/test_w78_paper_execution_qualification.py
+          tests/test_w78_paper_execution_durable.py
