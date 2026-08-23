@@ -10,6 +10,7 @@ import re
 from autotrade.domain import (
     MarketSnapshot,
     OrderRecord,
+    OrderStatus,
     Side,
     intent_fingerprint,
     market_fingerprint,
@@ -62,6 +63,11 @@ class PaperExecutionEvidence:
             raise PaperExecutionEvidenceError("order_id is required")
         if self.side not in {Side.BUY.value, Side.SELL.value}:
             raise PaperExecutionEvidenceError("side is invalid")
+        try:
+            status = OrderStatus(self.order_status)
+        except (TypeError, ValueError) as exc:
+            raise PaperExecutionEvidenceError("order_status is invalid") from exc
+
         for label, value in (
             ("requested_quantity", self.requested_quantity),
             ("filled_quantity", self.filled_quantity),
@@ -78,6 +84,8 @@ class PaperExecutionEvidence:
             raise PaperExecutionEvidenceError("fill_ratio mismatch")
         if self.fill_ratio < 0 or self.fill_ratio > 1:
             raise PaperExecutionEvidenceError("fill_ratio must be within [0,1]")
+        _validate_status_fill_consistency(status=status, fill_ratio=self.fill_ratio)
+
         if self.reference_touch <= 0:
             raise PaperExecutionEvidenceError("reference_touch must be positive")
         if self.filled_quantity == 0:
@@ -93,8 +101,9 @@ class PaperExecutionEvidence:
             if (
                 not isinstance(self.adverse_slippage_bps, Decimal)
                 or not self.adverse_slippage_bps.is_finite()
+                or self.adverse_slippage_bps < 0
             ):
-                raise PaperExecutionEvidenceError("filled execution requires slippage evidence")
+                raise PaperExecutionEvidenceError("filled execution requires non-negative adverse slippage evidence")
         _require_aware(self.market_observed_at, "market_observed_at")
         _require_aware(self.captured_at, "captured_at")
         if self.captured_at.astimezone(timezone.utc) < self.market_observed_at.astimezone(timezone.utc):
@@ -138,6 +147,8 @@ def capture_paper_execution_evidence(
             slippage = (order.average_fill_price - reference_touch) / reference_touch * BPS_DENOMINATOR
         else:
             slippage = (reference_touch - order.average_fill_price) / reference_touch * BPS_DENOMINATOR
+        if slippage < 0:
+            raise PaperExecutionEvidenceError("W78 adverse model may not record favorable slippage")
 
     values = {
         "scenario_id": scenario.scenario_id,
@@ -157,11 +168,23 @@ def capture_paper_execution_evidence(
         "market_observed_at": market.observed_at.astimezone(timezone.utc),
         "captured_at": captured_at.astimezone(timezone.utc),
     }
-    provisional = _payload_from_values(values)
     return PaperExecutionEvidence(
         **values,
-        evidence_hash=_hash(provisional),
+        evidence_hash=_hash(_payload_from_values(values)),
     )
+
+
+def _validate_status_fill_consistency(*, status: OrderStatus, fill_ratio: Decimal) -> None:
+    if status is OrderStatus.FILLED and fill_ratio != Decimal("1"):
+        raise PaperExecutionEvidenceError("FILLED evidence requires fill_ratio=1")
+    if status is OrderStatus.PARTIALLY_FILLED and not Decimal("0") < fill_ratio < Decimal("1"):
+        raise PaperExecutionEvidenceError("PARTIALLY_FILLED evidence requires 0<fill_ratio<1")
+    if status is OrderStatus.SUBMITTED and fill_ratio != Decimal("0"):
+        raise PaperExecutionEvidenceError("SUBMITTED evidence requires zero fill")
+    if status in {OrderStatus.VALIDATED, OrderStatus.SUBMITTING}:
+        raise PaperExecutionEvidenceError("pre-execution OMS state is not execution-quality evidence")
+    if status is OrderStatus.UNKNOWN:
+        raise PaperExecutionEvidenceError("UNKNOWN execution requires reconciliation, not qualification evidence")
 
 
 def _payload(value: PaperExecutionEvidence, *, include_hash: bool) -> dict[str, object]:
