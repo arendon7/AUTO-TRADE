@@ -3,169 +3,142 @@
 Fecha: 2026-08-23
 
 ## Objetivo inmediato
-**Cerrar W79 como capa de Strategy Promotion Governance + Strategy Lab read-only sobre W78 certificado, con exact-head CI completo y sin conceder PAPER candidate, capital authority ni LIVE.**
+**W81 — cerrar `TD-R7D-001` / `TOTAL_EXECUTION_COST_CONTINUITY_UNPROVEN` demostrando continuidad conservadora del impacto de ejecución Research -> W78 -> evidencia PAPER, sin conceder PAPER candidate, broker authority ni LIVE y sin interpretar fees como cerradas.**
 
-Stack actual:
-- R6 first-canary broker-truth: certificado;
-- R7 close real: `work/r7-paper-close-mac-staging` / PR #49, gate operativo independiente;
-- W78 execution qualification: `work/w78-realistic-paper-execution` / PR #50, exact-head certificado `2924456e33c2cc9e6579301b176267513a90861f`;
-- W79: `work/w79-strategy-promotion-evidence` / PR #51, DRAFT apilado sobre W78.
+## Stack certificado / activo
+- R0–R5: tracks certificados del machine debt register;
+- R6 first real PAPER canary broker-truth: cerrado;
+- R7B close real: PR #49, obligación operacional independiente;
+- W78 execution qualification: PR #50, implementation head certificado `2924456e33c2cc9e6579301b176267513a90861f`;
+- W79 Strategy Promotion Governance: PR #51, técnicamente certificado;
+- W80 Durable Promotion Assessment: PR #52, behavioral implementation head certificado `492ca4a621b263324b2cb5322490d74beda66a9c`; cierre documental exact-head en curso en la misma rama.
 
-R0–R5 permanecen los tracks certificados del machine debt register. R6 ya tiene broker truth real alcanzado, pero la promoción canónica de tracks sigue gobernada por el registro machine-readable existente.
+## W80 cerrado técnicamente
+W80 ya implementa y certifica:
+- journal append-only de Promotion Assessments;
+- receipt hash-bound;
+- ordinal + predecessor hash por policy;
+- `BEGIN IMMEDIATE` para serializar assessment writes;
+- evaluación W79 interna, no arbitrary view ingestion;
+- evidencia previa que no puede desaparecer silenciosamente;
+- gate no-MISSING que no puede volver a MISSING;
+- reader independiente `mode=ro/query_only` que no importa el writer;
+- revalidación receipt/side-columns/hash-chain;
+- binding independiente a la frozen W79 policy y threshold hash;
+- Strategy Lab con dos provenance domains separados: W79 governance y W80 durable assessments;
+- `NO_DURABLE_W80_ASSESSMENT` explícito cuando no hay receipt;
+- `EVIDENCE_QUALIFIED != PAPER_CANDIDATE` preservado.
 
-## Qué debe quedar cerrado en W79
+Evidencia sobre implementation head `492ca4a621b263324b2cb5322490d74beda66a9c`:
+- W80 dedicated `32671751555`: 46/46 PASS;
+- Core Safety `32671751544`: 2890/2890 PASS;
+- coverage exacta: `85.1061367161277%` >= 85%;
+- W80 writer boundary PASS;
+- W80 independent reader boundary PASS;
+- W80 Strategy Lab durable projection boundary PASS;
+- Mac Control Center, W79, W78 y Research boundaries PASS;
+- Debt Register PASS;
+- Canonical Knowledge PASS.
 
-### 1. Gobernanza de promoción
-W79 ya implementa:
-- threshold policy congelada antes de DEVELOPMENT;
-- DEVELOPMENT y FINAL_HOLDOUT como campañas separadas;
-- candidato congelado después del Tournament DEVELOPMENT y antes del HOLDOUT final;
-- strategy id + strategy version;
-- selected trial fingerprint;
-- tournament fingerprint;
-- una sola autoridad SQLite para threshold policy, candidate policy y trial ledger;
-- transacciones append-only/idempotentes por identidad;
-- políticas hash-bound.
+## W81 — problema que debe resolver
+W78 ya vincula el `ExecutionCostModel` de Research a escenarios deterministas, pero todavía no prueba completamente que el coste efectivo de precio usado durante qualification sea al menos tan conservador como el supuesto preregistrado.
 
-Gates canónicos:
-- `DEVELOPMENT_SELECTION`;
-- `EXECUTION_SENSITIVITY`;
-- `FINAL_HOLDOUT`;
-- `MULTIPLE_TESTING`.
+El hueco concreto es:
+- Research modela explícitamente `half_spread_bps + slippage_bps`;
+- W78 parte del bid/ask observado y aplica slippage configurado;
+- un snapshot con spread estrecho puede producir menor price impact total que el preregistrado aun cuando `scenario.slippage_bps >= research.slippage_bps`;
+- la evidencia externa PAPER añade realized spread/slippage que debe poder compararse sin cambiar retrospectivamente el modelo Research.
 
-Estados:
-- PASS;
-- FAIL;
-- MISSING;
-- BLOCKED.
+W81 debe impedir que una estrategia parezca robusta sólo porque una capa posterior usó fricción de mercado más favorable que la que se preregistró.
 
-Contrato obligatorio:
+## Contrato mínimo W81
+Diseñar una evidencia hash-bound de continuidad que, como mínimo, vincule:
+1. exact Research `ExecutionCostModel` / hash;
+2. exact W78 qualification contract / scenario matrix hash;
+3. quote bid/ask observado y spread efectivo;
+4. side/order direction;
+5. research half-spread assumption;
+6. configured adverse slippage;
+7. effective modeled price-impact bps;
+8. comparison contra el preregistered Research non-fee impact;
+9. clasificación conservadora: `CONSERVATIVE`, `FAVORABLE_OBSERVATION`, `BLOCKED` o equivalente explícito;
+10. evidence/provenance hashes;
+11. cuando exista evidencia PAPER externa compatible, realized execution-price slippage/spread evidence sin fabricarla;
+12. authority flags siempre false/NONE/BLOCKED.
 
-`EVIDENCE_QUALIFIED != PAPER_CANDIDATE`.
+## Regla económica
+W81 sólo podrá cerrar `TD-R7D-001` si el pipeline puede demostrar matemáticamente que el escenario usado para qualification no reduce silenciosamente el componente de **price impact** preregistrado.
 
-W79 siempre mantiene:
-- `paper_candidate_authorized=false`;
-- `external_execution_authorized=false`;
-- `capital_authority=NONE`;
-- `live_trading=BLOCKED`.
+Si el spread observado es más favorable, el sistema debe:
+- compensar mediante un escenario suficientemente adverso; o
+- etiquetar la observación como favorable/no-conservadora y bloquear su uso como evidencia conservadora de promoción.
 
-### 2. Strategy Lab read-only
-El Control Center ya incorpora `/strategy-lab` y `/api/strategy-lab` GET-only.
+No se permite escoger ex post el método que haga pasar al candidato.
 
-Debe conservarse:
-- `core.sqlite3` abierto con `mode=ro`;
-- `PRAGMA query_only=ON`;
-- cero INSERT/UPDATE/DELETE/DDL desde el read model;
-- sin broker network;
-- sin credenciales;
-- sin `SAFE_ACTIONS`;
-- sin ruta POST;
-- sin construcción de `OrderIntent`;
-- sin Safety/OMS execution authority;
-- sin `localStorage`/`sessionStorage` como autoridad;
-- provenance hash verificable;
-- blockers visibles;
-- PAPER candidate FALSE;
-- LIVE BLOCKED.
+## Fees siguen separadas
+`TD-R7D-002` / `FEE_ACCOUNTING_INCOMPLETE` permanece P1 incluso si W81 queda verde.
 
-W79 todavía no persiste un assessment autoritativo de gates. Hasta que exista un diseño durable posterior, la UI debe mostrar exactamente:
+W81 NO debe:
+- inventar fees dentro de `Fill`;
+- declarar realized net profitability fee-complete;
+- sumar fees nominales sin binding a producto/venue/evidencia;
+- quitar `FEE_ACCOUNTING_INCOMPLETE` de los blockers.
 
-`gate_evidence_state=NOT_PERSISTED_BY_W79`.
+La extensión fee-complete será un bloque posterior separado.
 
-No sintetizar PASS a partir de datos parciales.
-
-## Blockers que W79 no puede cerrar por interpretación
-
-- `EXECUTION_STRATEGY_VERSION_UNBOUND`;
-- `FEE_ACCOUNTING_INCOMPLETE`;
+## Shadow/Forward y strategy runtime siguen separados
+W81 tampoco cierra por sí mismo:
 - `SHADOW_FORWARD_PROMOTION_BINDING_REQUIRED`;
-- `TOTAL_EXECUTION_COST_CONTINUITY_UNPROVEN`.
+- `EXECUTION_STRATEGY_VERSION_UNBOUND`;
+- `TD-R7D-003` partial-fill remaining-quantity reservation.
 
-Además siguen vigentes las deudas R7D:
-- `TD-R7D-001` P1 — total execution-cost continuity Research -> PAPER;
-- `TD-R7D-002` P1 — fee-complete execution accounting;
-- `TD-R7D-003` P2 — safe remaining-quantity reservation after partial fills.
+## Authority boundary W81
+La capa de continuidad económica debe permanecer:
+- no-network salvo un futuro adapter explícito de evidencia PAPER que sea read-only;
+- sin broker credentials en el core científico;
+- sin writer;
+- sin Safety/OMS execution authority;
+- sin `OrderIntent` de Auto-Paper;
+- sin PAPER candidate authority;
+- sin LIVE.
 
-## Gate de cierre exact-head W79
+La IA puede proponer hipótesis/escenarios, pero no elegir retrospectivamente supuestos de coste para hacer pasar una estrategia.
 
-No declarar W79 cerrado hasta que el **mismo head final** demuestre:
-1. dedicated W79 workflow PASS usando la definición actual que compila y prueba promotion + read model + dashboard;
-2. W79 no-execution promotion boundary PASS;
-3. W79 Strategy Lab read-only boundary PASS;
-4. Mac Control Center boundary PASS;
-5. suite W79 completa PASS;
-6. W78 execution boundary re-probado;
-7. Research authority boundary re-probado;
-8. Core Safety completo PASS;
-9. coverage >=85%;
-10. Debt Register PASS;
-11. Canonical Knowledge PASS;
-12. todos los gates heredados sin regresión.
+## Negative tests obligatorios
+- observed spread menor que Research half-spread sin compensación;
+- configured slippage menor que Research slippage;
+- side incorrecto al calcular price impact;
+- crossed/invalid/future/stale quote;
+- cost-model hash drift;
+- scenario-matrix hash drift;
+- strategy/policy version mismatch;
+- favorable observation presentada como conservative;
+- missing market evidence interpretada como PASS;
+- NaN/Infinity/negative impossible cost components;
+- external PAPER evidence de otra cuenta/símbolo/order/strategy vinculada por error;
+- tampering de evidence hashes;
+- fee blocker eliminado por W81;
+- broker/writer/Safety/OMS import desde la capa científica;
+- PAPER candidate true;
+- LIVE habilitado.
 
-No reutilizar un run verde de un head anterior para certificar código o workflow añadido después.
-
-## R7B — obligación operacional separada
-
-PR #49 mantiene el cierre real de la exposición BTC/USD residual del first canary.
-
-W79 no debe tocar:
-- writer real;
-- lifecycle de close;
-- credential handling;
-- broker POST;
-- reconciliation real;
-- residual-exposure policy.
-
-La política R7B sigue siendo:
-- PAPER únicamente;
-- strict risk reduction;
-- un POST máximo por attempt;
-- durable UNKNOWN antes de I/O;
-- ambigüedad => GET-only reconciliation;
-- residual exposure => stop, no segundo SELL automático;
-- LIVE bloqueado.
-
-## Siguiente bloque permitido sólo después de cerrar W79
-
-Diseñar y persistir un **Promotion Assessment durable, hash-bound y reproducible** que:
-- vincule cada gate a evidencia inmutable;
-- se ate a la exact `StrategyPromotionThresholdPolicy` y `StrategyPromotionPolicy`;
-- capture evidence hashes, resultado, reason codes y provenance;
-- permita al Strategy Lab leer resultados reales en lugar de `NOT_PERSISTED_BY_W79`;
-- siga sin conceder PAPER candidate authority.
-
-Ese bloque no es todavía Auto-Paper.
-
-## Negative tests permanentes
-
-Conservar y ampliar:
-- threshold policy registrada después de iniciar DEVELOPMENT;
-- candidato congelado después de observar HOLDOUT;
-- DEVELOPMENT/HOLDOUT con misma campaign id;
-- strategy version drift;
-- tournament/trial fingerprint mismatch;
-- policy hash tampering;
-- SQLite runtime distinto entre policies y trial ledger;
-- duplicate/identity conflict;
-- gate set incompleto o inventado;
-- gate evidence sintetizada por la UI;
-- read model con mutación SQL;
-- Strategy Lab entrando a POST/SAFE_ACTIONS;
-- credenciales o broker network desde Strategy Lab;
-- `OrderIntent` creado por promotion governance;
-- W79 importando writer/Safety/OMS/TradingPipeline;
-- PAPER candidate pasando a true dentro de W79;
-- LIVE host/path;
-- IA/model output intentando saltar Strategy Runtime/Safety/OMS.
+## Gate de cierre W81
+No cerrar W81 hasta demostrar sobre un mismo exact head:
+- dedicated W81 PASS;
+- permanent execution-cost-continuity boundary PASS;
+- W80/W79/W78 boundaries PASS;
+- Research Authority PASS;
+- Core Safety completo PASS;
+- coverage >=85%;
+- Debt Register PASS;
+- Canonical Knowledge PASS;
+- documentación actualizada sin reutilizar CI de un head anterior.
 
 ## No-claims
-
-- R6 broker truth != estrategia rentable;
-- W78 simulated execution != fill Alpaca futuro;
-- W79 evidence qualification != PAPER candidate;
-- Strategy Lab read-only != capital authority;
-- HOLDOUT aislado != promoción;
-- fee-incomplete evidence != realized profitability;
-- PAPER qualification != LIVE qualification.
+- W80 durable assessment != estrategia rentable;
+- W81 conservative cost continuity != fee-complete P&L;
+- simulation != Alpaca future fill;
+- PAPER != LIVE;
+- evidence qualification != capital authority.
 
 **LIVE TRADING: BLOQUEADO.**
