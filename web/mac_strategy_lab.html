@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>AUTO-TRADE · Strategy Lab</title>
+<style>
+:root{--bg:#06100d;--panel:#0d1915;--line:#223b32;--text:#eef7f3;--muted:#91a79e;--green:#54e29d;--amber:#ffd06e;--red:#ff9f9f;--blue:#8dc9ff}*{box-sizing:border-box}body{margin:0;min-height:100vh;background:radial-gradient(circle at 12% -10%,#173d30,transparent 34%),radial-gradient(circle at 92% 10%,#14273c,transparent 28%),var(--bg);color:var(--text);font:14px/1.5 ui-sans-serif,-apple-system,BlinkMacSystemFont,"SF Pro Text",Inter,system-ui,sans-serif}.shell{max-width:1260px;margin:auto;padding:28px}.top{display:flex;justify-content:space-between;gap:18px;align-items:flex-start;margin-bottom:20px}.brand{display:flex;gap:14px;align-items:center}.logo{width:52px;height:52px;border:1px solid #34715a;border-radius:16px;display:grid;place-items:center;background:#10261d;color:var(--green);font-weight:900}.eyebrow{font-size:10px;text-transform:uppercase;letter-spacing:.12em;color:#7ce4b2;font-weight:900}h1{font-size:25px;margin:2px 0 4px}.muted{color:var(--muted)}.badges{display:flex;gap:7px;flex-wrap:wrap}.badge{padding:6px 9px;border-radius:999px;border:1px solid var(--line);background:#091510;color:var(--muted);font-size:10px;font-weight:850}.badge.good{border-color:#2b6549;color:#82efb8}.badge.warn{border-color:#665527;color:#efdca7}.hero,.panel{border:1px solid var(--line);border-radius:20px;background:linear-gradient(180deg,#10211b,#0a1511);padding:20px;margin-bottom:16px}.hero h2{font-size:29px;line-height:1.12;margin:7px 0 9px;letter-spacing:-.025em}.hero p{max-width:940px;margin:0;color:#b7cac2}.toolbar{display:grid;grid-template-columns:minmax(260px,1fr) auto;gap:10px;margin-top:17px}.input{width:100%;border:1px solid #355447;background:#07110d;color:var(--text);border-radius:11px;padding:11px 12px;font:12px ui-monospace,SFMono-Regular,Menlo,monospace;outline:none}.btn{border:1px solid #4ad997;border-radius:11px;padding:10px 14px;background:linear-gradient(180deg,#32c984,#209a65);color:#03120c;font-weight:900;cursor:pointer}.btn:disabled{opacity:.5;cursor:not-allowed}.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}.panel h3{font-size:17px;margin:0 0 9px}.facts{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}.fact{border:1px solid var(--line);border-radius:12px;background:#08110e;padding:10px}.fact b{display:block;font-size:11px;margin-bottom:3px}.fact span{font-size:11px;color:var(--muted);overflow-wrap:anywhere}.list{display:grid;gap:8px}.item{border:1px solid var(--line);border-radius:12px;background:#08110e;padding:11px}.item .title{font-weight:850;font-size:12px}.item .sub{font-size:10px;color:var(--muted);overflow-wrap:anywhere;margin-top:4px}.code{font:10px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;color:#b6d9ca;overflow-wrap:anywhere}.notice{border:1px solid #665527;border-radius:13px;background:#211b0c;color:#efdca7;padding:12px 13px;font-size:11px}.error{border-color:#6c3535;background:#211010;color:#ffc0c0}.status{min-height:18px;margin-top:9px;color:var(--muted);font-size:11px}.footer{margin-top:16px;color:#71877e;font-size:10px;display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap}.empty{color:var(--muted);font-size:11px}.back{color:#9ed8bd;text-decoration:none;font-weight:800}@media(max-width:900px){.grid,.facts{grid-template-columns:1fr}.top{flex-direction:column}.toolbar{grid-template-columns:1fr}.shell{padding:14px}.hero h2{font-size:24px}}
+</style>
+</head>
+<body>
+<div class="shell">
+  <div class="top">
+    <div class="brand"><div class="logo">SL</div><div><div class="eyebrow">W79 · Scientific governance</div><h1>AUTO-TRADE · Strategy Lab</h1><div class="muted">Promoción de estrategias · proyección local inmutable</div></div></div>
+    <div class="badges"><span class="badge good">READ ONLY</span><span class="badge warn">PAPER CANDIDATE · FALSE</span><span class="badge good">CAPITAL · NONE</span><span class="badge good">LIVE · BLOCKED</span></div>
+  </div>
+
+  <section class="hero">
+    <div class="eyebrow">Evidence before authority</div>
+    <h2>Ver qué se preregistró y qué candidato quedó congelado, sin convertir evidencia en permiso de trading.</h2>
+    <p>Esta pantalla lee únicamente <span class="code">core.sqlite3</span> en modo SQLite <span class="code">mode=ro + query_only</span>. No usa credenciales, no consulta al broker, no construye órdenes y no puede registrar thresholds, congelar candidatos ni promover a PAPER.</p>
+    <div class="toolbar"><input id="workspace" class="input" autocomplete="off" spellcheck="false" aria-label="Workspace local"><button id="refresh" class="btn" type="button">Actualizar evidencia · GET</button></div>
+    <div id="status" class="status">Cargando configuración local…</div>
+  </section>
+
+  <div class="grid">
+    <section class="panel"><h3>Estado de gobierno</h3><div id="governance" class="facts"><div class="empty">Sin lectura todavía.</div></div></section>
+    <section class="panel"><h3>Frontera de autoridad</h3><div class="facts"><div class="fact"><b>PAPER candidate</b><span>FALSE</span></div><div class="fact"><b>Capital authority</b><span>NONE</span></div><div class="fact"><b>LIVE</b><span>BLOCKED</span></div></div></section>
+    <section class="panel"><h3>Thresholds preregistrados</h3><div id="thresholds" class="list"><div class="empty">Sin lectura todavía.</div></div></section>
+    <section class="panel"><h3>Candidato congelado</h3><div id="candidates" class="list"><div class="empty">Sin lectura todavía.</div></div></section>
+    <section class="panel"><h3>Gates canónicos W79</h3><div id="gates" class="list"><div class="empty">Sin lectura todavía.</div></div><div class="notice" style="margin-top:10px"><strong>Importante:</strong> los resultados de gates NO se sintetizan. W79 todavía no persiste un assessment autoritativo; la UI debe mostrar <span class="code">NOT_PERSISTED_BY_W79</span> hasta que exista evidencia durable diseñada para ello.</div></section>
+    <section class="panel"><h3>Blockers de promoción</h3><div id="blockers" class="list"><div class="empty">Sin lectura todavía.</div></div></section>
+  </div>
+
+  <section class="panel"><h3>Provenance</h3><div id="provenance" class="code">Sin lectura todavía.</div></section>
+  <div class="notice"><strong>Broker POST: NO.</strong> Un candidato científicamente prometedor no obtiene autoridad de capital por aparecer aquí. Antes de cualquier promoción futura deben cerrarse los blockers explícitos y existir una decisión de autoridad separada, revisable y fail-closed.</div>
+  <div class="footer"><a class="back" href="/">← Volver al Hub</a><span>GET-only · sin credenciales · sin broker network · LIVE BLOCKED</span></div>
+</div>
+<script>
+"use strict";
+const $=id=>document.getElementById(id);
+const esc=value=>String(value??"").replace(/[&<>"']/g,ch=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[ch]));
+function setStatus(message,error=false){$("status").textContent=message;$("status").style.color=error?"#ffc0c0":"#91a79e"}
+function fact(label,value){return `<div class="fact"><b>${esc(label)}</b><span>${esc(value)}</span></div>`}
+function item(title,lines=[]){return `<div class="item"><div class="title">${esc(title)}</div>${lines.map(v=>`<div class="sub">${esc(v)}</div>`).join("")}</div>`}
+function render(value){
+  $("governance").innerHTML=fact("Governance",value.governance_state)+fact("Thresholds",value.threshold_count)+fact("Candidates",value.candidate_count)+fact("Gate evidence",value.gate_evidence_state)+fact("PAPER candidate",String(value.paper_candidate_authorized).toUpperCase())+fact("LIVE",value.live_trading);
+  $("thresholds").innerHTML=value.thresholds.length?value.thresholds.map(t=>item(t.threshold_policy_id,[`DEVELOPMENT: ${t.development_campaign_id}`,`HOLDOUT: ${t.holdout_campaign_id} / ${t.holdout_trial_id}`,`Holm p ≤ ${t.max_holm_adjusted_p} · holdout return ≥ ${t.min_holdout_net_return} · DD ≤ ${t.max_holdout_drawdown}`,`fills ≥ ${t.min_holdout_fills} · fill ratio ≥ ${t.min_execution_fill_ratio} · adverse slippage ≤ ${t.max_execution_adverse_slippage_bps} bps`,`binding: ${t.candidate_binding_state}`,`hash: ${t.threshold_policy_hash}`])).join(""):'<div class="empty">No hay threshold policy preregistrada en este core.</div>';
+  $("candidates").innerHTML=value.candidates.length?value.candidates.map(c=>item(c.policy_id,[`strategy: ${c.selected_strategy_id} @ ${c.selected_strategy_version}`,`trial: ${c.selected_trial_id}`,`threshold policy: ${c.threshold_policy_id}`,`trial fingerprint: ${c.selected_trial_fingerprint}`,`tournament fingerprint: ${c.tournament_fingerprint}`,`policy hash: ${c.policy_hash}`])).join(""):'<div class="empty">Todavía no hay candidato congelado.</div>';
+  $("gates").innerHTML=value.required_gate_ids.map(g=>item(g,[`estado durable: ${value.gate_evidence_state}`])).join("");
+  $("blockers").innerHTML=value.promotion_blockers.map(b=>item(b)).join("");
+  $("provenance").textContent=`snapshot ${value.provenance_hash} · observed ${value.observed_at} · broker_network_used=${value.broker_network_used} · credentials_used=${value.credentials_used}`;
+}
+async function refresh(){
+  const workspace=$("workspace").value.trim();
+  $("refresh").disabled=true;setStatus("Leyendo core.sqlite3 en modo read-only…");
+  try{
+    const response=await fetch("/api/strategy-lab?workspace="+encodeURIComponent(workspace),{method:"GET",cache:"no-store",credentials:"same-origin"});
+    const payload=await response.json();
+    if(!response.ok||!payload.ok)throw new Error(payload.error||"Strategy Lab read failed closed");
+    render(payload.strategy_lab);setStatus("Evidencia local leída. Ninguna autoridad fue creada.");
+  }catch(error){setStatus(error instanceof Error?error.message:"Strategy Lab read failed closed",true)}finally{$("refresh").disabled=false}
+}
+async function boot(){
+  try{const response=await fetch("/api/meta",{method:"GET",cache:"no-store",credentials:"same-origin"});const payload=await response.json();if(payload.ok&&payload.meta&&payload.meta.default_workspace)$("workspace").value=payload.meta.default_workspace}catch(_error){}
+  await refresh();
+}
+$("refresh").addEventListener("click",refresh);
+boot();
+</script>
+</body>
+</html>

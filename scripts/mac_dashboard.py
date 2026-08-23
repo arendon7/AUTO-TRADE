@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 import re
 import secrets
+import sqlite3
 import subprocess
 import sys
 import threading
@@ -17,11 +18,17 @@ from typing import NamedTuple
 from urllib.parse import parse_qs, urlparse
 import webbrowser
 
+from autotrade.strategy_lab_read_model import (
+    StrategyLabPromotionReadModel,
+    StrategyLabReadModelError,
+)
+
 ROOT = Path(__file__).resolve().parents[1]
 PYTHON = ROOT / ".venv/bin/python"
 HUB_HTML_PATH = ROOT / "web/mac_multi_asset.html"
 HTML_PATH = ROOT / "web/mac_dashboard.html"
 CRYPTO_HTML_PATH = ROOT / "web/mac_crypto_dashboard.html"
+STRATEGY_HTML_PATH = ROOT / "web/mac_strategy_lab.html"
 WRITE_ENV = "R6_EXTERNAL_PAPER_WRITE"
 KEY_ENV = "APCA_API_KEY_ID"
 SECRET_ENV = "APCA_API_SECRET_KEY"
@@ -68,7 +75,7 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
             "Local native multi-asset Control Center for AUTO-TRADE R6 safe/PAPER-read operations. "
-            "No staging, Final Freshness, order POST or LIVE action is exposed."
+            "W79 Strategy Lab is GET-only. No staging, Final Freshness, order POST or LIVE action is exposed."
         )
     )
     parser.add_argument("--host", default="127.0.0.1")
@@ -82,7 +89,7 @@ def _require_safe_runtime() -> None:
         raise DashboardError("Refusing dashboard while R6_EXTERNAL_PAPER_WRITE=ENABLED")
     if not PYTHON.is_file():
         raise DashboardError("AUTO-TRADE runtime is not installed; run INSTALAR_AUTO_TRADE.command")
-    for path in (HUB_HTML_PATH, HTML_PATH, CRYPTO_HTML_PATH):
+    for path in (HUB_HTML_PATH, HTML_PATH, CRYPTO_HTML_PATH, STRATEGY_HTML_PATH):
         if not path.is_file():
             raise DashboardError(f"Missing local dashboard asset: {path.relative_to(ROOT)}")
 
@@ -311,6 +318,10 @@ def _build_meta() -> dict[str, object]:
         "asset_classes": ["US_EQUITY", "CRYPTO"],
         "equity_route": "/equities",
         "crypto_route": "/crypto",
+        "strategy_lab_route": "/strategy-lab",
+        "strategy_lab_read_only": True,
+        "strategy_lab_paper_candidate_authorized": False,
+        "strategy_lab_gate_evidence": "NOT_PERSISTED_BY_W79",
         "crypto_default_symbol": "BTC/USD",
         "crypto_pair_input": "BASE/QUOTE",
         "crypto_rehearsal_available": True,
@@ -340,6 +351,36 @@ def _fail_closed_preview_value(message: str) -> dict[str, object]:
         "broker_write_performed": False,
         "external_post_authorized": False,
         "operator_approval_authority": "NONE",
+        "capital_authority": "NONE",
+        "live_trading": "BLOCKED",
+    }
+
+
+def _fail_closed_strategy_lab_value(message: str) -> dict[str, object]:
+    return {
+        "ok": False,
+        "error": message,
+        "paper_candidate_authorized": False,
+        "broker_network_used": False,
+        "broker_write_performed": False,
+        "credentials_used": False,
+        "external_execution_authorized": False,
+        "capital_authority": "NONE",
+        "live_trading": "BLOCKED",
+    }
+
+
+def _strategy_lab_value(workspace: str) -> dict[str, object]:
+    core_db = Path(workspace) / "core.sqlite3"
+    snapshot = StrategyLabPromotionReadModel(core_db).snapshot()
+    return {
+        "ok": True,
+        "strategy_lab": snapshot.to_dict(),
+        "paper_candidate_authorized": False,
+        "broker_network_used": False,
+        "broker_write_performed": False,
+        "credentials_used": False,
+        "external_execution_authorized": False,
         "capital_authority": "NONE",
         "live_trading": "BLOCKED",
     }
@@ -409,6 +450,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
             "/": HUB_HTML_PATH,
             "/equities": HTML_PATH,
             "/crypto": CRYPTO_HTML_PATH,
+            "/strategy-lab": STRATEGY_HTML_PATH,
         }
         if parsed.path in pages:
             self._write_body(
@@ -419,6 +461,19 @@ class DashboardHandler(BaseHTTPRequestHandler):
             return
         if parsed.path == "/api/meta":
             self._json(HTTPStatus.OK, {"ok": True, "meta": _build_meta()})
+            return
+        if parsed.path == "/api/strategy-lab":
+            raw_workspace = parse_qs(parsed.query, keep_blank_values=True).get("workspace", [""])[0]
+            try:
+                workspace = _workspace({"workspace": raw_workspace})
+                value = _strategy_lab_value(workspace)
+            except (DashboardError, StrategyLabReadModelError, sqlite3.Error, OSError, ValueError) as exc:
+                self._json(
+                    HTTPStatus.BAD_REQUEST,
+                    _fail_closed_strategy_lab_value(str(exc)),
+                )
+                return
+            self._json(HTTPStatus.OK, value)
             return
         if parsed.path == "/runbook":
             runbook = ROOT / "docs/MAC_PAPER_RUNBOOK.md"
@@ -626,6 +681,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"Hub: {url}")
     print(f"Equities: {url}equities")
     print(f"Crypto: {url}crypto")
+    print(f"Strategy Lab: {url}strategy-lab (GET-only)")
     print("External PAPER write: DISABLED")
     print("LIVE trading: BLOCKED")
     print("Order execution from dashboard: UNAVAILABLE")

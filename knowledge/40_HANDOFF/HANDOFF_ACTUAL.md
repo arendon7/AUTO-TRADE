@@ -1,91 +1,165 @@
 # HANDOFF ACTUAL — AUTO-TRADE
 
-Fecha: 2026-08-12
-Estado: **R0–R5 certified; R6 structurally closed / PRE-FIRST-CANARY; Mac guided UAT active**
+Fecha: 2026-08-23
+Estado: **R0–R5 certified; R6 first real PAPER canary broker-truth closed; R7 PAPER Operations active; W78 execution qualification certified; W79 Strategy Promotion Governance + Strategy Lab read-only CERTIFIED; W80 Promotion Assessment es el siguiente hito.**
 
-## Base y rama activa
-- post-R5-green `main`: `75dcbef65b061f742745ba7be0665521967e0587`;
-- R6 base: `reconstruction/r6-external-paper-protection`;
-- Mac UX: `work/r6-mac-control-center`;
-- PR #29: DRAFT.
+## Fuente de verdad al retomar
+Leer en este orden:
+1. `knowledge/00_CANON/SOURCE_OF_TRUTH.md`;
+2. `knowledge/00_CANON/ESTADO_ACTUAL.md`;
+3. `knowledge/00_CANON/TAREA_ACTIVA.md`;
+4. `knowledge/00_CANON/CONTEXTO_RAPIDO.md`;
+5. `knowledge/30_DECISIONES/ADR-0010-w78-deterministic-paper-execution-model.md`;
+6. `knowledge/30_DECISIONES/ADR-0011-w79-strategy-promotion-governance.md`;
+7. este handoff.
 
-Último checkpoint UX completamente certificado antes de sincronizar este handoff:
-`2c2e5ebef9bf01f13cf9bed477e670ba79fa2b29`.
+R5 sigue siendo el último track formalmente certificado en el machine debt register R0–R5; R6/W78/W79 tienen además los hitos técnicos y broker-truth descritos en este handoff.
 
-5/5 PASS:
-- Core Safety `31649170421`;
-- Knowledge Contract `31649170446`;
-- Mac Rehearsal `31649170429`;
-- R6 PAPER Authority `31649170448`;
-- Mac FULL Standalone `31649170468`.
+## Stack de PRs
 
-FULL Standalone pasó build, Control Center safety boundary, instalación desde árbol quarantined, localhost smoke y self-heal tanto en arm64 como x86_64.
+### PR #49 — R7 close real PAPER
+Branch: `work/r7-paper-close-mac-staging`.
 
-## UAT real observada
-En el paquete Mac anterior el operador consiguió abrir la app, Doctor PASS y Capital Safety rehearsal PASS. El defecto principal fue de producto/UX: todos los botones técnicos podían pulsarse sin respetar dependencias.
+Es la obligación operacional real de reducción de la exposición BTC/USD residual del first canary. Permanece DRAFT hasta alcanzar su verdad terminal de broker. No mezclar este gate con Strategy Lab.
 
-Eso produjo bloqueos correctos pero incomprensibles:
-- Preparation antes de candidate;
-- Candidate antes de account attestation;
-- Review receipt antes de preparation/first human decision.
+### PR #50 — W78 execution qualification
+Branch: `work/w78-realistic-paper-execution`.
+Exact-head técnico certificado:
 
-No fue una regresión de Python ni del Safety Kernel.
+`2924456e33c2cc9e6579301b176267513a90861f`
 
-## Cambio Mac ya implementado
-`web/mac_dashboard.html` ahora funciona como guía de ensayo:
-- `Empieza aquí`;
-- `1 · Probar la app sin broker` ejecuta workspace -> Doctor -> Capital Safety rehearsal;
-- `2 · Conectar Alpaca PAPER` guía Account -> Asset -> Flat -> Market;
-- gating visual/deshabilitación de acciones fuera de orden;
-- Candidate/Preparation sólo cuando readiness los habilita;
-- errores conocidos traducidos a explicación operacional;
-- traceback disponible sólo como diagnóstico técnico;
-- estado/timeline explicado en lenguaje de usuario;
-- `Strategy Lab` visible como siguiente capa, pero no falsamente presentado como disponible.
+W78 añade ejecución determinista/no-network para qualification reutilizando Capital Safety + OMS + fills + portfolio + reconciliation existentes. No tiene writer externo, credenciales ni LIVE.
 
-La frontera de seguridad no cambió:
-- localhost only;
-- external PAPER write disabled;
-- no Final Freshness/staging/writer/POST/LIVE desde dashboard;
-- credenciales PAPER efímeras en la página;
-- Capital Safety/OMS siguen siendo autoridad determinista.
+### PR #51 — W79 Strategy Promotion Governance
+Branch: `work/w79-strategy-promotion-evidence`.
+Base: W78 certificado.
+Behavioral implementation head certificado:
 
-## Cómo probar la próxima build Mac
-1. abrir la instalación FULL;
-2. pulsar `Probar la app sin broker`;
-3. exigir PASS en workspace, Doctor y Capital Safety;
-4. comprobar que la UI no deje saltar gates;
-5. si se decide probar broker: introducir credenciales PAPER y Account ID;
-6. completar Account -> Asset -> Flat -> Market;
-7. construir connectivity candidate y preparation sólo cuando se habiliten;
-8. STOP antes de H1 salvo decisión humana separada para la primera canary real.
+`c5c264e64e931ef380801b1e0d1508ea2cac0dfa`
 
-## Alpaca / TradingView / estrategia
-R6 se ensaya con AUTO-TRADE + Alpaca PAPER. TradingView no es requisito.
+## W79 cerrado técnicamente
 
-TradingView puede incorporarse después como visualización o input advisory, nunca como ejecución bypass.
+### Governance certificado
+- `StrategyPromotionThresholdPolicy` preregistrada antes de DEVELOPMENT;
+- DEVELOPMENT y FINAL_HOLDOUT separados;
+- candidato congelado después de Tournament DEVELOPMENT y antes del HOLDOUT final;
+- strategy id/version vinculados;
+- selected trial fingerprint;
+- tournament fingerprint;
+- una sola autoridad SQLite;
+- escritura append-only/idempotente;
+- hashes de policy verificables.
 
-R1–R5 contienen capacidades certificadas de research/backtest/holdout/walk-forward/portfolio/Health/shadow/forward, pero todavía no están expuestas como experiencia Mac amigable. Después de estabilizar esta UAT R6, el siguiente producto es `Strategy Lab`, que debe reutilizar esas capacidades reales y preservar toda la gobernanza de promoción.
+Gates:
+- `DEVELOPMENT_SELECTION`;
+- `EXECUTION_SENSITIVITY`;
+- `FINAL_HOLDOUT`;
+- `MULTIPLE_TESTING`.
 
-## Deuda
-CLOSED structurally: `TD-R6-007..013`.
+W79 fuerza:
+- `paper_candidate_authorized=false`;
+- `external_execution_authorized=false`;
+- `capital_authority=NONE`;
+- `live_trading=BLOCKED`.
 
-OPEN/blocking — requieren evidencia externa PAPER real:
-- `TD-R6-001` account/environment;
-- `TD-R6-002` submit ambiguity/idempotency/reconciliation;
-- `TD-R6-003` bounded real PAPER canary;
-- `TD-R6-004` terminality/fills/slippage/qualification;
-- `TD-R6-005` nested US-equity bracket;
-- `TD-R6-006` authenticated PAPER trade_updates.
+### Strategy Lab certificado
+El Mac Control Center expone:
+- `/strategy-lab`;
+- `GET /api/strategy-lab`.
 
-OPEN/nonblocking:
-- `TD-OPS-001` Graphify semantic/deep evidence.
+El read model:
+- abre `core.sqlite3` con `mode=ro`;
+- activa `PRAGMA query_only=ON`;
+- no muta SQL;
+- no usa broker;
+- no usa credenciales;
+- no construye `OrderIntent`;
+- no entra en `SAFE_ACTIONS`;
+- no tiene ruta POST;
+- no concede Safety/OMS/capital authority.
 
-## Capital
-- external PAPER order sent: **0**;
-- capital authority desde Control Center: **NONE**;
-- connectivity canary != strategy edge;
-- PAPER != profitability proof;
-- LIVE fuera de R6/v0.28R.
+W79 no persiste todavía un assessment autoritativo de gates. Strategy Lab debe mantener `NOT_PERSISTED_BY_W79` hasta que W80 tenga evidence receipts válidos.
+
+### Evidencia de certificación W79
+Sobre `c5c264e64e931ef380801b1e0d1508ea2cac0dfa`:
+- W79 dedicated workflow: PASS;
+- 73 pruebas W79: PASS;
+- Mac Control Center: 19 pruebas PASS;
+- Core Safety: 2844/2844 PASS;
+- branch coverage: `85.15094919501644%`;
+- W79 promotion boundary: PASS;
+- Strategy Lab read-only boundary: PASS;
+- Mac Control Center boundary: PASS;
+- W78 boundary: PASS;
+- Research authority: PASS;
+- Debt Register: PASS;
+- Canonical Knowledge: PASS.
+
+## Blockers que siguen abiertos
+- `EXECUTION_STRATEGY_VERSION_UNBOUND`;
+- `FEE_ACCOUNTING_INCOMPLETE`;
+- `SHADOW_FORWARD_PROMOTION_BINDING_REQUIRED`;
+- `TOTAL_EXECUTION_COST_CONTINUITY_UNPROVEN`;
+- `TD-R7D-001` total execution-cost continuity;
+- `TD-R7D-002` fee-complete execution accounting;
+- `TD-R7D-003` partial-fill remaining-quantity reservation.
+
+Por esto un assessment favorable todavía no puede equivaler a Auto-Paper.
+
+## Próximo hito — W80 Promotion Assessment durable
+
+Retomar desde `knowledge/00_CANON/TAREA_ACTIVA.md`.
+
+W80 debe persistir receipts autoritativos que vinculen:
+- exact threshold/candidate policy ids + hashes;
+- strategy id/version;
+- selected trial + tournament fingerprints;
+- DEVELOPMENT/HOLDOUT identities;
+- gate statuses + reason codes;
+- evidence hashes + provenance;
+- assessment state;
+- immutable receipt hash.
+
+Debe usar la misma autoridad SQLite y semántica append-only/idempotente. Strategy Lab podrá leer esos receipts, pero seguirá `mode=ro/query_only` y GET-only.
+
+W80 mantiene obligatoriamente:
+- PAPER candidate: FALSE;
+- capital authority: NONE;
+- broker network: NONE;
+- broker write: NO;
+- credentials: NO;
+- OrderIntent authority: NO;
+- Safety/OMS execution authority: NO;
+- LIVE: BLOCKED.
+
+La eventual decisión `PAPER_CANDIDATE` será un hito posterior y separado.
+
+## R7 close sigue independiente
+La exposición real PAPER no se resuelve por avanzar Strategy Lab. PR #49 conserva:
+- PAPER-only;
+- FULL BTC/USD SELL LIMIT IOC;
+- strict risk reduction;
+- fresh Portfolio + Safety + OMS antes de writer;
+- durable UNKNOWN antes del único POST;
+- GET-only reconciliation;
+- no retry POST;
+- residual exposure => stop;
+- credenciales memory-only;
+- LIVE bloqueado.
+
+## Regla de producto
+Research, promotion governance y ejecución siguen separados:
+
+`Research -> Promotion Evidence -> future PAPER Candidate Decision -> Strategy Runtime -> OrderIntent -> Portfolio -> Capital Safety -> OMS -> one-shot PAPER writer -> reconciliation -> Health`
+
+Ninguna salida de IA/modelo puede saltarse esa cadena.
+
+## Estado de autoridad
+- W79 PAPER candidate: **FALSE**;
+- W80 PAPER candidate: **FALSE**;
+- Strategy Lab capital authority: **NONE**;
+- Strategy Lab broker write: **NO**;
+- Strategy Lab credentials: **NO**;
+- LIVE: **BLOCKED**.
 
 **LIVE TRADING: BLOQUEADO.**

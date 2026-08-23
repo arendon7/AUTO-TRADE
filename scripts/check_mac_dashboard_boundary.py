@@ -8,6 +8,7 @@ SERVER = ROOT / "scripts/mac_dashboard.py"
 HTML = ROOT / "web/mac_dashboard.html"
 HUB = ROOT / "web/mac_multi_asset.html"
 CRYPTO_HTML = ROOT / "web/mac_crypto_dashboard.html"
+STRATEGY_HTML = ROOT / "web/mac_strategy_lab.html"
 CRYPTO_REHEARSAL = ROOT / "scripts/mac_crypto_paper_rehearsal.py"
 CRYPTO_PREVIEW = ROOT / "scripts/mac_crypto_canary_preview.py"
 OPEN = ROOT / "ABRIR_AUTO_TRADE.command"
@@ -47,6 +48,7 @@ def main() -> int:
         HTML,
         HUB,
         CRYPTO_HTML,
+        STRATEGY_HTML,
         CRYPTO_REHEARSAL,
         CRYPTO_PREVIEW,
         OPEN,
@@ -77,6 +79,12 @@ def main() -> int:
             '"asset_classes": ["US_EQUITY", "CRYPTO"]',
             '"/equities": HTML_PATH',
             '"/crypto": CRYPTO_HTML_PATH',
+            '"/strategy-lab": STRATEGY_HTML_PATH',
+            'if parsed.path == "/api/strategy-lab":',
+            '"strategy_lab_read_only": True',
+            '"strategy_lab_paper_candidate_authorized": False',
+            '"strategy_lab_gate_evidence": "NOT_PERSISTED_BY_W79"',
+            "StrategyLabPromotionReadModel(core_db).snapshot()",
             '"/usr/bin/open"',
             "subprocess.run(",
         ):
@@ -91,6 +99,9 @@ def main() -> int:
             errors.append("dashboard may never enable external PAPER write")
         if "[/usr/bin/open" in text or "shell=True" in text:
             errors.append("browser opener must not use shell execution")
+        post_block = text[text.find("def do_POST") :]
+        if '"/api/strategy-lab"' in post_block:
+            errors.append("Strategy Lab must remain outside dashboard POST routes")
 
     if HTML.is_file():
         html = HTML.read_text(encoding="utf-8")
@@ -120,8 +131,12 @@ def main() -> int:
             "AUTO-TRADE R6 · Multi-Asset",
             "US Equities",
             "Crypto 24/7",
+            "Strategy Lab",
             'href="/equities"',
             'href="/crypto"',
+            'href="/strategy-lab"',
+            "SQLite mode=ro + query_only",
+            "PAPER candidate FALSE · CAPITAL NONE · LIVE BLOCKED",
             "PAPER WRITE · DISABLED",
             "LIVE · BLOCKED",
             "Broker POST desde Hub: NO",
@@ -160,6 +175,36 @@ def main() -> int:
         for forbidden in FORBIDDEN + STORAGE_CALLS + ('<script src=', '<link rel="stylesheet" href='):
             if forbidden in crypto:
                 errors.append(f"crypto dashboard contains forbidden surface: {forbidden}")
+
+    if STRATEGY_HTML.is_file():
+        lab = STRATEGY_HTML.read_text(encoding="utf-8")
+        for anchor in (
+            "AUTO-TRADE · Strategy Lab",
+            "READ ONLY",
+            "PAPER CANDIDATE · FALSE",
+            "CAPITAL · NONE",
+            "LIVE · BLOCKED",
+            "Broker POST: NO",
+            "NOT_PERSISTED_BY_W79",
+            "Actualizar evidencia · GET",
+            'fetch("/api/strategy-lab?workspace="',
+            'method:"GET"',
+        ):
+            if anchor not in lab:
+                errors.append(f"Strategy Lab UI read-only anchor missing: {anchor}")
+        for forbidden in STORAGE_CALLS + (
+            '<script src=',
+            '<link rel="stylesheet" href=',
+            'method:"POST"',
+            "/api/action",
+            "/api/rehearsal",
+            "/api/canary-preview",
+            'type="password"',
+            "APCA_API_KEY_ID",
+            "APCA_API_SECRET_KEY",
+        ):
+            if forbidden in lab:
+                errors.append(f"Strategy Lab UI contains forbidden persistence/execution surface: {forbidden}")
 
     if CRYPTO_REHEARSAL.is_file():
         text = CRYPTO_REHEARSAL.read_text(encoding="utf-8")
@@ -291,9 +336,9 @@ def main() -> int:
         return 1
     print(
         "AUTO-TRADE Mac Multi-Asset Control Center boundary: PASS "
-        "(localhost-only; Equities + Crypto routes; ephemeral PAPER credentials; safe rehearsal; "
-        "isolated BTC/USD qualification preview with USD 5 hard cap; no reusable operator authority; "
-        "FULL standalone integration; no Final Freshness/staging/broker-write/LIVE surface)"
+        "(localhost-only; Equities + Crypto + GET-only Strategy Lab routes; ephemeral PAPER credentials only on named broker reads; "
+        "safe rehearsal; isolated BTC/USD qualification preview with USD 5 hard cap; Strategy Lab mode=ro/query_only with no synthesized gates; "
+        "no reusable operator authority; FULL standalone integration; no Final Freshness/staging/broker-write/LIVE surface)"
     )
     return 0
 
