@@ -1,7 +1,7 @@
 # HANDOFF ACTUAL — AUTO-TRADE
 
 Fecha: 2026-08-23
-Estado: **R0–R5 certified; R6 first real PAPER canary broker-truth closed; R7 PAPER Operations active; W78 execution qualification certified; W79 Strategy Promotion Governance + Strategy Lab read-only CERTIFIED; W80 Promotion Assessment es el siguiente hito.**
+Estado: **R0–R5 certified; R6 first real PAPER canary broker-truth closed; R7 PAPER Operations active; W78 execution qualification certified; W79 promotion governance certified; W80 durable promotion assessment technically certified; W81 execution-cost continuity next.**
 
 ## Fuente de verdad al retomar
 Leer en este orden:
@@ -11,155 +11,188 @@ Leer en este orden:
 4. `knowledge/00_CANON/CONTEXTO_RAPIDO.md`;
 5. `knowledge/30_DECISIONES/ADR-0010-w78-deterministic-paper-execution-model.md`;
 6. `knowledge/30_DECISIONES/ADR-0011-w79-strategy-promotion-governance.md`;
-7. este handoff.
+7. `knowledge/30_DECISIONES/ADR-0012-w80-durable-promotion-assessment.md`;
+8. este handoff.
 
-R5 sigue siendo el último track formalmente certificado en el machine debt register R0–R5; R6/W78/W79 tienen además los hitos técnicos y broker-truth descritos en este handoff.
+## Stack de PRs activo
+- PR #49 — R7 real PAPER risk-reducing close; obligación operacional independiente;
+- PR #50 — W78 execution qualification;
+- PR #51 — W79 Strategy Promotion Governance;
+- PR #52 — W80 Durable Promotion Assessment, DRAFT apilado sobre W79.
 
-## Stack de PRs
+No fusionar la pila fuera de orden.
 
-### PR #49 — R7 close real PAPER
-Branch: `work/r7-paper-close-mac-staging`.
+## W80 — qué quedó construido
 
-Es la obligación operacional real de reducción de la exposición BTC/USD residual del first canary. Permanece DRAFT hasta alcanzar su verdad terminal de broker. No mezclar este gate con Strategy Lab.
+### 1. Durable assessment writer
+`src/autotrade/strategy_promotion_assessment.py`
 
-### PR #50 — W78 execution qualification
-Branch: `work/w78-realistic-paper-execution`.
-Exact-head técnico certificado:
+Persiste assessment científico W79 como receipt:
+- append-only;
+- hash-bound;
+- ordinal por policy;
+- predecessor assessment hash;
+- timezone-aware timestamp;
+- exact gate set/reason codes/evidence hashes;
+- source W79 view hash;
+- exact policy/threshold/strategy identity;
+- `BEGIN IMMEDIATE`;
+- no arbitrary view ingestion;
+- evidencia previa no puede desaparecer;
+- no-MISSING no puede volver a MISSING;
+- unchanged view no puede insertarse con otro id.
 
-`2924456e33c2cc9e6579301b176267513a90861f`
+### 2. Independent reader
+`src/autotrade/strategy_promotion_assessment_read_model.py`
 
-W78 añade ejecución determinista/no-network para qualification reutilizando Capital Safety + OMS + fills + portfolio + reconciliation existentes. No tiene writer externo, credenciales ni LIVE.
+No importa el writer W80.
 
-### PR #51 — W79 Strategy Promotion Governance
-Branch: `work/w79-strategy-promotion-evidence`.
-Base: W78 certificado.
-Behavioral implementation head certificado:
+Abre `core.sqlite3`:
+- `mode=ro`;
+- `query_only=ON`;
+- sin schema initialization;
+- sin mutation;
+- sin broker/credentials/OMS/Safety.
 
-`c5c264e64e931ef380801b1e0d1508ea2cac0dfa`
+Revalida independientemente:
+- receipt hash;
+- SQLite side columns;
+- gate set/status/reasons/evidence;
+- predecessor/ordinal/timestamp chain;
+- evidence-history monotonicity;
+- frozen W79 candidate policy;
+- policy hash;
+- threshold-policy hash;
+- selected strategy id/version.
 
-## W79 cerrado técnicamente
+Un journal autocoherente pero desligado de su frozen W79 policy falla cerrado.
 
-### Governance certificado
-- `StrategyPromotionThresholdPolicy` preregistrada antes de DEVELOPMENT;
-- DEVELOPMENT y FINAL_HOLDOUT separados;
-- candidato congelado después de Tournament DEVELOPMENT y antes del HOLDOUT final;
-- strategy id/version vinculados;
-- selected trial fingerprint;
-- tournament fingerprint;
-- una sola autoridad SQLite;
-- escritura append-only/idempotente;
-- hashes de policy verificables.
+### 3. Strategy Lab
+La ruta permanece:
 
-Gates:
-- `DEVELOPMENT_SELECTION`;
-- `EXECUTION_SENSITIVITY`;
-- `FINAL_HOLDOUT`;
-- `MULTIPLE_TESTING`.
+`GET /api/strategy-lab`
 
-W79 fuerza:
-- `paper_candidate_authorized=false`;
-- `external_execution_authorized=false`;
-- `capital_authority=NONE`;
-- `live_trading=BLOCKED`.
+No se añadió POST ni SAFE_ACTION.
 
-### Strategy Lab certificado
-El Mac Control Center expone:
-- `/strategy-lab`;
-- `GET /api/strategy-lab`.
+La UI separa:
+- W79 governance provenance;
+- W80 assessment provenance.
 
-El read model:
-- abre `core.sqlite3` con `mode=ro`;
-- activa `PRAGMA query_only=ON`;
-- no muta SQL;
-- no usa broker;
-- no usa credenciales;
-- no construye `OrderIntent`;
-- no entra en `SAFE_ACTIONS`;
-- no tiene ruta POST;
-- no concede Safety/OMS/capital authority.
+W79 conserva exactamente:
 
-W79 no persiste todavía un assessment autoritativo de gates. Strategy Lab debe mantener `NOT_PERSISTED_BY_W79` hasta que W80 tenga evidence receipts válidos.
+`gate_evidence_state=NOT_PERSISTED_BY_W79`
 
-### Evidencia de certificación W79
-Sobre `c5c264e64e931ef380801b1e0d1508ea2cac0dfa`:
-- W79 dedicated workflow: PASS;
-- 73 pruebas W79: PASS;
-- Mac Control Center: 19 pruebas PASS;
-- Core Safety: 2844/2844 PASS;
-- branch coverage: `85.15094919501644%`;
-- W79 promotion boundary: PASS;
-- Strategy Lab read-only boundary: PASS;
-- Mac Control Center boundary: PASS;
-- W78 boundary: PASS;
-- Research authority: PASS;
-- Debt Register: PASS;
-- Canonical Knowledge: PASS.
+W80 expone:
+- `DURABLE_W80_ASSESSMENT`; o
+- `NO_DURABLE_W80_ASSESSMENT`.
 
-## Blockers que siguen abiertos
-- `EXECUTION_STRATEGY_VERSION_UNBOUND`;
-- `FEE_ACCOUNTING_INCOMPLETE`;
+Puede mostrar assessment states/gates/reasons/evidence hashes, pero siempre:
+- PAPER candidate FALSE;
+- external execution FALSE;
+- CAPITAL NONE;
+- LIVE BLOCKED;
+- Broker POST NO.
+
+## W80 exact implementation certification
+Behavioral implementation head:
+
+`492ca4a621b263324b2cb5322490d74beda66a9c`
+
+Dedicated W80 run `32671751555`:
+- **46/46 PASS**;
+- writer boundary PASS;
+- independent reader boundary PASS;
+- Strategy Lab durable projection boundary PASS;
+- W79 promotion/read-only boundaries PASS;
+- Mac Control Center PASS;
+- W78 PASS;
+- Research Authority PASS.
+
+Core Safety `32671751544`:
+- **2890/2890 PASS**;
+- coverage exacta **85.1061367161277%**;
+- writer 82%;
+- independent assessment reader 84%;
+- Strategy Lab read-model 84%;
+- all inherited R5/R6/R7/W78/W79 boundaries PASS;
+- all W80 boundaries PASS;
+- Debt Register PASS;
+- Canonical Knowledge PASS.
+
+Los commits canónicos posteriores a ese implementation head sólo documentan cierre/handoff. Exigir CI exact-head también sobre el head documental final antes de considerar PR #52 completamente cerrada.
+
+## W80 no significa
+- no demuestra estrategia rentable;
+- no concede Auto-Paper;
+- no concede capital;
+- no concede broker write;
+- no altera la exposición PAPER real;
+- no cierra fees;
+- no cierra Shadow/Forward;
+- no cierra strategy runtime/version binding;
+- no convierte el SHA-256 local en un transparency log firmado.
+
+## Deuda abierta relevante
+- `TD-R7D-001` P1 — total execution-cost continuity;
+- `TD-R7D-002` P1 — fee-complete accounting;
+- `TD-R7D-003` P2 — safe remaining-quantity reservation after partial fills;
 - `SHADOW_FORWARD_PROMOTION_BINDING_REQUIRED`;
-- `TOTAL_EXECUTION_COST_CONTINUITY_UNPROVEN`;
-- `TD-R7D-001` total execution-cost continuity;
-- `TD-R7D-002` fee-complete execution accounting;
-- `TD-R7D-003` partial-fill remaining-quantity reservation.
+- `EXECUTION_STRATEGY_VERSION_UNBOUND`.
 
-Por esto un assessment favorable todavía no puede equivaler a Auto-Paper.
+## W81 — próximo bloque
+Objetivo: cerrar `TD-R7D-001` sin mezclar fees.
 
-## Próximo hito — W80 Promotion Assessment durable
+Problema exacto:
+- Research preregistra `half_spread_bps + slippage_bps`;
+- W78 usa spread observado desde bid/ask + configured adverse slippage;
+- la comprobación actual garantiza slippage configurado >= Research slippage, pero no garantiza que el spread observado sea >= Research half-spread;
+- una observación con spread estrecho puede ser más favorable que Research y no debe pasar como conservative qualification.
 
-Retomar desde `knowledge/00_CANON/TAREA_ACTIVA.md`.
+Diseño esperado:
+- evidence contract hash-bound;
+- exact Research cost-model binding;
+- exact W78 scenario/matrix binding;
+- quote bid/ask + side;
+- observed effective half-spread;
+- configured adverse slippage;
+- modeled total non-fee price impact;
+- preregistered Research non-fee impact;
+- explicit classification (`CONSERVATIVE`, `FAVORABLE_OBSERVATION`, `BLOCKED` o equivalente);
+- provenance/evidence hashes;
+- compatible read-only external PAPER execution evidence cuando exista;
+- no ex-post widening/selection;
+- PAPER candidate false;
+- broker write none;
+- LIVE blocked.
 
-W80 debe persistir receipts autoritativos que vinculen:
-- exact threshold/candidate policy ids + hashes;
-- strategy id/version;
-- selected trial + tournament fingerprints;
-- DEVELOPMENT/HOLDOUT identities;
-- gate statuses + reason codes;
-- evidence hashes + provenance;
-- assessment state;
-- immutable receipt hash.
+`FEE_ACCOUNTING_INCOMPLETE` permanece explícitamente abierto después de W81. No inventar fees dentro de core `Fill` ni hacer profitability claims fee-complete.
 
-Debe usar la misma autoridad SQLite y semántica append-only/idempotente. Strategy Lab podrá leer esos receipts, pero seguirá `mode=ro/query_only` y GET-only.
-
-W80 mantiene obligatoriamente:
-- PAPER candidate: FALSE;
-- capital authority: NONE;
-- broker network: NONE;
-- broker write: NO;
-- credentials: NO;
-- OrderIntent authority: NO;
-- Safety/OMS execution authority: NO;
-- LIVE: BLOCKED.
-
-La eventual decisión `PAPER_CANDIDATE` será un hito posterior y separado.
-
-## R7 close sigue independiente
-La exposición real PAPER no se resuelve por avanzar Strategy Lab. PR #49 conserva:
+## R7 real sigue independiente
+PR #49 conserva:
+- broker Portfolio GET truth;
 - PAPER-only;
-- FULL BTC/USD SELL LIMIT IOC;
 - strict risk reduction;
-- fresh Portfolio + Safety + OMS antes de writer;
-- durable UNKNOWN antes del único POST;
-- GET-only reconciliation;
+- fresh Safety + OMS antes del writer;
+- durable UNKNOWN before one POST;
 - no retry POST;
+- GET-only ambiguity reconciliation;
 - residual exposure => stop;
-- credenciales memory-only;
-- LIVE bloqueado.
+- credentials memory-only;
+- LIVE blocked.
 
-## Regla de producto
-Research, promotion governance y ejecución siguen separados:
+## Regla de producto / autoridad
+Research, assessment y ejecución siguen siendo capas diferentes:
 
-`Research -> Promotion Evidence -> future PAPER Candidate Decision -> Strategy Runtime -> OrderIntent -> Portfolio -> Capital Safety -> OMS -> one-shot PAPER writer -> reconciliation -> Health`
+`Research -> Promotion Governance -> Durable Assessment -> future PAPER Candidate Decision -> Strategy Runtime -> OrderIntent -> Portfolio -> Capital Safety -> OMS -> one-shot PAPER writer -> reconciliation -> Health`
 
 Ninguna salida de IA/modelo puede saltarse esa cadena.
 
 ## Estado de autoridad
-- W79 PAPER candidate: **FALSE**;
 - W80 PAPER candidate: **FALSE**;
-- Strategy Lab capital authority: **NONE**;
-- Strategy Lab broker write: **NO**;
+- W80 broker write: **NO**;
+- W80 capital authority: **NONE**;
 - Strategy Lab credentials: **NO**;
+- Strategy Lab broker network: **NO**;
 - LIVE: **BLOCKED**.
 
 **LIVE TRADING: BLOQUEADO.**
