@@ -134,6 +134,16 @@ def test_limit_execution_sensitivity_exposes_fill_vs_no_fill_boundary(
     empty_portfolio,
     market_buy_intent,
 ):
+    # Use a tight quote so the LIMIT is accepted by Capital Safety, then place
+    # the price between baseline and stressed adverse W78 execution prices.
+    # This isolates the intended execution-sensitivity boundary:
+    # baseline 2 bps -> fill; stress 8 bps -> remain SUBMITTED.
+    execution_market = replace(
+        market,
+        bid=Decimal("99.95"),
+        ask=Decimal("100.05"),
+        last=Decimal("100"),
+    )
     matrix = _matrix(
         _scenario(scenario_id="baseline", slippage="2", fill="1"),
         _scenario(scenario_id="slippage_stress", slippage="8", fill="1"),
@@ -142,7 +152,7 @@ def test_limit_execution_sensitivity_exposes_fill_vs_no_fill_boundary(
     limit_intent = replace(
         market_buy_intent,
         order_type=OrderType.LIMIT,
-        limit_price=Decimal("101.05"),
+        limit_price=Decimal("100.10"),
     )
 
     report = run_paper_execution_sensitivity(
@@ -150,9 +160,9 @@ def test_limit_execution_sensitivity_exposes_fill_vs_no_fill_boundary(
         matrix=matrix,
         limits=limits,
         intent=limit_intent,
-        market=market,
+        market=execution_market,
         portfolio=empty_portfolio,
-        now=market.observed_at,
+        now=execution_market.observed_at,
     )
 
     assert report.full_fill_count == 1
