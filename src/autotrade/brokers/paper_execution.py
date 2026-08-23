@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from hashlib import sha256
 
+from autotrade.broker_state import BrokerAccountState
 from autotrade.domain import (
     Fill,
     MarketSnapshot,
@@ -79,6 +80,7 @@ class DeterministicPaperExecutionBroker:
     - stale/future/crossed/over-wide market rejection before a simulated submit;
     - duplicate local order ids are idempotent only when the intent fingerprint is exact;
     - cancellation never creates fills;
+    - exposes deterministic simulated broker truth through the existing InspectableBroker shape;
     - no external broker, credential, HTTP, socket or LIVE authority.
 
     This is an execution stress model, not a claim that a real venue would fill at
@@ -91,6 +93,8 @@ class DeterministicPaperExecutionBroker:
         self._cancel_count = 0
         self._intent_fingerprints: dict[str, str] = {}
         self._executions: dict[str, BrokerExecution] = {}
+        self._accounted_fill_ids: set[str] = set()
+        self._signed_position_notional_by_symbol: dict[str, Decimal] = {}
 
     @property
     def submission_count(self) -> int:
@@ -102,6 +106,30 @@ class DeterministicPaperExecutionBroker:
 
     def execution_for_order(self, order_id: str) -> BrokerExecution | None:
         return self._executions.get(order_id)
+
+    def get_execution(self, order_id: str) -> BrokerExecution | None:
+        """InspectableBroker-compatible cumulative execution lookup."""
+        return self._executions.get(order_id)
+
+    def account_state(self, *, now: datetime) -> BrokerAccountState:
+        """Return deterministic simulated broker truth; performs no external I/O."""
+        _require_aware(now, "now")
+        open_order_ids = frozenset(
+            order_id
+            for order_id, execution in self._executions.items()
+            if execution.status.broker_open
+        )
+        positions = {
+            symbol: value
+            for symbol, value in self._signed_position_notional_by_symbol.items()
+            if value != 0
+        }
+        return BrokerAccountState(
+            observed_at=now.astimezone(timezone.utc),
+            state_known=True,
+            signed_position_notional_by_symbol=positions,
+            open_order_ids=open_order_ids,
+        )
 
     def submit(
         self,
@@ -133,6 +161,7 @@ class DeterministicPaperExecutionBroker:
         execution = self._simulate(order=order, market=market, now=now)
         self._intent_fingerprints[order.order_id] = fingerprint
         self._executions[order.order_id] = execution
+        self._apply_account_fills(execution.fills)
         self._submission_count += 1
         return execution
 
@@ -147,6 +176,17 @@ class DeterministicPaperExecutionBroker:
         self._executions[order_id] = cancelled
         self._cancel_count += 1
         return cancelled
+
+    def _apply_account_fills(self, fills: tuple[Fill, ...]) -> None:
+        for fill in fills:
+            if fill.fill_id in self._accounted_fill_ids:
+                continue
+            signed_notional = fill.side.sign * fill.quantity * fill.price
+            self._signed_position_notional_by_symbol[fill.symbol] = (
+                self._signed_position_notional_by_symbol.get(fill.symbol, Decimal("0"))
+                + signed_notional
+            )
+            self._accounted_fill_ids.add(fill.fill_id)
 
     def _simulate(
         self,
