@@ -96,6 +96,10 @@ def main() -> int:
             'gate.gate_id == "EXECUTION_SENSITIVITY"',
             "continuity.sensitivity_measurement_hash not in execution_gate.evidence_hashes",
             'reasons.append("W81_MEASUREMENT_NOT_BOUND_TO_W80_EXECUTION_GATE")',
+            '"promotion_assessed_at": assessment.assessed_at',
+            '"continuity_assessed_at": continuity.assessed_at',
+            "_utc(resolved_at) < _utc(assessment.assessed_at)",
+            "_utc(resolved_at) < _utc(continuity.assessed_at)",
             '"fee_accounting_complete": False',
             '"strategy_version_execution_bound": False',
             '"paper_candidate_authorized": False',
@@ -118,7 +122,7 @@ def main() -> int:
         return 1
     print(
         "W81 PROMOTION COST CONTINUITY RESOLUTION BOUNDARY PASS — standalone continuity cannot resolve a candidate; "
-        "exact W80 assessment + selected strategy + EXECUTION_SENSITIVITY measurement binding required; "
+        "exact W80 assessment + selected strategy + EXECUTION_SENSITIVITY measurement + temporal provenance required; "
         "fee and strategy-version blockers remain; no broker/network/SQLite/OMS/Safety authority; "
         "PAPER candidate false; capital NONE; LIVE blocked"
     )
