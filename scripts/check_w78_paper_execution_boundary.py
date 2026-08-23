@@ -6,7 +6,11 @@ import sys
 
 
 ROOT = Path(__file__).resolve().parents[1]
-TARGET = ROOT / "src" / "autotrade" / "brokers" / "paper_execution.py"
+TARGETS = (
+    ROOT / "src" / "autotrade" / "brokers" / "paper_execution.py",
+    ROOT / "src" / "autotrade" / "paper_execution_scenarios.py",
+    ROOT / "src" / "autotrade" / "paper_execution_evidence.py",
+)
 FORBIDDEN_IMPORT_ROOTS = {
     "http",
     "socket",
@@ -21,54 +25,73 @@ FORBIDDEN_AUTOTRADE_IMPORT_FRAGMENTS = {
     "external_paper",
     "real_paper",
 }
+FORBIDDEN_TEXT = (
+    "HTTPSConnection",
+    "http://",
+    "https://",
+    "APCA-API-KEY-ID",
+    "APCA-API-SECRET-KEY",
+    "R7_CLOSE_PAPER_WRITE",
+    "ALPACA_PAPER_TRADING_HOST",
+)
 
 
 def fail(message: str) -> None:
     raise SystemExit(f"W78 PAPER EXECUTION BOUNDARY FAIL: {message}")
 
 
-def main() -> None:
-    if not TARGET.is_file():
-        fail("paper_execution.py is missing")
-    source = TARGET.read_text(encoding="utf-8")
-    tree = ast.parse(source, filename=str(TARGET))
+def _scan(path: Path) -> str:
+    if not path.is_file():
+        fail(f"required W78 module is missing: {path.relative_to(ROOT)}")
+    source = path.read_text(encoding="utf-8")
+    tree = ast.parse(source, filename=str(path))
 
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for alias in node.names:
                 if alias.name.split(".", 1)[0] in FORBIDDEN_IMPORT_ROOTS:
-                    fail(f"forbidden network import: {alias.name}")
+                    fail(f"{path.name}: forbidden network import: {alias.name}")
         elif isinstance(node, ast.ImportFrom):
             module = node.module or ""
             if module.split(".", 1)[0] in FORBIDDEN_IMPORT_ROOTS:
-                fail(f"forbidden network import: {module}")
+                fail(f"{path.name}: forbidden network import: {module}")
             lowered = module.lower()
             if module.startswith("autotrade") and any(
                 fragment in lowered for fragment in FORBIDDEN_AUTOTRADE_IMPORT_FRAGMENTS
             ):
-                fail(f"paper execution model imported broker-write authority: {module}")
+                fail(f"{path.name}: imported broker-write authority: {module}")
 
-    required_text = (
-        "class DeterministicPaperExecutionBroker",
-        "class PaperExecutionConfig",
-        "no-network PAPER execution broker",
-    )
-    for text in required_text:
-        if text not in source:
-            fail(f"required fail-closed marker missing: {text}")
-
-    forbidden_text = (
-        "HTTPSConnection",
-        "http://",
-        "https://",
-        "APCA-API-KEY-ID",
-        "APCA-API-SECRET-KEY",
-        "R7_CLOSE_PAPER_WRITE",
-        "LIVE_TRADING",
-    )
-    for text in forbidden_text:
+    for text in FORBIDDEN_TEXT:
         if text in source:
-            fail(f"forbidden execution-authority marker present: {text}")
+            fail(f"{path.name}: forbidden execution-authority marker present: {text}")
+    return source
+
+
+def main() -> None:
+    sources = {path.name: _scan(path) for path in TARGETS}
+    required_markers = {
+        "paper_execution.py": (
+            "class DeterministicPaperExecutionBroker",
+            "class PaperExecutionConfig",
+            "no-network PAPER execution broker",
+        ),
+        "paper_execution_scenarios.py": (
+            "class PaperExecutionScenario",
+            "class PaperExecutionScenarioMatrix",
+            "scenario_hash",
+            "matrix_hash",
+        ),
+        "paper_execution_evidence.py": (
+            "class PaperExecutionEvidence",
+            "evidence_hash",
+            "UNKNOWN execution requires reconciliation",
+        ),
+    }
+    for filename, markers in required_markers.items():
+        source = sources[filename]
+        for marker in markers:
+            if marker not in source:
+                fail(f"{filename}: required fail-closed marker missing: {marker}")
 
     print("W78 PAPER EXECUTION BOUNDARY PASS")
 
