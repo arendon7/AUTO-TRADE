@@ -7,14 +7,25 @@
       "track": "R7D",
       "area": "Research-to-PAPER total execution-cost continuity",
       "severity": "P1",
-      "status": "OPEN",
+      "status": "CLOSED",
       "evidence": [
         "src/autotrade/research/costs.py",
         "src/autotrade/paper_execution_qualification.py",
         "src/autotrade/paper_execution_lab.py",
-        "knowledge/30_DECISIONES/ADR-0010-w78-deterministic-paper-execution-model.md"
+        "src/autotrade/execution_cost_continuity.py",
+        "src/autotrade/promotion_cost_continuity.py",
+        "tests/test_w81_execution_cost_continuity.py",
+        "tests/test_w81_execution_cost_continuity_adversarial.py",
+        "tests/test_w81_execution_cost_continuity_temporal.py",
+        "tests/test_w81_promotion_cost_continuity.py",
+        "tests/test_w81_promotion_cost_continuity_temporal.py",
+        "scripts/check_w81_execution_cost_continuity_boundary.py",
+        "scripts/check_w81_promotion_cost_continuity_boundary.py",
+        ".github/workflows/w81-execution-cost-continuity.yml",
+        "knowledge/30_DECISIONES/ADR-0013-w81-execution-cost-continuity.md"
       ],
-      "next_action": "Before any Strategy Lab result may authorize Auto-Paper promotion, bind the preregistered R1 research half-spread plus slippage assumption to W78 effective execution impact. Prove that observed bid/ask spread plus configured W78 adverse slippage does not silently become more favorable than the research cost model, or classify the run as non-conservative observational evidence. Preserve fee assumptions separately and do not weaken Capital Safety or the W78 no-network boundary."
+      "resolution": "W81 proves non-fee Research-to-W78 execution-cost continuity from the observed midpoint using the exact preregistered Research half-spread plus slippage target and exact W78 multiplicative side-aware execution impact. Favorable observations that reduce effective friction are BLOCKED. A promotion blocker may be removed only by a hash-bound resolution tied to the exact W80 candidate assessment and its EXECUTION_SENSITIVITY measurement, with temporal provenance. Fee accounting, strategy-version execution binding, shadow/forward promotion binding and partial-fill reservation remain separate blockers. No compatible external PAPER execution-price receipt is fabricated; any future PAPER adapter must be read-only and identity-bound.",
+      "next_action": "Maintain W81 boundaries permanently. If a future authoritative PAPER execution-price source contains exact account/order/strategy/symbol identity, attach it through a separately reviewed read-only adapter; never substitute unrelated first-canary position truth. Continue with TD-R7D-002 fee-complete execution accounting."
     },
     {
       "id": "TD-R7D-002",
@@ -27,9 +38,10 @@
         "src/autotrade/research/costs.py",
         "src/autotrade/paper_execution_evidence.py",
         "src/autotrade/paper_execution_qualification.py",
-        "knowledge/30_DECISIONES/ADR-0010-w78-deterministic-paper-execution-model.md"
+        "knowledge/30_DECISIONES/ADR-0010-w78-deterministic-paper-execution-model.md",
+        "knowledge/30_DECISIONES/ADR-0013-w81-execution-cost-continuity.md"
       ],
-      "next_action": "Add a separately reviewed fee-aware execution accounting contract that can reconcile research fee assumptions with realized/simulated PAPER economics without fabricating fees inside the existing core Fill. Until then, W78 evidence may measure fill quantity and adverse price impact but must not be treated as fee-complete realized P&L or profitability proof."
+      "next_action": "W82: add a separately reviewed fee-complete execution accounting contract that binds Research fee assumptions to explicit simulated or authoritative PAPER fee evidence without fabricating fees inside the existing core Fill. Separate fee schedule assumptions from observed broker fees, preserve product/venue/account/order provenance, and keep profitability/PAPER-candidate claims blocked whenever fee evidence is missing or incomplete."
     },
     {
       "id": "TD-R7D-003",
