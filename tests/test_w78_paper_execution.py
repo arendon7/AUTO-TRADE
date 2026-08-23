@@ -42,6 +42,7 @@ def test_market_buy_uses_adverse_slippage(market, market_buy_intent):
     assert execution.fills[0].quantity == Decimal("10")
     assert execution.fills[0].price == Decimal("101.101")
     assert broker.submission_count == 1
+    assert broker.rejection_count == 0
 
 
 def test_market_sell_uses_adverse_slippage(market, market_buy_intent):
@@ -106,15 +107,25 @@ def test_partial_fill_is_explicit_and_never_silently_promoted_to_full(market, ma
     assert execution.fills[0].quantity == Decimal("4.0")
 
 
-def test_same_local_order_replay_is_broker_idempotent(market, market_buy_intent):
-    broker = DeterministicPaperExecutionBroker()
+def test_same_local_order_replay_is_broker_idempotent_even_if_new_market_is_stale(
+    market,
+    market_buy_intent,
+):
+    broker = DeterministicPaperExecutionBroker(
+        config=PaperExecutionConfig(max_market_age=timedelta(seconds=1))
+    )
     order = _order(intent=market_buy_intent)
 
     first = broker.submit(order=order, market=market, now=market.observed_at)
-    second = broker.submit(order=order, market=market, now=market.observed_at)
+    second = broker.submit(
+        order=order,
+        market=market,
+        now=market.observed_at + timedelta(seconds=5),
+    )
 
     assert first == second
     assert broker.submission_count == 1
+    assert broker.rejection_count == 0
     assert first.fills[0].fill_id == second.fills[0].fill_id
 
 
@@ -136,45 +147,52 @@ def test_same_local_order_id_with_changed_intent_fails_closed(market, market_buy
     assert broker.submission_count == 1
 
 
-def test_stale_market_fails_before_simulated_submission(market, market_buy_intent):
+def test_stale_market_is_terminal_rejection_not_unknown(market, market_buy_intent):
     broker = DeterministicPaperExecutionBroker(
         config=PaperExecutionConfig(max_market_age=timedelta(seconds=1))
     )
+    order = _order(intent=market_buy_intent)
 
-    with pytest.raises(PaperExecutionMarketError, match="stale"):
-        broker.submit(
-            order=_order(intent=market_buy_intent),
-            market=market,
-            now=market.observed_at + timedelta(seconds=2),
-        )
+    execution = broker.submit(
+        order=order,
+        market=market,
+        now=market.observed_at + timedelta(seconds=2),
+    )
+
+    assert execution.status is OrderStatus.REJECTED
+    assert execution.fills == ()
     assert broker.submission_count == 0
+    assert broker.rejection_count == 1
+    assert broker.rejection_reason_for_order(order.order_id) == "STALE_MARKET_SNAPSHOT"
 
 
-def test_future_market_fails_before_simulated_submission(market, market_buy_intent):
+def test_future_market_is_terminal_rejection(market, market_buy_intent):
     broker = DeterministicPaperExecutionBroker()
+    order = _order(intent=market_buy_intent)
 
-    with pytest.raises(PaperExecutionMarketError, match="future"):
-        broker.submit(
-            order=_order(intent=market_buy_intent),
-            market=market,
-            now=market.observed_at - timedelta(microseconds=1),
-        )
+    execution = broker.submit(
+        order=order,
+        market=market,
+        now=market.observed_at - timedelta(microseconds=1),
+    )
+
+    assert execution.status is OrderStatus.REJECTED
+    assert broker.rejection_reason_for_order(order.order_id) == "FUTURE_MARKET_SNAPSHOT"
     assert broker.submission_count == 0
 
 
-def test_crossed_market_fails_closed(market, market_buy_intent):
+def test_crossed_market_is_terminal_rejection(market, market_buy_intent):
     crossed = replace(market, bid=Decimal("102"), ask=Decimal("101"))
     broker = DeterministicPaperExecutionBroker()
+    order = _order(intent=market_buy_intent)
 
-    with pytest.raises(PaperExecutionMarketError, match="crossed"):
-        broker.submit(
-            order=_order(intent=market_buy_intent),
-            market=crossed,
-            now=market.observed_at,
-        )
+    execution = broker.submit(order=order, market=crossed, now=market.observed_at)
+
+    assert execution.status is OrderStatus.REJECTED
+    assert broker.rejection_reason_for_order(order.order_id) == "CROSSED_MARKET"
 
 
-def test_overwide_spread_fails_closed(market_buy_intent):
+def test_overwide_spread_is_terminal_rejection(market_buy_intent):
     now = market_buy_intent.created_at
     wide = MarketSnapshot(
         symbol=market_buy_intent.symbol,
@@ -186,9 +204,54 @@ def test_overwide_spread_fails_closed(market_buy_intent):
     broker = DeterministicPaperExecutionBroker(
         config=PaperExecutionConfig(max_spread_bps=Decimal("100"))
     )
+    order = _order(intent=market_buy_intent)
 
-    with pytest.raises(PaperExecutionMarketError, match="spread"):
-        broker.submit(order=_order(intent=market_buy_intent), market=wide, now=now)
+    execution = broker.submit(order=order, market=wide, now=now)
+
+    assert execution.status is OrderStatus.REJECTED
+    assert broker.rejection_reason_for_order(order.order_id) == "SPREAD_LIMIT_EXCEEDED"
+
+
+def test_symbol_mismatch_remains_contract_failure(market, market_buy_intent):
+    wrong = replace(market, symbol="OTHER-USD")
+    broker = DeterministicPaperExecutionBroker()
+
+    with pytest.raises(PaperExecutionMarketError, match="symbol mismatch"):
+        broker.submit(
+            order=_order(intent=market_buy_intent),
+            market=wrong,
+            now=market.observed_at,
+        )
+
+
+def test_oms_records_deterministic_market_quality_rejection_without_unknown(
+    limits,
+    market,
+    empty_portfolio,
+    market_buy_intent,
+):
+    ledger = InMemoryEventLedger()
+    broker = DeterministicPaperExecutionBroker(
+        config=PaperExecutionConfig(max_spread_bps=Decimal("100"))
+    )
+    wide = replace(market, bid=Decimal("90"), ask=Decimal("110"))
+    pipeline = TradingPipeline(
+        safety=CapitalSafetyKernel(limits, ledger),
+        oms=OrderManagementSystem(broker=broker, ledger=ledger),
+    )
+
+    result = pipeline.process_intent(
+        intent=market_buy_intent,
+        market=wide,
+        portfolio=empty_portfolio,
+        now=market.observed_at,
+    )
+
+    assert result.order is not None
+    assert result.order.status is OrderStatus.REJECTED
+    assert broker.rejection_count == 1
+    assert broker.submission_count == 0
+    assert "ORDER_STATE_UNKNOWN" not in [event.event_type for event in ledger.all_events()]
 
 
 def test_cancel_preserves_observed_partial_fill_and_is_terminal(market, market_buy_intent):
