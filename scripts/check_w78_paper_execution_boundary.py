@@ -11,6 +11,7 @@ TARGETS = (
     ROOT / "src" / "autotrade" / "paper_execution_scenarios.py",
     ROOT / "src" / "autotrade" / "paper_execution_evidence.py",
     ROOT / "src" / "autotrade" / "paper_execution_qualification.py",
+    ROOT / "src" / "autotrade" / "paper_execution_lab.py",
 )
 FORBIDDEN_IMPORT_ROOTS = {
     "http",
@@ -68,6 +69,19 @@ def _scan(path: Path) -> str:
     return source
 
 
+def _require_markers(*, source: str, filename: str, markers: tuple[str, ...]) -> None:
+    for marker in markers:
+        if marker not in source:
+            fail(f"{filename}: required fail-closed marker missing: {marker}")
+
+
+def _require_zero_authority(*, source: str, filename: str) -> None:
+    if '"external_execution_authorized": False' not in source:
+        fail(f"{filename}: does not hard-code zero external authority")
+    if '"live_trading": "BLOCKED"' not in source:
+        fail(f"{filename}: does not hard-code LIVE BLOCKED")
+
+
 def main() -> None:
     sources = {path.name: _scan(path) for path in TARGETS}
     required_markers = {
@@ -84,27 +98,47 @@ def main() -> None:
         ),
         "paper_execution_evidence.py": (
             "class PaperExecutionEvidence",
+            "measurement_hash",
             "evidence_hash",
             "UNKNOWN execution requires reconciliation",
         ),
         "paper_execution_qualification.py": (
             "class PaperExecutionQualificationContract",
             "external_execution_authorized",
-            'live_trading": value.live_trading',
             "may not grant external/LIVE authority",
+        ),
+        "paper_execution_lab.py": (
+            "class PaperExecutionSensitivityReport",
+            "measurement_report_hash",
+            "trace_report_hash",
+            "no-network W78 scenario entered ambiguous broker state",
+            "sensitivity report may not grant external/LIVE authority",
         ),
     }
     for filename, markers in required_markers.items():
-        source = sources[filename]
-        for marker in markers:
-            if marker not in source:
-                fail(f"{filename}: required fail-closed marker missing: {marker}")
+        _require_markers(source=sources[filename], filename=filename, markers=markers)
 
-    qualification = sources["paper_execution_qualification.py"]
-    if '"external_execution_authorized": False' not in qualification:
-        fail("qualification contract does not hard-code zero external authority")
-    if '"live_trading": "BLOCKED"' not in qualification:
-        fail("qualification contract does not hard-code LIVE BLOCKED")
+    _require_zero_authority(
+        source=sources["paper_execution_qualification.py"],
+        filename="paper_execution_qualification.py",
+    )
+    _require_zero_authority(
+        source=sources["paper_execution_lab.py"],
+        filename="paper_execution_lab.py",
+    )
+
+    # W78 is qualification-only. The modules may reuse Safety/OMS abstractions,
+    # but none may contain a writer/credential/network escape hatch.
+    lab = sources["paper_execution_lab.py"]
+    for forbidden in (
+        "credentials=",
+        "writer=",
+        "submit_once(",
+        "stage_external_submission(",
+        "bind_paper_close_execution_authority(",
+    ):
+        if forbidden in lab:
+            fail(f"paper_execution_lab.py: forbidden execution handoff marker present: {forbidden}")
 
     print("W78 PAPER EXECUTION BOUNDARY PASS")
 
