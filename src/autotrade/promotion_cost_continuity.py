@@ -50,6 +50,8 @@ class PromotionCostContinuityResolution:
     continuity_evidence_hash: str
     continuity_measurement_hash: str
     intent_fingerprint: str
+    promotion_assessed_at: datetime
+    continuity_assessed_at: datetime
     status: PromotionCostContinuityStatus
     reason_codes: tuple[str, ...]
     resolved_promotion_blockers: tuple[str, ...]
@@ -89,6 +91,20 @@ class PromotionCostContinuityResolution:
             raise PromotionCostContinuityIntegrityError("execution gate evidence hashes must be unique sorted")
         for value in self.execution_gate_evidence_hashes:
             _require_hash(value, "execution gate evidence hash")
+        for label, value in (
+            ("promotion_assessed_at", self.promotion_assessed_at),
+            ("continuity_assessed_at", self.continuity_assessed_at),
+            ("resolved_at", self.resolved_at),
+        ):
+            _require_aware(value, label)
+        if _utc(self.resolved_at) < _utc(self.promotion_assessed_at):
+            raise PromotionCostContinuityIntegrityError(
+                "resolution may not predate W80 promotion assessment"
+            )
+        if _utc(self.resolved_at) < _utc(self.continuity_assessed_at):
+            raise PromotionCostContinuityIntegrityError(
+                "resolution may not predate W81 continuity evidence"
+            )
         if not isinstance(self.status, PromotionCostContinuityStatus):
             raise PromotionCostContinuityIntegrityError("invalid resolution status")
         if self.reason_codes != tuple(sorted(set(self.reason_codes))):
@@ -118,7 +134,6 @@ class PromotionCostContinuityResolution:
             raise PromotionCostContinuityIntegrityError("W81 resolution may not authorize execution")
         if self.capital_authority != "NONE" or self.live_trading != "BLOCKED":
             raise PromotionCostContinuityIntegrityError("W81 resolution may not grant capital or LIVE authority")
-        _require_aware(self.resolved_at, "resolved_at")
         if self.resolution_hash != _hash(_payload(self, include_hash=False)):
             raise PromotionCostContinuityIntegrityError("promotion cost continuity resolution hash mismatch")
 
@@ -149,6 +164,14 @@ def resolve_promotion_cost_continuity(
     if not isinstance(execution_intent, OrderIntent):
         raise TypeError("execution_intent must be OrderIntent")
     _require_aware(resolved_at, "resolved_at")
+    if _utc(resolved_at) < _utc(assessment.assessed_at):
+        raise PromotionCostContinuityIntegrityError(
+            "resolution may not predate W80 promotion assessment"
+        )
+    if _utc(resolved_at) < _utc(continuity.assessed_at):
+        raise PromotionCostContinuityIntegrityError(
+            "resolution may not predate W81 continuity evidence"
+        )
 
     intent_hash = intent_fingerprint(execution_intent)
     if continuity.intent_fingerprint != intent_hash:
@@ -191,6 +214,8 @@ def resolve_promotion_cost_continuity(
         "continuity_evidence_hash": continuity.evidence_hash,
         "continuity_measurement_hash": continuity.sensitivity_measurement_hash,
         "intent_fingerprint": intent_hash,
+        "promotion_assessed_at": assessment.assessed_at,
+        "continuity_assessed_at": continuity.assessed_at,
         "status": status,
         "reason_codes": tuple(sorted(reasons)),
         "resolved_promotion_blockers": resolved,
@@ -224,6 +249,8 @@ def _payload(value: PromotionCostContinuityResolution, *, include_hash: bool) ->
             "continuity_evidence_hash": value.continuity_evidence_hash,
             "continuity_measurement_hash": value.continuity_measurement_hash,
             "intent_fingerprint": value.intent_fingerprint,
+            "promotion_assessed_at": value.promotion_assessed_at,
+            "continuity_assessed_at": value.continuity_assessed_at,
             "status": value.status,
             "reason_codes": value.reason_codes,
             "resolved_promotion_blockers": value.resolved_promotion_blockers,
@@ -249,7 +276,8 @@ def _payload_from_values(values: dict[str, object]) -> dict[str, object]:
     payload["reason_codes"] = list(payload["reason_codes"])  # type: ignore[arg-type]
     payload["resolved_promotion_blockers"] = list(payload["resolved_promotion_blockers"])  # type: ignore[arg-type]
     payload["remaining_promotion_blockers"] = list(payload["remaining_promotion_blockers"])  # type: ignore[arg-type]
-    payload["resolved_at"] = _utc_iso(payload["resolved_at"])  # type: ignore[arg-type]
+    for key in ("promotion_assessed_at", "continuity_assessed_at", "resolved_at"):
+        payload[key] = _utc_iso(payload[key])  # type: ignore[arg-type]
     return payload
 
 
@@ -268,8 +296,13 @@ def _require_aware(value: datetime, label: str) -> None:
         raise PromotionCostContinuityIntegrityError(f"{label} must be timezone-aware datetime")
 
 
+def _utc(value: datetime) -> datetime:
+    _require_aware(value, "datetime")
+    return value.astimezone(timezone.utc)
+
+
 def _utc_iso(value: datetime) -> str:
-    return value.astimezone(timezone.utc).isoformat()
+    return _utc(value).isoformat()
 
 
 def _enum_value(value: object) -> str:
