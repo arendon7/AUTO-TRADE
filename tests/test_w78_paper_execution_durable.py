@@ -5,11 +5,11 @@ from decimal import Decimal
 from autotrade.domain import OrderStatus
 from autotrade.engine import DurableTradingPipeline
 from autotrade.execution_state import SQLiteFillAwarePortfolioStore, SQLiteFillStore
-from autotrade.ledger import SQLiteEventLedger
 from autotrade.oms import OrderManagementSystem
 from autotrade.paper_execution_evidence import capture_paper_execution_evidence
 from autotrade.paper_execution_scenarios import build_paper_execution_scenario
 from autotrade.persistence import (
+    SQLiteEventLedger,
     SQLiteOrderStore,
     SQLiteReservationStore,
     SQLiteRuntime,
