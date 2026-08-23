@@ -14,6 +14,7 @@ from autotrade.strategy_lab_promotion import (
     REQUIRED_W79_GATE_IDS,
     PromotionAssessmentState,
     PromotionGateStatus,
+    StrategyPromotionIntegrityError,
     StrategyPromotionPolicy,
 )
 
@@ -373,22 +374,27 @@ def _assessment_from_row(row: sqlite3.Row) -> PromotionAssessmentReadView:
 
 def _promotion_policy_from_row(row: sqlite3.Row) -> StrategyPromotionPolicy:
     value = _json_object(row["policy_json"], "promotion policy JSON")
-    policy = StrategyPromotionPolicy(
-        policy_id=_string(value, "policy_id"),
-        threshold_policy_id=_string(value, "threshold_policy_id"),
-        threshold_policy_hash=_string(value, "threshold_policy_hash"),
-        development_campaign_id=_string(value, "development_campaign_id"),
-        holdout_campaign_id=_string(value, "holdout_campaign_id"),
-        holdout_trial_id=_string(value, "holdout_trial_id"),
-        selected_trial_id=_string(value, "selected_trial_id"),
-        selected_trial_fingerprint=_string(value, "selected_trial_fingerprint"),
-        selected_strategy_id=_string(value, "selected_strategy_id"),
-        selected_strategy_version=_string(value, "selected_strategy_version"),
-        tournament_fingerprint=_string(value, "tournament_fingerprint"),
-        external_execution_authorized=_false(value, "external_execution_authorized"),
-        live_trading=_string(value, "live_trading"),
-        policy_hash=_string(value, "policy_hash"),
-    )
+    try:
+        policy = StrategyPromotionPolicy(
+            policy_id=_string(value, "policy_id"),
+            threshold_policy_id=_string(value, "threshold_policy_id"),
+            threshold_policy_hash=_string(value, "threshold_policy_hash"),
+            development_campaign_id=_string(value, "development_campaign_id"),
+            holdout_campaign_id=_string(value, "holdout_campaign_id"),
+            holdout_trial_id=_string(value, "holdout_trial_id"),
+            selected_trial_id=_string(value, "selected_trial_id"),
+            selected_trial_fingerprint=_string(value, "selected_trial_fingerprint"),
+            selected_strategy_id=_string(value, "selected_strategy_id"),
+            selected_strategy_version=_string(value, "selected_strategy_version"),
+            tournament_fingerprint=_string(value, "tournament_fingerprint"),
+            external_execution_authorized=_false(value, "external_execution_authorized"),
+            live_trading=_string(value, "live_trading"),
+            policy_hash=_string(value, "policy_hash"),
+        )
+    except StrategyPromotionIntegrityError as exc:
+        raise PromotionAssessmentReadIntegrityError(
+            "frozen W79 policy failed canonical validation"
+        ) from exc
     expected = {
         "policy_id": policy.policy_id,
         "policy_hash": policy.policy_hash,
@@ -409,9 +415,12 @@ def _validate_policy_bindings(
 ) -> None:
     if not assessments:
         return
-    policies = {_promotion_policy_from_row(row).policy_id: _promotion_policy_from_row(row) for row in policy_rows}
-    if len(policies) != len(policy_rows):
-        raise PromotionAssessmentReadIntegrityError("duplicate frozen W79 policy identity")
+    policies: dict[str, StrategyPromotionPolicy] = {}
+    for row in policy_rows:
+        policy = _promotion_policy_from_row(row)
+        if policy.policy_id in policies:
+            raise PromotionAssessmentReadIntegrityError("duplicate frozen W79 policy identity")
+        policies[policy.policy_id] = policy
     thresholds = {str(row["threshold_policy_id"]): str(row["threshold_policy_hash"]) for row in threshold_rows}
     if len(thresholds) != len(threshold_rows):
         raise PromotionAssessmentReadIntegrityError("duplicate frozen W79 threshold identity")
