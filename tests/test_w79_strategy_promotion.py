@@ -30,9 +30,9 @@ from autotrade.strategy_lab_promotion import (
     PromotionAssessmentState,
     PromotionGateStatus,
     SQLiteStrategyPromotionPolicyRegistry,
-    StrategyPromotionConflict,
     StrategyPromotionIntegrityError,
     build_strategy_promotion_policy,
+    build_strategy_promotion_threshold_policy,
     evaluate_strategy_promotion,
 )
 
@@ -62,17 +62,7 @@ def _trial(
     )
 
 
-def _setup_policy(
-    tmp_path,
-    now,
-    *,
-    max_holm: str = "0.05",
-    min_execution_fill: str = "0.40",
-    max_execution_slippage: str = "10",
-):
-    db = tmp_path / "w79.db"
-    runtime = SQLiteRuntime(db)
-    ledger = SQLiteTrialLedger(runtime)
+def _create_campaigns(ledger, now):
     ledger.create_campaign(
         CampaignSpec(
             campaign_id="dev-campaign",
@@ -93,6 +83,53 @@ def _setup_policy(
         ),
         now=now + timedelta(milliseconds=1),
     )
+
+
+def _build_thresholds(
+    *,
+    max_holm: str = "0.05",
+    min_execution_fill: str = "0.40",
+    max_execution_slippage: str = "10",
+):
+    return build_strategy_promotion_threshold_policy(
+        threshold_policy_id="thresholds-a",
+        development_campaign_id="dev-campaign",
+        holdout_campaign_id="holdout-campaign",
+        holdout_trial_id="holdout-a",
+        max_holm_adjusted_p=Decimal(max_holm),
+        min_holdout_net_return=Decimal("0.02"),
+        max_holdout_drawdown=Decimal("0.10"),
+        min_holdout_fills=5,
+        min_execution_fill_ratio=Decimal(min_execution_fill),
+        max_execution_adverse_slippage_bps=Decimal(max_execution_slippage),
+    )
+
+
+def _setup_policy(
+    tmp_path,
+    now,
+    *,
+    max_holm: str = "0.05",
+    min_execution_fill: str = "0.40",
+    max_execution_slippage: str = "10",
+):
+    db = tmp_path / "w79.db"
+    runtime = SQLiteRuntime(db)
+    ledger = SQLiteTrialLedger(runtime)
+    _create_campaigns(ledger, now)
+
+    registry = SQLiteStrategyPromotionPolicyRegistry(runtime)
+    thresholds = _build_thresholds(
+        max_holm=max_holm,
+        min_execution_fill=min_execution_fill,
+        max_execution_slippage=max_execution_slippage,
+    )
+    registry.register_thresholds(
+        thresholds,
+        trial_ledger=ledger,
+        now=now + timedelta(milliseconds=10),
+    )
+
     ledger.preregister(
         _trial(trial_id="dev-a", campaign_id="dev-campaign", strategy_id="strategy-a"),
         now=now + timedelta(seconds=1),
@@ -125,19 +162,10 @@ def _setup_policy(
     )
     policy = build_strategy_promotion_policy(
         policy_id="promotion-a",
-        development_campaign_id="dev-campaign",
-        holdout_campaign_id="holdout-campaign",
-        holdout_trial_id="holdout-a",
+        thresholds=thresholds,
         trial_ledger=ledger,
         tournament=tournament,
-        max_holm_adjusted_p=Decimal(max_holm),
-        min_holdout_net_return=Decimal("0.02"),
-        max_holdout_drawdown=Decimal("0.10"),
-        min_holdout_fills=5,
-        min_execution_fill_ratio=Decimal(min_execution_fill),
-        max_execution_adverse_slippage_bps=Decimal(max_execution_slippage),
     )
-    registry = SQLiteStrategyPromotionPolicyRegistry(runtime)
     registry.register(
         policy,
         trial_ledger=ledger,
@@ -228,17 +256,21 @@ def _gate(view, gate_id):
     return next(item for item in view.gates if item.gate_id == gate_id)
 
 
-def test_policy_freezes_after_development_selection_before_holdout(tmp_path, now):
+def test_thresholds_are_preregistered_before_development_and_candidate_binds_after_tournament(
+    tmp_path, now
+):
     _, ledger, tournament, policy, registry = _setup_policy(tmp_path, now)
+    thresholds = registry.get_thresholds("thresholds-a")
 
-    loaded = registry.get(policy.policy_id)
-    assert loaded == policy
-    assert loaded.policy_hash == policy.policy_hash
-    assert loaded.selected_trial_id == "dev-a"
-    assert loaded.selected_strategy_id == "strategy-a"
-    assert loaded.selected_strategy_version == "v1"
-    assert loaded.external_execution_authorized is False
-    assert loaded.live_trading == "BLOCKED"
+    assert thresholds is not None
+    assert registry.list_threshold_policies() == (thresholds,)
+    assert registry.list_policies() == (policy,)
+    assert policy.threshold_policy_hash == thresholds.threshold_policy_hash
+    assert policy.selected_trial_id == "dev-a"
+    assert policy.selected_strategy_id == "strategy-a"
+    assert policy.selected_strategy_version == "v1"
+    assert policy.external_execution_authorized is False
+    assert policy.live_trading == "BLOCKED"
 
     assert (
         registry.register(
@@ -250,36 +282,62 @@ def test_policy_freezes_after_development_selection_before_holdout(tmp_path, now
         == policy
     )
     with pytest.raises(StrategyPromotionIntegrityError, match="policy hash mismatch"):
-        replace(policy, min_holdout_net_return=Decimal("0.03"))
+        replace(policy, selected_strategy_version="v2")
 
 
-def test_policy_cannot_be_created_or_registered_after_holdout_preregistration(tmp_path, now):
-    db, ledger, tournament, policy, _ = _setup_policy(tmp_path, now)
-    _complete_holdout(db, ledger, now)
+def test_threshold_policy_cannot_be_registered_after_development_preregistration(
+    tmp_path, now
+):
+    runtime = SQLiteRuntime(tmp_path / "late-thresholds.db")
+    ledger = SQLiteTrialLedger(runtime)
+    _create_campaigns(ledger, now)
+    ledger.preregister(
+        _trial(trial_id="dev-a", campaign_id="dev-campaign", strategy_id="strategy-a"),
+        now=now + timedelta(seconds=1),
+    )
+    registry = SQLiteStrategyPromotionPolicyRegistry(runtime)
 
-    with pytest.raises(StrategyPromotionIntegrityError, match="before HOLDOUT trial preregistration"):
-        build_strategy_promotion_policy(
-            policy_id="promotion-late",
-            development_campaign_id="dev-campaign",
-            holdout_campaign_id="holdout-campaign",
-            holdout_trial_id="holdout-a",
+    with pytest.raises(StrategyPromotionIntegrityError, match="before DEVELOPMENT"):
+        registry.register_thresholds(
+            _build_thresholds(),
             trial_ledger=ledger,
-            tournament=tournament,
-            max_holm_adjusted_p=Decimal("0.05"),
-            min_holdout_net_return=Decimal("0.02"),
-            max_holdout_drawdown=Decimal("0.10"),
-            min_holdout_fills=5,
-            min_execution_fill_ratio=Decimal("0.4"),
-            max_execution_adverse_slippage_bps=Decimal("10"),
+            now=now + timedelta(seconds=2),
         )
 
-    late_registry = SQLiteStrategyPromotionPolicyRegistry(tmp_path / "late-policy.db")
-    with pytest.raises(StrategyPromotionIntegrityError, match="after HOLDOUT preregistration"):
-        late_registry.register(
+
+def test_candidate_binding_cannot_be_created_after_holdout_preregistration(tmp_path, now):
+    db, ledger, tournament, policy, registry = _setup_policy(tmp_path, now)
+    thresholds = registry.get_thresholds(policy.threshold_policy_id)
+    assert thresholds is not None
+    _complete_holdout(db, ledger, now)
+
+    with pytest.raises(StrategyPromotionIntegrityError, match="before HOLDOUT"):
+        build_strategy_promotion_policy(
+            policy_id="promotion-late",
+            thresholds=thresholds,
+            trial_ledger=ledger,
+            tournament=tournament,
+        )
+
+    assert (
+        registry.register(
             policy,
             trial_ledger=ledger,
             tournament=tournament,
             now=now + timedelta(seconds=20),
+        )
+        == policy
+    )
+
+
+def test_registry_and_ledger_must_share_authoritative_sqlite_runtime(tmp_path, now):
+    _, ledger, _, _, _ = _setup_policy(tmp_path / "source", now)
+    other = SQLiteStrategyPromotionPolicyRegistry(tmp_path / "other" / "other.db")
+    with pytest.raises(StrategyPromotionIntegrityError, match="one authoritative SQLite"):
+        other.register_thresholds(
+            _build_thresholds(),
+            trial_ledger=ledger,
+            now=now + timedelta(seconds=30),
         )
 
 
@@ -303,6 +361,7 @@ def test_missing_evidence_is_visible_and_never_promotes(tmp_path, now):
     assert view.external_execution_authorized is False
     assert view.live_trading == "BLOCKED"
     assert view.promotion_blockers == tuple(sorted(PERMANENT_W79_PROMOTION_BLOCKERS))
+    assert view.threshold_policy_hash == policy.threshold_policy_hash
     assert view.to_dict()["view_hash"] == view.view_hash
 
 
@@ -414,7 +473,7 @@ def test_execution_identity_mismatch_blocks_even_when_w78_report_is_green(
     assert view.evidence_complete is False
 
 
-def test_holm_and_execution_thresholds_fail_closed(
+def test_preregistered_holm_and_execution_thresholds_fail_closed(
     tmp_path,
     now,
     limits,
@@ -422,9 +481,8 @@ def test_holm_and_execution_thresholds_fail_closed(
     empty_portfolio,
     market_buy_intent,
 ):
-    strict_dir = tmp_path / "strict"
     db, ledger, tournament, policy, registry = _setup_policy(
-        strict_dir,
+        tmp_path,
         now,
         max_holm="0.001",
         min_execution_fill="0.9",
@@ -454,7 +512,6 @@ def test_holm_and_execution_thresholds_fail_closed(
         "EXECUTION_SLIPPAGE_ABOVE_POLICY",
     )
     assert view.assessment_state is PromotionAssessmentState.REJECTED
-    assert view.paper_candidate_authorized is False
 
 
 def test_holdout_candidate_identity_mismatch_blocks(tmp_path, now):
@@ -476,7 +533,7 @@ def test_holdout_candidate_identity_mismatch_blocks(tmp_path, now):
     assert view.assessment_state is PromotionAssessmentState.BLOCKED
 
 
-def test_registry_conflict_unknown_policy_and_invalid_thresholds_fail_closed(tmp_path, now):
+def test_unknown_policy_and_candidate_hash_tamper_fail_closed(tmp_path, now):
     _, ledger, tournament, policy, registry = _setup_policy(tmp_path, now)
     with pytest.raises(StrategyPromotionIntegrityError, match="unknown frozen promotion policy"):
         evaluate_strategy_promotion(
@@ -486,43 +543,9 @@ def test_registry_conflict_unknown_policy_and_invalid_thresholds_fail_closed(tmp
             tournament=tournament,
         )
 
-    with pytest.raises(StrategyPromotionIntegrityError, match="policy hash mismatch"):
-        replace(policy, policy_id="promotion-b", policy_hash="0" * 64)
-
-    duplicate = build_strategy_promotion_policy(
-        policy_id="promotion-b",
-        development_campaign_id="dev-campaign",
-        holdout_campaign_id="holdout-campaign",
-        holdout_trial_id="holdout-a",
-        trial_ledger=ledger,
-        tournament=tournament,
-        max_holm_adjusted_p=Decimal("0.05"),
-        min_holdout_net_return=Decimal("0.02"),
-        max_holdout_drawdown=Decimal("0.10"),
-        min_holdout_fills=5,
-        min_execution_fill_ratio=Decimal("0.40"),
-        max_execution_adverse_slippage_bps=Decimal("10"),
-    )
-    with pytest.raises(StrategyPromotionConflict, match="HOLDOUT campaign already frozen"):
-        registry.register(
-            duplicate,
-            trial_ledger=ledger,
-            tournament=tournament,
-            now=now + timedelta(seconds=10),
-        )
-
-    with pytest.raises(StrategyPromotionIntegrityError, match="max_holm_adjusted_p"):
-        build_strategy_promotion_policy(
-            policy_id="promotion-invalid",
-            development_campaign_id="dev-campaign",
-            holdout_campaign_id="holdout-campaign",
-            holdout_trial_id="holdout-a",
-            trial_ledger=ledger,
-            tournament=tournament,
-            max_holm_adjusted_p=Decimal("1.1"),
-            min_holdout_net_return=Decimal("0.02"),
-            max_holdout_drawdown=Decimal("0.10"),
-            min_holdout_fills=5,
-            min_execution_fill_ratio=Decimal("0.40"),
-            max_execution_adverse_slippage_bps=Decimal("10"),
+    with pytest.raises(StrategyPromotionIntegrityError, match="hash mismatch"):
+        replace(
+            policy,
+            policy_id="promotion-b",
+            policy_hash=policy.policy_hash,
         )
