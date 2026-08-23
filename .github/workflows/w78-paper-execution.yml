@@ -31,6 +31,7 @@ jobs:
           tests/test_w78_paper_execution_scenarios.py
           tests/test_w78_paper_execution_qualification.py
           tests/test_w78_paper_execution_durable.py
+          tests/test_w78_paper_execution_reproducibility.py
           scripts/check_w78_paper_execution_boundary.py
       - name: W78 no-network authority boundary
         run: python scripts/check_w78_paper_execution_boundary.py
@@ -41,3 +42,4 @@ jobs:
           tests/test_w78_paper_execution_scenarios.py
           tests/test_w78_paper_execution_qualification.py
           tests/test_w78_paper_execution_durable.py
+          tests/test_w78_paper_execution_reproducibility.py
