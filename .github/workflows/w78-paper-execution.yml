@@ -1,0 +1,50 @@
+name: W78 PAPER Execution Model
+
+on:
+  push:
+    branches: ["work/w78-**"]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  paper-execution-model:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: python -m pip install -e '.[dev]'
+      - name: Compile impacted code
+        run: >-
+          python -m compileall -q
+          src/autotrade/brokers/paper_execution.py
+          src/autotrade/paper_execution_scenarios.py
+          src/autotrade/paper_execution_evidence.py
+          src/autotrade/paper_execution_qualification.py
+          src/autotrade/paper_execution_lab.py
+          tests/test_w78_paper_execution.py
+          tests/test_w78_paper_execution_scenarios.py
+          tests/test_w78_paper_execution_qualification.py
+          tests/test_w78_paper_execution_durable.py
+          tests/test_w78_paper_execution_reproducibility.py
+          tests/test_w78_paper_execution_lab.py
+          tests/test_w78_paper_execution_validation.py
+          scripts/check_w78_paper_execution_boundary.py
+      - name: W78 no-network authority boundary
+        run: python scripts/check_w78_paper_execution_boundary.py
+      - name: W78 execution qualification test suite
+        run: >-
+          pytest -q
+          tests/test_w78_paper_execution.py
+          tests/test_w78_paper_execution_scenarios.py
+          tests/test_w78_paper_execution_qualification.py
+          tests/test_w78_paper_execution_durable.py
+          tests/test_w78_paper_execution_reproducibility.py
+          tests/test_w78_paper_execution_lab.py
+          tests/test_w78_paper_execution_validation.py

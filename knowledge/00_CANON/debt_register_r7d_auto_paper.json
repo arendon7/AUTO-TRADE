@@ -1,0 +1,48 @@
+{
+  "registry_version": 1,
+  "certified_tracks": [],
+  "items": [
+    {
+      "id": "TD-R7D-001",
+      "track": "R7D",
+      "area": "Research-to-PAPER total execution-cost continuity",
+      "severity": "P1",
+      "status": "OPEN",
+      "evidence": [
+        "src/autotrade/research/costs.py",
+        "src/autotrade/paper_execution_qualification.py",
+        "src/autotrade/paper_execution_lab.py",
+        "knowledge/30_DECISIONES/ADR-0010-w78-deterministic-paper-execution-model.md"
+      ],
+      "next_action": "Before any Strategy Lab result may authorize Auto-Paper promotion, bind the preregistered R1 research half-spread plus slippage assumption to W78 effective execution impact. Prove that observed bid/ask spread plus configured W78 adverse slippage does not silently become more favorable than the research cost model, or classify the run as non-conservative observational evidence. Preserve fee assumptions separately and do not weaken Capital Safety or the W78 no-network boundary."
+    },
+    {
+      "id": "TD-R7D-002",
+      "track": "R7D",
+      "area": "Fee-complete execution accounting before profitability or Auto-Paper promotion claims",
+      "severity": "P1",
+      "status": "OPEN",
+      "evidence": [
+        "src/autotrade/domain.py",
+        "src/autotrade/research/costs.py",
+        "src/autotrade/paper_execution_evidence.py",
+        "src/autotrade/paper_execution_qualification.py",
+        "knowledge/30_DECISIONES/ADR-0010-w78-deterministic-paper-execution-model.md"
+      ],
+      "next_action": "Add a separately reviewed fee-aware execution accounting contract that can reconcile research fee assumptions with realized/simulated PAPER economics without fabricating fees inside the existing core Fill. Until then, W78 evidence may measure fill quantity and adverse price impact but must not be treated as fee-complete realized P&L or profitability proof."
+    },
+    {
+      "id": "TD-R7D-003",
+      "track": "R7D",
+      "area": "Partial-fill remaining-quantity risk reservation",
+      "severity": "P2",
+      "status": "OPEN",
+      "evidence": [
+        "src/autotrade/engine.py",
+        "tests/test_w78_paper_execution_durable.py",
+        "knowledge/30_DECISIONES/ADR-0010-w78-deterministic-paper-execution-model.md"
+      ],
+      "next_action": "Before repeated Auto-Paper partial-fill activity, replace conservative full OPEN reservation retention only if the system can bind the reduced reservation to authoritative remaining broker-open quantity. The change must preserve cross-process race safety, fill projection, cancellation/replacement semantics and reconciliation. Over-reservation is acceptable until that proof exists; premature capital release is not."
+    }
+  ]
+}
