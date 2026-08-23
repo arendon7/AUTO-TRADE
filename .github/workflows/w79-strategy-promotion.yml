@@ -24,16 +24,28 @@ jobs:
         run: >-
           python -m compileall -q
           src/autotrade/strategy_lab_promotion.py
+          src/autotrade/strategy_lab_read_model.py
           tests/test_w79_strategy_promotion.py
           tests/test_w79_strategy_promotion_validation.py
+          tests/test_w79_strategy_lab_read_model.py
+          tests/test_w79_strategy_lab_dashboard.py
           scripts/check_w79_strategy_promotion_boundary.py
+          scripts/check_w79_strategy_lab_read_model_boundary.py
       - name: W79 no-execution authority boundary
         run: python scripts/check_w79_strategy_promotion_boundary.py
-      - name: W79 promotion evidence tests
+      - name: W79 Strategy Lab read-only boundary
+        run: python scripts/check_w79_strategy_lab_read_model_boundary.py
+      - name: W79 promotion and Strategy Lab tests
         run: >-
           pytest -q
           tests/test_w79_strategy_promotion.py
           tests/test_w79_strategy_promotion_validation.py
+          tests/test_w79_strategy_lab_read_model.py
+          tests/test_w79_strategy_lab_dashboard.py
+      - name: Re-prove Mac Control Center boundary
+        run: python scripts/check_mac_dashboard_boundary.py
+      - name: Re-prove Mac Control Center tests
+        run: pytest -q tests/test_mac_dashboard.py
       - name: Re-prove W78 execution qualification boundary
         run: python scripts/check_w78_paper_execution_boundary.py
       - name: Re-prove research authority boundary
