@@ -27,15 +27,17 @@ jobs:
           src/autotrade/paper_execution_scenarios.py
           src/autotrade/paper_execution_evidence.py
           src/autotrade/paper_execution_qualification.py
+          src/autotrade/paper_execution_lab.py
           tests/test_w78_paper_execution.py
           tests/test_w78_paper_execution_scenarios.py
           tests/test_w78_paper_execution_qualification.py
           tests/test_w78_paper_execution_durable.py
           tests/test_w78_paper_execution_reproducibility.py
+          tests/test_w78_paper_execution_lab.py
           scripts/check_w78_paper_execution_boundary.py
       - name: W78 no-network authority boundary
         run: python scripts/check_w78_paper_execution_boundary.py
-      - name: W78 execution model, evidence, qualification and durable integration tests
+      - name: W78 execution qualification test suite
         run: >-
           pytest -q
           tests/test_w78_paper_execution.py
@@ -43,3 +45,4 @@ jobs:
           tests/test_w78_paper_execution_qualification.py
           tests/test_w78_paper_execution_durable.py
           tests/test_w78_paper_execution_reproducibility.py
+          tests/test_w78_paper_execution_lab.py
