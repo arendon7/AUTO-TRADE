@@ -29,22 +29,29 @@ jobs:
           tests/test_w80_promotion_assessment.py
           tests/test_w80_promotion_assessment_read_model.py
           tests/test_w80_promotion_assessment_policy_binding.py
+          tests/test_w80_strategy_lab_projection.py
           scripts/check_w80_promotion_assessment_boundary.py
           scripts/check_w80_promotion_assessment_read_model_boundary.py
+          scripts/check_w80_strategy_lab_projection_boundary.py
       - name: W80 durable assessment authority boundary
         run: python scripts/check_w80_promotion_assessment_boundary.py
       - name: W80 independent assessment reader boundary
         run: python scripts/check_w80_promotion_assessment_read_model_boundary.py
+      - name: W80 Strategy Lab durable projection boundary
+        run: python scripts/check_w80_strategy_lab_projection_boundary.py
       - name: W80 durable assessment tests
         run: >-
           pytest -q
           tests/test_w80_promotion_assessment.py
           tests/test_w80_promotion_assessment_read_model.py
           tests/test_w80_promotion_assessment_policy_binding.py
+          tests/test_w80_strategy_lab_projection.py
       - name: Re-prove W79 promotion boundary
         run: python scripts/check_w79_strategy_promotion_boundary.py
       - name: Re-prove W79 Strategy Lab read-only boundary
         run: python scripts/check_w79_strategy_lab_read_model_boundary.py
+      - name: Re-prove Mac Control Center boundary
+        run: python scripts/check_mac_dashboard_boundary.py
       - name: Re-prove W78 execution qualification boundary
         run: python scripts/check_w78_paper_execution_boundary.py
       - name: Re-prove research authority boundary
