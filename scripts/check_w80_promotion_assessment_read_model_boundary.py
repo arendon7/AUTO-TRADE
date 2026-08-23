@@ -9,6 +9,7 @@ ROOT = Path(__file__).resolve().parents[1]
 TARGET = ROOT / "src/autotrade/strategy_promotion_assessment_read_model.py"
 W80_WORKFLOW = ROOT / ".github/workflows/w80-promotion-assessment.yml"
 CORE_WORKFLOW = ROOT / ".github/workflows/core-tests.yml"
+POLICY_BINDING_TEST = ROOT / "tests/test_w80_promotion_assessment_policy_binding.py"
 
 FORBIDDEN_MODULE_PREFIXES = (
     "autotrade.brokers",
@@ -59,7 +60,7 @@ FORBIDDEN_TEXT = (
 
 def main() -> int:
     errors: list[str] = []
-    for path in (TARGET, W80_WORKFLOW, CORE_WORKFLOW):
+    for path in (TARGET, W80_WORKFLOW, CORE_WORKFLOW, POLICY_BINDING_TEST):
         if not path.is_file():
             errors.append(f"missing W80 reader contract file: {path.relative_to(ROOT)}")
 
@@ -99,6 +100,12 @@ def main() -> int:
             "assessment predecessor hash discontinuity",
             "assessment evidence regressed",
             "assessment gate regressed to MISSING",
+            "durable assessment journal lost its frozen W79 policy schema",
+            "durable assessment lost its frozen W79 policy",
+            "durable assessment does not match its frozen W79 policy identity",
+            "durable assessment policy lost its frozen W79 threshold binding",
+            "frozen W79 policy failed canonical validation",
+            "StrategyPromotionPolicy",
             '"paper_candidate_authorized": False',
             '"external_execution_authorized": False',
             '"capital_authority": "NONE"',
@@ -111,10 +118,18 @@ def main() -> int:
             if marker not in source:
                 errors.append(f"required W80 reader fail-closed marker missing: {marker}")
 
-    marker = "python scripts/check_w80_promotion_assessment_read_model_boundary.py"
-    for workflow, label in ((W80_WORKFLOW, "W80 workflow"), (CORE_WORKFLOW, "Core Safety")):
-        if workflow.is_file() and marker not in workflow.read_text(encoding="utf-8"):
-            errors.append(f"{label}: W80 reader boundary not wired")
+    workflow_source = W80_WORKFLOW.read_text(encoding="utf-8") if W80_WORKFLOW.is_file() else ""
+    for marker in (
+        "python scripts/check_w80_promotion_assessment_read_model_boundary.py",
+        "tests/test_w80_promotion_assessment_read_model.py",
+        "tests/test_w80_promotion_assessment_policy_binding.py",
+    ):
+        if marker not in workflow_source:
+            errors.append(f"W80 workflow: required independent-reader gate missing: {marker}")
+
+    core_marker = "python scripts/check_w80_promotion_assessment_read_model_boundary.py"
+    if CORE_WORKFLOW.is_file() and core_marker not in CORE_WORKFLOW.read_text(encoding="utf-8"):
+        errors.append("Core Safety: W80 reader boundary not wired")
 
     if errors:
         for error in errors:
@@ -122,8 +137,8 @@ def main() -> int:
         return 1
     print(
         "W80 PROMOTION ASSESSMENT READ MODEL BOUNDARY PASS — independent mode=ro/query_only verification; "
-        "writer import denied; receipt/side-column/hash-chain integrity revalidated; no broker/network/OMS/Safety authority; "
-        "PAPER candidate false; capital NONE; LIVE blocked"
+        "writer import denied; receipt/side-column/hash-chain + frozen W79 policy binding revalidated; "
+        "no broker/network/OMS/Safety authority; PAPER candidate false; capital NONE; LIVE blocked"
     )
     return 0
 
