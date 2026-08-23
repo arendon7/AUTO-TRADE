@@ -25,8 +25,10 @@ jobs:
           python -m compileall -q
           src/autotrade/strategy_promotion_assessment.py
           src/autotrade/strategy_promotion_assessment_read_model.py
+          src/autotrade/strategy_lab_read_model.py
           tests/test_w80_promotion_assessment.py
           tests/test_w80_promotion_assessment_read_model.py
+          tests/test_w80_promotion_assessment_policy_binding.py
           scripts/check_w80_promotion_assessment_boundary.py
           scripts/check_w80_promotion_assessment_read_model_boundary.py
       - name: W80 durable assessment authority boundary
@@ -38,6 +40,7 @@ jobs:
           pytest -q
           tests/test_w80_promotion_assessment.py
           tests/test_w80_promotion_assessment_read_model.py
+          tests/test_w80_promotion_assessment_policy_binding.py
       - name: Re-prove W79 promotion boundary
         run: python scripts/check_w79_strategy_promotion_boundary.py
       - name: Re-prove W79 Strategy Lab read-only boundary
