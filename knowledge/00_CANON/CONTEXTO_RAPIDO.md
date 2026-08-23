@@ -1,6 +1,6 @@
 # CONTEXTO RÁPIDO — AUTO-TRADE
 
-Estado actual: **R0–R5 certified; R6 first real Alpaca PAPER canary broker-truth closed; R7 PAPER Operations activo; W78 execution qualification certificado; W79 Strategy Promotion Governance + Strategy Lab read-only en certificación DRAFT.**
+Estado actual: **R0–R5 certified; R6 first real Alpaca PAPER canary broker-truth closed; R7 PAPER Operations activo; W78 execution qualification certificado; W79 Strategy Promotion Governance + Strategy Lab read-only CERTIFIED; W80 Promotion Assessment durable es el siguiente hito.**
 
 ## Leer primero
 1. `knowledge/00_CANON/SOURCE_OF_TRUTH.md`
@@ -20,7 +20,20 @@ R6 first-canary exact-head certificado: `0cbb782015eeed200b9851b53764ac6389c3d9f
 
 W78 exact-head certificado: `2924456e33c2cc9e6579301b176267513a90861f`.
 
-W78 demostró execution qualification determinista/no-network bajo supuestos preregistrados. No demostró rentabilidad ni ejecución Alpaca futura.
+W79 behavioral implementation head certificado: `c5c264e64e931ef380801b1e0d1508ea2cac0dfa`.
+
+Evidencia W79 sobre ese head:
+- dedicated W79 workflow: PASS;
+- 73 pruebas W79: PASS;
+- 19 pruebas Mac Control Center: PASS;
+- Core Safety: 2844/2844 PASS;
+- branch coverage total: `85.15094919501644%` >= 85%;
+- W79 promotion boundary: PASS;
+- Strategy Lab read-only boundary: PASS;
+- W78 boundary y Research authority: PASS;
+- Debt Register y Canonical Knowledge: PASS.
+
+W78 demostró execution qualification determinista/no-network bajo supuestos preregistrados. W79 demostró gobernanza de promoción y una proyección Strategy Lab read-only. Ninguno demuestra rentabilidad ni concede ejecución automática.
 
 ## Broker truth observado
 Intento `first-canary-57d01d35e8b25f4babc57695ac87d962`:
@@ -54,16 +67,16 @@ Conserva:
 ### R7C — W78 Execution Qualification
 PR #50 / `work/w78-realistic-paper-execution`.
 
-W78 reutiliza el control plane existente:
+W78 reutiliza:
 
 `OrderIntent -> Capital Safety -> OMS -> DeterministicPaperExecutionBroker -> Fill/EventLedger -> Portfolio/Reconciliation`
 
 Incluye slippage adverso determinista, partial fills, LIMIT fill/no-fill, market-quality rejection, scenario matrix hash-bound, Research cost-model binding, execution evidence reproducible y permanent no-network/no-writer boundary.
 
 ### R7C — W79 Strategy Promotion Governance
-PR #51 / `work/w79-strategy-promotion-evidence`, apilado sobre W78 certificado.
+PR #51 / `work/w79-strategy-promotion-evidence`, técnicamente certificado y apilado sobre W78.
 
-W79 añade gobernanza de promoción sin autoridad de ejecución:
+W79 certificó:
 - threshold policy congelada antes de DEVELOPMENT;
 - candidato congelado después de Tournament DEVELOPMENT y antes del HOLDOUT final;
 - strategy id/version + trial/tournament fingerprints;
@@ -73,7 +86,7 @@ W79 añade gobernanza de promoción sin autoridad de ejecución:
 - `EVIDENCE_QUALIFIED != PAPER_CANDIDATE`;
 - blockers explícitos preservados.
 
-Strategy Lab ya existe en el Control Center como `/strategy-lab`:
+Strategy Lab existe en el Control Center como `/strategy-lab`:
 - SQLite `mode=ro` + `query_only`;
 - GET-only;
 - sin credenciales ni broker network;
@@ -83,10 +96,20 @@ Strategy Lab ya existe en el Control Center como `/strategy-lab`:
 - `CAPITAL=NONE`;
 - `LIVE=BLOCKED`.
 
-W79 **no persiste todavía assessment autoritativo de gates**. La UI debe mostrar `NOT_PERSISTED_BY_W79` y no sintetizar PASS.
+W79 **no persiste todavía assessment autoritativo de gates**. La UI debe seguir mostrando `NOT_PERSISTED_BY_W79` y no sintetizar PASS.
+
+## W80 — siguiente hito
+Persistir un Promotion Assessment durable, hash-bound y reproducible que vincule cada gate a evidencia inmutable y a las policies exactas de W79.
+
+W80 debe seguir con:
+- PAPER candidate authority = FALSE;
+- broker network = NONE;
+- writer = NONE;
+- Safety/OMS execution authority = NONE;
+- LIVE = BLOCKED.
 
 ## R7D — Auto-Paper
-Bloqueado por evidencia y deuda explícita:
+Sigue bloqueado por:
 - `TD-R7D-001` total execution-cost continuity;
 - `TD-R7D-002` fee-complete execution accounting;
 - `TD-R7D-003` safe remaining-quantity reservation after partial fills;
@@ -94,9 +117,6 @@ Bloqueado por evidencia y deuda explícita:
 - `SHADOW_FORWARD_PROMOTION_BINDING_REQUIRED`.
 
 No promover una estrategia a Auto-Paper sólo por backtest, HOLDOUT aislado o resultados simulados W78/W79.
-
-## Próximo bloque después de cerrar W79
-Persistir un assessment de promoción durable, hash-bound y reproducible, vinculando cada gate a evidencia inmutable sin crear PAPER candidate authority.
 
 ## Authority
 La IA puede investigar, generar hipótesis, programar experimentos y comparar evidencia. No puede convertir por sí sola una salida model-generated en broker-order authority.
