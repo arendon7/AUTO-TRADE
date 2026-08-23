@@ -137,16 +137,25 @@ def test_zero_fill_limit_evidence_does_not_invent_price_or_slippage(
     empty_portfolio,
     market_buy_intent,
 ):
+    # Keep the limit safely inside Capital Safety's deviation bound while placing
+    # it below the W78 10 bps adverse execution price. This isolates the intended
+    # execution-model no-fill behavior instead of being rejected by Safety first.
+    execution_market = replace(
+        market,
+        bid=Decimal("99.95"),
+        ask=Decimal("100.05"),
+        last=Decimal("100"),
+    )
     scenario = _scenario(scenario_id="no_fill", slippage_bps="10", fill_fraction="1")
     intent = replace(
         market_buy_intent,
         order_type=OrderType.LIMIT,
-        limit_price=Decimal("101.05"),
+        limit_price=Decimal("100.10"),
     )
     order = _run(
         scenario=scenario,
         limits=limits,
-        market=market,
+        market=execution_market,
         empty_portfolio=empty_portfolio,
         intent=intent,
     )
@@ -156,8 +165,8 @@ def test_zero_fill_limit_evidence_does_not_invent_price_or_slippage(
     evidence = capture_paper_execution_evidence(
         scenario=scenario,
         order=order,
-        market=market,
-        captured_at=market.observed_at,
+        market=execution_market,
+        captured_at=execution_market.observed_at,
     )
     assert evidence.fill_ratio == Decimal("0")
     assert evidence.average_fill_price is None
