@@ -19,14 +19,17 @@ from autotrade.research.trials import SQLiteTrialLedger, TrialPhase, TrialRecord
 _HASH_RE = re.compile(r"^[0-9a-f]{64}$")
 _ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 
-# W79 intentionally cannot grant PAPER/LIVE authority. These blockers make the
-# scientific gaps machine-visible instead of letting a UI infer promotion from
-# a collection of green-looking research cards.
 PERMANENT_W79_PROMOTION_BLOCKERS = (
     "EXECUTION_STRATEGY_VERSION_UNBOUND",
     "FEE_ACCOUNTING_INCOMPLETE",
     "SHADOW_FORWARD_PROMOTION_BINDING_REQUIRED",
     "TOTAL_EXECUTION_COST_CONTINUITY_UNPROVEN",
+)
+REQUIRED_W79_GATE_IDS = (
+    "DEVELOPMENT_SELECTION",
+    "EXECUTION_SENSITIVITY",
+    "FINAL_HOLDOUT",
+    "MULTIPLE_TESTING",
 )
 
 
@@ -58,12 +61,7 @@ class PromotionAssessmentState(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class StrategyPromotionPolicy:
-    """Frozen pre-HOLDOUT promotion thresholds for one selected candidate.
-
-    The policy is candidate-specific and is frozen only after a complete
-    DEVELOPMENT tournament has selected a winner, but before the separate
-    FINAL_HOLDOUT campaign preregisters its one expected trial.
-    """
+    """Frozen candidate-specific thresholds selected before FINAL_HOLDOUT."""
 
     policy_id: str
     development_campaign_id: str
@@ -97,7 +95,9 @@ class StrategyPromotionPolicy:
             if not isinstance(value, str) or not _ID_RE.fullmatch(value):
                 raise StrategyPromotionIntegrityError(f"{label} must be a canonical identifier")
         if self.development_campaign_id == self.holdout_campaign_id:
-            raise StrategyPromotionIntegrityError("development and HOLDOUT campaigns must be distinct")
+            raise StrategyPromotionIntegrityError(
+                "development and HOLDOUT campaigns must be distinct"
+            )
         for label, value in (
             ("selected_trial_fingerprint", self.selected_trial_fingerprint),
             ("tournament_fingerprint", self.tournament_fingerprint),
@@ -109,28 +109,43 @@ class StrategyPromotionPolicy:
             ("min_holdout_net_return", self.min_holdout_net_return),
             ("max_holdout_drawdown", self.max_holdout_drawdown),
             ("min_execution_fill_ratio", self.min_execution_fill_ratio),
-            ("max_execution_adverse_slippage_bps", self.max_execution_adverse_slippage_bps),
+            (
+                "max_execution_adverse_slippage_bps",
+                self.max_execution_adverse_slippage_bps,
+            ),
         ):
             if not isinstance(value, Decimal) or not value.is_finite():
                 raise StrategyPromotionIntegrityError(f"{label} must be finite Decimal")
         if not Decimal("0") <= self.max_holm_adjusted_p <= Decimal("1"):
-            raise StrategyPromotionIntegrityError("max_holm_adjusted_p must be within [0,1]")
+            raise StrategyPromotionIntegrityError(
+                "max_holm_adjusted_p must be within [0,1]"
+            )
         if self.min_holdout_net_return <= Decimal("-1"):
-            raise StrategyPromotionIntegrityError("min_holdout_net_return must be greater than -1")
+            raise StrategyPromotionIntegrityError(
+                "min_holdout_net_return must be greater than -1"
+            )
         if not Decimal("0") <= self.max_holdout_drawdown <= Decimal("1"):
-            raise StrategyPromotionIntegrityError("max_holdout_drawdown must be within [0,1]")
-        if isinstance(self.min_holdout_fills, bool) or not isinstance(self.min_holdout_fills, int):
+            raise StrategyPromotionIntegrityError(
+                "max_holdout_drawdown must be within [0,1]"
+            )
+        if isinstance(self.min_holdout_fills, bool) or not isinstance(
+            self.min_holdout_fills, int
+        ):
             raise StrategyPromotionIntegrityError("min_holdout_fills must be integer")
         if self.min_holdout_fills < 1:
             raise StrategyPromotionIntegrityError("min_holdout_fills must be >=1")
         if not Decimal("0") <= self.min_execution_fill_ratio <= Decimal("1"):
-            raise StrategyPromotionIntegrityError("min_execution_fill_ratio must be within [0,1]")
+            raise StrategyPromotionIntegrityError(
+                "min_execution_fill_ratio must be within [0,1]"
+            )
         if self.max_execution_adverse_slippage_bps < 0:
             raise StrategyPromotionIntegrityError(
                 "max_execution_adverse_slippage_bps must be non-negative"
             )
         if self.external_execution_authorized is not False or self.live_trading != "BLOCKED":
-            raise StrategyPromotionIntegrityError("W79 policy may not grant PAPER/LIVE authority")
+            raise StrategyPromotionIntegrityError(
+                "W79 policy may not grant PAPER/LIVE authority"
+            )
         if self.policy_hash != _hash(_policy_payload(self, include_hash=False)):
             raise StrategyPromotionIntegrityError("promotion policy hash mismatch")
 
@@ -149,17 +164,28 @@ class PromotionGateEvidence:
         if not isinstance(self.gate_id, str) or not _ID_RE.fullmatch(self.gate_id):
             raise StrategyPromotionIntegrityError("gate_id must be canonical")
         if not isinstance(self.status, PromotionGateStatus):
-            raise StrategyPromotionIntegrityError("gate status must use PromotionGateStatus")
+            raise StrategyPromotionIntegrityError(
+                "gate status must use PromotionGateStatus"
+            )
         if self.reason_codes != tuple(sorted(set(self.reason_codes))):
-            raise StrategyPromotionIntegrityError("gate reason_codes must be unique sorted order")
-        if any(not isinstance(value, str) or not value.strip() for value in self.reason_codes):
+            raise StrategyPromotionIntegrityError(
+                "gate reason_codes must be unique sorted order"
+            )
+        if any(
+            not isinstance(value, str) or not value.strip()
+            for value in self.reason_codes
+        ):
             raise StrategyPromotionIntegrityError("gate reason code is invalid")
         if self.evidence_hashes != tuple(sorted(set(self.evidence_hashes))):
-            raise StrategyPromotionIntegrityError("gate evidence_hashes must be unique sorted order")
+            raise StrategyPromotionIntegrityError(
+                "gate evidence_hashes must be unique sorted order"
+            )
         for value in self.evidence_hashes:
             _require_hash(value, "gate evidence hash")
         if self.status is PromotionGateStatus.PASS and self.reason_codes:
-            raise StrategyPromotionIntegrityError("PASS gate may not carry failure reasons")
+            raise StrategyPromotionIntegrityError(
+                "PASS gate may not carry failure reasons"
+            )
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -186,46 +212,71 @@ class StrategyPromotionEvidenceView:
     view_hash: str
 
     def __post_init__(self) -> None:
-        if not _ID_RE.fullmatch(self.policy_id):
+        if not isinstance(self.policy_id, str) or not _ID_RE.fullmatch(self.policy_id):
             raise StrategyPromotionIntegrityError("policy_id must be canonical")
         _require_hash(self.policy_hash, "policy_hash")
         _require_hash(self.view_hash, "view_hash")
-        if not _ID_RE.fullmatch(self.selected_strategy_id) or not _ID_RE.fullmatch(
-            self.selected_strategy_version
+        if (
+            not isinstance(self.selected_strategy_id, str)
+            or not _ID_RE.fullmatch(self.selected_strategy_id)
+            or not isinstance(self.selected_strategy_version, str)
+            or not _ID_RE.fullmatch(self.selected_strategy_version)
         ):
-            raise StrategyPromotionIntegrityError("selected strategy identity is invalid")
-        if not self.gates:
-            raise StrategyPromotionIntegrityError("promotion evidence requires gates")
+            raise StrategyPromotionIntegrityError(
+                "selected strategy identity is invalid"
+            )
+        if any(not isinstance(item, PromotionGateEvidence) for item in self.gates):
+            raise StrategyPromotionIntegrityError(
+                "promotion gates must use PromotionGateEvidence"
+            )
         if self.gates != tuple(sorted(self.gates, key=lambda item: item.gate_id)):
-            raise StrategyPromotionIntegrityError("promotion gates must be sorted by gate_id")
-        if len({item.gate_id for item in self.gates}) != len(self.gates):
-            raise StrategyPromotionIntegrityError("duplicate promotion gate")
-        expected_complete = all(item.status is PromotionGateStatus.PASS for item in self.gates)
+            raise StrategyPromotionIntegrityError(
+                "promotion gates must be sorted by gate_id"
+            )
+        gate_ids = tuple(item.gate_id for item in self.gates)
+        if gate_ids != REQUIRED_W79_GATE_IDS:
+            raise StrategyPromotionIntegrityError(
+                "promotion evidence must contain the exact W79 gate set"
+            )
+        expected_complete = all(
+            item.status is PromotionGateStatus.PASS for item in self.gates
+        )
         if self.evidence_complete is not expected_complete:
-            raise StrategyPromotionIntegrityError("evidence_complete does not match gate states")
-        expected_state = _assessment_state(self.gates)
-        if self.assessment_state is not expected_state:
-            raise StrategyPromotionIntegrityError("assessment_state does not match gate states")
-        if self.promotion_blockers != tuple(sorted(set(self.promotion_blockers))):
-            raise StrategyPromotionIntegrityError("promotion_blockers must be unique sorted order")
-        if not self.promotion_blockers:
-            raise StrategyPromotionIntegrityError("W79 must retain explicit promotion blockers")
+            raise StrategyPromotionIntegrityError(
+                "evidence_complete does not match gate states"
+            )
+        if self.assessment_state is not _assessment_state(self.gates):
+            raise StrategyPromotionIntegrityError(
+                "assessment_state does not match gate states"
+            )
+        if self.promotion_blockers != tuple(sorted(PERMANENT_W79_PROMOTION_BLOCKERS)):
+            raise StrategyPromotionIntegrityError(
+                "W79 promotion blockers must match the canonical blocker set"
+            )
         if self.paper_candidate_authorized is not False:
-            raise StrategyPromotionIntegrityError("W79 may not authorize PAPER candidate promotion")
+            raise StrategyPromotionIntegrityError(
+                "W79 may not authorize PAPER candidate promotion"
+            )
         if self.external_execution_authorized is not False or self.live_trading != "BLOCKED":
-            raise StrategyPromotionIntegrityError("W79 evidence may not grant execution/LIVE authority")
+            raise StrategyPromotionIntegrityError(
+                "W79 evidence may not grant execution/LIVE authority"
+            )
         if self.view_hash != _hash(_view_payload(self, include_hash=False)):
-            raise StrategyPromotionIntegrityError("promotion evidence view hash mismatch")
+            raise StrategyPromotionIntegrityError(
+                "promotion evidence view hash mismatch"
+            )
 
     def to_dict(self) -> dict[str, object]:
         return _view_payload(self, include_hash=True)
 
 
 class SQLiteStrategyPromotionPolicyRegistry:
-    """Append-only frozen policy registry on the same durable SQLite runtime."""
+    """Append-only frozen policy registry over durable SQLite."""
 
     def __init__(self, runtime: SQLiteRuntime | str) -> None:
-        self._runtime = runtime if isinstance(runtime, SQLiteRuntime) else SQLiteRuntime(runtime)
+        self._runtime = (
+            runtime if isinstance(runtime, SQLiteRuntime) else SQLiteRuntime(runtime)
+        )
         self._initialize()
 
     def _initialize(self) -> None:
@@ -255,26 +306,36 @@ class SQLiteStrategyPromotionPolicyRegistry:
         now: datetime,
     ) -> StrategyPromotionPolicy:
         _require_aware(now, "now")
-        _validate_freeze_preconditions(
-            policy=policy,
-            trial_ledger=trial_ledger,
-            tournament=tournament,
-        )
         payload = _canonical_json(policy.to_dict())
         conn = self._runtime.connect()
         try:
             conn.execute("BEGIN IMMEDIATE")
             row = conn.execute(
-                "SELECT policy_hash, policy_json FROM strategy_promotion_policies WHERE policy_id = ?",
+                "SELECT * FROM strategy_promotion_policies WHERE policy_id = ?",
                 (policy.policy_id,),
             ).fetchone()
             if row is not None:
-                if row["policy_hash"] != policy.policy_hash or row["policy_json"] != payload:
-                    raise StrategyPromotionConflict(f"promotion policy identity conflict: {policy.policy_id}")
+                existing = _policy_from_row(row)
+                if existing != policy:
+                    raise StrategyPromotionConflict(
+                        f"promotion policy identity conflict: {policy.policy_id}"
+                    )
                 conn.execute("COMMIT")
-                return policy
+                return existing
+
+            # BEGIN IMMEDIATE is intentionally acquired before checking the
+            # pre-HOLDOUT condition so a same-runtime HOLDOUT preregistration
+            # cannot race this policy freeze.
+            _validate_freeze_preconditions(
+                policy=policy,
+                trial_ledger=trial_ledger,
+                tournament=tournament,
+            )
             other = conn.execute(
-                "SELECT policy_id FROM strategy_promotion_policies WHERE holdout_campaign_id = ?",
+                """
+                SELECT policy_id FROM strategy_promotion_policies
+                WHERE holdout_campaign_id = ?
+                """,
                 (policy.holdout_campaign_id,),
             ).fetchone()
             if other is not None:
@@ -310,12 +371,25 @@ class SQLiteStrategyPromotionPolicyRegistry:
         conn = self._runtime.connect()
         try:
             row = conn.execute(
-                "SELECT policy_json FROM strategy_promotion_policies WHERE policy_id = ?",
+                "SELECT * FROM strategy_promotion_policies WHERE policy_id = ?",
                 (policy_id,),
             ).fetchone()
+            return _policy_from_row(row) if row is not None else None
         finally:
             conn.close()
-        return _policy_from_json(row["policy_json"]) if row is not None else None
+
+    def list_policies(self) -> tuple[StrategyPromotionPolicy, ...]:
+        conn = self._runtime.connect()
+        try:
+            rows = conn.execute(
+                """
+                SELECT * FROM strategy_promotion_policies
+                ORDER BY registered_at, policy_id
+                """
+            ).fetchall()
+            return tuple(_policy_from_row(row) for row in rows)
+        finally:
+            conn.close()
 
 
 def build_strategy_promotion_policy(
@@ -334,31 +408,52 @@ def build_strategy_promotion_policy(
     max_execution_adverse_slippage_bps: Decimal,
 ) -> StrategyPromotionPolicy:
     if tournament.campaign_id != development_campaign_id:
-        raise StrategyPromotionIntegrityError("tournament belongs to another development campaign")
+        raise StrategyPromotionIntegrityError(
+            "tournament belongs to another development campaign"
+        )
     if not tournament.winner_trial_id:
-        raise StrategyPromotionIntegrityError("promotion policy requires an eligible tournament winner")
+        raise StrategyPromotionIntegrityError(
+            "promotion policy requires an eligible tournament winner"
+        )
     trial_ledger.require_complete_campaign(development_campaign_id)
     selected = trial_ledger.get_trial(tournament.winner_trial_id)
     if selected is None:
-        raise StrategyPromotionIntegrityError("tournament winner is missing from trial ledger")
-    if selected.status is not TrialStatus.COMPLETED or selected.spec.phase is not TrialPhase.DEVELOPMENT:
-        raise StrategyPromotionIntegrityError("tournament winner must be completed DEVELOPMENT trial")
+        raise StrategyPromotionIntegrityError(
+            "tournament winner is missing from trial ledger"
+        )
+    if (
+        selected.status is not TrialStatus.COMPLETED
+        or selected.spec.phase is not TrialPhase.DEVELOPMENT
+    ):
+        raise StrategyPromotionIntegrityError(
+            "tournament winner must be completed DEVELOPMENT trial"
+        )
     entry = next(
-        (item for item in tournament.entries if item.trial_id == tournament.winner_trial_id),
+        (
+            item
+            for item in tournament.entries
+            if item.trial_id == tournament.winner_trial_id
+        ),
         None,
     )
     if entry is None or not entry.eligible:
-        raise StrategyPromotionIntegrityError("tournament winner entry is not eligible")
+        raise StrategyPromotionIntegrityError(
+            "tournament winner entry is not eligible"
+        )
     if (
         entry.strategy_id != selected.spec.strategy_id
         or entry.strategy_version != selected.spec.strategy_version
         or entry.result_hash != selected.result_hash
     ):
-        raise StrategyPromotionIntegrityError("tournament winner identity does not match durable trial")
+        raise StrategyPromotionIntegrityError(
+            "tournament winner identity does not match durable trial"
+        )
 
     holdout = trial_ledger.campaign_accounting(holdout_campaign_id)
     if holdout.expected_trial_ids != (holdout_trial_id,):
-        raise StrategyPromotionIntegrityError("HOLDOUT campaign must freeze exactly one expected trial")
+        raise StrategyPromotionIntegrityError(
+            "HOLDOUT campaign must freeze exactly one expected trial"
+        )
     if holdout.preregistered_trial_ids:
         raise StrategyPromotionIntegrityError(
             "promotion thresholds must be frozen before HOLDOUT trial preregistration"
@@ -401,8 +496,9 @@ def evaluate_strategy_promotion(
 ) -> StrategyPromotionEvidenceView:
     policy = registry.get(policy_id)
     if policy is None:
-        raise StrategyPromotionIntegrityError(f"unknown frozen promotion policy: {policy_id}")
-
+        raise StrategyPromotionIntegrityError(
+            f"unknown frozen promotion policy: {policy_id}"
+        )
     gates = tuple(
         sorted(
             (
@@ -414,16 +510,17 @@ def evaluate_strategy_promotion(
             key=lambda item: item.gate_id,
         )
     )
-    blockers = tuple(sorted(PERMANENT_W79_PROMOTION_BLOCKERS))
     values = {
         "policy_id": policy.policy_id,
         "policy_hash": policy.policy_hash,
         "selected_strategy_id": policy.selected_strategy_id,
         "selected_strategy_version": policy.selected_strategy_version,
         "gates": gates,
-        "evidence_complete": all(item.status is PromotionGateStatus.PASS for item in gates),
+        "evidence_complete": all(
+            item.status is PromotionGateStatus.PASS for item in gates
+        ),
         "assessment_state": _assessment_state(gates),
-        "promotion_blockers": blockers,
+        "promotion_blockers": tuple(sorted(PERMANENT_W79_PROMOTION_BLOCKERS)),
         "paper_candidate_authorized": False,
         "external_execution_authorized": False,
         "live_trading": "BLOCKED",
@@ -440,20 +537,34 @@ def _validate_freeze_preconditions(
     trial_ledger: SQLiteTrialLedger,
     tournament: TournamentEvidence,
 ) -> None:
-    development = trial_ledger.require_complete_campaign(policy.development_campaign_id)
+    development = trial_ledger.require_complete_campaign(
+        policy.development_campaign_id
+    )
     if not development.completed_trial_ids:
-        raise StrategyPromotionIntegrityError("development campaign has no completed trials")
+        raise StrategyPromotionIntegrityError(
+            "development campaign has no completed trials"
+        )
     if tournament.campaign_id != policy.development_campaign_id:
-        raise StrategyPromotionIntegrityError("tournament/development campaign mismatch")
+        raise StrategyPromotionIntegrityError(
+            "tournament/development campaign mismatch"
+        )
     if tournament.fingerprint != policy.tournament_fingerprint:
-        raise StrategyPromotionIntegrityError("tournament fingerprint differs from frozen policy")
+        raise StrategyPromotionIntegrityError(
+            "tournament fingerprint differs from frozen policy"
+        )
     if tournament.winner_trial_id != policy.selected_trial_id:
-        raise StrategyPromotionIntegrityError("tournament winner differs from frozen candidate")
+        raise StrategyPromotionIntegrityError(
+            "tournament winner differs from frozen candidate"
+        )
     selected = trial_ledger.get_trial(policy.selected_trial_id)
     if selected is None or selected.status is not TrialStatus.COMPLETED:
-        raise StrategyPromotionIntegrityError("frozen candidate trial is not completed")
+        raise StrategyPromotionIntegrityError(
+            "frozen candidate trial is not completed"
+        )
     if selected.spec.phase is not TrialPhase.DEVELOPMENT:
-        raise StrategyPromotionIntegrityError("frozen candidate must come from DEVELOPMENT")
+        raise StrategyPromotionIntegrityError(
+            "frozen candidate must come from DEVELOPMENT"
+        )
     if selected.spec.fingerprint != policy.selected_trial_fingerprint:
         raise StrategyPromotionIntegrityError("selected trial fingerprint changed")
     if (
@@ -463,7 +574,9 @@ def _validate_freeze_preconditions(
         raise StrategyPromotionIntegrityError("selected strategy identity changed")
     holdout = trial_ledger.campaign_accounting(policy.holdout_campaign_id)
     if holdout.expected_trial_ids != (policy.holdout_trial_id,):
-        raise StrategyPromotionIntegrityError("HOLDOUT expected-trial universe changed")
+        raise StrategyPromotionIntegrityError(
+            "HOLDOUT expected-trial universe changed"
+        )
     if holdout.preregistered_trial_ids:
         raise StrategyPromotionIntegrityError(
             "policy registration occurred after HOLDOUT preregistration"
@@ -653,7 +766,10 @@ def _execution_gate(
         reasons.append("EXECUTION_FILL_RATIO_BELOW_POLICY")
     if report.maximum_adverse_slippage_bps is None:
         reasons.append("EXECUTION_SLIPPAGE_MISSING")
-    elif report.maximum_adverse_slippage_bps > policy.max_execution_adverse_slippage_bps:
+    elif (
+        report.maximum_adverse_slippage_bps
+        > policy.max_execution_adverse_slippage_bps
+    ):
         reasons.append("EXECUTION_SLIPPAGE_ABOVE_POLICY")
     return _gate(
         "EXECUTION_SENSITIVITY",
@@ -694,7 +810,9 @@ def _metric_int(record: TrialRecord, name: str) -> int:
         raise StrategyPromotionIntegrityError(f"HOLDOUT metric missing: {name}")
     raw = record.metrics[name]
     if isinstance(raw, bool):
-        raise StrategyPromotionIntegrityError(f"HOLDOUT metric {name} must be integer")
+        raise StrategyPromotionIntegrityError(
+            f"HOLDOUT metric {name} must be integer"
+        )
     if isinstance(raw, int):
         value = raw
     elif isinstance(raw, float) and raw.is_integer():
@@ -703,14 +821,22 @@ def _metric_int(record: TrialRecord, name: str) -> int:
         try:
             decimal = Decimal(raw)
         except InvalidOperation as exc:
-            raise StrategyPromotionIntegrityError(f"HOLDOUT metric {name} must be integer") from exc
+            raise StrategyPromotionIntegrityError(
+                f"HOLDOUT metric {name} must be integer"
+            ) from exc
         if not decimal.is_finite() or decimal != decimal.to_integral_value():
-            raise StrategyPromotionIntegrityError(f"HOLDOUT metric {name} must be integer")
+            raise StrategyPromotionIntegrityError(
+                f"HOLDOUT metric {name} must be integer"
+            )
         value = int(decimal)
     else:
-        raise StrategyPromotionIntegrityError(f"HOLDOUT metric {name} must be integer")
+        raise StrategyPromotionIntegrityError(
+            f"HOLDOUT metric {name} must be integer"
+        )
     if value < 0:
-        raise StrategyPromotionIntegrityError(f"HOLDOUT metric {name} must be non-negative")
+        raise StrategyPromotionIntegrityError(
+            f"HOLDOUT metric {name} must be non-negative"
+        )
     return value
 
 
@@ -740,12 +866,17 @@ def _gate(
     )
 
 
-def _assessment_state(gates: tuple[PromotionGateEvidence, ...]) -> PromotionAssessmentState:
+def _assessment_state(
+    gates: tuple[PromotionGateEvidence, ...],
+) -> PromotionAssessmentState:
     statuses = {item.status for item in gates}
-    if PromotionGateStatus.FAIL in statuses:
-        return PromotionAssessmentState.REJECTED
+    # Integrity ambiguity must dominate statistical failure. A BLOCKED view
+    # cannot safely be described as merely rejected because some evidence is
+    # untrustworthy or identity-inconsistent.
     if PromotionGateStatus.BLOCKED in statuses:
         return PromotionAssessmentState.BLOCKED
+    if PromotionGateStatus.FAIL in statuses:
+        return PromotionAssessmentState.REJECTED
     if PromotionGateStatus.MISSING in statuses:
         return PromotionAssessmentState.INCOMPLETE
     return PromotionAssessmentState.EVIDENCE_QUALIFIED
@@ -796,27 +927,56 @@ def _policy_payload_from_values(values: dict[str, object]) -> dict[str, object]:
 
 
 def _policy_from_json(raw: str) -> StrategyPromotionPolicy:
-    value = json.loads(raw)
-    return StrategyPromotionPolicy(
-        policy_id=value["policy_id"],
-        development_campaign_id=value["development_campaign_id"],
-        holdout_campaign_id=value["holdout_campaign_id"],
-        holdout_trial_id=value["holdout_trial_id"],
-        selected_trial_id=value["selected_trial_id"],
-        selected_trial_fingerprint=value["selected_trial_fingerprint"],
-        selected_strategy_id=value["selected_strategy_id"],
-        selected_strategy_version=value["selected_strategy_version"],
-        tournament_fingerprint=value["tournament_fingerprint"],
-        max_holm_adjusted_p=Decimal(value["max_holm_adjusted_p"]),
-        min_holdout_net_return=Decimal(value["min_holdout_net_return"]),
-        max_holdout_drawdown=Decimal(value["max_holdout_drawdown"]),
-        min_holdout_fills=int(value["min_holdout_fills"]),
-        min_execution_fill_ratio=Decimal(value["min_execution_fill_ratio"]),
-        max_execution_adverse_slippage_bps=Decimal(value["max_execution_adverse_slippage_bps"]),
-        external_execution_authorized=value["external_execution_authorized"],
-        live_trading=value["live_trading"],
-        policy_hash=value["policy_hash"],
-    )
+    try:
+        value = json.loads(raw)
+        return StrategyPromotionPolicy(
+            policy_id=value["policy_id"],
+            development_campaign_id=value["development_campaign_id"],
+            holdout_campaign_id=value["holdout_campaign_id"],
+            holdout_trial_id=value["holdout_trial_id"],
+            selected_trial_id=value["selected_trial_id"],
+            selected_trial_fingerprint=value["selected_trial_fingerprint"],
+            selected_strategy_id=value["selected_strategy_id"],
+            selected_strategy_version=value["selected_strategy_version"],
+            tournament_fingerprint=value["tournament_fingerprint"],
+            max_holm_adjusted_p=Decimal(value["max_holm_adjusted_p"]),
+            min_holdout_net_return=Decimal(value["min_holdout_net_return"]),
+            max_holdout_drawdown=Decimal(value["max_holdout_drawdown"]),
+            min_holdout_fills=int(value["min_holdout_fills"]),
+            min_execution_fill_ratio=Decimal(value["min_execution_fill_ratio"]),
+            max_execution_adverse_slippage_bps=Decimal(
+                value["max_execution_adverse_slippage_bps"]
+            ),
+            external_execution_authorized=value["external_execution_authorized"],
+            live_trading=value["live_trading"],
+            policy_hash=value["policy_hash"],
+        )
+    except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise StrategyPromotionIntegrityError(
+            "persisted promotion policy JSON is invalid"
+        ) from exc
+
+
+def _policy_from_row(row) -> StrategyPromotionPolicy:
+    policy = _policy_from_json(row["policy_json"])
+    if (
+        row["policy_id"] != policy.policy_id
+        or row["policy_hash"] != policy.policy_hash
+        or row["development_campaign_id"] != policy.development_campaign_id
+        or row["holdout_campaign_id"] != policy.holdout_campaign_id
+        or row["policy_json"] != _canonical_json(policy.to_dict())
+    ):
+        raise StrategyPromotionIntegrityError(
+            "persisted promotion policy row does not match hash-bound policy JSON"
+        )
+    try:
+        registered_at = datetime.fromisoformat(row["registered_at"])
+    except (TypeError, ValueError) as exc:
+        raise StrategyPromotionIntegrityError(
+            "persisted promotion registered_at is invalid"
+        ) from exc
+    _require_aware(registered_at, "persisted promotion registered_at")
+    return policy
 
 
 def _view_payload(
@@ -867,12 +1027,23 @@ def _require_hash(value: str, label: str) -> None:
 
 
 def _require_aware(value: datetime, label: str) -> None:
-    if not isinstance(value, datetime) or value.tzinfo is None or value.utcoffset() is None:
-        raise StrategyPromotionIntegrityError(f"{label} must be timezone-aware datetime")
+    if (
+        not isinstance(value, datetime)
+        or value.tzinfo is None
+        or value.utcoffset() is None
+    ):
+        raise StrategyPromotionIntegrityError(
+            f"{label} must be timezone-aware datetime"
+        )
 
 
 def _canonical_json(value: object) -> str:
-    return json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False)
+    return json.dumps(
+        value,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    )
 
 
 def _hash(value: object) -> str:
@@ -881,6 +1052,7 @@ def _hash(value: object) -> str:
 
 __all__ = [
     "PERMANENT_W79_PROMOTION_BLOCKERS",
+    "REQUIRED_W79_GATE_IDS",
     "PromotionAssessmentState",
     "PromotionGateEvidence",
     "PromotionGateStatus",
