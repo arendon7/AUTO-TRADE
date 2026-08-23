@@ -27,7 +27,7 @@ class PaperExecutionError(RuntimeError):
 
 
 class PaperExecutionMarketError(PaperExecutionError):
-    """The supplied market snapshot is unsafe for deterministic PAPER execution."""
+    """The supplied market snapshot violates the broker/market data contract."""
 
 
 class PaperExecutionConflict(PaperExecutionError):
@@ -36,12 +36,7 @@ class PaperExecutionConflict(PaperExecutionError):
 
 @dataclass(frozen=True, slots=True)
 class PaperExecutionConfig:
-    """Conservative deterministic execution assumptions for offline/PAPER qualification.
-
-    This model intentionally has no network surface and does not predict real fills.
-    It provides reproducible adverse execution assumptions while reusing the normal
-    OMS, Safety, fill store, portfolio projection and reconciliation machinery.
-    """
+    """Conservative deterministic execution assumptions for offline/PAPER qualification."""
 
     slippage_bps: Decimal = Decimal("2")
     max_fill_fraction: Decimal = Decimal("1")
@@ -73,32 +68,32 @@ class PaperExecutionConfig:
 class DeterministicPaperExecutionBroker:
     """Fail-closed, no-network PAPER execution broker for Strategy Lab qualification.
 
-    Key properties:
-    - current-touch execution only; no look-ahead data;
-    - adverse deterministic slippage;
-    - bounded deterministic partial fills;
-    - stale/future/crossed/over-wide market rejection before a simulated submit;
-    - duplicate local order ids are idempotent only when the intent fingerprint is exact;
-    - cancellation never creates fills;
-    - exposes deterministic simulated broker truth through the existing InspectableBroker shape;
-    - no external broker, credential, HTTP, socket or LIVE authority.
+    Deterministic market-quality failures are terminal `REJECTED`, not `UNKNOWN`:
+    this broker has no external I/O, so stale/future/crossed/over-wide market data
+    cannot create submit ambiguity. Contract/tamper failures still raise and the
+    existing OMS may conservatively mark those attempts UNKNOWN.
 
-    This is an execution stress model, not a claim that a real venue would fill at
-    these prices or quantities.
+    This model is an execution stress model, not a prediction of real venue fills.
     """
 
     def __init__(self, *, config: PaperExecutionConfig | None = None) -> None:
         self._config = config or PaperExecutionConfig()
         self._submission_count = 0
+        self._rejection_count = 0
         self._cancel_count = 0
         self._intent_fingerprints: dict[str, str] = {}
         self._executions: dict[str, BrokerExecution] = {}
+        self._rejection_reasons: dict[str, str] = {}
         self._accounted_fill_ids: set[str] = set()
         self._signed_position_notional_by_symbol: dict[str, Decimal] = {}
 
     @property
     def submission_count(self) -> int:
         return self._submission_count
+
+    @property
+    def rejection_count(self) -> int:
+        return self._rejection_count
 
     @property
     def cancel_count(self) -> int:
@@ -108,8 +103,10 @@ class DeterministicPaperExecutionBroker:
         return self._executions.get(order_id)
 
     def get_execution(self, order_id: str) -> BrokerExecution | None:
-        """InspectableBroker-compatible cumulative execution lookup."""
         return self._executions.get(order_id)
+
+    def rejection_reason_for_order(self, order_id: str) -> str | None:
+        return self._rejection_reasons.get(order_id)
 
     def account_state(self, *, now: datetime) -> BrokerAccountState:
         """Return deterministic simulated broker truth; performs no external I/O."""
@@ -144,12 +141,6 @@ class DeterministicPaperExecutionBroker:
         if order.status is not OrderStatus.VALIDATED:
             raise PaperExecutionConflict("paper execution accepts only OMS VALIDATED orders")
         _validate_order(order)
-        _validate_market(
-            market=market,
-            now=now,
-            expected_symbol=order.intent.symbol,
-            config=self._config,
-        )
 
         fingerprint = intent_fingerprint(order.intent)
         existing_fingerprint = self._intent_fingerprints.get(order.order_id)
@@ -158,9 +149,25 @@ class DeterministicPaperExecutionBroker:
                 raise PaperExecutionConflict("paper order_id was reused with a different intent")
             return self._executions[order.order_id]
 
+        _validate_market_contract(market=market, expected_symbol=order.intent.symbol)
+        rejection_reason = _market_quality_rejection_reason(
+            market=market,
+            now=now,
+            config=self._config,
+        )
+        if rejection_reason is not None:
+            execution = BrokerExecution(status=OrderStatus.REJECTED)
+            self._record_execution(
+                order=order,
+                fingerprint=fingerprint,
+                execution=execution,
+            )
+            self._rejection_reasons[order.order_id] = rejection_reason
+            self._rejection_count += 1
+            return execution
+
         execution = self._simulate(order=order, market=market, now=now)
-        self._intent_fingerprints[order.order_id] = fingerprint
-        self._executions[order.order_id] = execution
+        self._record_execution(order=order, fingerprint=fingerprint, execution=execution)
         self._apply_account_fills(execution.fills)
         self._submission_count += 1
         return execution
@@ -176,6 +183,16 @@ class DeterministicPaperExecutionBroker:
         self._executions[order_id] = cancelled
         self._cancel_count += 1
         return cancelled
+
+    def _record_execution(
+        self,
+        *,
+        order: OrderRecord,
+        fingerprint: str,
+        execution: BrokerExecution,
+    ) -> None:
+        self._intent_fingerprints[order.order_id] = fingerprint
+        self._executions[order.order_id] = execution
 
     def _apply_account_fills(self, fills: tuple[Fill, ...]) -> None:
         for fill in fills:
@@ -242,22 +259,15 @@ def _validate_order(order: OrderRecord) -> None:
     if intent.order_type is OrderType.MARKET:
         if intent.limit_price is not None:
             raise PaperExecutionConflict("market paper order may not carry limit_price")
-    else:
-        if (
-            not isinstance(intent.limit_price, Decimal)
-            or not intent.limit_price.is_finite()
-            or intent.limit_price <= 0
-        ):
-            raise PaperExecutionConflict("limit paper order requires finite positive limit_price")
+    elif (
+        not isinstance(intent.limit_price, Decimal)
+        or not intent.limit_price.is_finite()
+        or intent.limit_price <= 0
+    ):
+        raise PaperExecutionConflict("limit paper order requires finite positive limit_price")
 
 
-def _validate_market(
-    *,
-    market: MarketSnapshot,
-    now: datetime,
-    expected_symbol: str,
-    config: PaperExecutionConfig,
-) -> None:
+def _validate_market_contract(*, market: MarketSnapshot, expected_symbol: str) -> None:
     if not isinstance(market, MarketSnapshot):
         raise TypeError("paper execution requires MarketSnapshot")
     _require_aware(market.observed_at, "market.observed_at")
@@ -266,21 +276,28 @@ def _validate_market(
     for label, value in (("bid", market.bid), ("ask", market.ask), ("last", market.last)):
         if not isinstance(value, Decimal) or not value.is_finite() or value <= 0:
             raise PaperExecutionMarketError(f"market {label} must be finite positive Decimal")
-    if market.bid > market.ask:
-        raise PaperExecutionMarketError("crossed market snapshot is unsafe")
 
+
+def _market_quality_rejection_reason(
+    *,
+    market: MarketSnapshot,
+    now: datetime,
+    config: PaperExecutionConfig,
+) -> str | None:
+    if market.bid > market.ask:
+        return "CROSSED_MARKET"
     instant = now.astimezone(timezone.utc)
     observed = market.observed_at.astimezone(timezone.utc)
     age = instant - observed
     if age < timedelta(0):
-        raise PaperExecutionMarketError("future market snapshot is unsafe")
+        return "FUTURE_MARKET_SNAPSHOT"
     if age > config.max_market_age:
-        raise PaperExecutionMarketError("stale market snapshot is unsafe")
-
+        return "STALE_MARKET_SNAPSHOT"
     midpoint = (market.bid + market.ask) / Decimal("2")
     spread_bps = (market.ask - market.bid) / midpoint * BPS_DENOMINATOR
     if spread_bps > config.max_spread_bps:
-        raise PaperExecutionMarketError("market spread exceeds configured PAPER execution bound")
+        return "SPREAD_LIMIT_EXCEEDED"
+    return None
 
 
 def _fill_id(order: OrderRecord) -> str:
