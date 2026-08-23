@@ -94,17 +94,17 @@ class ExecutionCostContinuityObservation:
             raise ExecutionCostContinuityIntegrityError("research non-fee impact is inconsistent")
         if self.continuity_margin_bps != self.effective_non_fee_impact_bps - self.research_non_fee_impact_bps:
             raise ExecutionCostContinuityIntegrityError("continuity margin is inconsistent")
-        if not isinstance(self.status, ExecutionCostContinuityStatus):
-            raise ExecutionCostContinuityIntegrityError("invalid continuity status")
+        expected = (
+            ExecutionCostContinuityStatus.PASS
+            if self.continuity_margin_bps >= 0 and self.reason_code == "NON_FEE_CONTINUITY_CONSERVATIVE"
+            else ExecutionCostContinuityStatus.BLOCKED
+        )
+        if self.status is not expected:
+            raise ExecutionCostContinuityIntegrityError("continuity observation status/reason mismatch")
+        if self.status is ExecutionCostContinuityStatus.BLOCKED and self.reason_code == "NON_FEE_CONTINUITY_CONSERVATIVE":
+            raise ExecutionCostContinuityIntegrityError("BLOCKED observation may not use PASS reason")
         if not isinstance(self.reason_code, str) or not self.reason_code.strip():
             raise ExecutionCostContinuityIntegrityError("reason_code is required")
-        if self.status is ExecutionCostContinuityStatus.PASS:
-            if self.continuity_margin_bps < 0:
-                raise ExecutionCostContinuityIntegrityError("PASS observation may not weaken research friction")
-            if self.reason_code != "NON_FEE_CONTINUITY_CONSERVATIVE":
-                raise ExecutionCostContinuityIntegrityError("PASS observation reason is not canonical")
-        elif self.reason_code == "NON_FEE_CONTINUITY_CONSERVATIVE":
-            raise ExecutionCostContinuityIntegrityError("BLOCKED observation may not use PASS reason")
         if self.observation_hash != _hash(_observation_payload(self, include_hash=False)):
             raise ExecutionCostContinuityIntegrityError("continuity observation hash mismatch")
 
@@ -163,7 +163,7 @@ class ExecutionCostContinuityEvidence:
             raise ExecutionCostContinuityIntegrityError("assessment may not predate market observation")
         if not self.observations:
             raise ExecutionCostContinuityIntegrityError("continuity evidence requires observations")
-        if tuple(sorted(self.observations, key=lambda item: item.scenario_id)) != self.observations:
+        if self.observations != tuple(sorted(self.observations, key=lambda item: item.scenario_id)):
             raise ExecutionCostContinuityIntegrityError("continuity observations must be sorted by scenario_id")
         if len({item.scenario_id for item in self.observations}) != len(self.observations):
             raise ExecutionCostContinuityIntegrityError("duplicate continuity scenario")
@@ -178,23 +178,17 @@ class ExecutionCostContinuityEvidence:
         )
         if self.status is not expected_status:
             raise ExecutionCostContinuityIntegrityError("aggregate continuity status mismatch")
-        expected_reasons = tuple(
-            sorted(
-                {
-                    item.reason_code
-                    for item in self.observations
-                    if item.status is ExecutionCostContinuityStatus.BLOCKED
-                }
-            )
-        )
+        expected_reasons = tuple(sorted({
+            item.reason_code
+            for item in self.observations
+            if item.status is ExecutionCostContinuityStatus.BLOCKED
+        }))
         if self.blocking_reasons != expected_reasons:
             raise ExecutionCostContinuityIntegrityError("continuity blocking reasons mismatch")
         expected_resolved = (CONTINUITY_BLOCKER,) if self.status is ExecutionCostContinuityStatus.PASS else ()
         if self.resolved_promotion_blockers != expected_resolved:
             raise ExecutionCostContinuityIntegrityError("resolved promotion blockers are inconsistent")
-        expected_remaining = tuple(
-            sorted(set(PERMANENT_W79_PROMOTION_BLOCKERS) - set(expected_resolved))
-        )
+        expected_remaining = tuple(sorted(set(PERMANENT_W79_PROMOTION_BLOCKERS) - set(expected_resolved)))
         if self.remaining_promotion_blockers != expected_remaining:
             raise ExecutionCostContinuityIntegrityError("remaining promotion blockers are inconsistent")
         if FEE_ACCOUNTING_BLOCKER not in self.remaining_promotion_blockers:
@@ -223,13 +217,13 @@ def build_execution_cost_continuity_evidence(
     market: MarketSnapshot,
     assessed_at: datetime,
 ) -> ExecutionCostContinuityEvidence:
-    """Bind R1 non-fee research friction to W78 midpoint-to-execution impact.
+    """Prove R1 -> W78 non-fee market-impact continuity without execution authority.
 
-    W78 applies adverse slippage from the observed bid/ask touch. Research applies
-    half-spread + slippage from a reference price. This proof measures W78 from the
-    observed midpoint so a narrow/favorable quote cannot silently reduce the
-    preregistered research friction. Fees are deliberately excluded and remain a
-    separate blocking debt item.
+    W78 freshness and market-quality decisions belong to the W78 sensitivity
+    outcome at execution time. W81 may be assessed later without retroactively
+    making a previously valid execution measurement stale. W81 therefore binds
+    the exact W78 outcome and enforces temporal causality only: assessment cannot
+    predate the observed market. Fees remain a separate blocking debt item.
     """
 
     _require_id(evidence_id, "evidence_id")
@@ -284,18 +278,15 @@ def build_execution_cost_continuity_evidence(
             raise ExecutionCostContinuityIntegrityError(
                 f"sensitivity scenario hash mismatch: {scenario.scenario_id}"
             )
-        observations.append(
-            _build_observation(
-                scenario=scenario,
-                outcome_hash=outcome.outcome_hash,
-                has_execution_measurement=(outcome.measurement_hash is not None),
-                broker_rejection_reason=outcome.broker_rejection_reason,
-                cost_model=cost_model,
-                intent=intent,
-                market=market,
-                assessed_at=assessed_at,
-            )
-        )
+        observations.append(_build_observation(
+            scenario=scenario,
+            outcome_hash=outcome.outcome_hash,
+            has_execution_measurement=outcome.measurement_hash is not None,
+            broker_rejection_reason=outcome.broker_rejection_reason,
+            cost_model=cost_model,
+            intent=intent,
+            market=market,
+        ))
 
     ordered = tuple(sorted(observations, key=lambda item: item.scenario_id))
     status = (
@@ -303,15 +294,11 @@ def build_execution_cost_continuity_evidence(
         if all(item.status is ExecutionCostContinuityStatus.PASS for item in ordered)
         else ExecutionCostContinuityStatus.BLOCKED
     )
-    reasons = tuple(
-        sorted(
-            {
-                item.reason_code
-                for item in ordered
-                if item.status is ExecutionCostContinuityStatus.BLOCKED
-            }
-        )
-    )
+    reasons = tuple(sorted({
+        item.reason_code
+        for item in ordered
+        if item.status is ExecutionCostContinuityStatus.BLOCKED
+    }))
     resolved = (CONTINUITY_BLOCKER,) if status is ExecutionCostContinuityStatus.PASS else ()
     remaining = tuple(sorted(set(PERMANENT_W79_PROMOTION_BLOCKERS) - set(resolved)))
     values = {
@@ -354,7 +341,6 @@ def _build_observation(
     cost_model: ExecutionCostModel,
     intent: OrderIntent,
     market: MarketSnapshot,
-    assessed_at: datetime,
 ) -> ExecutionCostContinuityObservation:
     _require_hash(outcome_hash, "outcome_hash")
     market_hash = market_fingerprint(market)
@@ -368,13 +354,11 @@ def _build_observation(
     reason = _blocking_reason(
         scenario=scenario,
         market=market,
-        assessed_at=assessed_at,
         has_execution_measurement=has_execution_measurement,
         broker_rejection_reason=broker_rejection_reason,
         continuity_margin_bps=margin,
     )
     status = ExecutionCostContinuityStatus.PASS if reason is None else ExecutionCostContinuityStatus.BLOCKED
-    reason_code = reason or "NON_FEE_CONTINUITY_CONSERVATIVE"
     values = {
         "scenario_id": scenario.scenario_id,
         "scenario_hash": scenario.scenario_hash,
@@ -393,7 +377,7 @@ def _build_observation(
         "research_non_fee_impact_bps": research_non_fee,
         "continuity_margin_bps": margin,
         "status": status,
-        "reason_code": reason_code,
+        "reason_code": reason or "NON_FEE_CONTINUITY_CONSERVATIVE",
     }
     return ExecutionCostContinuityObservation(
         **values,
@@ -405,25 +389,16 @@ def _blocking_reason(
     *,
     scenario: PaperExecutionScenario,
     market: MarketSnapshot,
-    assessed_at: datetime,
     has_execution_measurement: bool,
     broker_rejection_reason: str | None,
     continuity_margin_bps: Decimal,
 ) -> str | None:
-    if market.bid <= 0 or market.ask <= 0:
-        return "MARKET_PRICE_NON_POSITIVE"
-    if market.ask < market.bid:
-        return "CROSSED_MARKET"
-    if _utc(market.observed_at) > _utc(assessed_at):
-        return "FUTURE_MARKET_SNAPSHOT"
-    if _utc(assessed_at) - _utc(market.observed_at) > scenario.config.max_market_age:
-        return "STALE_MARKET_SNAPSHOT"
     midpoint = (market.bid + market.ask) / Decimal("2")
     spread_bps = (market.ask - market.bid) / midpoint * BPS_DENOMINATOR
     if spread_bps > scenario.config.max_spread_bps:
         return "SPREAD_ABOVE_SCENARIO_BOUND"
     if broker_rejection_reason is not None:
-        return f"W78_BROKER_REJECTED:{broker_rejection_reason}"
+        return broker_rejection_reason
     if not has_execution_measurement:
         return "W78_EXECUTION_MEASUREMENT_MISSING"
     if continuity_margin_bps < 0:
@@ -442,8 +417,6 @@ def _effective_non_fee_impact(
     if market.ask < market.bid:
         raise ExecutionCostContinuityIntegrityError("market may not be crossed")
     midpoint = (market.bid + market.ask) / Decimal("2")
-    if midpoint <= 0:
-        raise ExecutionCostContinuityIntegrityError("market midpoint must be positive")
     touch = market.ask if side is Side.BUY else market.bid
     adverse = touch * (
         Decimal("1") + side.sign * scenario.config.slippage_bps / BPS_DENOMINATOR
@@ -457,33 +430,27 @@ def _effective_non_fee_impact(
     return midpoint, touch, adverse, observed_half_spread, effective
 
 
-def _observation_payload(
-    value: ExecutionCostContinuityObservation,
-    *,
-    include_hash: bool,
-) -> dict[str, object]:
-    payload = _observation_payload_from_values(
-        {
-            "scenario_id": value.scenario_id,
-            "scenario_hash": value.scenario_hash,
-            "outcome_hash": value.outcome_hash,
-            "market_fingerprint": value.market_fingerprint,
-            "symbol": value.symbol,
-            "side": value.side,
-            "midpoint": value.midpoint,
-            "touch_price": value.touch_price,
-            "modeled_adverse_price": value.modeled_adverse_price,
-            "observed_half_spread_bps": value.observed_half_spread_bps,
-            "scenario_slippage_bps": value.scenario_slippage_bps,
-            "effective_non_fee_impact_bps": value.effective_non_fee_impact_bps,
-            "research_half_spread_bps": value.research_half_spread_bps,
-            "research_slippage_bps": value.research_slippage_bps,
-            "research_non_fee_impact_bps": value.research_non_fee_impact_bps,
-            "continuity_margin_bps": value.continuity_margin_bps,
-            "status": value.status,
-            "reason_code": value.reason_code,
-        }
-    )
+def _observation_payload(value: ExecutionCostContinuityObservation, *, include_hash: bool) -> dict[str, object]:
+    payload = _observation_payload_from_values({
+        "scenario_id": value.scenario_id,
+        "scenario_hash": value.scenario_hash,
+        "outcome_hash": value.outcome_hash,
+        "market_fingerprint": value.market_fingerprint,
+        "symbol": value.symbol,
+        "side": value.side,
+        "midpoint": value.midpoint,
+        "touch_price": value.touch_price,
+        "modeled_adverse_price": value.modeled_adverse_price,
+        "observed_half_spread_bps": value.observed_half_spread_bps,
+        "scenario_slippage_bps": value.scenario_slippage_bps,
+        "effective_non_fee_impact_bps": value.effective_non_fee_impact_bps,
+        "research_half_spread_bps": value.research_half_spread_bps,
+        "research_slippage_bps": value.research_slippage_bps,
+        "research_non_fee_impact_bps": value.research_non_fee_impact_bps,
+        "continuity_margin_bps": value.continuity_margin_bps,
+        "status": value.status,
+        "reason_code": value.reason_code,
+    })
     if include_hash:
         payload["observation_hash"] = value.observation_hash
     return payload
@@ -509,38 +476,32 @@ def _observation_payload_from_values(values: dict[str, object]) -> dict[str, obj
     return payload
 
 
-def _evidence_payload(
-    value: ExecutionCostContinuityEvidence,
-    *,
-    include_hash: bool,
-) -> dict[str, object]:
-    payload = _evidence_payload_from_values(
-        {
-            "evidence_id": value.evidence_id,
-            "contract_version": value.contract_version,
-            "qualification_contract_hash": value.qualification_contract_hash,
-            "research_cost_model_hash": value.research_cost_model_hash,
-            "scenario_matrix_hash": value.scenario_matrix_hash,
-            "sensitivity_measurement_hash": value.sensitivity_measurement_hash,
-            "intent_fingerprint": value.intent_fingerprint,
-            "market_fingerprint": value.market_fingerprint,
-            "symbol": value.symbol,
-            "side": value.side,
-            "observed_at": value.observed_at,
-            "assessed_at": value.assessed_at,
-            "observations": value.observations,
-            "status": value.status,
-            "blocking_reasons": value.blocking_reasons,
-            "resolved_promotion_blockers": value.resolved_promotion_blockers,
-            "remaining_promotion_blockers": value.remaining_promotion_blockers,
-            "fee_accounting_complete": value.fee_accounting_complete,
-            "fee_accounting_state": value.fee_accounting_state,
-            "paper_candidate_authorized": value.paper_candidate_authorized,
-            "external_execution_authorized": value.external_execution_authorized,
-            "capital_authority": value.capital_authority,
-            "live_trading": value.live_trading,
-        }
-    )
+def _evidence_payload(value: ExecutionCostContinuityEvidence, *, include_hash: bool) -> dict[str, object]:
+    payload = _evidence_payload_from_values({
+        "evidence_id": value.evidence_id,
+        "contract_version": value.contract_version,
+        "qualification_contract_hash": value.qualification_contract_hash,
+        "research_cost_model_hash": value.research_cost_model_hash,
+        "scenario_matrix_hash": value.scenario_matrix_hash,
+        "sensitivity_measurement_hash": value.sensitivity_measurement_hash,
+        "intent_fingerprint": value.intent_fingerprint,
+        "market_fingerprint": value.market_fingerprint,
+        "symbol": value.symbol,
+        "side": value.side,
+        "observed_at": value.observed_at,
+        "assessed_at": value.assessed_at,
+        "observations": value.observations,
+        "status": value.status,
+        "blocking_reasons": value.blocking_reasons,
+        "resolved_promotion_blockers": value.resolved_promotion_blockers,
+        "remaining_promotion_blockers": value.remaining_promotion_blockers,
+        "fee_accounting_complete": value.fee_accounting_complete,
+        "fee_accounting_state": value.fee_accounting_state,
+        "paper_candidate_authorized": value.paper_candidate_authorized,
+        "external_execution_authorized": value.external_execution_authorized,
+        "capital_authority": value.capital_authority,
+        "live_trading": value.live_trading,
+    })
     if include_hash:
         payload["evidence_hash"] = value.evidence_hash
     return payload
@@ -553,11 +514,7 @@ def _evidence_payload_from_values(values: dict[str, object]) -> dict[str, object
     payload["observed_at"] = _utc_iso(payload["observed_at"])  # type: ignore[arg-type]
     payload["assessed_at"] = _utc_iso(payload["assessed_at"])  # type: ignore[arg-type]
     payload["observations"] = [item.to_dict() for item in payload["observations"]]  # type: ignore[union-attr]
-    for key in (
-        "blocking_reasons",
-        "resolved_promotion_blockers",
-        "remaining_promotion_blockers",
-    ):
+    for key in ("blocking_reasons", "resolved_promotion_blockers", "remaining_promotion_blockers"):
         payload[key] = list(payload[key])  # type: ignore[arg-type]
     return payload
 
