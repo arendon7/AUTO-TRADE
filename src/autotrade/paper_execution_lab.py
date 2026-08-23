@@ -343,6 +343,8 @@ def _outcome_measurement_payload(value: PaperExecutionScenarioOutcome) -> dict[s
 
 def _outcome_measurement_payload_from_values(values: dict[str, object]) -> dict[str, object]:
     payload = dict(values)
+    payload.pop("trace_evidence_hash", None)
+    payload.pop("outcome_hash", None)
     for key in ("fill_ratio", "adverse_slippage_bps"):
         raw = payload[key]
         payload[key] = None if raw is None else _decimal(raw)  # type: ignore[arg-type]
@@ -375,6 +377,8 @@ def _report_measurement_payload(value: PaperExecutionSensitivityReport) -> dict[
 
 def _report_measurement_payload_from_values(values: dict[str, object]) -> dict[str, object]:
     payload = dict(values)
+    payload.pop("measurement_report_hash", None)
+    payload.pop("trace_report_hash", None)
     outcomes = payload["outcomes"]
     payload["outcomes"] = [item.measurement_dict() for item in outcomes]  # type: ignore[union-attr]
     for key in ("minimum_fill_ratio", "maximum_adverse_slippage_bps"):
@@ -410,6 +414,7 @@ def _report_trace_payload(value: PaperExecutionSensitivityReport) -> dict[str, o
 
 def _report_trace_payload_from_values(values: dict[str, object]) -> dict[str, object]:
     payload = dict(values)
+    payload.pop("trace_report_hash", None)
     outcomes = payload["outcomes"]
     payload["outcomes"] = [item.trace_dict() for item in outcomes]  # type: ignore[union-attr]
     for key in ("minimum_fill_ratio", "maximum_adverse_slippage_bps"):
