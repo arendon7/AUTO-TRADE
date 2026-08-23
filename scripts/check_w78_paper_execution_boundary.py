@@ -10,6 +10,7 @@ TARGETS = (
     ROOT / "src" / "autotrade" / "brokers" / "paper_execution.py",
     ROOT / "src" / "autotrade" / "paper_execution_scenarios.py",
     ROOT / "src" / "autotrade" / "paper_execution_evidence.py",
+    ROOT / "src" / "autotrade" / "paper_execution_qualification.py",
 )
 FORBIDDEN_IMPORT_ROOTS = {
     "http",
@@ -86,12 +87,24 @@ def main() -> None:
             "evidence_hash",
             "UNKNOWN execution requires reconciliation",
         ),
+        "paper_execution_qualification.py": (
+            "class PaperExecutionQualificationContract",
+            "external_execution_authorized",
+            'live_trading": value.live_trading',
+            "may not grant external/LIVE authority",
+        ),
     }
     for filename, markers in required_markers.items():
         source = sources[filename]
         for marker in markers:
             if marker not in source:
                 fail(f"{filename}: required fail-closed marker missing: {marker}")
+
+    qualification = sources["paper_execution_qualification.py"]
+    if '"external_execution_authorized": False' not in qualification:
+        fail("qualification contract does not hard-code zero external authority")
+    if '"live_trading": "BLOCKED"' not in qualification:
+        fail("qualification contract does not hard-code LIVE BLOCKED")
 
     print("W78 PAPER EXECUTION BOUNDARY PASS")
 
