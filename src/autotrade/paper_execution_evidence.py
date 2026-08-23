@@ -224,6 +224,10 @@ def _measurement_payload(value: PaperExecutionEvidence) -> dict[str, object]:
 
 def _measurement_payload_from_values(values: dict[str, object]) -> dict[str, object]:
     payload = dict(values)
+    payload.pop("order_id", None)
+    payload.pop("captured_at", None)
+    payload.pop("measurement_hash", None)
+    payload.pop("evidence_hash", None)
     for key in (
         "requested_quantity",
         "filled_quantity",
