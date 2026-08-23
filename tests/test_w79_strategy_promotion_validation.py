@@ -15,31 +15,51 @@ from autotrade.strategy_lab_promotion import (
     StrategyPromotionEvidenceView,
     StrategyPromotionIntegrityError,
     StrategyPromotionPolicy,
+    StrategyPromotionThresholdPolicy,
     _assessment_state,
     _canonical_json,
     _hash,
     _policy_payload_from_values,
+    _threshold_payload_from_values,
     _view_payload_from_values,
 )
 
 
-def _valid_policy() -> StrategyPromotionPolicy:
+def _valid_thresholds() -> StrategyPromotionThresholdPolicy:
     values = {
-        "policy_id": "policy-a",
+        "threshold_policy_id": "thresholds-a",
         "development_campaign_id": "dev-a",
         "holdout_campaign_id": "holdout-a",
         "holdout_trial_id": "holdout-trial-a",
-        "selected_trial_id": "dev-trial-a",
-        "selected_trial_fingerprint": "1" * 64,
-        "selected_strategy_id": "strategy-a",
-        "selected_strategy_version": "v1",
-        "tournament_fingerprint": "2" * 64,
         "max_holm_adjusted_p": Decimal("0.05"),
         "min_holdout_net_return": Decimal("0.01"),
         "max_holdout_drawdown": Decimal("0.10"),
         "min_holdout_fills": 5,
         "min_execution_fill_ratio": Decimal("0.50"),
         "max_execution_adverse_slippage_bps": Decimal("10"),
+        "external_execution_authorized": False,
+        "live_trading": "BLOCKED",
+    }
+    return StrategyPromotionThresholdPolicy(
+        **values,
+        threshold_policy_hash=_hash(_threshold_payload_from_values(values)),
+    )
+
+
+def _valid_policy() -> StrategyPromotionPolicy:
+    thresholds = _valid_thresholds()
+    values = {
+        "policy_id": "policy-a",
+        "threshold_policy_id": thresholds.threshold_policy_id,
+        "threshold_policy_hash": thresholds.threshold_policy_hash,
+        "development_campaign_id": thresholds.development_campaign_id,
+        "holdout_campaign_id": thresholds.holdout_campaign_id,
+        "holdout_trial_id": thresholds.holdout_trial_id,
+        "selected_trial_id": "dev-trial-a",
+        "selected_trial_fingerprint": "1" * 64,
+        "selected_strategy_id": "strategy-a",
+        "selected_strategy_version": "v1",
+        "tournament_fingerprint": "2" * 64,
         "external_execution_authorized": False,
         "live_trading": "BLOCKED",
     }
@@ -66,12 +86,14 @@ def _valid_gates() -> tuple[PromotionGateEvidence, ...]:
 
 
 def _valid_view() -> StrategyPromotionEvidenceView:
+    policy = _valid_policy()
     gates = _valid_gates()
     values = {
-        "policy_id": "policy-a",
-        "policy_hash": "7" * 64,
-        "selected_strategy_id": "strategy-a",
-        "selected_strategy_version": "v1",
+        "policy_id": policy.policy_id,
+        "policy_hash": policy.policy_hash,
+        "threshold_policy_hash": policy.threshold_policy_hash,
+        "selected_strategy_id": policy.selected_strategy_id,
+        "selected_strategy_version": policy.selected_strategy_version,
         "gates": gates,
         "evidence_complete": True,
         "assessment_state": PromotionAssessmentState.EVIDENCE_QUALIFIED,
@@ -89,9 +111,8 @@ def _valid_view() -> StrategyPromotionEvidenceView:
 @pytest.mark.parametrize(
     ("changes", "message"),
     (
-        ({"policy_id": ""}, "canonical identifier"),
+        ({"threshold_policy_id": ""}, "canonical identifier"),
         ({"development_campaign_id": "holdout-a"}, "campaigns must be distinct"),
-        ({"selected_trial_fingerprint": "BAD"}, "lowercase sha256"),
         ({"max_holm_adjusted_p": 0.05}, "finite Decimal"),
         ({"max_holm_adjusted_p": Decimal("NaN")}, "finite Decimal"),
         ({"max_holm_adjusted_p": Decimal("1.1")}, "within"),
@@ -103,10 +124,28 @@ def _valid_view() -> StrategyPromotionEvidenceView:
         ({"max_execution_adverse_slippage_bps": Decimal("-1")}, "non-negative"),
         ({"external_execution_authorized": True}, "may not grant"),
         ({"live_trading": "ENABLED"}, "may not grant"),
+        ({"threshold_policy_hash": "BAD"}, "lowercase sha256"),
+        ({"threshold_policy_hash": "0" * 64}, "hash mismatch"),
+    ),
+)
+def test_threshold_policy_rejects_invalid_or_tampered_values(changes, message):
+    thresholds = _valid_thresholds()
+    with pytest.raises(StrategyPromotionIntegrityError, match=message):
+        replace(thresholds, **changes)
+
+
+@pytest.mark.parametrize(
+    ("changes", "message"),
+    (
+        ({"policy_id": ""}, "canonical identifier"),
+        ({"threshold_policy_hash": "BAD"}, "lowercase sha256"),
+        ({"selected_trial_fingerprint": "BAD"}, "lowercase sha256"),
+        ({"external_execution_authorized": True}, "may not grant"),
+        ({"live_trading": "ENABLED"}, "may not grant"),
         ({"policy_hash": "0" * 64}, "hash mismatch"),
     ),
 )
-def test_policy_constructor_rejects_invalid_or_tampered_values(changes, message):
+def test_candidate_policy_rejects_invalid_or_tampered_values(changes, message):
     policy = _valid_policy()
     with pytest.raises(StrategyPromotionIntegrityError, match=message):
         replace(policy, **changes)
@@ -195,7 +234,7 @@ def test_view_requires_exact_gate_and_blocker_sets():
         replace(view, promotion_blockers=("SOMETHING_ELSE",))
 
 
-def test_view_consistency_and_authority_are_fail_closed():
+def test_view_consistency_hashes_and_authority_are_fail_closed():
     view = _valid_view()
     blocked_gate = PromotionGateEvidence(
         gate_id="EXECUTION_SENSITIVITY",
@@ -213,8 +252,10 @@ def test_view_consistency_and_authority_are_fail_closed():
         replace(view, assessment_state=PromotionAssessmentState.REJECTED)
     with pytest.raises(StrategyPromotionIntegrityError, match="PAPER candidate"):
         replace(view, paper_candidate_authorized=True)
-    with pytest.raises(StrategyPromotionIntegrityError, match="execution/LIVE"):
+    with pytest.raises(StrategyPromotionIntegrityError, match="PAPER/LIVE"):
         replace(view, live_trading="ENABLED")
+    with pytest.raises(StrategyPromotionIntegrityError, match="lowercase sha256"):
+        replace(view, threshold_policy_hash="BAD")
     with pytest.raises(StrategyPromotionIntegrityError, match="view hash mismatch"):
         replace(view, view_hash="0" * 64)
 
@@ -237,19 +278,48 @@ def test_blocked_integrity_dominates_statistical_failure():
     assert _assessment_state(gates) is PromotionAssessmentState.BLOCKED
 
 
-def _insert_policy_row(runtime: SQLiteRuntime, policy: StrategyPromotionPolicy) -> None:
+def _insert_threshold_row(
+    runtime: SQLiteRuntime, thresholds: StrategyPromotionThresholdPolicy
+) -> None:
+    conn = runtime.connect()
+    try:
+        conn.execute(
+            """
+            INSERT INTO strategy_promotion_threshold_policies(
+                threshold_policy_id, threshold_policy_hash,
+                development_campaign_id, holdout_campaign_id,
+                registered_at, policy_json
+            ) VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                thresholds.threshold_policy_id,
+                thresholds.threshold_policy_hash,
+                thresholds.development_campaign_id,
+                thresholds.holdout_campaign_id,
+                datetime(2026, 8, 23, 19, 0, tzinfo=timezone.utc).isoformat(),
+                _canonical_json(thresholds.to_dict()),
+            ),
+        )
+    finally:
+        conn.close()
+
+
+def _insert_candidate_row(runtime: SQLiteRuntime, policy: StrategyPromotionPolicy) -> None:
     conn = runtime.connect()
     try:
         conn.execute(
             """
             INSERT INTO strategy_promotion_policies(
-                policy_id, policy_hash, development_campaign_id,
+                policy_id, policy_hash, threshold_policy_id,
+                threshold_policy_hash, development_campaign_id,
                 holdout_campaign_id, registered_at, policy_json
-            ) VALUES (?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 policy.policy_id,
                 policy.policy_hash,
+                policy.threshold_policy_id,
+                policy.threshold_policy_hash,
                 policy.development_campaign_id,
                 policy.holdout_campaign_id,
                 datetime(2026, 8, 23, 20, 0, tzinfo=timezone.utc).isoformat(),
@@ -260,34 +330,75 @@ def _insert_policy_row(runtime: SQLiteRuntime, policy: StrategyPromotionPolicy) 
         conn.close()
 
 
-def test_registry_get_and_list_verify_complete_durable_row(tmp_path):
+def test_registry_get_and_list_verify_both_durable_stages(tmp_path):
     runtime = SQLiteRuntime(tmp_path / "promotion-integrity.db")
     registry = SQLiteStrategyPromotionPolicyRegistry(runtime)
+    thresholds = _valid_thresholds()
     policy = _valid_policy()
-    _insert_policy_row(runtime, policy)
+    _insert_threshold_row(runtime, thresholds)
+    _insert_candidate_row(runtime, policy)
 
+    assert registry.get_thresholds(thresholds.threshold_policy_id) == thresholds
     assert registry.get(policy.policy_id) == policy
+    assert registry.list_threshold_policies() == (thresholds,)
     assert registry.list_policies() == (policy,)
 
 
 @pytest.mark.parametrize(
     ("column", "value", "message"),
     (
+        ("threshold_policy_hash", "9" * 64, "does not match"),
+        ("development_campaign_id", "tampered-dev", "does not match"),
+        ("holdout_campaign_id", "tampered-holdout", "does not match"),
+        ("registered_at", "2026-08-23T19:00:00", "timezone-aware"),
+        ("registered_at", "not-a-time", "registered_at is invalid"),
+        ("policy_json", "{", "threshold policy JSON is invalid"),
+    ),
+)
+def test_registry_detects_threshold_row_tampering(
+    tmp_path, column, value, message
+):
+    runtime = SQLiteRuntime(tmp_path / f"threshold-{column}.db")
+    registry = SQLiteStrategyPromotionPolicyRegistry(runtime)
+    thresholds = _valid_thresholds()
+    _insert_threshold_row(runtime, thresholds)
+    conn = runtime.connect()
+    try:
+        conn.execute(
+            f"""
+            UPDATE strategy_promotion_threshold_policies
+            SET {column} = ? WHERE threshold_policy_id = ?
+            """,
+            (value, thresholds.threshold_policy_id),
+        )
+    finally:
+        conn.close()
+
+    with pytest.raises(StrategyPromotionIntegrityError, match=message):
+        registry.get_thresholds(thresholds.threshold_policy_id)
+
+
+@pytest.mark.parametrize(
+    ("column", "value", "message"),
+    (
         ("policy_hash", "9" * 64, "does not match"),
+        ("threshold_policy_hash", "8" * 64, "does not match"),
         ("development_campaign_id", "tampered-dev", "does not match"),
         ("holdout_campaign_id", "tampered-holdout", "does not match"),
         ("registered_at", "2026-08-23T20:00:00", "timezone-aware"),
         ("registered_at", "not-a-time", "registered_at is invalid"),
-        ("policy_json", "{", "policy JSON is invalid"),
+        ("policy_json", "{", "promotion policy JSON is invalid"),
     ),
 )
-def test_registry_detects_side_column_json_and_timestamp_tampering(
+def test_registry_detects_candidate_row_tampering(
     tmp_path, column, value, message
 ):
-    runtime = SQLiteRuntime(tmp_path / f"tamper-{column}.db")
+    runtime = SQLiteRuntime(tmp_path / f"candidate-{column}.db")
     registry = SQLiteStrategyPromotionPolicyRegistry(runtime)
+    thresholds = _valid_thresholds()
     policy = _valid_policy()
-    _insert_policy_row(runtime, policy)
+    _insert_threshold_row(runtime, thresholds)
+    _insert_candidate_row(runtime, policy)
     conn = runtime.connect()
     try:
         conn.execute(
