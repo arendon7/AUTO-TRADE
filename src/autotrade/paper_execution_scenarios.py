@@ -45,11 +45,23 @@ class PaperExecutionScenario:
             raise TypeError("scenario config must be PaperExecutionConfig")
         if not isinstance(self.scenario_hash, str) or not _HASH_RE.fullmatch(self.scenario_hash):
             raise PaperExecutionScenarioError("scenario_hash must be lowercase sha256")
-        if self.scenario_hash != _hash(_scenario_payload(self, include_hash=False)):
+        if self.scenario_hash != _hash(
+            _scenario_payload_from_values(
+                scenario_id=self.scenario_id,
+                purpose=self.purpose,
+                config=self.config,
+            )
+        ):
             raise PaperExecutionScenarioError("scenario_hash mismatch")
 
     def to_dict(self) -> dict[str, object]:
-        return _scenario_payload(self, include_hash=True)
+        payload = _scenario_payload_from_values(
+            scenario_id=self.scenario_id,
+            purpose=self.purpose,
+            config=self.config,
+        )
+        payload["scenario_hash"] = self.scenario_hash
+        return payload
 
     def build_broker(self) -> DeterministicPaperExecutionBroker:
         return DeterministicPaperExecutionBroker(config=self.config)
@@ -109,18 +121,19 @@ def build_paper_execution_scenario(
         max_market_age=max_market_age,
         max_spread_bps=max_spread_bps,
     )
-    values = {
-        "scenario_id": scenario_id,
-        "purpose": purpose,
-        "config": config,
-    }
-    provisional = PaperExecutionScenario.__new__(PaperExecutionScenario)
-    object.__setattr__(provisional, "scenario_id", scenario_id)
-    object.__setattr__(provisional, "purpose", purpose)
-    object.__setattr__(provisional, "config", config)
-    object.__setattr__(provisional, "scenario_hash", "0" * 64)
-    digest = _hash(_scenario_payload(provisional, include_hash=False))
-    return PaperExecutionScenario(**values, scenario_hash=digest)
+    digest = _hash(
+        _scenario_payload_from_values(
+            scenario_id=scenario_id,
+            purpose=purpose,
+            config=config,
+        )
+    )
+    return PaperExecutionScenario(
+        scenario_id=scenario_id,
+        purpose=purpose,
+        config=config,
+        scenario_hash=digest,
+    )
 
 
 def build_paper_execution_scenario_matrix(
@@ -133,15 +146,15 @@ def build_paper_execution_scenario_matrix(
     )
 
 
-def _scenario_payload(
-    scenario: PaperExecutionScenario,
+def _scenario_payload_from_values(
     *,
-    include_hash: bool,
+    scenario_id: str,
+    purpose: str,
+    config: PaperExecutionConfig,
 ) -> dict[str, object]:
-    config = scenario.config
-    payload: dict[str, object] = {
-        "scenario_id": scenario.scenario_id,
-        "purpose": scenario.purpose,
+    return {
+        "scenario_id": scenario_id,
+        "purpose": purpose,
         "config": {
             "slippage_bps": _decimal(config.slippage_bps),
             "max_fill_fraction": _decimal(config.max_fill_fraction),
@@ -149,9 +162,6 @@ def _scenario_payload(
             "max_spread_bps": _decimal(config.max_spread_bps),
         },
     }
-    if include_hash:
-        payload["scenario_hash"] = scenario.scenario_hash
-    return payload
 
 
 def _matrix_payload(scenarios: tuple[PaperExecutionScenario, ...]) -> dict[str, object]:
