@@ -103,9 +103,9 @@ def main() -> int:
             '"external_execution_authorized": False',
             '"capital_authority": "NONE"',
             '"live_trading": "BLOCKED"',
-            '"broker_network_used": False',
-            '"broker_write_performed": False',
-            '"credentials_used": False',
+            "broker_network_used=False",
+            "broker_write_performed=False",
+            "credentials_used=False",
         )
         for marker in required:
             if marker not in source:
