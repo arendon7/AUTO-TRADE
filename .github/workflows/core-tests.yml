@@ -118,6 +118,8 @@ jobs:
         run: python scripts/check_w78_paper_execution_boundary.py
       - name: W79 no-execution strategy promotion boundary
         run: python scripts/check_w79_strategy_promotion_boundary.py
+      - name: W79 Strategy Lab read-only boundary
+        run: python scripts/check_w79_strategy_lab_read_model_boundary.py
       - name: Debt register contract
         run: python scripts/check_debt_register.py
       - name: Canonical knowledge contract
