@@ -1,3 +1,4 @@
+from dataclasses import replace
 from datetime import timedelta
 from decimal import Decimal
 
@@ -14,6 +15,7 @@ from autotrade.persistence import (
     SQLiteRuntime,
     SQLiteSafetyStateStore,
 )
+from autotrade.reconciliation import ReconciliationEngine
 from autotrade.safety import CapitalSafetyKernel
 from autotrade.state import ReservationStatus
 
@@ -49,17 +51,24 @@ def _durable_w78_stack(*, db_path, limits, empty_portfolio, now, fill_fraction: 
         portfolio_store=portfolio,
         reservation_store=reservations,
     )
-    return runtime, ledger, portfolio, reservations, scenario, broker, oms, pipeline
+    reconciliation = ReconciliationEngine(
+        broker=broker,
+        oms=oms,
+        portfolio_store=portfolio,
+        reservation_store=reservations,
+        ledger=ledger,
+    )
+    return runtime, ledger, portfolio, reservations, scenario, broker, oms, pipeline, reconciliation
 
 
-def test_partial_fill_updates_durable_portfolio_and_keeps_remaining_order_reserved(
+def test_partial_fill_updates_durable_portfolio_and_reconciles_to_simulated_broker_truth(
     tmp_path,
     limits,
     market,
     empty_portfolio,
     market_buy_intent,
 ):
-    _, ledger, portfolio, reservations, scenario, broker, oms, pipeline = _durable_w78_stack(
+    _, ledger, portfolio, reservations, scenario, broker, oms, pipeline, reconciliation = _durable_w78_stack(
         db_path=tmp_path / "w78.db",
         limits=limits,
         empty_portfolio=empty_portfolio,
@@ -83,6 +92,16 @@ def test_partial_fill_updates_durable_portfolio_and_keeps_remaining_order_reserv
     assert reservation is not None
     assert reservation.status is ReservationStatus.OPEN
     assert oms.fills_for_order(result.order.order_id)[0].quantity == Decimal("4.0")
+
+    account = broker.account_state(now=market.observed_at)
+    assert account.state_known is True
+    assert account.signed_position_notional_by_symbol == {"TEST-USD": Decimal("404.08080")}
+    assert account.open_order_ids == frozenset({result.order.order_id})
+
+    reconciled = reconciliation.reconcile(now=market.observed_at + timedelta(milliseconds=1))
+    assert reconciled.ok is True
+    assert reconciled.issues == ()
+    assert portfolio.get().snapshot.reconciliation_ok is True
     assert ledger.verify_integrity() is True
 
     evidence = capture_paper_execution_evidence(
@@ -101,7 +120,7 @@ def test_cancel_partial_fill_releases_reservation_without_erasing_filled_exposur
     empty_portfolio,
     market_buy_intent,
 ):
-    _, ledger, portfolio, reservations, scenario, broker, _, pipeline = _durable_w78_stack(
+    _, ledger, portfolio, reservations, scenario, broker, _, pipeline, reconciliation = _durable_w78_stack(
         db_path=tmp_path / "w78.db",
         limits=limits,
         empty_portfolio=empty_portfolio,
@@ -128,6 +147,13 @@ def test_cancel_partial_fill_releases_reservation_without_erasing_filled_exposur
     assert reservation is not None
     assert reservation.status is ReservationStatus.RELEASED
     assert broker.cancel_count == 1
+    account = broker.account_state(now=market.observed_at + timedelta(milliseconds=1))
+    assert account.open_order_ids == frozenset()
+    assert account.signed_position_notional_by_symbol == {"TEST-USD": before}
+
+    reconciled = reconciliation.reconcile(now=market.observed_at + timedelta(milliseconds=2))
+    assert reconciled.ok is True
+    assert reconciled.issues == ()
     assert ledger.verify_integrity() is True
 
     evidence = capture_paper_execution_evidence(
@@ -147,7 +173,7 @@ def test_full_fill_releases_durable_reservation_and_projects_full_position(
     empty_portfolio,
     market_buy_intent,
 ):
-    _, ledger, portfolio, reservations, _, broker, _, pipeline = _durable_w78_stack(
+    _, ledger, portfolio, reservations, _, broker, _, pipeline, reconciliation = _durable_w78_stack(
         db_path=tmp_path / "w78.db",
         limits=limits,
         empty_portfolio=empty_portfolio,
@@ -169,4 +195,51 @@ def test_full_fill_releases_durable_reservation_and_projects_full_position(
     assert reservation is not None
     assert reservation.status is ReservationStatus.RELEASED
     assert broker.submission_count == 1
+    assert reconciliation.reconcile(now=market.observed_at + timedelta(milliseconds=1)).ok is True
     assert ledger.verify_integrity() is True
+
+
+def test_canonical_reconciliation_detects_local_portfolio_drift(
+    tmp_path,
+    limits,
+    market,
+    empty_portfolio,
+    market_buy_intent,
+):
+    _, _, portfolio, _, _, broker, _, pipeline, reconciliation = _durable_w78_stack(
+        db_path=tmp_path / "w78.db",
+        limits=limits,
+        empty_portfolio=empty_portfolio,
+        now=market.observed_at,
+        fill_fraction="1",
+    )
+    result = pipeline.process_intent(
+        intent=market_buy_intent,
+        market=market,
+        now=market.observed_at,
+    )
+    assert result.order is not None
+    assert broker.account_state(now=market.observed_at).signed_position_notional_by_symbol == {
+        "TEST-USD": Decimal("1010.2020")
+    }
+
+    current = portfolio.get()
+    tampered = replace(
+        current.snapshot,
+        gross_exposure=Decimal("999"),
+        net_exposure=Decimal("999"),
+        signed_position_notional_by_symbol={"TEST-USD": Decimal("999")},
+        strategy_gross_exposure={"strategy-a": Decimal("999")},
+        strategy_signed_position_notional_by_symbol={"strategy-a": {"TEST-USD": Decimal("999")}},
+    )
+    assert portfolio.compare_and_set(
+        expected_version=current.version,
+        snapshot=tampered,
+        now=market.observed_at + timedelta(milliseconds=1),
+    ) is not None
+
+    reconciled = reconciliation.reconcile(now=market.observed_at + timedelta(milliseconds=2))
+    assert reconciled.ok is False
+    assert "POSITION_MISMATCH" in {issue.code for issue in reconciled.issues}
+    assert portfolio.get().snapshot.reconciliation_ok is False
+    assert portfolio.get().snapshot.broker_state_known is True
