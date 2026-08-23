@@ -28,7 +28,13 @@ class PaperExecutionEvidenceError(ValueError):
 
 @dataclass(frozen=True, slots=True)
 class PaperExecutionEvidence:
-    """Tamper-detect execution-quality evidence for one simulated OMS order."""
+    """Execution-quality evidence with separate trace and scientific identities.
+
+    `evidence_hash` binds the concrete runtime trace, including OMS order identity
+    and capture time. `measurement_hash` deliberately excludes those opaque runtime
+    identifiers so the same inputs + execution assumptions + deterministic outcome
+    reproduce the same measurement across independent Strategy Lab runs.
+    """
 
     scenario_id: str
     scenario_hash: str
@@ -46,6 +52,7 @@ class PaperExecutionEvidence:
     adverse_slippage_bps: Decimal | None
     market_observed_at: datetime
     captured_at: datetime
+    measurement_hash: str
     evidence_hash: str
 
     def __post_init__(self) -> None:
@@ -53,6 +60,7 @@ class PaperExecutionEvidence:
             ("scenario_hash", self.scenario_hash),
             ("intent_fingerprint", self.intent_fingerprint),
             ("market_fingerprint", self.market_fingerprint),
+            ("measurement_hash", self.measurement_hash),
             ("evidence_hash", self.evidence_hash),
         ):
             if not isinstance(value, str) or not _HASH_RE.fullmatch(value):
@@ -108,11 +116,13 @@ class PaperExecutionEvidence:
         _require_aware(self.captured_at, "captured_at")
         if self.captured_at.astimezone(timezone.utc) < self.market_observed_at.astimezone(timezone.utc):
             raise PaperExecutionEvidenceError("execution evidence cannot predate market observation")
-        if self.evidence_hash != _hash(_payload(self, include_hash=False)):
+        if self.measurement_hash != _hash(_measurement_payload(self)):
+            raise PaperExecutionEvidenceError("execution measurement hash mismatch")
+        if self.evidence_hash != _hash(_payload(self, include_hashes=False)):
             raise PaperExecutionEvidenceError("execution evidence hash mismatch")
 
     def to_dict(self) -> dict[str, object]:
-        return _payload(self, include_hash=True)
+        return _payload(self, include_hashes=True)
 
 
 def capture_paper_execution_evidence(
@@ -168,9 +178,13 @@ def capture_paper_execution_evidence(
         "market_observed_at": market.observed_at.astimezone(timezone.utc),
         "captured_at": captured_at.astimezone(timezone.utc),
     }
+    measurement_hash = _hash(_measurement_payload_from_values(values))
+    trace_values = dict(values)
+    trace_values["measurement_hash"] = measurement_hash
     return PaperExecutionEvidence(
         **values,
-        evidence_hash=_hash(_payload_from_values(values)),
+        measurement_hash=measurement_hash,
+        evidence_hash=_hash(_payload_from_values(trace_values)),
     )
 
 
@@ -187,7 +201,44 @@ def _validate_status_fill_consistency(*, status: OrderStatus, fill_ratio: Decima
         raise PaperExecutionEvidenceError("UNKNOWN execution requires reconciliation, not qualification evidence")
 
 
-def _payload(value: PaperExecutionEvidence, *, include_hash: bool) -> dict[str, object]:
+def _measurement_payload(value: PaperExecutionEvidence) -> dict[str, object]:
+    return _measurement_payload_from_values(
+        {
+            "scenario_id": value.scenario_id,
+            "scenario_hash": value.scenario_hash,
+            "intent_fingerprint": value.intent_fingerprint,
+            "market_fingerprint": value.market_fingerprint,
+            "symbol": value.symbol,
+            "side": value.side,
+            "order_status": value.order_status,
+            "requested_quantity": value.requested_quantity,
+            "filled_quantity": value.filled_quantity,
+            "fill_ratio": value.fill_ratio,
+            "reference_touch": value.reference_touch,
+            "average_fill_price": value.average_fill_price,
+            "adverse_slippage_bps": value.adverse_slippage_bps,
+            "market_observed_at": value.market_observed_at,
+        }
+    )
+
+
+def _measurement_payload_from_values(values: dict[str, object]) -> dict[str, object]:
+    payload = dict(values)
+    for key in (
+        "requested_quantity",
+        "filled_quantity",
+        "fill_ratio",
+        "reference_touch",
+        "average_fill_price",
+        "adverse_slippage_bps",
+    ):
+        raw = payload[key]
+        payload[key] = None if raw is None else _decimal(raw)  # type: ignore[arg-type]
+    payload["market_observed_at"] = payload["market_observed_at"].astimezone(timezone.utc).isoformat()  # type: ignore[union-attr]
+    return payload
+
+
+def _payload(value: PaperExecutionEvidence, *, include_hashes: bool) -> dict[str, object]:
     payload = _payload_from_values(
         {
             "scenario_id": value.scenario_id,
@@ -206,9 +257,10 @@ def _payload(value: PaperExecutionEvidence, *, include_hash: bool) -> dict[str, 
             "adverse_slippage_bps": value.adverse_slippage_bps,
             "market_observed_at": value.market_observed_at,
             "captured_at": value.captured_at,
+            "measurement_hash": value.measurement_hash,
         }
     )
-    if include_hash:
+    if include_hashes:
         payload["evidence_hash"] = value.evidence_hash
     return payload
 
@@ -223,8 +275,8 @@ def _payload_from_values(values: dict[str, object]) -> dict[str, object]:
         "average_fill_price",
         "adverse_slippage_bps",
     ):
-        value = payload[key]
-        payload[key] = None if value is None else _decimal(value)  # type: ignore[arg-type]
+        raw = payload[key]
+        payload[key] = None if raw is None else _decimal(raw)  # type: ignore[arg-type]
     for key in ("market_observed_at", "captured_at"):
         payload[key] = payload[key].astimezone(timezone.utc).isoformat()  # type: ignore[union-attr]
     return payload
