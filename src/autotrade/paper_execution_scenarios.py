@@ -91,8 +91,8 @@ class PaperExecutionScenarioMatrix:
         ids = tuple(item.scenario_id for item in self.scenarios)
         if len(set(ids)) != len(ids):
             raise PaperExecutionScenarioError("matrix scenario_id values must be unique")
-        hashes = tuple(item.scenario_hash for item in self.scenarios)
-        if len(set(hashes)) != len(hashes):
+        configs = tuple(item.config for item in self.scenarios)
+        if len(set(configs)) != len(configs):
             raise PaperExecutionScenarioError("matrix contains duplicate execution assumptions")
         if not isinstance(self.matrix_hash, str) or not _HASH_RE.fullmatch(self.matrix_hash):
             raise PaperExecutionScenarioError("matrix_hash must be lowercase sha256")
