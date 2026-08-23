@@ -62,7 +62,14 @@ def _trial(
     )
 
 
-def _setup_policy(tmp_path, now):
+def _setup_policy(
+    tmp_path,
+    now,
+    *,
+    max_holm: str = "0.05",
+    min_execution_fill: str = "0.40",
+    max_execution_slippage: str = "10",
+):
     db = tmp_path / "w79.db"
     runtime = SQLiteRuntime(db)
     ledger = SQLiteTrialLedger(runtime)
@@ -123,12 +130,12 @@ def _setup_policy(tmp_path, now):
         holdout_trial_id="holdout-a",
         trial_ledger=ledger,
         tournament=tournament,
-        max_holm_adjusted_p=Decimal("0.05"),
+        max_holm_adjusted_p=Decimal(max_holm),
         min_holdout_net_return=Decimal("0.02"),
         max_holdout_drawdown=Decimal("0.10"),
         min_holdout_fills=5,
-        min_execution_fill_ratio=Decimal("0.40"),
-        max_execution_adverse_slippage_bps=Decimal("10"),
+        min_execution_fill_ratio=Decimal(min_execution_fill),
+        max_execution_adverse_slippage_bps=Decimal(max_execution_slippage),
     )
     registry = SQLiteStrategyPromotionPolicyRegistry(runtime)
     registry.register(
@@ -140,7 +147,15 @@ def _setup_policy(tmp_path, now):
     return db, ledger, tournament, policy, registry
 
 
-def _complete_holdout(db, ledger, now, *, metrics=None, strategy_id="strategy-a", strategy_version="v1"):
+def _complete_holdout(
+    db,
+    ledger,
+    now,
+    *,
+    metrics=None,
+    strategy_id="strategy-a",
+    strategy_version="v1",
+):
     permit = HoldoutPermit(permit_id="holdout-permit-a", issued_by="w79-test")
     SQLiteExperimentRegistry(db).consume_holdout_permit(
         permit=permit,
@@ -225,7 +240,6 @@ def test_policy_freezes_after_development_selection_before_holdout(tmp_path, now
     assert loaded.external_execution_authorized is False
     assert loaded.live_trading == "BLOCKED"
 
-    # Exact replay is idempotent; frozen identity cannot be replaced.
     assert (
         registry.register(
             policy,
@@ -240,7 +254,7 @@ def test_policy_freezes_after_development_selection_before_holdout(tmp_path, now
 
 
 def test_policy_cannot_be_created_or_registered_after_holdout_preregistration(tmp_path, now):
-    db, ledger, tournament, policy, registry = _setup_policy(tmp_path, now)
+    db, ledger, tournament, policy, _ = _setup_policy(tmp_path, now)
     _complete_holdout(db, ledger, now)
 
     with pytest.raises(StrategyPromotionIntegrityError, match="before HOLDOUT trial preregistration"):
@@ -400,30 +414,69 @@ def test_execution_identity_mismatch_blocks_even_when_w78_report_is_green(
     assert view.evidence_complete is False
 
 
-def test_holm_and_execution_thresholds_fail_closed(tmp_path, now, limits, market, empty_portfolio, market_buy_intent):
-    db, ledger, tournament, policy, registry = _setup_policy(tmp_path, now)
+def test_holm_and_execution_thresholds_fail_closed(
+    tmp_path,
+    now,
+    limits,
+    market,
+    empty_portfolio,
+    market_buy_intent,
+):
+    strict_dir = tmp_path / "strict"
+    db, ledger, tournament, policy, registry = _setup_policy(
+        strict_dir,
+        now,
+        max_holm="0.001",
+        min_execution_fill="0.9",
+        max_execution_slippage="5",
+    )
     _complete_holdout(db, ledger, now)
+    holm = campaign_holm_evidence(ledger, "dev-campaign")
     report = _execution_report(limits, market, empty_portfolio, market_buy_intent)
 
-    strict = replace(
-        policy,
-        max_holm_adjusted_p=Decimal("0.001"),
-        min_execution_fill_ratio=Decimal("0.9"),
-        policy_hash="0" * 64,
+    view = evaluate_strategy_promotion(
+        registry=registry,
+        policy_id=policy.policy_id,
+        trial_ledger=ledger,
+        tournament=tournament,
+        holm=holm,
+        execution_report=report,
+        execution_intent=market_buy_intent,
     )
-    # A policy cannot be mutated by replacing thresholds and inventing a hash.
-    with pytest.raises(StrategyPromotionIntegrityError, match="policy hash mismatch"):
-        strict
 
+    multiple = _gate(view, "MULTIPLE_TESTING")
+    execution = _gate(view, "EXECUTION_SENSITIVITY")
+    assert multiple.status is PromotionGateStatus.FAIL
+    assert multiple.reason_codes == ("HOLM_ADJUSTED_P_ABOVE_POLICY",)
+    assert execution.status is PromotionGateStatus.FAIL
+    assert execution.reason_codes == (
+        "EXECUTION_FILL_RATIO_BELOW_POLICY",
+        "EXECUTION_SLIPPAGE_ABOVE_POLICY",
+    )
+    assert view.assessment_state is PromotionAssessmentState.REJECTED
+    assert view.paper_candidate_authorized is False
+
+
+def test_holdout_candidate_identity_mismatch_blocks(tmp_path, now):
+    db, ledger, tournament, policy, registry = _setup_policy(tmp_path, now)
+    _complete_holdout(db, ledger, now, strategy_version="v2")
     holm = campaign_holm_evidence(ledger, "dev-campaign")
-    # Use the frozen policy but make W78 evidence exceed its slippage threshold by
-    # constructing a second legitimately frozen policy in a separate clean store.
-    assert holm.adjusted_p_values["dev-a"] == pytest.approx(0.02)
-    assert report.minimum_fill_ratio == Decimal("0.5")
-    assert report.maximum_adverse_slippage_bps == Decimal("8")
+
+    view = evaluate_strategy_promotion(
+        registry=registry,
+        policy_id=policy.policy_id,
+        trial_ledger=ledger,
+        tournament=tournament,
+        holm=holm,
+    )
+
+    holdout = _gate(view, "FINAL_HOLDOUT")
+    assert holdout.status is PromotionGateStatus.BLOCKED
+    assert holdout.reason_codes == ("HOLDOUT_STRATEGY_VERSION_MISMATCH",)
+    assert view.assessment_state is PromotionAssessmentState.BLOCKED
 
 
-def test_registry_conflict_and_unknown_policy_fail_closed(tmp_path, now):
+def test_registry_conflict_unknown_policy_and_invalid_thresholds_fail_closed(tmp_path, now):
     _, ledger, tournament, policy, registry = _setup_policy(tmp_path, now)
     with pytest.raises(StrategyPromotionIntegrityError, match="unknown frozen promotion policy"):
         evaluate_strategy_promotion(
@@ -433,21 +486,9 @@ def test_registry_conflict_and_unknown_policy_fail_closed(tmp_path, now):
             tournament=tournament,
         )
 
-    # Same policy id with different immutable identity is denied before persistence.
-    other = replace(
-        policy,
-        policy_id="promotion-b",
-        policy_hash="0" * 64,
-    )
     with pytest.raises(StrategyPromotionIntegrityError, match="policy hash mismatch"):
-        registry.register(
-            other,
-            trial_ledger=ledger,
-            tournament=tournament,
-            now=now + timedelta(seconds=9),
-        )
+        replace(policy, policy_id="promotion-b", policy_hash="0" * 64)
 
-    # Registering an exact second policy over the same HOLDOUT campaign is also denied.
     duplicate = build_strategy_promotion_policy(
         policy_id="promotion-b",
         development_campaign_id="dev-campaign",
@@ -468,4 +509,20 @@ def test_registry_conflict_and_unknown_policy_fail_closed(tmp_path, now):
             trial_ledger=ledger,
             tournament=tournament,
             now=now + timedelta(seconds=10),
+        )
+
+    with pytest.raises(StrategyPromotionIntegrityError, match="max_holm_adjusted_p"):
+        build_strategy_promotion_policy(
+            policy_id="promotion-invalid",
+            development_campaign_id="dev-campaign",
+            holdout_campaign_id="holdout-campaign",
+            holdout_trial_id="holdout-a",
+            trial_ledger=ledger,
+            tournament=tournament,
+            max_holm_adjusted_p=Decimal("1.1"),
+            min_holdout_net_return=Decimal("0.02"),
+            max_holdout_drawdown=Decimal("0.10"),
+            min_holdout_fills=5,
+            min_execution_fill_ratio=Decimal("0.40"),
+            max_execution_adverse_slippage_bps=Decimal("10"),
         )
