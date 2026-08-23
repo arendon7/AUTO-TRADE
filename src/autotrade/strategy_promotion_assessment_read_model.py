@@ -14,6 +14,7 @@ from autotrade.strategy_lab_promotion import (
     REQUIRED_W79_GATE_IDS,
     PromotionAssessmentState,
     PromotionGateStatus,
+    StrategyPromotionPolicy,
 )
 
 
@@ -217,8 +218,8 @@ class PromotionAssessmentReadModel:
     """Independent immutable W80 assessment reader.
 
     The writer module is intentionally not imported. The database is opened
-    mode=ro with query_only=ON, and every receipt/side-column/hash-chain is
-    independently revalidated before any assessment truth is exposed.
+    mode=ro with query_only=ON. Every receipt, side column, hash chain and W79
+    frozen-policy binding is independently revalidated before evidence is shown.
     """
 
     def __init__(self, core_db_path: str | Path) -> None:
@@ -235,13 +236,27 @@ class PromotionAssessmentReadModel:
         conn = self._connect()
         try:
             conn.execute("BEGIN")
-            table_present = conn.execute(
-                "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
-                ("strategy_promotion_assessments",),
-            ).fetchone() is not None
+            tables = {
+                str(row["name"])
+                for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+            }
+            table_present = "strategy_promotion_assessments" in tables
             rows = conn.execute(
                 "SELECT * FROM strategy_promotion_assessments ORDER BY sequence"
             ).fetchall() if table_present else []
+            if rows and not {
+                "strategy_promotion_policies",
+                "strategy_promotion_threshold_policies",
+            }.issubset(tables):
+                raise PromotionAssessmentReadIntegrityError(
+                    "durable assessment journal lost its frozen W79 policy schema"
+                )
+            policy_rows = conn.execute(
+                "SELECT * FROM strategy_promotion_policies ORDER BY policy_id"
+            ).fetchall() if rows else []
+            threshold_rows = conn.execute(
+                "SELECT threshold_policy_id, threshold_policy_hash FROM strategy_promotion_threshold_policies"
+            ).fetchall() if rows else []
             conn.execute("COMMIT")
         except Exception:
             if conn.in_transaction:
@@ -252,6 +267,7 @@ class PromotionAssessmentReadModel:
 
         assessments = tuple(_assessment_from_row(row) for row in rows)
         _validate_chains(assessments)
+        _validate_policy_bindings(assessments, policy_rows, threshold_rows)
         latest: dict[str, PromotionAssessmentReadView] = {}
         for item in assessments:
             latest[item.policy_id] = item
@@ -355,6 +371,69 @@ def _assessment_from_row(row: sqlite3.Row) -> PromotionAssessmentReadView:
     return view
 
 
+def _promotion_policy_from_row(row: sqlite3.Row) -> StrategyPromotionPolicy:
+    value = _json_object(row["policy_json"], "promotion policy JSON")
+    policy = StrategyPromotionPolicy(
+        policy_id=_string(value, "policy_id"),
+        threshold_policy_id=_string(value, "threshold_policy_id"),
+        threshold_policy_hash=_string(value, "threshold_policy_hash"),
+        development_campaign_id=_string(value, "development_campaign_id"),
+        holdout_campaign_id=_string(value, "holdout_campaign_id"),
+        holdout_trial_id=_string(value, "holdout_trial_id"),
+        selected_trial_id=_string(value, "selected_trial_id"),
+        selected_trial_fingerprint=_string(value, "selected_trial_fingerprint"),
+        selected_strategy_id=_string(value, "selected_strategy_id"),
+        selected_strategy_version=_string(value, "selected_strategy_version"),
+        tournament_fingerprint=_string(value, "tournament_fingerprint"),
+        external_execution_authorized=_false(value, "external_execution_authorized"),
+        live_trading=_string(value, "live_trading"),
+        policy_hash=_string(value, "policy_hash"),
+    )
+    expected = {
+        "policy_id": policy.policy_id,
+        "policy_hash": policy.policy_hash,
+        "threshold_policy_id": policy.threshold_policy_id,
+        "threshold_policy_hash": policy.threshold_policy_hash,
+        "policy_json": _canonical_json(policy.to_dict()),
+    }
+    for key, target in expected.items():
+        if str(row[key]) != target:
+            raise PromotionAssessmentReadIntegrityError(f"frozen W79 policy SQLite column mismatch: {key}")
+    return policy
+
+
+def _validate_policy_bindings(
+    assessments: tuple[PromotionAssessmentReadView, ...],
+    policy_rows: list[sqlite3.Row],
+    threshold_rows: list[sqlite3.Row],
+) -> None:
+    if not assessments:
+        return
+    policies = {_promotion_policy_from_row(row).policy_id: _promotion_policy_from_row(row) for row in policy_rows}
+    if len(policies) != len(policy_rows):
+        raise PromotionAssessmentReadIntegrityError("duplicate frozen W79 policy identity")
+    thresholds = {str(row["threshold_policy_id"]): str(row["threshold_policy_hash"]) for row in threshold_rows}
+    if len(thresholds) != len(threshold_rows):
+        raise PromotionAssessmentReadIntegrityError("duplicate frozen W79 threshold identity")
+    for item in assessments:
+        policy = policies.get(item.policy_id)
+        if policy is None:
+            raise PromotionAssessmentReadIntegrityError("durable assessment lost its frozen W79 policy")
+        if (
+            item.policy_hash != policy.policy_hash
+            or item.threshold_policy_hash != policy.threshold_policy_hash
+            or item.selected_strategy_id != policy.selected_strategy_id
+            or item.selected_strategy_version != policy.selected_strategy_version
+        ):
+            raise PromotionAssessmentReadIntegrityError(
+                "durable assessment does not match its frozen W79 policy identity"
+            )
+        if thresholds.get(policy.threshold_policy_id) != policy.threshold_policy_hash:
+            raise PromotionAssessmentReadIntegrityError(
+                "durable assessment policy lost its frozen W79 threshold binding"
+            )
+
+
 def _gate(value: object) -> PromotionGateReadView:
     if not isinstance(value, dict) or set(value) != _GATE_KEYS:
         raise PromotionAssessmentReadIntegrityError("assessment gate fields are not canonical W80")
@@ -417,6 +496,18 @@ def _assessment_state(gates: tuple[PromotionGateReadView, ...]) -> PromotionAsse
     return PromotionAssessmentState.EVIDENCE_QUALIFIED
 
 
+def _json_object(raw: object, label: str) -> dict[str, object]:
+    if not isinstance(raw, str):
+        raise PromotionAssessmentReadIntegrityError(f"{label} must be text")
+    try:
+        value = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise PromotionAssessmentReadIntegrityError(f"{label} is invalid") from exc
+    if not isinstance(value, dict):
+        raise PromotionAssessmentReadIntegrityError(f"{label} must be object")
+    return value
+
+
 def _string(value: dict[str, object], key: str) -> str:
     raw = value.get(key)
     if not isinstance(raw, str):
@@ -436,6 +527,12 @@ def _boolean(value: dict[str, object], key: str) -> bool:
     if not isinstance(raw, bool):
         raise PromotionAssessmentReadIntegrityError(f"{key} must be boolean")
     return raw
+
+
+def _false(value: dict[str, object], key: str) -> bool:
+    if value.get(key) is not False:
+        raise PromotionAssessmentReadIntegrityError(f"{key} must remain false")
+    return False
 
 
 def _positive_int(value: object, label: str) -> int:
