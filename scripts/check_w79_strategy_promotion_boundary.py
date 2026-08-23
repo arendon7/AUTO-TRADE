@@ -28,6 +28,7 @@ FORBIDDEN_NAMES = {
     "run_paper_execution_sensitivity",
 }
 FORBIDDEN_CALLS = {
+    "OrderIntent",
     "submit",
     "submit_order",
     "place_order",
@@ -89,6 +90,14 @@ def main() -> int:
         '"external_execution_authorized": False',
         '"live_trading": "BLOCKED"',
         "PERMANENT_W79_PROMOTION_BLOCKERS",
+        "REQUIRED_W79_GATE_IDS",
+        "StrategyPromotionThresholdPolicy",
+        "register_thresholds",
+        "promotion thresholds must be frozen before DEVELOPMENT preregistration",
+        "candidate binding must be frozen before HOLDOUT trial preregistration",
+        "_require_same_runtime",
+        "one authoritative SQLite runtime",
+        'conn.execute("BEGIN IMMEDIATE")',
         "EXECUTION_STRATEGY_VERSION_UNBOUND",
         "SHADOW_FORWARD_PROMOTION_BINDING_REQUIRED",
         "TOTAL_EXECUTION_COST_CONTINUITY_UNPROVEN",
@@ -104,14 +113,18 @@ def main() -> int:
         return 1
 
     print(
-        "W79 STRATEGY PROMOTION BOUNDARY PASS — frozen evidence only; "
+        "W79 STRATEGY PROMOTION BOUNDARY PASS — thresholds preregistered before "
+        "DEVELOPMENT; candidate frozen before HOLDOUT; one SQLite authority; "
         "no broker/network/Safety/OMS authority; PAPER candidate false; LIVE blocked"
     )
     return 0
 
 
 def _forbidden_module(module: str) -> bool:
-    return any(module == prefix or module.startswith(prefix + ".") for prefix in FORBIDDEN_MODULE_PREFIXES)
+    return any(
+        module == prefix or module.startswith(prefix + ".")
+        for prefix in FORBIDDEN_MODULE_PREFIXES
+    )
 
 
 def _call_name(func: ast.expr) -> str:
