@@ -1,7 +1,7 @@
 # ESTADO ACTUAL — AUTO-TRADE
 
 Fecha: 2026-08-23
-Estado canónico: **R0–R5 CERTIFIED; R6 FIRST PAPER CANARY BROKER-TRUTH CLOSED; R7 PAPER OPERATIONS ACTIVE; W78 EXECUTION QUALIFICATION CERTIFIED; W79 STRATEGY PROMOTION GOVERNANCE + STRATEGY LAB READ-ONLY DRAFT.**
+Estado canónico: **R0–R5 CERTIFIED; R6 FIRST PAPER CANARY BROKER-TRUTH CLOSED; R7 PAPER OPERATIONS ACTIVE; W78 EXECUTION QUALIFICATION CERTIFIED; W79 STRATEGY PROMOTION GOVERNANCE CERTIFIED; W80 DURABLE PROMOTION ASSESSMENT TECHNICALLY CERTIFIED; W81 EXECUTION-COST CONTINUITY NEXT.**
 
 ## R6 — hito real alcanzado
 El primer canary crypto PAPER compatible con el mínimo real de Alpaca terminó reconciliado por verdad del broker.
@@ -51,7 +51,7 @@ Branch: `work/w78-realistic-paper-execution`.
 PR #50.
 Exact-head certificado: `2924456e33c2cc9e6579301b176267513a90861f`.
 
-W78 no crea un segundo OMS, portfolio manager ni reconciliation engine. Reutiliza R2/R6/R7:
+W78 reutiliza el control plane existente:
 
 `OrderIntent -> Capital Safety -> OMS -> deterministic no-network broker -> Fill/EventLedger -> Portfolio/Reconciliation`
 
@@ -72,23 +72,21 @@ Certificado:
 
 W78 no prueba rentabilidad, no predice fills Alpaca y no concede Auto-Paper.
 
-## W79 — Strategy Promotion Governance
+## W79 — Strategy Promotion Governance — CERTIFIED
 
 Branch: `work/w79-strategy-promotion-evidence`.
-PR #51, DRAFT, apilado sobre W78 certificado.
+PR #51, apilado sobre W78 certificado.
+Behavioral implementation head certificado: `c5c264e64e931ef380801b1e0d1508ea2cac0dfa`.
 
-### Problema que resuelve
-W79 impide que la selección de una estrategia o sus thresholds se puedan reinterpretar retrospectivamente después de observar HOLDOUT o execution sensitivity.
+W79 certificó:
+1. `StrategyPromotionThresholdPolicy` antes de DEVELOPMENT;
+2. Tournament DEVELOPMENT selecciona el candidato;
+3. `StrategyPromotionPolicy` congela strategy id/version, trial fingerprint y tournament fingerprint antes del HOLDOUT final;
+4. DEVELOPMENT y HOLDOUT separados;
+5. una sola autoridad SQLite para policies + Trial Ledger;
+6. policies hash-bound y append-only/idempotentes por identidad.
 
-### Gobernanza implementada
-1. `StrategyPromotionThresholdPolicy` se congela antes de DEVELOPMENT.
-2. Tournament DEVELOPMENT selecciona el candidato.
-3. `StrategyPromotionPolicy` congela strategy id/version, trial fingerprint y tournament fingerprint antes del HOLDOUT final.
-4. DEVELOPMENT y HOLDOUT usan campañas separadas.
-5. Threshold policy, candidate policy y trial ledger comparten una sola autoridad SQLite.
-6. Las políticas son hash-bound y append-only/idempotentes por identidad.
-
-Gates W79:
+Gates:
 - `DEVELOPMENT_SELECTION`;
 - `EXECUTION_SENSITIVITY`;
 - `FINAL_HOLDOUT`;
@@ -100,92 +98,161 @@ Estados:
 - MISSING;
 - BLOCKED.
 
-Un view puede quedar `EVIDENCE_QUALIFIED`, pero W79 fuerza:
+Contrato permanente:
+
+`EVIDENCE_QUALIFIED != PAPER_CANDIDATE`.
+
+W79 fuerza:
 - `paper_candidate_authorized=false`;
 - `external_execution_authorized=false`;
 - `capital_authority=NONE`;
 - `live_trading=BLOCKED`.
 
-Por contrato:
-
-`EVIDENCE_QUALIFIED != PAPER_CANDIDATE`.
-
-### Blockers de promoción preservados
-- `EXECUTION_STRATEGY_VERSION_UNBOUND`;
-- `FEE_ACCOUNTING_INCOMPLETE`;
-- `SHADOW_FORWARD_PROMOTION_BINDING_REQUIRED`;
-- `TOTAL_EXECUTION_COST_CONTINUITY_UNPROVEN`.
-
-## Strategy Lab — superficie de producto W79
-
-El Control Center nativo ya incorpora `/strategy-lab` como proyección local de gobernanza.
-
-La ruta:
-- abre `core.sqlite3` con `mode=ro`;
-- activa `PRAGMA query_only=ON`;
-- es GET-only;
-- no usa broker ni credenciales;
-- no entra en `SAFE_ACTIONS`;
-- no expone POST;
-- no crea `OrderIntent`;
-- no usa Safety/OMS como authority;
-- muestra thresholds preregistrados, candidato congelado, blockers y provenance.
-
-W79 todavía **no persiste assessment autoritativo de gates**. La UI debe mostrar `gate_evidence_state=NOT_PERSISTED_BY_W79`; no puede sintetizar un PASS visual.
-
-Boundaries dedicados y permanentes cubren tanto promotion governance como el read model/UI.
-
-## Certificación W79
-
-W79 sólo se cierra cuando el head final del PR #51 demuestre, sobre el mismo commit:
-- dedicated W79 PASS usando la definición de workflow actual;
+Evidencia W79 behavioral head:
+- 2844/2844 Core PASS;
+- coverage `85.15094919501644%`;
+- W79 promotion boundary PASS;
 - Strategy Lab read-only boundary PASS;
-- Mac Control Center boundary PASS;
-- suite W79 PASS;
-- Core Safety completo PASS;
-- coverage >=85%;
-- Knowledge Contract PASS;
-- Debt Register PASS;
-- W78 y Research authority re-probados.
+- Mac Control Center PASS;
+- W78 / Research / Debt / Knowledge PASS.
 
-No usar un run antiguo o una definición previa del workflow para certificar una superficie añadida después.
+## W80 — Durable Promotion Assessment — TECHNICALLY CERTIFIED
+
+Branch: `work/w80-durable-promotion-assessment`.
+PR #52, DRAFT apilado sobre W79.
+Behavioral implementation head certificado:
+
+`492ca4a621b263324b2cb5322490d74beda66a9c`
+
+### Problema resuelto
+W79 podía evaluar gates pero deliberadamente no persistía la evaluación. Strategy Lab debía mostrar `gate_evidence_state=NOT_PERSISTED_BY_W79` para no convertir datos parciales en un PASS visual.
+
+W80 persiste la conclusión científica como evidencia durable, pero **no** como permiso de trading.
+
+### Journal W80
+`strategy_promotion_assessment.py` implementa:
+- `StrategyPromotionAssessmentReceipt` hash-bound;
+- journal SQLite append-only;
+- `BEGIN IMMEDIATE`;
+- ordinal monotónico por policy;
+- predecessor assessment hash;
+- timestamp monotónico;
+- W79 evaluation ejecutada internamente;
+- no arbitrary public `StrategyPromotionEvidenceView` ingestion;
+- side-column / receipt JSON cross-check;
+- duplicate/conflicting identity fail-closed;
+- unchanged source view no puede reinsertarse con otro id;
+- evidence hashes observados no pueden desaparecer;
+- un gate no-MISSING no puede volver a MISSING;
+- authority siempre false/NONE/BLOCKED.
+
+### Reader W80 independiente
+`strategy_promotion_assessment_read_model.py`:
+- NO importa el writer W80;
+- SQLite `mode=ro`;
+- `PRAGMA query_only=ON`;
+- rechaza core DB symlinked/missing;
+- recalcula receipt hashes;
+- valida receipt/side-columns;
+- valida toda la predecessor chain;
+- valida monotonicidad de evidence hashes y estados;
+- reconstruye la frozen W79 policy;
+- exige exact policy hash, threshold hash, selected strategy id/version;
+- exige que la frozen threshold identity siga presente;
+- journal autocoherente pero desligado de W79 => BLOCKED.
+
+### Strategy Lab W80
+La ruta continúa siendo la misma:
+
+`GET /api/strategy-lab`
+
+No se añadió POST ni SAFE_ACTION.
+
+La proyección mantiene dos dominios de provenance separados:
+1. W79 governance — thresholds + candidate freeze y `gate_evidence_state=NOT_PERSISTED_BY_W79`;
+2. W80 durable assessment — history/last assessment con provenance propio o `NO_DURABLE_W80_ASSESSMENT`.
+
+La UI muestra:
+- assessment id / ordinal;
+- policy y strategy version;
+- assessment state;
+- gates;
+- reason codes;
+- evidence hashes;
+- predecessor / assessment / source hashes;
+- W79 provenance y W80 provenance;
+- blockers.
+
+Sigue mostrando explícitamente:
+- `PAPER CANDIDATE · FALSE`;
+- `CAPITAL · NONE`;
+- `LIVE · BLOCKED`;
+- `Broker POST: NO`.
+
+### Certificación técnica W80
+Implementation head `492ca4a621b263324b2cb5322490d74beda66a9c`:
+
+Dedicated W80 workflow `32671751555`:
+- **46/46 W80 tests PASS**;
+- W80 writer boundary PASS;
+- W80 independent reader boundary PASS;
+- W80 Strategy Lab durable projection boundary PASS;
+- W79 promotion boundary PASS;
+- W79 Strategy Lab read-only boundary PASS;
+- Mac Control Center boundary PASS;
+- W78 boundary PASS;
+- Research Authority PASS.
+
+Core Safety workflow `32671751544`:
+- **2890/2890 PASS**;
+- required coverage 85%;
+- exact coverage `85.1061367161277%` PASS;
+- `strategy_promotion_assessment.py`: 82%;
+- `strategy_promotion_assessment_read_model.py`: 84%;
+- `strategy_lab_read_model.py`: 84%;
+- all inherited R5/R6/R7/W78/W79 boundaries PASS;
+- all three W80 boundaries PASS;
+- Debt Register PASS: 60 items / 3 registries; 11 open, 10 blocking on uncertified tracks;
+- Canonical Knowledge PASS.
+
+### Criptografía / alcance de integridad
+La cadena SHA-256 es evidencia determinista contra cambios parciales/inconsistentes dentro del contrato local. No se presenta como transparencia log firmado ni como defensa contra un administrador privilegiado capaz de reescribir coherentemente todo SQLite y sus policies. Una futura garantía de no repudio requeriría checkpoint firmado o anclaje externo separado.
+
+## Blockers que permanecen después de W80
+- `TOTAL_EXECUTION_COST_CONTINUITY_UNPROVEN` / `TD-R7D-001` P1;
+- `FEE_ACCOUNTING_INCOMPLETE` / `TD-R7D-002` P1;
+- `SHADOW_FORWARD_PROMOTION_BINDING_REQUIRED`;
+- `EXECUTION_STRATEGY_VERSION_UNBOUND`;
+- `TD-R7D-003` P2 safe remaining-quantity reservation after partial fills.
+
+W80 no demuestra rentabilidad, no concede PAPER candidate y no altera R7B real.
+
+## W81 — siguiente hito
+W81 debe cerrar `TD-R7D-001` demostrando continuidad de **price impact** entre:
+
+`Research ExecutionCostModel -> W78 scenario/quote -> effective spread + adverse slippage -> compatible PAPER execution evidence`
+
+El propósito es impedir que una qualification use fricción posterior más favorable que la preregistrada sin etiquetarla explícitamente como favorable/no-conservadora.
+
+W81 debe clasificar evidencia de forma fail-closed y hash-bound. Un spread observado más estrecho no puede convertirse en PASS conservador por interpretación.
+
+`TD-R7D-002` fees sigue siendo P1 separado: W81 no puede declarar P&L fee-complete ni quitar `FEE_ACCOUNTING_INCOMPLETE`.
 
 ## Deuda R7D / Auto-Paper
-
 Machine-readable: `knowledge/00_CANON/debt_register_r7d_auto_paper.json`.
 
 - `TD-R7D-001` P1 — total execution-cost continuity Research -> PAPER;
 - `TD-R7D-002` P1 — fee-complete execution accounting antes de profitability/Auto-Paper claims;
 - `TD-R7D-003` P2 — remaining-quantity reservation segura después de partial fills.
 
-Además W79 mantiene strategy-version y shadow/forward binding como blockers explícitos.
-
-## Próximo bloque permitido después de cerrar W79
-
-Persistir un **promotion assessment durable, hash-bound y reproducible**, vinculando cada gate a evidencia inmutable y a la policy exacta.
-
-Ese bloque debe seguir sin:
-- PAPER candidate authority;
-- broker network;
-- writer;
-- Safety/OMS execution authority;
-- LIVE.
-
-Auto-Paper no es el siguiente paso inmediato.
-
 ## Modelo de automatización
-La IA puede generar hipótesis, variantes, experimentos y análisis. No puede tener un camino directo a POST.
+La IA puede generar hipótesis, variantes, experimentos y análisis. No puede tener camino directo a POST.
 
-Una estrategia que opere automáticamente deberá estar:
-- versionada/fingerprinted;
-- reproducible;
-- promovida por evidencia research/forward;
-- acotada por permiso determinista;
-- evaluada por Portfolio + Capital Safety;
-- stageada por OMS;
-- enviada por writer PAPER one-shot;
-- reconciliada contra broker truth;
-- vigilada por Health/kill switch/loss limits.
+Una estrategia automática futura deberá cruzar:
+
+`Strategy Runtime -> OrderIntent -> Portfolio -> Capital Safety -> OMS -> one-shot PAPER writer -> reconciliation -> Health`
+
+Ningún W78/W79/W80/W81 puede saltar esa cadena.
 
 ## Negative tests permanentes
 Mantener y ampliar:
@@ -199,13 +266,15 @@ Mantener y ampliar:
 - duplicate POST;
 - direct writer access;
 - qualification/research intentando importar writer/red;
-- W79 intentando crear `OrderIntent` o llamar broker/Safety/OMS;
-- Strategy Lab intentando POST, mutar SQLite, persistir credenciales o sintetizar gates;
+- W79/W80 intentando crear ejecución externa;
+- W80 receipt/policy/hash-chain tampering;
+- Strategy Lab intentando POST, mutar SQLite, persistir credenciales o sintetizar W79 gates;
 - strategy version drift;
+- favorable execution assumptions presentados como conservative;
 - IA/model output intentando saltar Strategy Runtime/Safety/OMS;
 - cualquier intento LIVE.
 
 ## Capital
-Existe exposición PAPER derivada del first canary y PR #49 mantiene su tratamiento como obligación operacional separada. W78/W79 no envían órdenes externas y no pueden alterar esa exposición.
+Existe exposición PAPER derivada del first canary y PR #49 mantiene su tratamiento como obligación operacional separada. W78/W79/W80 no tienen autoridad para alterar esa exposición.
 
 **LIVE TRADING: BLOQUEADO.**
