@@ -232,25 +232,26 @@ def test_oms_records_deterministic_market_quality_rejection_without_unknown(
 ):
     ledger = InMemoryEventLedger()
     broker = DeterministicPaperExecutionBroker(
-        config=PaperExecutionConfig(max_spread_bps=Decimal("100"))
+        config=PaperExecutionConfig(max_market_age=timedelta(milliseconds=500))
     )
-    wide = replace(market, bid=Decimal("90"), ask=Decimal("110"))
     pipeline = TradingPipeline(
         safety=CapitalSafetyKernel(limits, ledger),
         oms=OrderManagementSystem(broker=broker, ledger=ledger),
     )
+    now = market.observed_at + timedelta(milliseconds=750)
 
     result = pipeline.process_intent(
         intent=market_buy_intent,
-        market=wide,
+        market=market,
         portfolio=empty_portfolio,
-        now=market.observed_at,
+        now=now,
     )
 
     assert result.order is not None
     assert result.order.status is OrderStatus.REJECTED
     assert broker.rejection_count == 1
     assert broker.submission_count == 0
+    assert broker.rejection_reason_for_order(result.order.order_id) == "STALE_MARKET_SNAPSHOT"
     assert "ORDER_STATE_UNKNOWN" not in [event.event_type for event in ledger.all_events()]
 
 
