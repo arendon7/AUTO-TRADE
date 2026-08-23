@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
+import json
 import sqlite3
 
 import pytest
@@ -170,7 +171,7 @@ def test_reader_rejects_policy_hash_side_column_drift(tmp_path):
         PromotionAssessmentReadModel(db).snapshot(now=NOW + timedelta(seconds=10))
 
 
-def test_reader_rejects_assessment_identity_rebound_to_another_strategy(tmp_path):
+def test_reader_normalizes_tampered_w79_policy_validation_failure(tmp_path):
     db, _, _ = _setup(tmp_path)
     conn = sqlite3.connect(db)
     try:
@@ -179,7 +180,6 @@ def test_reader_rejects_assessment_identity_rebound_to_another_strategy(tmp_path
             ("promotion-binding",),
         ).fetchone()
         assert row is not None
-        import json
         value = json.loads(row[0])
         value["selected_strategy_id"] = "strategy-other"
         conn.execute(
@@ -189,7 +189,7 @@ def test_reader_rejects_assessment_identity_rebound_to_another_strategy(tmp_path
         conn.commit()
     finally:
         conn.close()
-    with pytest.raises(Exception, match="policy hash mismatch|frozen W79 policy"):
+    with pytest.raises(PromotionAssessmentReadIntegrityError, match="failed canonical validation"):
         PromotionAssessmentReadModel(db).snapshot(now=NOW + timedelta(seconds=10))
 
 
