@@ -13,7 +13,6 @@ from autotrade.forward_shadow_measurement import (
     FORWARD_MEASUREMENT_RECEIPT_VERSION,
     FORWARD_MEASUREMENT_RUNTIME_VERSION,
     ForwardMeasurementPlan,
-    ForwardMeasurementRuntimeIdentity,
     ForwardShadowMeasurementIntegrityError,
     ForwardShadowMeasurementReceipt,
     build_forward_measurement_plan,
@@ -97,7 +96,7 @@ def _valid_receipt_with(receipt: ForwardShadowMeasurementReceipt, **changes):
         "live_trading",
     )
     values = {name: getattr(receipt, name) for name in base_names}
-    values.update({k: v for k, v in changes.items() if k in values})
+    values.update({key: value for key, value in changes.items() if key in values})
     measurement_hash = measurement._hash(
         measurement._measurement_payload_from_values(values)
     )
@@ -139,9 +138,7 @@ def test_w84_runtime_identity_constructor_fail_closed_branches():
 def test_w84_plan_constructor_fail_closed_branches(
     limits, market, empty_portfolio, market_buy_intent
 ):
-    *_, plan, _ = _baseline(
-        limits, market, empty_portfolio, market_buy_intent
-    )
+    *_, plan, _ = _baseline(limits, market, empty_portfolio, market_buy_intent)
     assert plan.contract_version == FORWARD_MEASUREMENT_PLAN_VERSION
     assert plan.to_dict()["plan_hash"] == plan.plan_hash
 
@@ -170,9 +167,7 @@ def test_w84_plan_constructor_fail_closed_branches(
 def test_w84_receipt_constructor_fail_closed_branches(
     limits, market, empty_portfolio, market_buy_intent
 ):
-    *_, receipts = _baseline(
-        limits, market, empty_portfolio, market_buy_intent
-    )
+    *_, receipts = _baseline(limits, market, empty_portfolio, market_buy_intent)
     receipt = receipts[0]
     assert receipt.contract_version == FORWARD_MEASUREMENT_RECEIPT_VERSION
     assert receipt.to_dict()["receipt_hash"] == receipt.receipt_hash
@@ -341,7 +336,10 @@ def test_w84_plan_builder_rejects_gap_alignment_lookback_and_runtime_drift(
             domain_source_hash=current.domain_source_hash,
         ),
     )
-    with pytest.raises(ForwardShadowMeasurementIntegrityError, match="certified W83 runtime"):
+    with pytest.raises(
+        ForwardShadowMeasurementIntegrityError,
+        match="certified W83 runtime",
+    ):
         build_forward_measurement_plan(
             plan_id="runtime-drift",
             w83_resolution=resolution,
@@ -397,11 +395,12 @@ def test_w84_measurement_builder_rejects_dataset_and_capture_drift(
             **common, post_freeze_dataset=shifted
         )
 
+    stale_capture = dict(common)
+    stale_capture["captured_at"] = post_freeze.ended_at - timedelta(seconds=1)
     with pytest.raises(ForwardShadowMeasurementIntegrityError, match="captured before"):
         build_forward_shadow_measurements(
-            **common,
+            **stale_capture,
             post_freeze_dataset=post_freeze,
-            captured_at=post_freeze.ended_at - timedelta(seconds=1),
         )
 
 
@@ -420,9 +419,12 @@ def test_w84_binding_rejects_selection_length_capture_and_receipt_identity_drift
         plan,
         receipts,
     ) = _baseline(limits, market, empty_portfolio, market_buy_intent)
-    policy_hash = "a" * 64
+    policy_hash = receipts[0].policy_hash
 
-    from autotrade.research.shadow import FrozenShadowConfig, SQLitePortfolioShadowRegistry
+    from autotrade.research.shadow import (
+        FrozenShadowConfig,
+        SQLitePortfolioShadowRegistry,
+    )
 
     shadow = SQLitePortfolioShadowRegistry(tmp_path / "shadow.sqlite")
     shadow.register_config(
@@ -449,7 +451,10 @@ def test_w84_binding_rejects_selection_length_capture_and_receipt_identity_drift
             assessed_at=assessed_at,
         )
 
-    with pytest.raises(ForwardShadowMeasurementIntegrityError, match="one measurement receipt"):
+    with pytest.raises(
+        ForwardShadowMeasurementIntegrityError,
+        match="one measurement receipt",
+    ):
         verify_shadow_measurement_binding(
             plan=plan,
             policy_hash=policy_hash,
@@ -487,9 +492,7 @@ def test_w84_binding_rejects_selection_length_capture_and_receipt_identity_drift
 def test_w84_private_validation_and_source_location_fail_closed(
     monkeypatch, limits, market, empty_portfolio, market_buy_intent
 ):
-    *_, plan, receipts = _baseline(
-        limits, market, empty_portfolio, market_buy_intent
-    )
+    *_, plan, receipts = _baseline(limits, market, empty_portfolio, market_buy_intent)
     receipt = receipts[0]
 
     forged_plan = _forge_dataclass(
