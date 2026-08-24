@@ -13,6 +13,7 @@ ALPACA_CRYPTO_FEE_SOURCE_URL = "https://docs.alpaca.markets/us/docs/crypto-fees"
 ALPACA_CRYPTO_FEE_SOURCE_CHECKED_AT = datetime(
     2026, 8, 24, 1, 55, tzinfo=timezone.utc
 )
+ALPACA_CRYPTO_QUALIFICATION_VENUE = "alpaca-paper-model"
 ALPACA_CRYPTO_TIER1_MAKER_BPS = Decimal("15")
 ALPACA_CRYPTO_TIER1_TAKER_BPS = Decimal("25")
 ALPACA_CRYPTO_CONSERVATIVE_FLOOR_BPS = ALPACA_CRYPTO_TIER1_TAKER_BPS
@@ -80,6 +81,10 @@ class FeeScheduleAttestation:
         if self.asset_class != "crypto":
             raise FeeScheduleAttestationIntegrityError(
                 "Alpaca crypto fee attestation requires crypto asset class"
+            )
+        if self.venue != ALPACA_CRYPTO_QUALIFICATION_VENUE:
+            raise FeeScheduleAttestationIntegrityError(
+                "Alpaca crypto fee attestation requires canonical Alpaca qualification venue"
             )
         if not isinstance(self.symbol, str) or not self.symbol.strip():
             raise FeeScheduleAttestationIntegrityError("symbol is required")
@@ -166,6 +171,10 @@ class FeeScheduleAttestation:
             raise FeeScheduleAttestationIntegrityError(
                 "fee schedule attestation venue mismatch"
             )
+        if venue != ALPACA_CRYPTO_QUALIFICATION_VENUE:
+            raise FeeScheduleAttestationIntegrityError(
+                "fee schedule validation requires canonical Alpaca qualification venue"
+            )
         if self.symbol != symbol:
             raise FeeScheduleAttestationIntegrityError(
                 "fee schedule attestation symbol mismatch"
@@ -191,10 +200,15 @@ def build_alpaca_crypto_worst_case_fee_attestation(
 
     The baseline deliberately assumes no favorable 30-day volume tier and no
     maker guarantee. A lower fee floor requires a future separately certified
-    evidence path; callers cannot lower the canonical values or refresh the
-    documentation timestamp without versioning this source snapshot.
+    evidence path; callers cannot lower the canonical values, substitute another
+    venue, or refresh the documentation timestamp without versioning this source
+    snapshot.
     """
 
+    if venue != ALPACA_CRYPTO_QUALIFICATION_VENUE:
+        raise FeeScheduleAttestationIntegrityError(
+            "Alpaca crypto fee attestation factory requires canonical Alpaca qualification venue"
+        )
     values = {
         "attestation_id": attestation_id,
         "version": FEE_SCHEDULE_ATTESTATION_VERSION,
@@ -202,7 +216,7 @@ def build_alpaca_crypto_worst_case_fee_attestation(
         "source_checked_at": ALPACA_CRYPTO_FEE_SOURCE_CHECKED_AT,
         "product_id": product_id,
         "asset_class": "crypto",
-        "venue": venue,
+        "venue": ALPACA_CRYPTO_QUALIFICATION_VENUE,
         "symbol": symbol,
         "liquidity_assumption": ALPACA_CRYPTO_LIQUIDITY_ASSUMPTION,
         "volume_tier_assumption": ALPACA_CRYPTO_VOLUME_ASSUMPTION,
@@ -330,6 +344,7 @@ __all__ = [
     "ALPACA_CRYPTO_FEE_SOURCE_URL",
     "ALPACA_CRYPTO_LIQUIDITY_ASSUMPTION",
     "ALPACA_CRYPTO_POSTING_SEMANTICS",
+    "ALPACA_CRYPTO_QUALIFICATION_VENUE",
     "ALPACA_CRYPTO_TIER1_MAKER_BPS",
     "ALPACA_CRYPTO_TIER1_TAKER_BPS",
     "ALPACA_CRYPTO_VOLUME_ASSUMPTION",
