@@ -66,7 +66,7 @@ def test_w82_aggregate_rejects_partial_or_falsified_completeness(
         replace(evidence, total_fee_amount=evidence.total_fee_amount + Decimal("0.01"))
     with pytest.raises(FeeAccountingIntegrityError, match="COMPLETE"):
         replace(evidence, status=FeeAccountingStatus.BLOCKED)
-    with pytest.raises(FeeAccountingIntegrityError, match="complete fee accounting"):
+    with pytest.raises(FeeAccountingIntegrityError, match="mark fee accounting complete"):
         replace(evidence, fee_accounting_complete=False)
     with pytest.raises(FeeAccountingIntegrityError, match="broker-authoritative source"):
         replace(evidence, source=FeeEvidenceSource.BROKER_AUTHORITATIVE)
