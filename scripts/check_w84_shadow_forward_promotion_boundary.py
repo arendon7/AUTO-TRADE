@@ -6,12 +6,15 @@ import sys
 
 
 ROOT = Path(__file__).resolve().parents[1]
-MEASUREMENT = ROOT / "src/autotrade/forward_shadow_measurement.py"
-PROMOTION = ROOT / "src/autotrade/promotion_shadow_forward_binding.py"
+SRC = ROOT / "src/autotrade"
+MEASUREMENT = SRC / "forward_shadow_measurement.py"
+PROMOTION = SRC / "promotion_shadow_forward_binding.py"
+SOURCE_VERIFICATION = SRC / "promotion_shadow_forward_source_verification.py"
 TEST_MEASUREMENT = ROOT / "tests/test_w84_forward_shadow_measurement.py"
 TEST_MEASUREMENT_COVERAGE = ROOT / "tests/test_w84_forward_shadow_measurement_coverage.py"
 TEST_PROMOTION = ROOT / "tests/test_w84_shadow_forward_promotion_binding.py"
 TEST_PROMOTION_VALIDATION = ROOT / "tests/test_w84_shadow_forward_promotion_validation.py"
+TEST_SOURCE_VERIFICATION = ROOT / "tests/test_w84_shadow_forward_source_verification.py"
 W84_WORKFLOW = ROOT / ".github/workflows/w84-shadow-forward-promotion.yml"
 CORE_WORKFLOW = ROOT / ".github/workflows/core-tests.yml"
 
@@ -39,6 +42,12 @@ FORBIDDEN_CALLS = {
     "send_order",
     "urlopen",
     "connect",
+    # R5 registries remain the persistence authority. W84 production may read
+    # their verified chains but may never create or append durable evidence.
+    "register_config",
+    "append_period",
+    "register_policy",
+    "append_shadow_record",
 }
 FORBIDDEN_TEXT = (
     "APCA_API_KEY_ID",
@@ -108,16 +117,43 @@ PROMOTION_REQUIRED = (
     '"live_trading": "BLOCKED"',
 )
 
+SOURCE_VERIFICATION_REQUIRED = (
+    'SOURCE_VERIFICATION_VERSION = "W84_SHADOW_FORWARD_SOURCE_VERIFICATION_V1"',
+    "`PromotionShadowForwardResolution` is an intermediate identity/blocker receipt.",
+    "shadow_registry.get_config()",
+    "shadow_registry.list_records()",
+    "shadow_registry.control_state()",
+    "forward_registry.get_policy()",
+    "forward_registry.list_records()",
+    "forward_registry.control_state()",
+    "verify_shadow_measurement_binding(",
+    "measurement_receipts_hash(",
+    "source-verified PASS requires exact preregistered Shadow horizon",
+    "source-verified PASS requires exact preregistered Forward horizon",
+    "cumulative_return, max_drawdown = _forward_metrics(forward_records)",
+    "rehash-valid W84 evidence disagrees with durable source truth",
+    "R5 source truth changed during final W84 verification",
+    '"source_truth_verified": True',
+    '"resolved_promotion_blockers": (SHADOW_FORWARD_BLOCKER,)',
+    '"paper_candidate_authorized": False',
+    '"external_execution_authorized": False',
+    '"runtime_execution_authorized": False',
+    '"capital_authority": "NONE"',
+    '"live_trading": "BLOCKED"',
+)
+
 
 def main() -> int:
     errors: list[str] = []
     required_files = (
         MEASUREMENT,
         PROMOTION,
+        SOURCE_VERIFICATION,
         TEST_MEASUREMENT,
         TEST_MEASUREMENT_COVERAGE,
         TEST_PROMOTION,
         TEST_PROMOTION_VALIDATION,
+        TEST_SOURCE_VERIFICATION,
         W84_WORKFLOW,
         CORE_WORKFLOW,
     )
@@ -125,7 +161,7 @@ def main() -> int:
         if not path.is_file():
             errors.append(f"missing W84 contract file: {path.relative_to(ROOT)}")
 
-    for path in (MEASUREMENT, PROMOTION):
+    for path in (MEASUREMENT, PROMOTION, SOURCE_VERIFICATION):
         if path.is_file():
             errors.extend(_scan_authority(path))
 
@@ -140,6 +176,23 @@ def main() -> int:
         for marker in PROMOTION_REQUIRED:
             if marker not in source:
                 errors.append(f"W84 promotion marker missing: {marker}")
+
+    if SOURCE_VERIFICATION.is_file():
+        source = SOURCE_VERIFICATION.read_text(encoding="utf-8")
+        for marker in SOURCE_VERIFICATION_REQUIRED:
+            if marker not in source:
+                errors.append(f"W84 source-verification marker missing: {marker}")
+
+    # The V2 resolver is intentionally an intermediate receipt. No production
+    # layer outside W84 source verification may consume it as final authority.
+    intermediate_name = "resolve_promotion_shadow_forward_binding"
+    for path in SRC.glob("*.py"):
+        if path in {PROMOTION, SOURCE_VERIFICATION}:
+            continue
+        if intermediate_name in path.read_text(encoding="utf-8"):
+            errors.append(
+                f"{path.name}: consumes intermediate W84 resolver without source verification"
+            )
 
     boundary_marker = "python scripts/check_w84_shadow_forward_promotion_boundary.py"
     for workflow, label in (
@@ -158,6 +211,7 @@ def main() -> int:
             "tests/test_w84_forward_shadow_measurement_coverage.py",
             "tests/test_w84_shadow_forward_promotion_binding.py",
             "tests/test_w84_shadow_forward_promotion_validation.py",
+            "tests/test_w84_shadow_forward_source_verification.py",
         ):
             if path not in workflow_source:
                 errors.append(f"W84 workflow: required test not wired: {path}")
@@ -184,13 +238,13 @@ def main() -> int:
 
     print(
         "W84 SHADOW/FORWARD PROMOTION BOUNDARY PASS — exact W83 candidate, "
-        "StrategySpec and runtime remain bound; forward measurement reuses the "
-        "deterministic research BacktestEngine with frozen config/history and "
-        "prefix-only market data; every R5 observation must carry the exact W84 "
-        "measurement hash; complete tails, fixed horizon and sub-period freshness "
-        "budgets prevent omission/optional stopping; only the Shadow/Forward "
-        "promotion blocker may be removed; no broker/network/OMS/Safety/SQLite "
-        "authority; PAPER candidate false; capital NONE; LIVE blocked"
+        "StrategySpec and runtime remain bound; deterministic prefix-only W84 "
+        "measurements bind every R5 Shadow observation; the V2 blocker receipt is "
+        "intermediate only and final W84 certification re-reads durable R5 Shadow/" 
+        "Forward truth plus measurement receipts, recomputes metrics/freshness and "
+        "rejects rehash-valid lies; R5 mutation stays outside W84; only the Shadow/" 
+        "Forward promotion blocker may be removed; no broker/network/OMS/Safety/" 
+        "SQLite authority; PAPER candidate false; capital NONE; LIVE blocked"
     )
     return 0
 
@@ -216,7 +270,7 @@ def _scan_authority(path: Path) -> list[str]:
             name = _call_name(node.func)
             if name in FORBIDDEN_CALLS:
                 errors.append(
-                    f"{path.name}:{node.lineno}: forbidden authority/network call {name}"
+                    f"{path.name}:{node.lineno}: forbidden authority/mutation/network call {name}"
                 )
     for marker in FORBIDDEN_TEXT:
         if marker in source:
