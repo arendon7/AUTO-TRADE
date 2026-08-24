@@ -10,6 +10,9 @@ import re
 
 FEE_SCHEDULE_ATTESTATION_VERSION = "W82_ALPACA_CRYPTO_FEE_SCHEDULE_V1"
 ALPACA_CRYPTO_FEE_SOURCE_URL = "https://docs.alpaca.markets/us/docs/crypto-fees"
+ALPACA_CRYPTO_FEE_SOURCE_CHECKED_AT = datetime(
+    2026, 8, 24, 1, 55, tzinfo=timezone.utc
+)
 ALPACA_CRYPTO_TIER1_MAKER_BPS = Decimal("15")
 ALPACA_CRYPTO_TIER1_TAKER_BPS = Decimal("25")
 ALPACA_CRYPTO_CONSERVATIVE_FLOOR_BPS = ALPACA_CRYPTO_TIER1_TAKER_BPS
@@ -70,6 +73,10 @@ class FeeScheduleAttestation:
                 "fee schedule attestation source is not canonical Alpaca crypto documentation"
             )
         _require_aware(self.source_checked_at, "source_checked_at")
+        if _utc(self.source_checked_at) != _utc(ALPACA_CRYPTO_FEE_SOURCE_CHECKED_AT):
+            raise FeeScheduleAttestationIntegrityError(
+                "fee schedule source verification timestamp is not canonical W82"
+            )
         if self.asset_class != "crypto":
             raise FeeScheduleAttestationIntegrityError(
                 "Alpaca crypto fee attestation requires crypto asset class"
@@ -102,7 +109,9 @@ class FeeScheduleAttestation:
             raise FeeScheduleAttestationIntegrityError(
                 "canonical Alpaca crypto conservative fee floor must be 25 bps"
             )
-        if self.required_fee_floor_bps < max(self.maker_fee_bps, self.taker_fee_bps):
+        if self.required_fee_floor_bps < max(
+            self.maker_fee_bps, self.taker_fee_bps
+        ):
             raise FeeScheduleAttestationIntegrityError(
                 "required fee floor may not undercut documented worst-case tier fee"
             )
@@ -177,20 +186,20 @@ def build_alpaca_crypto_worst_case_fee_attestation(
     product_id: str,
     venue: str,
     symbol: str,
-    source_checked_at: datetime,
 ) -> FeeScheduleAttestation:
     """Build the fixed conservative Alpaca crypto fee baseline used by W82.
 
     The baseline deliberately assumes no favorable 30-day volume tier and no
     maker guarantee. A lower fee floor requires a future separately certified
-    evidence path; callers cannot lower the canonical values in this factory.
+    evidence path; callers cannot lower the canonical values or refresh the
+    documentation timestamp without versioning this source snapshot.
     """
 
     values = {
         "attestation_id": attestation_id,
         "version": FEE_SCHEDULE_ATTESTATION_VERSION,
         "source_url": ALPACA_CRYPTO_FEE_SOURCE_URL,
-        "source_checked_at": source_checked_at,
+        "source_checked_at": ALPACA_CRYPTO_FEE_SOURCE_CHECKED_AT,
         "product_id": product_id,
         "asset_class": "crypto",
         "venue": venue,
@@ -213,7 +222,9 @@ def build_alpaca_crypto_worst_case_fee_attestation(
     )
 
 
-def _payload(value: FeeScheduleAttestation, *, include_hash: bool) -> dict[str, object]:
+def _payload(
+    value: FeeScheduleAttestation, *, include_hash: bool
+) -> dict[str, object]:
     payload = _payload_from_values(
         {
             "attestation_id": value.attestation_id,
@@ -245,7 +256,11 @@ def _payload(value: FeeScheduleAttestation, *, include_hash: bool) -> dict[str, 
 def _payload_from_values(values: dict[str, object]) -> dict[str, object]:
     payload = dict(values)
     payload["source_checked_at"] = _utc_iso(payload["source_checked_at"])
-    for key in ("maker_fee_bps", "taker_fee_bps", "required_fee_floor_bps"):
+    for key in (
+        "maker_fee_bps",
+        "taker_fee_bps",
+        "required_fee_floor_bps",
+    ):
         payload[key] = _decimal(payload[key])
     return payload
 
@@ -311,6 +326,7 @@ def _hash(value: object) -> str:
 __all__ = [
     "ALPACA_CRYPTO_CONSERVATIVE_FLOOR_BPS",
     "ALPACA_CRYPTO_FEE_CHARGE_BASIS",
+    "ALPACA_CRYPTO_FEE_SOURCE_CHECKED_AT",
     "ALPACA_CRYPTO_FEE_SOURCE_URL",
     "ALPACA_CRYPTO_LIQUIDITY_ASSUMPTION",
     "ALPACA_CRYPTO_POSTING_SEMANTICS",
