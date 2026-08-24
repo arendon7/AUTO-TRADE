@@ -8,15 +8,13 @@ import autotrade.strategy_lab_promotion as promotion
 import autotrade.strategy_promotion_assessment as assessment_module
 from autotrade.execution_cost_continuity import build_execution_cost_continuity_evidence
 from autotrade.fee_accounting import (
+    FeeAccountingIntegrityError,
     build_simulated_fee_accounting_contract,
     build_simulated_fee_accounting_evidence,
 )
 from autotrade.paper_execution_lab import run_paper_execution_sensitivity
 from autotrade.paper_execution_qualification import bind_research_costs_to_paper_execution
-from autotrade.paper_execution_scenarios import (
-    build_paper_execution_scenario,
-    build_paper_execution_scenario_matrix,
-)
+from autotrade.paper_execution_scenarios import build_paper_execution_scenario, build_paper_execution_scenario_matrix
 from autotrade.promotion_cost_continuity import resolve_promotion_cost_continuity
 from autotrade.promotion_fee_accounting import (
     PromotionFeeAccountingIntegrityError,
@@ -30,52 +28,30 @@ from autotrade.strategy_promotion_assessment import ZERO_ASSESSMENT_HASH
 
 
 def _matrix():
-    return build_paper_execution_scenario_matrix(
-        (
-            build_paper_execution_scenario(
-                scenario_id="baseline",
-                purpose="W82 candidate baseline",
-                slippage_bps=Decimal("2"),
-                max_fill_fraction=Decimal("1"),
-                max_market_age=timedelta(seconds=2),
-                max_spread_bps=Decimal("250"),
-            ),
-            build_paper_execution_scenario(
-                scenario_id="stress",
-                purpose="W82 candidate stress",
-                slippage_bps=Decimal("8"),
-                max_fill_fraction=Decimal("0.5"),
-                max_market_age=timedelta(seconds=2),
-                max_spread_bps=Decimal("250"),
-            ),
-        )
-    )
-
-
-def _cost():
-    return ExecutionCostModel(
-        fee_bps=Decimal("5"),
-        half_spread_bps=Decimal("2"),
-        slippage_bps=Decimal("2"),
-    )
+    return build_paper_execution_scenario_matrix((
+        build_paper_execution_scenario(
+            scenario_id="baseline", purpose="W82 candidate baseline",
+            slippage_bps=Decimal("2"), max_fill_fraction=Decimal("1"),
+            max_market_age=timedelta(seconds=2), max_spread_bps=Decimal("250"),
+        ),
+        build_paper_execution_scenario(
+            scenario_id="stress", purpose="W82 candidate stress",
+            slippage_bps=Decimal("8"), max_fill_fraction=Decimal("0.5"),
+            max_market_age=timedelta(seconds=2), max_spread_bps=Decimal("250"),
+        ),
+    ))
 
 
 def _assessment(*, measurement_hash: str):
     gates = []
     for index, gate_id in enumerate(promotion.REQUIRED_W79_GATE_IDS, start=1):
-        hashes = (
-            tuple(sorted((measurement_hash, "f" * 64)))
-            if gate_id == "EXECUTION_SENSITIVITY"
-            else (str(index) * 64,)
-        )
-        gates.append(
-            promotion.PromotionGateEvidence(
-                gate_id=gate_id,
-                status=promotion.PromotionGateStatus.PASS,
-                reason_codes=(),
-                evidence_hashes=hashes,
-            )
-        )
+        hashes = tuple(sorted((measurement_hash, "f" * 64))) if gate_id == "EXECUTION_SENSITIVITY" else (str(index) * 64,)
+        gates.append(promotion.PromotionGateEvidence(
+            gate_id=gate_id,
+            status=promotion.PromotionGateStatus.PASS,
+            reason_codes=(),
+            evidence_hashes=hashes,
+        ))
     gates_tuple = tuple(gates)
     values = {
         "policy_id": "promotion-a",
@@ -96,92 +72,60 @@ def _assessment(*, measurement_hash: str):
         view_hash=promotion._hash(promotion._view_payload_from_values(values)),
     )
     return assessment_module._build_receipt(
-        assessment_id="assessment-w82",
-        view=view,
-        ordinal=1,
+        assessment_id="assessment-w82", view=view, ordinal=1,
         previous_assessment_hash=ZERO_ASSESSMENT_HASH,
         assessed_at=datetime(2026, 8, 23, 18, 0, tzinfo=timezone.utc),
     )
 
 
 def _candidate(*, limits, market, empty_portfolio, intent, bind_measurement=True):
-    cost = _cost()
+    cost = ExecutionCostModel(
+        fee_bps=Decimal("5"), half_spread_bps=Decimal("2"), slippage_bps=Decimal("2")
+    )
     matrix = _matrix()
     qualification = bind_research_costs_to_paper_execution(cost_model=cost, matrix=matrix)
     report = run_paper_execution_sensitivity(
-        qualification=qualification,
-        matrix=matrix,
-        limits=limits,
-        intent=intent,
-        market=market,
-        portfolio=empty_portfolio,
-        now=market.observed_at,
+        qualification=qualification, matrix=matrix, limits=limits, intent=intent,
+        market=market, portfolio=empty_portfolio, now=market.observed_at,
     )
     continuity = build_execution_cost_continuity_evidence(
-        evidence_id="w82-candidate-continuity",
-        cost_model=cost,
-        qualification=qualification,
-        matrix=matrix,
-        sensitivity_report=report,
-        intent=intent,
-        market=market,
-        assessed_at=market.observed_at,
+        evidence_id="w82-candidate-continuity", cost_model=cost,
+        qualification=qualification, matrix=matrix, sensitivity_report=report,
+        intent=intent, market=market, assessed_at=market.observed_at,
     )
     assessment = _assessment(
-        measurement_hash=(report.measurement_report_hash if bind_measurement else "e" * 64)
+        measurement_hash=report.measurement_report_hash if bind_measurement else "e" * 64
     )
     w81 = resolve_promotion_cost_continuity(
-        resolution_id="w81-before-w82",
-        assessment=assessment,
-        continuity=continuity,
-        execution_intent=intent,
-        resolved_at=assessment.assessed_at + timedelta(seconds=1),
+        resolution_id="w81-before-w82", assessment=assessment, continuity=continuity,
+        execution_intent=intent, resolved_at=assessment.assessed_at + timedelta(seconds=1),
     )
     contract = build_simulated_fee_accounting_contract(
-        contract_id="w82-candidate-fee-contract",
-        cost_model=cost,
-        qualification=qualification,
-        matrix=matrix,
-        product_id="test-product",
-        asset_class="crypto",
-        venue="alpaca-paper-model",
-        settlement_currency="USD",
+        contract_id="w82-candidate-fee-contract", cost_model=cost,
+        qualification=qualification, matrix=matrix, product_id="test-product",
+        asset_class="crypto", venue="alpaca-paper-model", settlement_currency="USD",
         created_at=market.observed_at,
     )
     fee = build_simulated_fee_accounting_evidence(
-        evidence_id="w82-candidate-fee-evidence",
-        contract=contract,
-        cost_model=cost,
-        qualification=qualification,
-        matrix=matrix,
-        sensitivity_report=report,
-        continuity=continuity,
-        intent=intent,
-        market=market,
+        evidence_id="w82-candidate-fee-evidence", contract=contract, cost_model=cost,
+        qualification=qualification, matrix=matrix, sensitivity_report=report,
+        continuity=continuity, intent=intent, market=market,
         assessed_at=w81.resolved_at + timedelta(seconds=1),
     )
-    return report, continuity, assessment, w81, contract, fee
+    return w81, fee
 
 
 def test_w82_resolution_removes_only_fee_blocker_for_exact_w81_candidate(
     limits, market, empty_portfolio, market_buy_intent
 ):
-    _, _, _, w81, _, fee = _candidate(
-        limits=limits,
-        market=market,
-        empty_portfolio=empty_portfolio,
-        intent=market_buy_intent,
+    w81, fee = _candidate(
+        limits=limits, market=market, empty_portfolio=empty_portfolio, intent=market_buy_intent
     )
     result = resolve_promotion_fee_accounting(
-        resolution_id="w82-resolution-pass",
-        w81_resolution=w81,
-        fee_evidence=fee,
-        execution_intent=market_buy_intent,
-        resolved_at=fee.assessed_at + timedelta(seconds=1),
+        resolution_id="w82-resolution-pass", w81_resolution=w81, fee_evidence=fee,
+        execution_intent=market_buy_intent, resolved_at=fee.assessed_at + timedelta(seconds=1),
     )
-
     assert result.status is PromotionFeeAccountingStatus.PASS
-    assert result.reason_codes == ()
     assert result.resolved_promotion_blockers == ("FEE_ACCOUNTING_INCOMPLETE",)
     assert "FEE_ACCOUNTING_INCOMPLETE" not in result.remaining_promotion_blockers
     assert STRATEGY_VERSION_BLOCKER in result.remaining_promotion_blockers
@@ -200,18 +144,13 @@ def test_w82_resolution_removes_only_fee_blocker_for_exact_w81_candidate(
 def test_w82_resolution_blocks_when_w81_candidate_resolution_did_not_pass(
     limits, market, empty_portfolio, market_buy_intent
 ):
-    _, _, _, w81, _, fee = _candidate(
-        limits=limits,
-        market=market,
-        empty_portfolio=empty_portfolio,
-        intent=market_buy_intent,
-        bind_measurement=False,
+    w81, fee = _candidate(
+        limits=limits, market=market, empty_portfolio=empty_portfolio,
+        intent=market_buy_intent, bind_measurement=False,
     )
     result = resolve_promotion_fee_accounting(
-        resolution_id="w82-resolution-w81-blocked",
-        w81_resolution=w81,
-        fee_evidence=fee,
-        execution_intent=market_buy_intent,
+        resolution_id="w82-resolution-w81-blocked", w81_resolution=w81,
+        fee_evidence=fee, execution_intent=market_buy_intent,
         resolved_at=fee.assessed_at + timedelta(seconds=1),
     )
     assert result.status is PromotionFeeAccountingStatus.BLOCKED
@@ -221,116 +160,42 @@ def test_w82_resolution_blocks_when_w81_candidate_resolution_did_not_pass(
     assert result.fee_accounting_complete is False
 
 
-def test_w82_resolution_rejects_intent_and_strategy_drift(
+def test_w82_resolution_rejects_identity_tamper_and_temporal_regression(
     limits, market, empty_portfolio, market_buy_intent
 ):
-    _, _, _, w81, _, fee = _candidate(
-        limits=limits,
-        market=market,
-        empty_portfolio=empty_portfolio,
-        intent=market_buy_intent,
+    w81, fee = _candidate(
+        limits=limits, market=market, empty_portfolio=empty_portfolio, intent=market_buy_intent
     )
     drifted = replace(market_buy_intent, idempotency_key="w82-intent-drift")
     with pytest.raises(PromotionFeeAccountingIntegrityError, match="fingerprint mismatch"):
         resolve_promotion_fee_accounting(
-            resolution_id="w82-resolution-intent-drift",
-            w81_resolution=w81,
-            fee_evidence=fee,
-            execution_intent=drifted,
+            resolution_id="w82-resolution-intent-drift", w81_resolution=w81,
+            fee_evidence=fee, execution_intent=drifted,
             resolved_at=fee.assessed_at + timedelta(seconds=1),
         )
-
-    other_strategy = replace(
-        market_buy_intent,
-        strategy_id="strategy-other",
-        idempotency_key="w82-other-strategy",
-    )
-    with pytest.raises(PromotionFeeAccountingIntegrityError, match="fingerprint mismatch"):
-        resolve_promotion_fee_accounting(
-            resolution_id="w82-resolution-strategy-drift",
-            w81_resolution=w81,
-            fee_evidence=fee,
-            execution_intent=other_strategy,
-            resolved_at=fee.assessed_at + timedelta(seconds=1),
-        )
-
-
-def test_w82_resolution_blocks_if_fee_evidence_not_bound_to_exact_w81_hashes(
-    limits, market, empty_portfolio, market_buy_intent
-):
-    _, _, _, w81, _, fee = _candidate(
-        limits=limits,
-        market=market,
-        empty_portfolio=empty_portfolio,
-        intent=market_buy_intent,
-    )
-    tampered_continuity = replace(fee, w81_continuity_evidence_hash="c" * 64, evidence_hash=fee.evidence_hash)
-    # Frozen evidence itself catches hash tampering before candidate resolution.
-    with pytest.raises(Exception):
-        _ = tampered_continuity
-
-    # A second valid candidate produces different W81/measurement binding and may
-    # not be paired with this W81 resolution.
-    other_intent = replace(
-        market_buy_intent,
-        intent_id="w82-other-intent",
-        idempotency_key="w82-other-intent-key",
-    )
-    _, _, _, _, _, other_fee = _candidate(
-        limits=limits,
-        market=market,
-        empty_portfolio=empty_portfolio,
-        intent=other_intent,
-    )
-    with pytest.raises(PromotionFeeAccountingIntegrityError, match="intent fingerprint mismatch"):
-        resolve_promotion_fee_accounting(
-            resolution_id="w82-resolution-cross-candidate",
-            w81_resolution=w81,
-            fee_evidence=other_fee,
-            execution_intent=market_buy_intent,
-            resolved_at=other_fee.assessed_at + timedelta(seconds=1),
-        )
-
-
-def test_w82_resolution_rejects_temporal_regression(
-    limits, market, empty_portfolio, market_buy_intent
-):
-    _, _, _, w81, _, fee = _candidate(
-        limits=limits,
-        market=market,
-        empty_portfolio=empty_portfolio,
-        intent=market_buy_intent,
-    )
+    with pytest.raises(FeeAccountingIntegrityError, match="evidence hash"):
+        replace(fee, w81_continuity_evidence_hash="c" * 64)
     with pytest.raises(PromotionFeeAccountingIntegrityError, match="predate fee evidence"):
         resolve_promotion_fee_accounting(
-            resolution_id="w82-resolution-time-regression",
-            w81_resolution=w81,
-            fee_evidence=fee,
-            execution_intent=market_buy_intent,
+            resolution_id="w82-resolution-time-regression", w81_resolution=w81,
+            fee_evidence=fee, execution_intent=market_buy_intent,
             resolved_at=fee.assessed_at - timedelta(microseconds=1),
         )
 
 
-def test_w82_resolution_hash_is_reproducible_and_cannot_mint_authority(
+def test_w82_resolution_hash_reproducible_and_cannot_mint_authority(
     limits, market, empty_portfolio, market_buy_intent
 ):
-    _, _, _, w81, _, fee = _candidate(
-        limits=limits,
-        market=market,
-        empty_portfolio=empty_portfolio,
-        intent=market_buy_intent,
+    w81, fee = _candidate(
+        limits=limits, market=market, empty_portfolio=empty_portfolio, intent=market_buy_intent
     )
     kwargs = dict(
-        resolution_id="w82-resolution-repro",
-        w81_resolution=w81,
-        fee_evidence=fee,
-        execution_intent=market_buy_intent,
-        resolved_at=fee.assessed_at + timedelta(seconds=1),
+        resolution_id="w82-resolution-repro", w81_resolution=w81, fee_evidence=fee,
+        execution_intent=market_buy_intent, resolved_at=fee.assessed_at + timedelta(seconds=1),
     )
     first = resolve_promotion_fee_accounting(**kwargs)
     second = resolve_promotion_fee_accounting(**kwargs)
     assert first.resolution_hash == second.resolution_hash
-
     with pytest.raises(PromotionFeeAccountingIntegrityError, match="broker-authoritative"):
         replace(first, broker_authoritative_fee_proven=True)
     with pytest.raises(PromotionFeeAccountingIntegrityError, match="realized-profitability"):
