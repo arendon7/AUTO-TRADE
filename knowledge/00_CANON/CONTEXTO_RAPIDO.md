@@ -1,6 +1,6 @@
 # CONTEXTO RÁPIDO — AUTO-TRADE
 
-Estado: **R0–R5 formalmente certified; R6 broker-truth cerrado; W78 execution qualification, W79 promotion governance, W80 durable assessments, W81 non-fee cost continuity, W82 fee-complete deterministic qualification, W83 execution strategy-version binding y W84 Shadow/Forward promotion binding técnicamente certificados. `TD-R7D-001/002` CLOSED. W85 PAPER Candidate Admission / Probation Gate ACTIVE.**
+Estado: **R0–R5 formalmente certified; R6 broker-truth cerrado; W78 execution qualification, W79 promotion governance, W80 durable assessments, W81 non-fee cost continuity, W82 fee-complete deterministic qualification, W83 execution strategy-version binding y W84 Shadow/Forward binding behaviorally certified. W85 PAPER Candidate Admission / Probation Gate es el siguiente layer.**
 
 ## Leer primero
 1. `knowledge/00_CANON/SOURCE_OF_TRUTH.md`
@@ -25,51 +25,62 @@ Estado: **R0–R5 formalmente certified; R6 broker-truth cerrado; W78 execution 
 - W81 canonical: `0d042bfb80c9ae0f89de035b6638938f831a3cba`;
 - W82 certified closure/base W83: `d33a99727d9f326a35612ffa39007b436fe76625`;
 - W83 certified base W84: `0d177a1cfb16cffbb1266ee07865db5f77f1fe50`;
-- W84 behavioral certified head: `abf25f4b699f145a629955efe73a798966f29845`.
+- W84 behavioral certified head: `f1ed0f675224c515f74a099ddb0beeefd9c96629`.
 
 ## W84 en una frase
-W84 demuestra que los outcomes Shadow/Forward atribuidos al exact candidate W83 provienen de mediciones deterministas, prefix-only y hash-bound del exact StrategySpec/runtime/config/history; cada observación R5 debe llevar el exact measurement hash y el complete tail/fixed horizon/freshness contract impide omission y optional stopping.
+W84 demuestra que el exact candidate W83 fue medido prefix-only bajo un plan/policy preregistrado, que sus outcomes coinciden con R5 Shadow/Forward durable truth y que la certificación final ocurrió dentro del frozen decision-lag budget usando un reloj UTC interno del proceso.
 
-Certificación behavioral W84:
-- Dedicated `32740076750`: **44/44 PASS**;
+## Salida canónica W84
+Sólo:
+
+`PromotionShadowForwardFinalVerification`.
+
+Son intermedios y no deben alimentar W85 directamente:
+- `PromotionShadowForwardResolution`;
+- `PromotionShadowForwardSourceVerification`.
+
+La source verification relee R5 y measurement receipts, recalcula las métricas y rechaza evidence rehash-valid que contradiga la fuente. El final verifier vuelve a ejecutar esa verificación y usa reloj interno; no acepta caller `verified_at`.
+
+## Certificación behavioral W84
+- Dedicated `32745537577`: **76/76 PASS**;
 - W84 permanent boundary PASS;
-- Core `32740076693`: **3035/3035 PASS**;
-- exact coverage `85.20576561520785%`;
-- `forward_shadow_measurement.py` 93%;
-- `promotion_shadow_forward_binding.py` 89%;
-- W78–W84/Research boundaries PASS;
-- Debt Register + Canonical Knowledge PASS;
-- Knowledge Contract `32740076824`: PASS.
-
-`SHADOW_FORWARD_PROMOTION_BINDING_REQUIRED` queda resuelto únicamente para la exact W83 candidate/artifact/runtime + W84 plan/policy/measurement + R5 Shadow/Forward identity.
-
-## Lo que sigue abierto
-- `TD-R7D-003` partial-fill reservation — P2;
-- PAPER candidate admission/probation — objetivo W85;
-- R7B real PAPER close operativo separado.
+- Core `32745537856`: **3067/3067 PASS**;
+- exact coverage `85.27030933795895%`;
+- measurement 93%; V2 binding 89%; source verification 89%; final verification 95%;
+- Contract Registry 10 PASS;
+- W78–W84/Research/R5/R6/R7 boundaries PASS;
+- Debt Register PASS;
+- Knowledge `32745537825`: PASS.
 
 ## W85
-W85 debe añadir una decisión explícita de admission/probation que consuma la cadena certificada W79→W84 sin inferir autoridad de ejecución.
+W85 construye la decisión explícita que separa qualification de admission:
 
-Objetivo conceptual:
+`exact W79→W84 final certified chain -> frozen admission policy -> durable PAPER_CANDIDATE decision`.
 
-`qualified evidence chain -> explicit durable admission policy -> PAPER_CANDIDATE decision`
+La entrada W84 debe ser el exact `PromotionShadowForwardFinalVerification`.
 
-pero manteniendo:
+W85 no puede conceder:
+- broker POST;
+- OMS/Safety handoff;
+- `OrderIntent`;
+- runtime execution;
+- capital authority;
+- LIVE.
 
-`PAPER_CANDIDATE != PAPER_EXECUTION_AUTHORIZED`.
-
-El eventual admission receipt debe ser hash-bound, auditable, replay-safe, candidate-specific y sin broker/network/OMS/Safety/writer authority.
+## Lo que sigue abierto
+- `TD-R7D-003`: **OPEN P2** — partial-fill reservation;
+- PAPER candidate admission/probation: W85;
+- posterior PAPER runtime readiness;
+- R7B real PAPER close operativo separado.
 
 ## Authority
 - `EVIDENCE_QUALIFIED != PAPER_CANDIDATE`;
+- `PAPER_CANDIDATE != PAPER_EXECUTION_AUTHORIZED`;
 - PAPER candidate actual: FALSE;
-- PAPER candidate futuro no implica execution authorization;
-- capital authority desde capas científicas/admission: NONE;
-- broker write desde Research/W78–W85: NO;
-- broker-authoritative realized fee proof desde W82: FALSE;
+- capital authority desde W78–W85: NONE salvo decisión futura explícita de otro control layer;
+- broker write desde capas científicas/admission: NO;
+- broker-authoritative realized fee proof: FALSE;
 - realized profitability authorized: FALSE;
 - LIVE: BLOCKED.
 
-**PAPER_CANDIDATE != PAPER_EXECUTION_AUTHORIZED.**
 **LIVE TRADING: BLOQUEADO.**

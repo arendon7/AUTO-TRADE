@@ -1,7 +1,7 @@
 # HANDOFF ACTUAL — AUTO-TRADE
 
 Fecha: 2026-08-24
-Estado: **R0–R5 formalmente certified; R6 first real PAPER canary broker-truth closed; W78/W79/W80/W81/W82/W83/W84 technically certified; TD-R7D-001/002 CLOSED; W85 PAPER Candidate Admission / Probation Gate ACTIVE.**
+Estado: **R0–R5 formalmente certified; R6 broker-truth cerrado; W78–W84 técnicamente certificados; W84 final trust boundary endurecido; W85 PAPER Candidate Admission / Probation Gate NEXT.**
 
 ## Fuente de verdad al retomar
 1. `knowledge/00_CANON/SOURCE_OF_TRUTH.md`;
@@ -11,191 +11,155 @@ Estado: **R0–R5 formalmente certified; R6 first real PAPER canary broker-truth
 5. `knowledge/30_DECISIONES/ADR-0016-w84-shadow-forward-promotion-binding.md`;
 6. este handoff.
 
-R5 sigue siendo el último track formal certificado del machine debt register principal. R6 y W78–W84 son hitos técnicos independientes.
+R5 sigue siendo el último track formal certificado del machine registry principal. R6 y W78–W84 son hitos técnicos independientes.
 
-## Stack activo
-- PR #49 — R7 real PAPER close / lifecycle operacional independiente;
+## Stack
+- PR #49 — R7 real PAPER close / lifecycle operacional separado;
 - PR #50 — W78 execution qualification;
-- PR #51 — W79 promotion governance + Strategy Lab;
-- PR #52 — W80 durable promotion assessment;
+- PR #51 — W79 promotion governance;
+- PR #52 — W80 durable assessment;
 - PR #53 — W81 execution-cost continuity;
-- PR #54 — W82 fee-complete deterministic execution accounting;
+- PR #54 — W82 fee-complete accounting;
 - PR #55 — W83 execution strategy-version binding;
-- PR #56 — W84 Shadow/Forward promotion binding, DRAFT apilado exactamente sobre W83.
+- PR #56 — W84 Shadow/Forward promotion binding, DRAFT apilado sobre W83.
 
-No fusionar el stack fuera de orden. No mezclar el cierre operacional PR #49 con W84/W85 científico.
+No fusionar fuera de orden. No mezclar PR #49 con la cadena científica W78–W85.
 
-## W84 — resultado
-W84 resuelve `SHADOW_FORWARD_PROMOTION_BINDING_REQUIRED` **sólo para la exact W83 candidate/artifact/runtime + W84 measurement/policy + R5 Shadow/Forward identity certificada**.
+## W84 — resultado definitivo
+Behavioral exact head:
 
-La arquitectura final V2 es:
+`f1ed0f675224c515f74a099ddb0beeefd9c96629`
 
-`exact W83 candidate/artifact/runtime -> frozen W84 measurement plan/policy -> deterministic prefix-only measurement receipts -> exact R5 Shadow observations -> exact R5 Forward tail -> W84 promotion resolution`.
+W84 resuelve `SHADOW_FORWARD_PROMOTION_BINDING_REQUIRED` únicamente para la exact W83 candidate/artifact/runtime + exact W84 plan/policy/measurement + exact R5 Shadow/Forward truth, y además exige una finalización dentro del frozen temporal budget usando el reloj del proceso.
 
-### Brecha que W84 cerró
-No asumir que una R5 hash-chain íntegra prueba candidate provenance. Antes de W84 V2, `StrategyShadowObservation.source_fingerprint` podía ser un SHA-256 opaco suministrado por el caller. El mismo `strategy_id` podía teóricamente ocultar otra versión/runtime.
+### Cadena final
+`exact W83 candidate/artifact/runtime`
+`-> ForwardMeasurementPlan`
+`-> prefix-only ForwardShadowMeasurementReceipt chain`
+`-> exact R5 Shadow`
+`-> exact R5 Forward`
+`-> PromotionShadowForwardResolution [INTERMEDIATE]`
+`-> PromotionShadowForwardSourceVerification [INTERMEDIATE]`
+`-> PromotionShadowForwardFinalVerification [CANONICAL]`.
 
-**No regresar a ese diseño.**
+**W85 sólo puede consumir `PromotionShadowForwardFinalVerification`.**
 
-Cada Shadow observation usada para promotion debe corresponder a un `ForwardShadowMeasurementReceipt` determinista cuyo `measurement_hash` sea exactamente el `source_fingerprint`.
+### Qué cerró la source verification
+`src/autotrade/promotion_shadow_forward_source_verification.py` no confía en un PASS receipt porque esté correctamente rehasheado. Relee los registries R5 y measurement receipts, valida exact identity/heads/horizon y recalcula:
+- duration;
+- cumulative return;
+- peak-to-trough drawdown;
+- capture lag.
 
-### Measurement provenance
-`src/autotrade/forward_shadow_measurement.py`:
-- exact W83 resolution/binding/candidate/spec;
-- W83 safe-DSL runtime identity;
-- `backtest.py + costs.py + domain.py + exact Python patch` en el measurement runtime identity;
-- frozen BacktestConfig + initial cash;
-- frozen pre-outcome history dataset;
-- plan freeze antes de forward activation;
-- prefix-only BacktestEngine recomputation por período;
-- hash-linked measurement receipts;
-- exact per-observation source fingerprint verification;
-- no broker/network/OMS/Safety authority.
+Un evidence rehash-valid que mienta sobre métricas, heads, windows o proof flags falla cerrado. También hay relectura final de R5 control heads para TOCTOU.
 
-### Shadow/Forward binding
-`src/autotrade/promotion_shadow_forward_binding.py` exige:
-- candidate-only Shadow `{selected_strategy_id: Decimal("1")}`;
-- Shadow source config hash = W84 policy hash;
-- Forward frozen parameters hash = W84 policy hash;
-- Forward source code hash = W84 measurement runtime hash;
-- complete observed eligible Shadow tail == Forward tail;
-- fixed exact horizon N;
-- `<N=PENDING`, `N=evaluate`, `>N=FAIL/OVERRUN`;
-- capture lag + assessment delay < market period;
-- data cutoff <= capture <= assessment;
-- only Shadow/Forward blocker removable.
+### Qué cerró la final verification
+R5 no contiene un timestamp independiente de append. Por eso `assessed_at` no puede funcionar como temporal authority final si el caller puede reconstruir/rehashear el objeto.
 
-### Behavioral exact-head
-`abf25f4b699f145a629955efe73a798966f29845`
+`src/autotrade/promotion_shadow_forward_final_verification.py`:
+- no acepta caller `verified_at`;
+- obtiene `_now_utc()` internamente;
+- ejecuta nuevamente source verification;
+- deriva `measurement_capture_at` desde source truth;
+- calcula el actual `decision_delay_seconds`;
+- exige `decision_delay <= policy.max_assessment_delay_seconds`;
+- produce `source_truth_verified=True` y `process_clock_freshness_verified=True`.
 
-Dedicated W84 run `32740076750`:
-- **44/44 PASS**;
-- W84 boundary PASS;
-- W83/W82/W81/W80/W79/W78/Research boundaries PASS.
+### Permanent boundary
+`scripts/check_w84_shadow_forward_promotion_boundary.py` prohíbe:
+- broker/network/OMS/Safety/connectivity/paper-close/direct-SQLite authority;
+- Alpaca credentials/endpoints;
+- `OrderIntent(` construction;
+- R5 mutation calls (`register_config`, `append_period`, `register_policy`, `append_shadow_record`);
+- uso downstream del resolver V2 o source verifier como final authority;
+- PAPER/execution/capital/LIVE escalation.
 
-Core Safety run `32740076693`:
-- **3035/3035 PASS**;
-- exact coverage `85.20576561520785%`;
-- `forward_shadow_measurement.py` 93%;
-- `promotion_shadow_forward_binding.py` 89%;
+## Certificación W84
+Dedicated W84 `32745537577`: **SUCCESS**.
+- **76/76 W84 PASS**;
+- permanent W84 boundary PASS;
+- W83/W82/W81/W80/W79/W78/Research PASS.
+
+Core Safety `32745537856`: **SUCCESS**.
+- **3067/3067 PASS**;
+- exact coverage `85.27030933795895%`;
+- measurement 93%; binding V2 89%; source verifier 89%; final verifier 95%;
 - Contract Registry 10 PASS, SHA-256 `ddb94afa8916be37d0d956e6c32f775ea41c0fb79f4ea26d2d65dfa286c62785`;
-- inherited boundaries through W84 PASS;
+- R5/R6/R7/W78–W84 boundaries PASS;
 - Debt Register PASS: 60 items / 9 open / 8 blocking on uncertified tracks;
 - Canonical Knowledge PASS.
 
-Knowledge Contract `32740076824`: PASS.
-
-## Permanent W84 authority
-Boundary:
-`scripts/check_w84_shadow_forward_promotion_boundary.py`
-
-Workflow:
-`.github/workflows/w84-shadow-forward-promotion.yml`
-
-También está cableado permanentemente en Core Safety.
-
-No debilitar los siguientes invariantes:
-- no broker/network/OMS/Safety/connectivity/paper-close/direct-SQLite authority;
-- no credentials/endpoints Alpaca;
-- no `OrderIntent(` construction;
-- PAPER candidate false en W84;
-- capital NONE;
-- LIVE blocked;
-- per-observation measurement provenance;
-- prefix-only/no-lookahead;
-- complete tail;
-- fixed horizon;
-- sub-period freshness budgets;
-- exact blocker semantics.
-
-## Debt separado
-- `TD-R7D-001`: CLOSED;
-- `TD-R7D-002`: CLOSED;
-- `TD-R7D-003`: **OPEN P2** — remaining-quantity reservation after partial fills.
-
-W84 no cierra `TD-R7D-003`.
+Knowledge `32745537825`: **SUCCESS**.
 
 ## W85 — retomar aquí
-W85 no debe ejecutar una estrategia. Debe construir la decisión explícita que separa qualification de admission.
-
 Objetivo:
 
-`exact W79→W84 certified evidence chain + frozen admission policy -> durable PAPER_CANDIDATE admission receipt`.
+`exact W79→W84 final verified chain + frozen admission policy -> durable PAPER_CANDIDATE admission decision`.
 
-### Principio central
+Principios:
 
 `EVIDENCE_QUALIFIED != PAPER_CANDIDATE`
 
-y además:
+y
 
 `PAPER_CANDIDATE != PAPER_EXECUTION_AUTHORIZED`.
 
-Un candidate admitido sólo sería elegible para un proceso posterior de PAPER runtime readiness. No recibe POST authority, Capital Safety decision ni OMS handoff por el hecho de ser candidate.
-
-### Discovery prioritario W85
-Inspeccionar primero:
-- W79 `StrategyPromotionPolicy` y threshold policy;
-- W80 durable assessment journal/read model;
-- W81 `PromotionCostContinuityResolution`;
-- W82 `PromotionFeeAccountingResolution`;
-- W83 `PromotionStrategyVersionResolution`;
-- W84 `PromotionShadowForwardResolution` y exact evidence/policy/measurement hashes;
-- todos los lugares donde hoy aparece `paper_candidate_authorized`;
-- si existe ya algún concepto de probation/admission/readiness que pueda reutilizarse sin crear authority duplicada.
+### Discovery W85
+Inspeccionar:
+- W79 selected candidate/policy;
+- W80 durable assessment;
+- W81 continuity resolution;
+- W82 fee resolution;
+- W83 strategy-version resolution;
+- **W84 `PromotionShadowForwardFinalVerification`**;
+- lugares donde aparece `paper_candidate_authorized`;
+- patrones existentes de durable policy/receipt/idempotency que puedan reutilizarse sin crear execution authority.
 
 ### W85 hard requirements
-- consumir receipts/resolutions exactos, no strings sueltos;
-- definir `PaperCandidateAdmissionPolicy` o equivalente, frozen/hash-bound;
-- definir durable `PaperCandidateAdmissionReceipt` o equivalente;
+- entrada typed exacta, no hashes sueltos;
+- frozen/hash-bound admission policy;
+- durable admission receipt;
 - candidate/campaign/policy-specific identity;
-- causalidad temporal explícita;
-- deterministic replay/idempotency/conflict semantics;
-- PASS/FAIL/BLOCKED/INCOMPLETE explícitos;
-- distinguir candidate admission de runtime readiness;
-- no broker/network/writer/Safety/OMS/OrderIntent authority;
+- explicit status semantics;
+- temporal causality;
+- replay/idempotency/conflict protection;
+- candidate admission separado de PAPER runtime readiness;
+- no broker/network/credentials/writer/Safety/OMS/OrderIntent authority;
 - LIVE blocked.
 
 ### Negative tests W85
-Cubrir al menos:
-- missing/unknown/tampered W84 resolution;
-- W84 evidence non-PASS;
-- mismatched candidate/spec/runtime/measurement chain;
-- stale/wrong admission policy;
-- admission anterior a evidencia necesaria;
-- replay para otra campaign/candidate;
-- duplicate conflicting admission;
+- missing/tampered final W84 receipt;
+- consumo directo de V2/source intermediate receipts;
+- false source/process-clock verification flags;
+- candidate/spec/runtime/measurement mismatch;
+- stale policy;
+- admission temporalmente imposible;
+- cross-campaign replay;
+- conflicting duplicate admission;
 - hash tamper;
-- PAPER execution authority minted from candidate receipt;
-- broker/network/writer/Safety/OMS import/call;
-- `OrderIntent` construction;
-- LIVE != BLOCKED.
+- PAPER execution minted from admission;
+- prohibited imports/calls;
+- LIVE escalation.
 
-### Gate de cierre W85
-Mismo exact head:
-- Dedicated W85 PASS;
-- permanent W85 admission boundary PASS;
-- W84→W78 inherited boundaries PASS;
-- Research Authority PASS;
-- Core Safety PASS;
-- coverage >=85%;
-- Debt Register PASS;
-- Canonical Knowledge PASS.
+## Debt
+- `TD-R7D-001`: CLOSED;
+- `TD-R7D-002`: CLOSED;
+- `TD-R7D-003`: **OPEN P2**.
 
 ## Regla de producto
 La cadena futura permanece:
 
-`Research -> Promotion Evidence -> Durable Assessment -> Economic Qualification -> Strategy Version Binding -> Shadow/Forward Binding -> PAPER Candidate Admission -> PAPER Runtime Readiness -> OrderIntent -> Portfolio -> Capital Safety -> OMS -> one-shot PAPER writer -> reconciliation -> Health`
+`Research -> Promotion Evidence -> Durable Assessment -> Economic Qualification -> Strategy Version Binding -> Shadow/Forward Final Verification -> PAPER Candidate Admission -> PAPER Runtime Readiness -> OrderIntent -> Portfolio -> Capital Safety -> OMS -> one-shot PAPER writer -> reconciliation -> Health`.
 
-IA/model output no puede saltarse esa cadena.
+IA/model output no puede saltarse la cadena.
 
-## Estado de autoridad
+## Authority
 - PAPER candidate actual: FALSE;
 - W78–W84 capital authority: NONE;
-- W85 admission puede cambiar sólo el estado candidate si su contrato lo demuestra, pero no capital/execution authority;
-- broker write desde capas científicas/admission: NO;
-- credentials en Strategy Lab/admission: NO;
-- broker-authoritative realized fee proof por W82: NO;
-- realized profitability claim: NO;
+- W85 candidate admission no implica capital ni execution authority;
+- broker write desde Research/promotion/admission: NO;
+- broker-authoritative realized fee proof: FALSE;
+- realized-profitability claim: NO;
 - LIVE: BLOCKED.
 
 **PAPER_CANDIDATE != PAPER_EXECUTION_AUTHORIZED.**
