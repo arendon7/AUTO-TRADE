@@ -25,7 +25,7 @@ from autotrade.research.shadow import ShadowPeriodRecord, StrategyShadowObservat
 from autotrade.strategy_execution_binding import ExecutionStrategyBindingEvidence
 
 
-FORWARD_MEASUREMENT_PLAN_VERSION = "W84_FORWARD_MEASUREMENT_PLAN_V1"
+FORWARD_MEASUREMENT_PLAN_VERSION = "W84_FORWARD_MEASUREMENT_PLAN_V2"
 FORWARD_MEASUREMENT_RUNTIME_VERSION = "W84_FORWARD_MEASUREMENT_RUNTIME_V1"
 FORWARD_MEASUREMENT_RECEIPT_VERSION = "W84_FORWARD_MEASUREMENT_RECEIPT_V1"
 GENESIS_MEASUREMENT_HASH = "0" * 64
@@ -78,6 +78,13 @@ class ForwardMeasurementRuntimeIdentity:
 
 @dataclass(frozen=True, slots=True)
 class ForwardMeasurementPlan:
+    """Pre-outcome commitment for exact candidate forward measurement semantics.
+
+    `history_dataset_hash` binds only market data already closed at `planned_at`.
+    Data between `planned_at` and `forward_activated_at` is processed later only
+    to establish deterministic strategy state; it is never qualification return.
+    """
+
     plan_id: str
     contract_version: str
     w83_resolution_id: str
@@ -95,13 +102,14 @@ class ForwardMeasurementPlan:
     domain_source_hash: str
     backtest_config_hash: str
     initial_cash: Decimal
-    warmup_dataset_hash: str
+    history_dataset_hash: str
     dataset_source: str
     dataset_symbol: str
     dataset_venue: str
     dataset_quote_currency: str
     timeframe_seconds: int
-    warmup_bars: int
+    history_bars: int
+    planned_at: datetime
     forward_activated_at: datetime
     paper_candidate_authorized: bool
     external_execution_authorized: bool
@@ -139,7 +147,7 @@ class ForwardMeasurementPlan:
             ("costs_source_hash", self.costs_source_hash),
             ("domain_source_hash", self.domain_source_hash),
             ("backtest_config_hash", self.backtest_config_hash),
-            ("warmup_dataset_hash", self.warmup_dataset_hash),
+            ("history_dataset_hash", self.history_dataset_hash),
             ("plan_hash", self.plan_hash),
         ):
             _require_hash(value, label)
@@ -151,8 +159,13 @@ class ForwardMeasurementPlan:
         if not isinstance(self.dataset_source, str) or not self.dataset_source.strip():
             raise ForwardShadowMeasurementIntegrityError("dataset_source is required")
         _require_positive_int(self.timeframe_seconds, "timeframe_seconds")
-        _require_positive_int(self.warmup_bars, "warmup_bars")
+        _require_positive_int(self.history_bars, "history_bars")
+        _require_aware(self.planned_at, "planned_at")
         _require_aware(self.forward_activated_at, "forward_activated_at")
+        if _utc(self.planned_at) >= _utc(self.forward_activated_at):
+            raise ForwardShadowMeasurementIntegrityError(
+                "measurement plan must be frozen before forward activation"
+            )
         _require_no_authority(
             paper=self.paper_candidate_authorized,
             external=self.external_execution_authorized,
@@ -298,6 +311,8 @@ class ForwardShadowMeasurementReceipt:
 
 
 def build_forward_measurement_runtime_identity() -> ForwardMeasurementRuntimeIdentity:
+    """Bind all local code that determines W84 forward measurement semantics."""
+
     w83_runtime = build_safe_dsl_runtime_identity()
     values = {
         "version": FORWARD_MEASUREMENT_RUNTIME_VERSION,
@@ -327,17 +342,21 @@ def build_forward_measurement_plan(
     binding_evidence: ExecutionStrategyBindingEvidence,
     strategy_spec: StrategySpec,
     backtest_config: BacktestConfig,
-    warmup_dataset: MarketDataset,
+    history_dataset: MarketDataset,
+    planned_at: datetime,
     forward_activated_at: datetime,
 ) -> ForwardMeasurementPlan:
+    """Freeze exact candidate/config/history before any qualification outcome exists."""
+
     _require_id(plan_id, "plan_id")
     _validate_w83_pair(w83_resolution=w83_resolution, binding_evidence=binding_evidence)
     if not isinstance(strategy_spec, StrategySpec):
         raise TypeError("strategy_spec must be StrategySpec")
     if not isinstance(backtest_config, BacktestConfig):
         raise TypeError("backtest_config must be BacktestConfig")
-    if not isinstance(warmup_dataset, MarketDataset):
-        raise TypeError("warmup_dataset must be MarketDataset")
+    if not isinstance(history_dataset, MarketDataset):
+        raise TypeError("history_dataset must be MarketDataset")
+    _require_aware(planned_at, "planned_at")
     _require_aware(forward_activated_at, "forward_activated_at")
 
     if (
@@ -349,23 +368,32 @@ def build_forward_measurement_plan(
             "measurement StrategySpec does not match exact W83 candidate artifact"
         )
     _validate_dataset_identity(
-        dataset=warmup_dataset,
+        dataset=history_dataset,
         binding_evidence=binding_evidence,
         expected_source=None,
         expected_timeframe=None,
     )
-    if warmup_dataset.gap_indexes():
+    if history_dataset.gap_indexes():
         raise ForwardShadowMeasurementIntegrityError(
-            "warmup dataset must be strictly contiguous"
+            "history dataset must be strictly contiguous"
         )
-    if _utc(warmup_dataset.ended_at) != _utc(forward_activated_at):
+    if _utc(history_dataset.ended_at) != _utc(planned_at):
         raise ForwardShadowMeasurementIntegrityError(
-            "warmup dataset must end exactly at forward activation"
+            "history dataset must end exactly at measurement plan freeze"
+        )
+    if _utc(planned_at) >= _utc(forward_activated_at):
+        raise ForwardShadowMeasurementIntegrityError(
+            "measurement plan freeze must strictly predate forward activation"
+        )
+    delta_seconds = int((_utc(forward_activated_at) - _utc(planned_at)).total_seconds())
+    if delta_seconds % history_dataset.timeframe_seconds:
+        raise ForwardShadowMeasurementIntegrityError(
+            "forward activation must align to frozen market timeframe"
         )
     long_window = int(strategy_spec.parameters["long_window"])
-    if len(warmup_dataset.bars) < long_window + 1:
+    if len(history_dataset.bars) < long_window + 1:
         raise ForwardShadowMeasurementIntegrityError(
-            "warmup dataset is insufficient for exact StrategySpec lookback"
+            "history dataset is insufficient for exact StrategySpec lookback"
         )
 
     runtime = build_forward_measurement_runtime_identity()
@@ -391,13 +419,14 @@ def build_forward_measurement_plan(
         "domain_source_hash": runtime.domain_source_hash,
         "backtest_config_hash": backtest_config.config_hash,
         "initial_cash": backtest_config.initial_cash,
-        "warmup_dataset_hash": warmup_dataset.dataset_hash,
-        "dataset_source": warmup_dataset.source,
-        "dataset_symbol": warmup_dataset.instrument.symbol,
-        "dataset_venue": warmup_dataset.instrument.venue,
-        "dataset_quote_currency": warmup_dataset.instrument.quote_currency,
-        "timeframe_seconds": warmup_dataset.timeframe_seconds,
-        "warmup_bars": len(warmup_dataset.bars),
+        "history_dataset_hash": history_dataset.dataset_hash,
+        "dataset_source": history_dataset.source,
+        "dataset_symbol": history_dataset.instrument.symbol,
+        "dataset_venue": history_dataset.instrument.venue,
+        "dataset_quote_currency": history_dataset.instrument.quote_currency,
+        "timeframe_seconds": history_dataset.timeframe_seconds,
+        "history_bars": len(history_dataset.bars),
+        "planned_at": planned_at,
         "forward_activated_at": forward_activated_at,
         "paper_candidate_authorized": False,
         "external_execution_authorized": False,
@@ -419,10 +448,16 @@ def build_forward_shadow_measurements(
     binding_evidence: ExecutionStrategyBindingEvidence,
     strategy_spec: StrategySpec,
     backtest_config: BacktestConfig,
-    warmup_dataset: MarketDataset,
-    forward_dataset: MarketDataset,
+    history_dataset: MarketDataset,
+    post_freeze_dataset: MarketDataset,
     captured_at: datetime,
 ) -> tuple[ForwardShadowMeasurementReceipt, ...]:
+    """Recompute one candidate return receipt per post-activation market bar.
+
+    Every receipt is generated from a dataset prefix ending at that exact period,
+    so its stable `measurement_hash` cannot depend on any later forward bar.
+    """
+
     _validate_plan(plan)
     _require_hash(policy_hash, "policy_hash")
     _validate_w83_pair(w83_resolution=w83_resolution, binding_evidence=binding_evidence)
@@ -432,41 +467,58 @@ def build_forward_shadow_measurements(
         binding_evidence=binding_evidence,
         strategy_spec=strategy_spec,
         backtest_config=backtest_config,
-        warmup_dataset=warmup_dataset,
+        history_dataset=history_dataset,
     )
-    if not isinstance(forward_dataset, MarketDataset):
-        raise TypeError("forward_dataset must be MarketDataset")
+    if not isinstance(post_freeze_dataset, MarketDataset):
+        raise TypeError("post_freeze_dataset must be MarketDataset")
     _require_aware(captured_at, "captured_at")
     _validate_dataset_identity(
-        dataset=forward_dataset,
+        dataset=post_freeze_dataset,
         binding_evidence=binding_evidence,
         expected_source=plan.dataset_source,
         expected_timeframe=plan.timeframe_seconds,
     )
-    if forward_dataset.gap_indexes():
+    if post_freeze_dataset.gap_indexes():
         raise ForwardShadowMeasurementIntegrityError(
-            "forward measurement dataset must be strictly contiguous"
+            "post-freeze measurement dataset must be strictly contiguous"
         )
-    if _utc(forward_dataset.started_at) != _utc(plan.forward_activated_at):
+    if _utc(post_freeze_dataset.started_at) != _utc(plan.planned_at):
         raise ForwardShadowMeasurementIntegrityError(
-            "forward measurement dataset must start exactly at activation"
+            "post-freeze dataset must start exactly at measurement plan freeze"
         )
-    if _utc(captured_at) < _utc(forward_dataset.ended_at):
+    if history_dataset.bars[-1].ended_at != post_freeze_dataset.bars[0].started_at:
+        raise ForwardShadowMeasurementIntegrityError(
+            "history and post-freeze datasets must be exactly contiguous"
+        )
+    if _utc(captured_at) < _utc(post_freeze_dataset.ended_at):
         raise ForwardShadowMeasurementIntegrityError(
             "forward measurements cannot be captured before dataset end"
         )
-    if warmup_dataset.bars[-1].ended_at != forward_dataset.bars[0].started_at:
+
+    qualification_indexes = tuple(
+        index
+        for index, bar in enumerate(post_freeze_dataset.bars)
+        if _utc(bar.started_at) >= _utc(plan.forward_activated_at)
+    )
+    if qualification_indexes:
+        first_qualification = post_freeze_dataset.bars[qualification_indexes[0]]
+        if _utc(first_qualification.started_at) != _utc(plan.forward_activated_at):
+            raise ForwardShadowMeasurementIntegrityError(
+                "first qualification bar must start exactly at forward activation"
+            )
+    elif _utc(post_freeze_dataset.ended_at) > _utc(plan.forward_activated_at):
         raise ForwardShadowMeasurementIntegrityError(
-            "warmup and forward datasets must be exactly contiguous"
+            "post-freeze dataset crossed activation without qualification bar"
         )
 
     previous_measurement_hash = GENESIS_MEASUREMENT_HASH
     receipts: list[ForwardShadowMeasurementReceipt] = []
-    warmup_count = len(warmup_dataset.bars)
-    for index, period_bar in enumerate(forward_dataset.bars, start=1):
+    history_count = len(history_dataset.bars)
+    for ordinal, post_index in enumerate(qualification_indexes, start=1):
+        period_bar = post_freeze_dataset.bars[post_index]
         prefix_dataset = MarketDataset(
-            instrument=forward_dataset.instrument,
-            bars=warmup_dataset.bars + forward_dataset.bars[:index],
+            instrument=post_freeze_dataset.instrument,
+            bars=history_dataset.bars + post_freeze_dataset.bars[: post_index + 1],
             source=plan.dataset_source,
         )
         result = BacktestEngine().run(
@@ -483,8 +535,9 @@ def build_forward_shadow_measurements(
             raise ForwardShadowMeasurementIntegrityError(
                 "backtest result identity differs from frozen measurement plan"
             )
-        previous_point = result.equity_curve[warmup_count + index - 2]
-        current_point = result.equity_curve[warmup_count + index - 1]
+        current_global_index = history_count + post_index
+        previous_point = result.equity_curve[current_global_index - 1]
+        current_point = result.equity_curve[current_global_index]
         if previous_point.occurred_at != period_bar.started_at:
             raise ForwardShadowMeasurementIntegrityError(
                 "measurement baseline does not align with forward period start"
@@ -503,7 +556,7 @@ def build_forward_shadow_measurements(
             "plan_id": plan.plan_id,
             "plan_hash": plan.plan_hash,
             "policy_hash": policy_hash,
-            "ordinal": index,
+            "ordinal": ordinal,
             "selected_strategy_id": plan.selected_strategy_id,
             "selected_strategy_version": plan.selected_strategy_version,
             "strategy_spec_hash": plan.strategy_spec_hash,
@@ -554,6 +607,8 @@ def verify_shadow_measurement_binding(
     receipts: tuple[ForwardShadowMeasurementReceipt, ...],
     assessed_at: datetime,
 ) -> str:
+    """Require every eligible R5 observation to equal its recomputed W84 receipt."""
+
     _validate_plan(plan)
     _require_hash(policy_hash, "policy_hash")
     _require_id(selected_strategy_id, "selected_strategy_id")
@@ -635,14 +690,14 @@ def _validate_plan_inputs(
     binding_evidence: ExecutionStrategyBindingEvidence,
     strategy_spec: StrategySpec,
     backtest_config: BacktestConfig,
-    warmup_dataset: MarketDataset,
+    history_dataset: MarketDataset,
 ) -> None:
     if not isinstance(strategy_spec, StrategySpec):
         raise TypeError("strategy_spec must be StrategySpec")
     if not isinstance(backtest_config, BacktestConfig):
         raise TypeError("backtest_config must be BacktestConfig")
-    if not isinstance(warmup_dataset, MarketDataset):
-        raise TypeError("warmup_dataset must be MarketDataset")
+    if not isinstance(history_dataset, MarketDataset):
+        raise TypeError("history_dataset must be MarketDataset")
     current_runtime = build_forward_measurement_runtime_identity()
     if (
         plan.w83_resolution_id != w83_resolution.resolution_id
@@ -660,17 +715,17 @@ def _validate_plan_inputs(
         or plan.domain_source_hash != current_runtime.domain_source_hash
         or plan.backtest_config_hash != backtest_config.config_hash
         or plan.initial_cash != backtest_config.initial_cash
-        or plan.warmup_dataset_hash != warmup_dataset.dataset_hash
-        or plan.warmup_bars != len(warmup_dataset.bars)
-        or plan.dataset_source != warmup_dataset.source
-        or plan.timeframe_seconds != warmup_dataset.timeframe_seconds
-        or _utc(plan.forward_activated_at) != _utc(warmup_dataset.ended_at)
+        or plan.history_dataset_hash != history_dataset.dataset_hash
+        or plan.history_bars != len(history_dataset.bars)
+        or plan.dataset_source != history_dataset.source
+        or plan.timeframe_seconds != history_dataset.timeframe_seconds
+        or _utc(plan.planned_at) != _utc(history_dataset.ended_at)
     ):
         raise ForwardShadowMeasurementIntegrityError(
             "measurement inputs differ from frozen W84 measurement plan"
         )
     _validate_dataset_identity(
-        dataset=warmup_dataset,
+        dataset=history_dataset,
         binding_evidence=binding_evidence,
         expected_source=plan.dataset_source,
         expected_timeframe=plan.timeframe_seconds,
@@ -822,13 +877,14 @@ def _plan_payload(value: ForwardMeasurementPlan, *, include_hash: bool) -> dict[
                 "domain_source_hash",
                 "backtest_config_hash",
                 "initial_cash",
-                "warmup_dataset_hash",
+                "history_dataset_hash",
                 "dataset_source",
                 "dataset_symbol",
                 "dataset_venue",
                 "dataset_quote_currency",
                 "timeframe_seconds",
-                "warmup_bars",
+                "history_bars",
+                "planned_at",
                 "forward_activated_at",
                 "paper_candidate_authorized",
                 "external_execution_authorized",
@@ -846,6 +902,7 @@ def _plan_payload(value: ForwardMeasurementPlan, *, include_hash: bool) -> dict[
 def _plan_payload_from_values(values: dict[str, object]) -> dict[str, object]:
     payload = dict(values)
     payload["initial_cash"] = str(payload["initial_cash"])
+    payload["planned_at"] = _utc_iso(payload["planned_at"])
     payload["forward_activated_at"] = _utc_iso(payload["forward_activated_at"])
     return payload
 
