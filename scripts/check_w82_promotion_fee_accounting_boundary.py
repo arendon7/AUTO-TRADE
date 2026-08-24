@@ -99,6 +99,7 @@ def main() -> int:
             'STRATEGY_VERSION_BLOCKER = "EXECUTION_STRATEGY_VERSION_UNBOUND"',
             'SHADOW_FORWARD_BLOCKER = "SHADOW_FORWARD_PROMOTION_BINDING_REQUIRED"',
             'MAX_PERCENT_FEE_BPS = Decimal("10000")',
+            "FeeLiquidityRole,",
             "fee_schedule_attestation: FeeScheduleAttestation",
             "fee_schedule_attestation.validate_for(",
             "fee_schedule_attestation.required_fee_floor_bps",
@@ -117,6 +118,10 @@ def main() -> int:
             "product_economics.symbol != fee_evidence.symbol",
             "product_economics.side is not fee_evidence.side",
             "product_economics.market_observed_at",
+            "is not FeeChargeConvention.RECEIVED_ASSET_PERCENT",
+            "Alpaca fee schedule requires received-asset fee convention",
+            "product_economics.liquidity_role is not FeeLiquidityRole.WORST_CASE",
+            "Alpaca fee schedule requires worst-case liquidity role",
             "percent fee may not exceed 100% at promotion boundary",
             "BUY product fee economics have impossible net direction",
             "SELL product fee economics have impossible net direction",
@@ -166,7 +171,7 @@ def main() -> int:
             print(f"ERROR: {error}", file=sys.stderr)
         return 1
     print(
-        "W82 PROMOTION FEE RESOLUTION BOUNDARY PASS — fee blocker requires exact W81 candidate + base W82 fee receipt + product-aware charge semantics + fresh versioned documented Alpaca crypto fee schedule attestation; caller policy cannot undercut the documented 25 bps conservative floor; final resolution independently revalidates cost/product/asset/venue/symbol/side/market-time identity, rejects >100% percentage fees and impossible net directions; strategy-version and Shadow/Forward remain blocked; broker fee proof and realized profitability remain false; no broker/network/SQLite/OMS/Safety authority; PAPER candidate false; capital NONE; LIVE blocked"
+        "W82 PROMOTION FEE RESOLUTION BOUNDARY PASS — fee blocker requires exact W81 candidate + base W82 fee receipt + fresh versioned Alpaca crypto fee schedule attestation + canonical Alpaca venue + RECEIVED_ASSET_PERCENT charge semantics + WORST_CASE liquidity role; caller policy cannot undercut the documented 25 bps conservative floor; final resolution independently revalidates cost/product/asset/venue/symbol/side/market-time identity, rejects semantic drift, >100% percentage fees and impossible net directions; strategy-version and Shadow/Forward remain blocked; broker fee proof and realized profitability remain false; no broker/network/SQLite/OMS/Safety authority; PAPER candidate false; capital NONE; LIVE blocked"
     )
     return 0
 
