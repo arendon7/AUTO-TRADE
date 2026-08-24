@@ -12,6 +12,12 @@ from autotrade.fee_accounting import (
     build_simulated_fee_accounting_contract,
     build_simulated_fee_accounting_evidence,
 )
+from autotrade.fee_product_economics import (
+    FeeChargeConvention,
+    FeeLiquidityRole,
+    build_fee_product_economics_evidence,
+    build_fee_product_policy,
+)
 from autotrade.paper_execution_lab import run_paper_execution_sensitivity
 from autotrade.paper_execution_qualification import bind_research_costs_to_paper_execution
 from autotrade.paper_execution_scenarios import build_paper_execution_scenario, build_paper_execution_scenario_matrix
@@ -78,7 +84,7 @@ def _assessment(*, measurement_hash: str):
     )
 
 
-def _candidate(*, limits, market, empty_portfolio, intent, bind_measurement=True):
+def _candidate(*, limits, market, empty_portfolio, intent, bind_measurement=True, minimum_fee_bps="5"):
     cost = ExecutionCostModel(
         fee_bps=Decimal("5"), half_spread_bps=Decimal("2"), slippage_bps=Decimal("2")
     )
@@ -112,18 +118,41 @@ def _candidate(*, limits, market, empty_portfolio, intent, bind_measurement=True
         continuity=continuity, intent=intent, market=market,
         assessed_at=w81.resolved_at + timedelta(seconds=1),
     )
-    return w81, fee
+    policy = build_fee_product_policy(
+        policy_id="w82-product-fee-policy",
+        product_id="test-product",
+        asset_class="crypto",
+        venue="alpaca-paper-model",
+        symbol=intent.symbol,
+        base_currency="TEST",
+        quote_currency="USD",
+        charge_convention=FeeChargeConvention.RECEIVED_ASSET_PERCENT,
+        liquidity_role=FeeLiquidityRole.WORST_CASE,
+        minimum_fee_bps=Decimal(minimum_fee_bps),
+        source_reference="test-preregistered-fee-policy",
+        effective_at=market.observed_at - timedelta(seconds=1),
+    )
+    product = build_fee_product_economics_evidence(
+        evidence_id="w82-candidate-product-economics",
+        policy=policy,
+        fee_evidence=fee,
+        cost_model=cost,
+        execution_intent=intent,
+        assessed_at=fee.assessed_at + timedelta(seconds=1),
+    )
+    return w81, fee, product
 
 
 def test_w82_resolution_removes_only_fee_blocker_for_exact_w81_candidate(
     limits, market, empty_portfolio, market_buy_intent
 ):
-    w81, fee = _candidate(
+    w81, fee, product = _candidate(
         limits=limits, market=market, empty_portfolio=empty_portfolio, intent=market_buy_intent
     )
     result = resolve_promotion_fee_accounting(
         resolution_id="w82-resolution-pass", w81_resolution=w81, fee_evidence=fee,
-        execution_intent=market_buy_intent, resolved_at=fee.assessed_at + timedelta(seconds=1),
+        product_economics=product, execution_intent=market_buy_intent,
+        resolved_at=product.assessed_at + timedelta(seconds=1),
     )
     assert result.status is PromotionFeeAccountingStatus.PASS
     assert result.resolved_promotion_blockers == ("FEE_ACCOUNTING_INCOMPLETE",)
@@ -131,6 +160,8 @@ def test_w82_resolution_removes_only_fee_blocker_for_exact_w81_candidate(
     assert STRATEGY_VERSION_BLOCKER in result.remaining_promotion_blockers
     assert SHADOW_FORWARD_BLOCKER in result.remaining_promotion_blockers
     assert result.fee_accounting_complete is True
+    assert result.fee_schedule_conservative is True
+    assert result.product_fee_economics_complete is True
     assert result.broker_authoritative_fee_proven is False
     assert result.realized_profitability_authorized is False
     assert result.strategy_version_execution_bound is False
@@ -144,14 +175,14 @@ def test_w82_resolution_removes_only_fee_blocker_for_exact_w81_candidate(
 def test_w82_resolution_blocks_when_w81_candidate_resolution_did_not_pass(
     limits, market, empty_portfolio, market_buy_intent
 ):
-    w81, fee = _candidate(
+    w81, fee, product = _candidate(
         limits=limits, market=market, empty_portfolio=empty_portfolio,
         intent=market_buy_intent, bind_measurement=False,
     )
     result = resolve_promotion_fee_accounting(
         resolution_id="w82-resolution-w81-blocked", w81_resolution=w81,
-        fee_evidence=fee, execution_intent=market_buy_intent,
-        resolved_at=fee.assessed_at + timedelta(seconds=1),
+        fee_evidence=fee, product_economics=product, execution_intent=market_buy_intent,
+        resolved_at=product.assessed_at + timedelta(seconds=1),
     )
     assert result.status is PromotionFeeAccountingStatus.BLOCKED
     assert result.reason_codes == ("W81_CONTINUITY_RESOLUTION_NOT_PASS",)
@@ -160,38 +191,60 @@ def test_w82_resolution_blocks_when_w81_candidate_resolution_did_not_pass(
     assert result.fee_accounting_complete is False
 
 
+def test_w82_resolution_blocks_when_research_fee_is_below_product_policy(
+    limits, market, empty_portfolio, market_buy_intent
+):
+    w81, fee, product = _candidate(
+        limits=limits, market=market, empty_portfolio=empty_portfolio,
+        intent=market_buy_intent, minimum_fee_bps="25",
+    )
+    result = resolve_promotion_fee_accounting(
+        resolution_id="w82-resolution-underpriced", w81_resolution=w81,
+        fee_evidence=fee, product_economics=product, execution_intent=market_buy_intent,
+        resolved_at=product.assessed_at + timedelta(seconds=1),
+    )
+    assert result.status is PromotionFeeAccountingStatus.BLOCKED
+    assert result.reason_codes == (
+        "FEE_PRODUCT_ECONOMICS_NOT_PASS",
+        "FEE_SCHEDULE_NOT_CONSERVATIVE",
+        "PRODUCT_FEE_ECONOMICS_INCOMPLETE",
+    )
+    assert "FEE_ACCOUNTING_INCOMPLETE" in result.remaining_promotion_blockers
+
+
 def test_w82_resolution_rejects_identity_tamper_and_temporal_regression(
     limits, market, empty_portfolio, market_buy_intent
 ):
-    w81, fee = _candidate(
+    w81, fee, product = _candidate(
         limits=limits, market=market, empty_portfolio=empty_portfolio, intent=market_buy_intent
     )
     drifted = replace(market_buy_intent, idempotency_key="w82-intent-drift")
     with pytest.raises(PromotionFeeAccountingIntegrityError, match="fingerprint mismatch"):
         resolve_promotion_fee_accounting(
             resolution_id="w82-resolution-intent-drift", w81_resolution=w81,
-            fee_evidence=fee, execution_intent=drifted,
-            resolved_at=fee.assessed_at + timedelta(seconds=1),
+            fee_evidence=fee, product_economics=product, execution_intent=drifted,
+            resolved_at=product.assessed_at + timedelta(seconds=1),
         )
     with pytest.raises(FeeAccountingIntegrityError, match="evidence hash"):
         replace(fee, w81_continuity_evidence_hash="c" * 64)
-    with pytest.raises(PromotionFeeAccountingIntegrityError, match="predate fee evidence"):
+    with pytest.raises(PromotionFeeAccountingIntegrityError, match="predate product fee evidence"):
         resolve_promotion_fee_accounting(
             resolution_id="w82-resolution-time-regression", w81_resolution=w81,
-            fee_evidence=fee, execution_intent=market_buy_intent,
-            resolved_at=fee.assessed_at - timedelta(microseconds=1),
+            fee_evidence=fee, product_economics=product, execution_intent=market_buy_intent,
+            resolved_at=product.assessed_at - timedelta(microseconds=1),
         )
 
 
 def test_w82_resolution_hash_reproducible_and_cannot_mint_authority(
     limits, market, empty_portfolio, market_buy_intent
 ):
-    w81, fee = _candidate(
+    w81, fee, product = _candidate(
         limits=limits, market=market, empty_portfolio=empty_portfolio, intent=market_buy_intent
     )
     kwargs = dict(
         resolution_id="w82-resolution-repro", w81_resolution=w81, fee_evidence=fee,
-        execution_intent=market_buy_intent, resolved_at=fee.assessed_at + timedelta(seconds=1),
+        product_economics=product, execution_intent=market_buy_intent,
+        resolved_at=product.assessed_at + timedelta(seconds=1),
     )
     first = resolve_promotion_fee_accounting(**kwargs)
     second = resolve_promotion_fee_accounting(**kwargs)
