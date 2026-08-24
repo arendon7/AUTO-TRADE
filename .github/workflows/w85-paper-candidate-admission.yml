@@ -4,7 +4,9 @@ on:
   pull_request:
     paths:
       - "src/autotrade/paper_candidate_admission.py"
+      - "src/autotrade/paper_candidate_admission_lifecycle.py"
       - "tests/test_w85_paper_candidate_admission.py"
+      - "tests/test_w85_paper_candidate_lifecycle.py"
       - "scripts/check_w85_paper_candidate_admission_boundary.py"
       - ".github/workflows/w85-paper-candidate-admission.yml"
       - ".github/workflows/core-tests.yml"
@@ -31,12 +33,17 @@ jobs:
         run: >-
           python -m compileall -q
           src/autotrade/paper_candidate_admission.py
+          src/autotrade/paper_candidate_admission_lifecycle.py
           tests/test_w85_paper_candidate_admission.py
+          tests/test_w85_paper_candidate_lifecycle.py
           scripts/check_w85_paper_candidate_admission_boundary.py
       - name: W85 candidate admission authority boundary
         run: python scripts/check_w85_paper_candidate_admission_boundary.py
-      - name: W85 candidate admission tests
-        run: pytest -q tests/test_w85_paper_candidate_admission.py
+      - name: W85 candidate admission and lifecycle tests
+        run: >-
+          pytest -q
+          tests/test_w85_paper_candidate_admission.py
+          tests/test_w85_paper_candidate_lifecycle.py
       - name: Re-prove W84 shadow-forward final boundary
         run: python scripts/check_w84_shadow_forward_promotion_boundary.py
       - name: Re-prove W83 strategy-version binding boundary
