@@ -158,25 +158,41 @@ def test_w83_rejects_intent_drift_after_w82_and_binding(
         _resolve(chain, evidence, drifted)
 
 
-def test_w83_rejects_w82_that_already_claims_strategy_bound(
+def test_w82_cannot_preclaim_w83_strategy_version_authority(
+    limits, market, empty_portfolio, market_buy_intent
+):
+    chain, _ = _runtime_chain(
+        limits, market, empty_portfolio, market_buy_intent
+    )
+    with pytest.raises(
+        w82_module.PromotionFeeAccountingIntegrityError,
+        match="may not claim strategy-version execution binding",
+    ):
+        _rehash_w82(
+            chain["w82"],
+            strategy_version_execution_bound=True,
+        )
+
+
+def test_w83_rejects_valid_w82_receipt_from_different_resolution_identity(
     limits, market, empty_portfolio, market_buy_intent
 ):
     chain, evidence = _runtime_chain(
         limits, market, empty_portfolio, market_buy_intent
     )
-    tampered = _rehash_w82(
+    other_w82 = _rehash_w82(
         chain["w82"],
-        strategy_version_execution_bound=True,
+        resolution_id="w82-other-valid-resolution",
     )
     with pytest.raises(
         PromotionStrategyVersionResolutionIntegrityError,
-        match="W82 prerequisite is not exact",
+        match="does not match exact W82 candidate/intent",
     ):
         resolve_promotion_strategy_version_binding(
-            resolution_id="w83-pre-resolved",
+            resolution_id="w83-w82-identity-drift",
             binding_evidence=evidence,
             selected_trial=chain["trial"],
-            w82_resolution=tampered,
+            w82_resolution=other_w82,
             execution_intent=market_buy_intent,
             resolved_at=evidence.assessed_at + timedelta(seconds=1),
         )
