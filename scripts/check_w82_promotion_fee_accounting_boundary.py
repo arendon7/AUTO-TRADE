@@ -63,13 +63,17 @@ def main() -> int:
                 errors.append(f"forbidden W82 resolution surface present: {marker}")
 
         required = (
-            'RESOLUTION_CONTRACT_VERSION = "W82_PROMOTION_FEE_ACCOUNTING_RESOLUTION_V1"',
+            'RESOLUTION_CONTRACT_VERSION = "W82_PROMOTION_FEE_ACCOUNTING_RESOLUTION_V2"',
             'STRATEGY_VERSION_BLOCKER = "EXECUTION_STRATEGY_VERSION_UNBOUND"',
             'SHADOW_FORWARD_BLOCKER = "SHADOW_FORWARD_PROMOTION_BINDING_REQUIRED"',
-            "w81_resolution.status is not PromotionCostContinuityStatus.PASS",
-            "fee_evidence.status is not FeeAccountingStatus.COMPLETE",
-            "fee_evidence.w81_continuity_evidence_hash != w81_resolution.continuity_evidence_hash",
-            "fee_evidence.sensitivity_measurement_hash != w81_resolution.continuity_measurement_hash",
+            "product_economics: FeeProductEconomicsEvidence",
+            "product_economics.fee_accounting_evidence_hash != fee_evidence.evidence_hash",
+            "product_economics.w81_continuity_evidence_hash != w81_resolution.continuity_evidence_hash",
+            "product_economics.status is not FeeProductEconomicsStatus.PASS",
+            "not product_economics.fee_schedule_conservative",
+            "not product_economics.product_fee_economics_complete",
+            '"FEE_SCHEDULE_NOT_CONSERVATIVE"',
+            '"PRODUCT_FEE_ECONOMICS_INCOMPLETE"',
             '"broker_authoritative_fee_proven": False',
             '"realized_profitability_authorized": False',
             '"strategy_version_execution_bound": False',
@@ -93,9 +97,7 @@ def main() -> int:
             print(f"ERROR: {error}", file=sys.stderr)
         return 1
     print(
-        "W82 PROMOTION FEE RESOLUTION BOUNDARY PASS — fee completeness resolves only the exact W81 candidate fee blocker; "
-        "strategy-version and Shadow/Forward remain blocked; simulated fees are not broker proof or realized profitability; "
-        "no broker/network/SQLite/OMS/Safety authority; PAPER candidate false; capital NONE; LIVE blocked"
+        "W82 PROMOTION FEE RESOLUTION BOUNDARY PASS — fee blocker requires exact W81 candidate + base W82 fee receipt + conservative product/venue fee policy + product-aware charge semantics; strategy-version and Shadow/Forward remain blocked; broker fee proof and realized profitability remain false; no broker/network/SQLite/OMS/Safety authority; PAPER candidate false; capital NONE; LIVE blocked"
     )
     return 0
 
