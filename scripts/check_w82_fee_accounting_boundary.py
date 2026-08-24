@@ -101,14 +101,15 @@ def main() -> int:
             '"realized_profitability_authorized": False',
         ),
         "paper_fee_activity_evidence.py": (
-            'PAPER_FEE_ACTIVITY_VERSION = "W82_PAPER_FEE_ACTIVITY_V1"',
-            'OBSERVED = "OBSERVED"',
+            'PAPER_FEE_ACTIVITY_VERSION = "W82_PAPER_FEE_ACTIVITY_V2"',
             'PENDING_PUBLICATION = "PENDING_PUBLICATION"',
-            '"CFEE", "FEE"',
-            '"FEE_ACTIVITY_NOT_YET_OBSERVED"',
+            '"BROKER_FEE_SOURCE_NOT_CERTIFIED_OR_NOT_YET_OBSERVED"',
             '"zero_fee_inferred": False',
             '"broker_authoritative_fee_proven": False',
+            '"credentials_persisted": False',
+            '"broker_network_performed": False',
             '"paper_only": True',
+            "BROKER_AUTHORITATIVE fee activity is unsupported until a read-only broker fee source is certified",
         ),
     }
     for target in TARGETS:
@@ -129,7 +130,7 @@ def main() -> int:
             print(f"ERROR: {error}", file=sys.stderr)
         return 1
     print(
-        "W82 FEE ACCOUNTING BOUNDARY PASS — base fee arithmetic, preregistered product/venue fee floor, received-asset semantics and delayed PAPER fee activity are separate/hash-bound; canonical Fill unchanged; missing activity never means zero; no broker/network/SQLite/OMS/Safety/writer authority; realized-profitability unauthorized; PAPER candidate false; capital NONE; LIVE blocked"
+        "W82 FEE ACCOUNTING BOUNDARY PASS — base fee arithmetic + preregistered product/venue fee floor + received-asset semantics are hash-bound; canonical Fill unchanged; PAPER fee truth stays PENDING until an audited read-only source exists; missing activity never means zero; no broker/network/SQLite/OMS/Safety/writer authority; realized-profitability unauthorized; PAPER candidate false; capital NONE; LIVE blocked"
     )
     return 0
 
