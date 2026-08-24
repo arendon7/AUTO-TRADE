@@ -6,6 +6,9 @@ import pytest
 
 from autotrade.domain import Side
 import autotrade.fee_product_economics as product_module
+from autotrade.fee_schedule_attestation import (
+    build_alpaca_crypto_worst_case_fee_attestation,
+)
 from autotrade.promotion_fee_accounting import (
     PromotionFeeAccountingIntegrityError,
     resolve_promotion_fee_accounting,
@@ -43,14 +46,15 @@ def _rehash_product(product, **changes):
     )
 
 
-def _resolve(*, w81, fee, product, intent):
+def _resolve(*, w81, fee, product, attestation, intent, resolved_at=None):
     return resolve_promotion_fee_accounting(
         resolution_id="w82-hardening-resolution",
         w81_resolution=w81,
         fee_evidence=fee,
         product_economics=product,
+        fee_schedule_attestation=attestation,
         execution_intent=intent,
-        resolved_at=product.assessed_at + timedelta(seconds=1),
+        resolved_at=resolved_at or product.assessed_at + timedelta(seconds=1),
     )
 
 
@@ -71,7 +75,7 @@ def test_w82_final_resolution_rejects_validly_rehashed_parent_identity_drift(
     mutation,
     message,
 ):
-    w81, fee, product = _candidate(
+    w81, fee, product, attestation = _candidate(
         limits=limits,
         market=market,
         empty_portfolio=empty_portfolio,
@@ -84,6 +88,7 @@ def test_w82_final_resolution_rejects_validly_rehashed_parent_identity_drift(
             w81=w81,
             fee=fee,
             product=drifted,
+            attestation=attestation,
             intent=market_buy_intent,
         )
 
@@ -91,7 +96,7 @@ def test_w82_final_resolution_rejects_validly_rehashed_parent_identity_drift(
 def test_w82_final_resolution_rejects_validly_rehashed_market_time_drift(
     limits, market, empty_portfolio, market_buy_intent
 ):
-    w81, fee, product = _candidate(
+    w81, fee, product, attestation = _candidate(
         limits=limits,
         market=market,
         empty_portfolio=empty_portfolio,
@@ -110,6 +115,7 @@ def test_w82_final_resolution_rejects_validly_rehashed_market_time_drift(
             w81=w81,
             fee=fee,
             product=drifted,
+            attestation=attestation,
             intent=market_buy_intent,
         )
 
@@ -117,7 +123,7 @@ def test_w82_final_resolution_rejects_validly_rehashed_market_time_drift(
 def test_w82_final_resolution_rejects_validly_rehashed_symbol_drift(
     limits, market, empty_portfolio, market_buy_intent
 ):
-    w81, fee, product = _candidate(
+    w81, fee, product, attestation = _candidate(
         limits=limits,
         market=market,
         empty_portfolio=empty_portfolio,
@@ -127,11 +133,7 @@ def test_w82_final_resolution_rejects_validly_rehashed_symbol_drift(
         _rehash_scenario(item, symbol="OTHER-USD")
         for item in product.scenarios
     )
-    drifted = _rehash_product(
-        product,
-        symbol="OTHER-USD",
-        scenarios=scenarios,
-    )
+    drifted = _rehash_product(product, symbol="OTHER-USD", scenarios=scenarios)
 
     with pytest.raises(
         PromotionFeeAccountingIntegrityError,
@@ -141,6 +143,7 @@ def test_w82_final_resolution_rejects_validly_rehashed_symbol_drift(
             w81=w81,
             fee=fee,
             product=drifted,
+            attestation=attestation,
             intent=market_buy_intent,
         )
 
@@ -148,7 +151,7 @@ def test_w82_final_resolution_rejects_validly_rehashed_symbol_drift(
 def test_w82_final_resolution_rejects_validly_rehashed_side_drift(
     limits, market, empty_portfolio, market_buy_intent
 ):
-    w81, fee, product = _candidate(
+    w81, fee, product, attestation = _candidate(
         limits=limits,
         market=market,
         empty_portfolio=empty_portfolio,
@@ -158,11 +161,7 @@ def test_w82_final_resolution_rejects_validly_rehashed_side_drift(
         _rehash_scenario(item, side=Side.SELL)
         for item in product.scenarios
     )
-    drifted = _rehash_product(
-        product,
-        side=Side.SELL,
-        scenarios=scenarios,
-    )
+    drifted = _rehash_product(product, side=Side.SELL, scenarios=scenarios)
 
     with pytest.raises(
         PromotionFeeAccountingIntegrityError,
@@ -172,6 +171,7 @@ def test_w82_final_resolution_rejects_validly_rehashed_side_drift(
             w81=w81,
             fee=fee,
             product=drifted,
+            attestation=attestation,
             intent=market_buy_intent,
         )
 
@@ -179,15 +179,14 @@ def test_w82_final_resolution_rejects_validly_rehashed_side_drift(
 def test_w82_final_resolution_rejects_percent_fee_above_full_notional(
     limits, market, empty_portfolio, market_buy_intent
 ):
-    w81, fee, product = _candidate(
+    w81, fee, product, attestation = _candidate(
         limits=limits,
         market=market,
         empty_portfolio=empty_portfolio,
         intent=market_buy_intent,
     )
     drifted = _rehash_product(
-        product,
-        research_fee_bps=Decimal("10000.0001"),
+        product, research_fee_bps=Decimal("10000.0001")
     )
 
     with pytest.raises(
@@ -198,6 +197,7 @@ def test_w82_final_resolution_rejects_percent_fee_above_full_notional(
             w81=w81,
             fee=fee,
             product=drifted,
+            attestation=attestation,
             intent=market_buy_intent,
         )
 
@@ -205,7 +205,7 @@ def test_w82_final_resolution_rejects_percent_fee_above_full_notional(
 def test_w82_final_resolution_rejects_negative_net_base_after_buy_fee(
     limits, market, empty_portfolio, market_buy_intent
 ):
-    w81, fee, product = _candidate(
+    w81, fee, product, attestation = _candidate(
         limits=limits,
         market=market,
         empty_portfolio=empty_portfolio,
@@ -213,10 +213,11 @@ def test_w82_final_resolution_rejects_negative_net_base_after_buy_fee(
     )
     first, *rest = product.scenarios
     impossible = _rehash_scenario(
-        first,
-        net_base_quantity_delta=Decimal("-0.00000001"),
+        first, net_base_quantity_delta=Decimal("-0.00000001")
     )
-    scenarios = tuple(sorted((impossible, *rest), key=lambda item: item.scenario_id))
+    scenarios = tuple(
+        sorted((impossible, *rest), key=lambda item: item.scenario_id)
+    )
     drifted = _rehash_product(product, scenarios=scenarios)
 
     with pytest.raises(
@@ -227,6 +228,7 @@ def test_w82_final_resolution_rejects_negative_net_base_after_buy_fee(
             w81=w81,
             fee=fee,
             product=drifted,
+            attestation=attestation,
             intent=market_buy_intent,
         )
 
@@ -234,7 +236,7 @@ def test_w82_final_resolution_rejects_negative_net_base_after_buy_fee(
 def test_w82_final_resolution_rejects_received_asset_buy_fee_currency_drift(
     limits, market, empty_portfolio, market_buy_intent
 ):
-    w81, fee, product = _candidate(
+    w81, fee, product, attestation = _candidate(
         limits=limits,
         market=market,
         empty_portfolio=empty_portfolio,
@@ -242,8 +244,7 @@ def test_w82_final_resolution_rejects_received_asset_buy_fee_currency_drift(
     )
     first, *rest = product.scenarios
     drifted_scenario = _rehash_scenario(
-        first,
-        charged_fee_currency=product.quote_currency,
+        first, charged_fee_currency=product.quote_currency
     )
     scenarios = tuple(
         sorted((drifted_scenario, *rest), key=lambda item: item.scenario_id)
@@ -258,5 +259,58 @@ def test_w82_final_resolution_rejects_received_asset_buy_fee_currency_drift(
             w81=w81,
             fee=fee,
             product=drifted,
+            attestation=attestation,
             intent=market_buy_intent,
+        )
+
+
+def test_w82_final_resolution_rejects_fee_schedule_attestation_identity_drift(
+    limits, market, empty_portfolio, market_buy_intent
+):
+    w81, fee, product, _ = _candidate(
+        limits=limits,
+        market=market,
+        empty_portfolio=empty_portfolio,
+        intent=market_buy_intent,
+    )
+    wrong = build_alpaca_crypto_worst_case_fee_attestation(
+        attestation_id="w82-wrong-venue-attestation",
+        product_id=product.product_id,
+        venue="other-venue",
+        symbol=product.symbol,
+    )
+    with pytest.raises(
+        PromotionFeeAccountingIntegrityError,
+        match="attestation venue mismatch",
+    ):
+        _resolve(
+            w81=w81,
+            fee=fee,
+            product=product,
+            attestation=wrong,
+            intent=market_buy_intent,
+        )
+
+
+def test_w82_final_resolution_rejects_stale_documented_fee_schedule(
+    limits, market, empty_portfolio, market_buy_intent
+):
+    w81, fee, product, attestation = _candidate(
+        limits=limits,
+        market=market,
+        empty_portfolio=empty_portfolio,
+        intent=market_buy_intent,
+    )
+    stale_resolution_time = attestation.source_checked_at + timedelta(days=31)
+    with pytest.raises(
+        PromotionFeeAccountingIntegrityError,
+        match="attestation is stale",
+    ):
+        _resolve(
+            w81=w81,
+            fee=fee,
+            product=product,
+            attestation=attestation,
+            intent=market_buy_intent,
+            resolved_at=stale_resolution_time,
         )
