@@ -7,6 +7,7 @@ import pytest
 from autotrade.domain import Side
 import autotrade.fee_product_economics as product_module
 from autotrade.fee_schedule_attestation import (
+    FeeScheduleAttestationIntegrityError,
     build_alpaca_crypto_worst_case_fee_attestation,
 )
 from autotrade.promotion_fee_accounting import (
@@ -264,30 +265,75 @@ def test_w82_final_resolution_rejects_received_asset_buy_fee_currency_drift(
         )
 
 
-def test_w82_final_resolution_rejects_fee_schedule_attestation_identity_drift(
+def test_w82_alpaca_attestation_factory_rejects_non_alpaca_venue(
     limits, market, empty_portfolio, market_buy_intent
 ):
-    w81, fee, product, _ = _candidate(
+    _, _, product, _ = _candidate(
         limits=limits,
         market=market,
         empty_portfolio=empty_portfolio,
         intent=market_buy_intent,
     )
-    wrong = build_alpaca_crypto_worst_case_fee_attestation(
-        attestation_id="w82-wrong-venue-attestation",
-        product_id=product.product_id,
-        venue="other-venue",
-        symbol=product.symbol,
+    with pytest.raises(
+        FeeScheduleAttestationIntegrityError,
+        match="canonical Alpaca qualification venue",
+    ):
+        build_alpaca_crypto_worst_case_fee_attestation(
+            attestation_id="w82-wrong-venue-attestation",
+            product_id=product.product_id,
+            venue="other-venue",
+            symbol=product.symbol,
+        )
+
+
+def test_w82_final_resolution_rejects_validly_rehashed_charge_convention_drift(
+    limits, market, empty_portfolio, market_buy_intent
+):
+    w81, fee, product, attestation = _candidate(
+        limits=limits,
+        market=market,
+        empty_portfolio=empty_portfolio,
+        intent=market_buy_intent,
+    )
+    drifted = _rehash_product(
+        product,
+        charge_convention=product_module.FeeChargeConvention.QUOTE_NOTIONAL_PERCENT,
     )
     with pytest.raises(
         PromotionFeeAccountingIntegrityError,
-        match="attestation venue mismatch",
+        match="received-asset fee convention",
     ):
         _resolve(
             w81=w81,
             fee=fee,
-            product=product,
-            attestation=wrong,
+            product=drifted,
+            attestation=attestation,
+            intent=market_buy_intent,
+        )
+
+
+def test_w82_final_resolution_rejects_validly_rehashed_liquidity_role_drift(
+    limits, market, empty_portfolio, market_buy_intent
+):
+    w81, fee, product, attestation = _candidate(
+        limits=limits,
+        market=market,
+        empty_portfolio=empty_portfolio,
+        intent=market_buy_intent,
+    )
+    drifted = _rehash_product(
+        product,
+        liquidity_role=product_module.FeeLiquidityRole.TAKER,
+    )
+    with pytest.raises(
+        PromotionFeeAccountingIntegrityError,
+        match="worst-case liquidity role",
+    ):
+        _resolve(
+            w81=w81,
+            fee=fee,
+            product=drifted,
+            attestation=attestation,
             intent=market_buy_intent,
         )
 
