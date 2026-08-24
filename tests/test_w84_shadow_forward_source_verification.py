@@ -101,17 +101,19 @@ def _rehash_resolution(base, **changes):
 
 
 def _forge_measurement_receipt(receipt, **changes):
-    values = {
+    measurement_values = {
         field.name: getattr(receipt, field.name)
         for field in fields(receipt)
-        if field.name not in {"measurement_hash", "receipt_hash"}
+        if field.name not in {"measurement_hash", "receipt_hash", "captured_at"}
     }
-    values.update(changes)
+    measurement_values.update(
+        {key: value for key, value in changes.items() if key != "captured_at"}
+    )
     measurement_hash = measurement._hash(
-        measurement._measurement_payload_from_values(values)
+        measurement._measurement_payload_from_values(measurement_values)
     )
     receipt_values = {
-        **values,
+        **measurement_values,
         "measurement_hash": measurement_hash,
         "captured_at": changes.get("captured_at", receipt.captured_at),
     }
