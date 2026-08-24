@@ -190,7 +190,8 @@ IA/model output no puede saltarse esa cadena.
 
 ## Estado de autoridad
 - PAPER candidate actual: FALSE;
-- W78–W85 capital authority: NONE;
+- W78–W84 capital authority: NONE;
+- W85 admission puede cambiar sólo el estado candidate si su contrato lo demuestra, pero no capital/execution authority;
 - broker write desde capas científicas/admission: NO;
 - credentials en Strategy Lab/admission: NO;
 - broker-authoritative realized fee proof por W82: NO;
