@@ -4,7 +4,7 @@ from decimal import Decimal
 
 import pytest
 
-from autotrade.domain import Side
+from autotrade.domain import OrderType, Side
 from autotrade.execution_cost_continuity import build_execution_cost_continuity_evidence
 from autotrade.fee_accounting import (
     FeeAccountingIntegrityError,
@@ -36,11 +36,11 @@ def _scenario(*, scenario_id: str, slippage: str, fill: str = "1"):
     )
 
 
-def _matrix(*, second_fill: str = "0.5"):
+def _matrix():
     return build_paper_execution_scenario_matrix(
         (
             _scenario(scenario_id="baseline", slippage="2", fill="1"),
-            _scenario(scenario_id="stress", slippage="8", fill=second_fill),
+            _scenario(scenario_id="stress", slippage="8", fill="0.5"),
         )
     )
 
@@ -165,27 +165,32 @@ def test_w82_sell_side_keeps_fee_as_cost_in_quote_currency(
     assert baseline.net_quote_cash_delta == Decimal("989.3070990")
 
 
-def test_w82_zero_fill_measurement_has_zero_fee(
+def test_w82_valid_nonmarketable_limit_has_zero_fee(
     limits, market, empty_portfolio, market_buy_intent
 ):
+    limit_no_fill = replace(
+        market_buy_intent,
+        intent_id="w82-limit-no-fill",
+        idempotency_key="w82-limit-no-fill-idem",
+        order_type=OrderType.LIMIT,
+        limit_price=Decimal("100"),
+    )
     *_, evidence = _build(
         limits=limits,
         market=market,
         empty_portfolio=empty_portfolio,
-        intent=market_buy_intent,
-        matrix=_matrix(second_fill="0"),
+        intent=limit_no_fill,
     )
-    stress = next(item for item in evidence.observations if item.scenario_id == "stress")
-    assert stress.fill_ratio == 0
-    assert stress.filled_quantity == 0
-    assert stress.average_fill_price is None
-    assert stress.gross_notional == 0
-    assert stress.fee_amount == 0
-    assert stress.net_quote_cash_delta == 0
-    assert stress.reason_code == "NO_FILL_NO_FEE"
+    assert all(item.fill_ratio == 0 for item in evidence.observations)
+    assert all(item.filled_quantity == 0 for item in evidence.observations)
+    assert all(item.average_fill_price is None for item in evidence.observations)
+    assert all(item.gross_notional == 0 for item in evidence.observations)
+    assert all(item.fee_amount == 0 for item in evidence.observations)
+    assert all(item.net_quote_cash_delta == 0 for item in evidence.observations)
+    assert all(item.reason_code == "NO_FILL_NO_FEE" for item in evidence.observations)
 
 
-def test_w82_rejects_fee_schedule_cost_matrix_intent_and_market_drift(
+def test_w82_rejects_fee_schedule_cost_intent_and_market_drift(
     limits, market, empty_portfolio, market_buy_intent
 ):
     cost, matrix, qualification, report, continuity, contract, _ = _build(
