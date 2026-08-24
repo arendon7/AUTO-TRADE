@@ -1,7 +1,7 @@
 # DEBT REGISTER — v0.28R
 
 Fecha: 2026-08-24
-Estado: **R0–R5 CERTIFIED; R6/R7 capability work active; W78–W82 technically certified in stacked branches**
+Estado: **R0–R5 CERTIFIED; R6/R7 capability work active; W78–W82 technically certified in stacked branches; W83 active**
 
 ## Authority
 La autoridad machine-readable es la composición validada por CI de `knowledge/00_CANON/debt_register.json` + sus extensiones `knowledge/00_CANON/debt_register_*.json`. Si esta vista humana discrepa, manda el registro machine-readable compuesto + CI.
@@ -52,7 +52,7 @@ La extensión machine-readable de R6/R7 contiene el estado exacto más reciente 
 | ID | Sev | Estado | Área | Resultado actual |
 |---|---|---|---|---|
 | `TD-R7D-001` | P1 | **CLOSED** | Research-to-PAPER non-fee execution-cost continuity | W81 prueba midpoint→touch→adverse continuity candidate-bound; favorable under-cost scenarios BLOCK |
-| `TD-R7D-002` | P1 | **CLOSED** | Fee-complete execution accounting | W82 prueba fee-complete **deterministic qualification** con exact Research/W78/W81 binding, product fee mechanics y documented Alpaca crypto floor; no realized broker-fee claim |
+| `TD-R7D-002` | P1 | **CLOSED** | Fee-complete execution accounting | W82 prueba fee-complete **deterministic qualification** con exact Research/W78/W81 binding, product fee mechanics y documented Alpaca crypto schedule; no realized broker-fee claim |
 | `TD-R7D-003` | P2 | **OPEN** | Partial-fill remaining-quantity risk reservation | conservar full reservation hasta poder probar authoritative remaining open quantity; premature capital release prohibido |
 
 ### W82 fee boundary
@@ -64,20 +64,29 @@ W82 separa cuatro verdades:
 3. product-specific fee mechanics;
 4. broker-observed fee activity.
 
-Para Alpaca crypto, la attestation documental W82 verificada el 2026-08-24 fija, mientras no haya evidencia separadamente certificada de tier/rol más favorable:
+Para el qualification path de Alpaca crypto, la attestation documental W82 verificada el 2026-08-24 fija:
+- canonical venue: `alpaca-paper-model`;
 - Tier 1 maker: 15 bps;
 - Tier 1 taker: 25 bps;
 - conservative qualification floor: **25 bps**;
+- charge convention requerida: `RECEIVED_ASSET_PERCENT`;
+- liquidity role requerido: `WORST_CASE`;
 - fee sobre el activo/fiat acreditado según lado;
 - fee activity potencialmente publicada con retraso/EOD;
 - snapshot expirable a 30 días.
 
-Una policy local no puede abaratar ese floor. Cualquier lower-tier assumption requiere evidencia futura de 30-day volume tier + liquidity role.
+Una policy local no puede abaratar ese floor. La attestation no puede mintarse para otro venue. El final resolver rechaza receipts válidamente re-hasheados con charge convention o liquidity role distintos. Cualquier lower-tier assumption requiere evidencia futura separada de 30-day volume tier + liquidity role.
 
 Broker activity sigue fail-closed:
 - `broker_authoritative_fee_proven=false`;
 - `realized_profitability_authorized=false`;
 - missing fee activity != zero fee.
+
+Behavioral exact-head W82 `66dbc63941cb2d6552ff1dfadc292dc020e1ecb2`:
+- W82 `32684230790`: **49/49 PASS**;
+- Core `32684230698`: **2966/2966 PASS**, coverage `85.12870855148343%`;
+- W78–W82/Research boundaries PASS;
+- Debt Register + Canonical Knowledge PASS.
 
 ## Promotion blockers aún abiertos
 El cierre W82 no remueve:
@@ -85,7 +94,7 @@ El cierre W82 no remueve:
 - `SHADOW_FORWARD_PROMOTION_BINDING_REQUIRED`;
 - `TD-R7D-003`.
 
-W83 debe atacar primero `EXECUTION_STRATEGY_VERSION_UNBOUND`: la versión/artefacto determinista que pudiera producir futuros intents debe quedar criptográficamente ligada a la exact selected strategy id/version congelada por Promotion Governance. Hasta entonces no hay Auto-Paper candidate.
+W83 está activo y debe atacar primero `EXECUTION_STRATEGY_VERSION_UNBOUND`: la versión/artefacto determinista que pudiera producir futuros intents debe quedar criptográficamente ligada a la exact selected strategy id/version y selected trial fingerprint congelados por Promotion Governance. Un version string aislado no basta. Hasta entonces no hay Auto-Paper candidate.
 
 ## Deuda no bloqueante fuera del workstream inmediato
 | ID | Sev | Track | Área |
@@ -93,10 +102,11 @@ W83 debe atacar primero `EXECUTION_STRATEGY_VERSION_UNBOUND`: la versión/artefa
 | `TD-OPS-001` | P3 | OPS | Graphify semantic/deep real pending supported runtime |
 
 ## Authority
-- Strategy Lab / W78–W82 scientific layers: no broker write;
+- Strategy Lab / W78–W83 scientific layers: no broker write;
 - PAPER candidate: FALSE;
-- external execution authority from W82: FALSE;
-- W82 capital authority: NONE;
+- external execution authority from W82/W83: FALSE;
+- scientific capital authority: NONE;
+- broker-authoritative fee proof from W82: FALSE;
 - realized profitability authorization: FALSE;
 - LIVE: BLOCKED.
 
