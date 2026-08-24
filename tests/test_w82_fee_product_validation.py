@@ -137,7 +137,12 @@ def test_w82_product_evidence_aggregate_validation(limits, market, empty_portfol
     _, _, _, evidence = _bundle(limits, market, empty_portfolio, market_buy_intent)
     reverse = tuple(reversed(evidence.scenarios))
     duplicate = (evidence.scenarios[0], evidence.scenarios[0])
-    wrong_scenario = replace(evidence.scenarios[0], symbol="OTHER", scenario_hash=evidence.scenarios[0].scenario_hash)
+
+    # A scenario cannot be identity-mutated without recomputing its own canonical
+    # hash; prove that local defense explicitly rather than trying to sneak an
+    # invalid child into the aggregate.
+    with pytest.raises(FeeProductEconomicsIntegrityError, match="scenario hash mismatch"):
+        replace(evidence.scenarios[0], symbol="OTHER")
 
     mutations = (
         {"evidence_id": " bad"},
@@ -145,6 +150,7 @@ def test_w82_product_evidence_aggregate_validation(limits, market, empty_portfol
         {"fee_policy_hash": "bad"},
         {"product_id": " bad"},
         {"symbol": ""},
+        {"symbol": "OTHER"},
         {"side": "BUY"},
         {"base_currency": "usd"},
         {"quote_currency": "usd"},
@@ -156,7 +162,6 @@ def test_w82_product_evidence_aggregate_validation(limits, market, empty_portfol
         {"scenarios": ()},
         {"scenarios": reverse},
         {"scenarios": duplicate},
-        {"scenarios": (wrong_scenario,) + evidence.scenarios[1:]},
         {"status": FeeProductEconomicsStatus.BLOCKED},
         {"reason_codes": ("UNEXPECTED",)},
         {"fee_schedule_conservative": False},
