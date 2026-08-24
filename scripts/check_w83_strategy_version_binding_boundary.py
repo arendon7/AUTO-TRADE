@@ -76,7 +76,15 @@ BINDING_REQUIRED = (
 
 RESOLUTION_REQUIRED = (
     '"W83_PROMOTION_STRATEGY_VERSION_RESOLUTION_V1"',
-    '"W83_SAFE_DSL_RUNTIME_CODE_IDENTITY_V1"',
+    '"W83_SAFE_DSL_RUNTIME_CODE_IDENTITY_V2"',
+    "class SafeDslRuntimeIdentity:",
+    "research_dsl.StrategySpec",
+    "research_strategy.StrategyContext",
+    "research_market.Bar",
+    "sys.version_info.micro",
+    '"runtime_dsl_source_hash"',
+    '"runtime_strategy_source_hash"',
+    '"runtime_market_source_hash"',
     "Path(source_path).read_bytes()",
     "selected_trial.code_version != loaded_runtime_hash",
     'selected_trial.parameters.get("spec_hash")',
@@ -166,8 +174,9 @@ def main() -> int:
     print(
         "W83 STRATEGY VERSION BINDING BOUNDARY PASS — exact W79 selected trial "
         "freezes StrategySpec canonical hash + dataset; exact W82 product/venue/"
-        "currency/intent provenance is retained; loaded safe-DSL bytes + Python "
-        "major/minor must equal preregistered trial code_version; only "
+        "currency/intent provenance is retained; loaded safe-DSL semantic source "
+        "set (dsl.py + strategy.py + market.py) plus exact Python implementation/"
+        "patch must equal preregistered trial code_version; only "
         "EXECUTION_STRATEGY_VERSION_UNBOUND may be resolved; Shadow/Forward "
         "remains blocked; no broker/network/SQLite/OMS/Safety/OrderIntent "
         "construction authority; PAPER candidate false; capital NONE; LIVE blocked"

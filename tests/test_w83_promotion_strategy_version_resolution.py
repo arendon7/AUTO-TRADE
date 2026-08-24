@@ -1,9 +1,11 @@
 from dataclasses import fields, replace
-from datetime import timedelta
+from datetime import datetime, timedelta
+import sys
 
 import pytest
 
 import autotrade.promotion_fee_accounting as w82_module
+import autotrade.promotion_strategy_version_binding as w83_module
 from autotrade.promotion_fee_accounting import (
     SHADOW_FORWARD_BLOCKER,
     STRATEGY_VERSION_BLOCKER,
@@ -12,6 +14,7 @@ from autotrade.promotion_strategy_version_binding import (
     PROMOTION_STRATEGY_VERSION_RESOLUTION_VERSION,
     RUNTIME_CODE_IDENTITY_VERSION,
     PromotionStrategyVersionResolutionIntegrityError,
+    build_safe_dsl_runtime_identity,
     resolve_promotion_strategy_version_binding,
     safe_dsl_runtime_code_hash,
 )
@@ -53,12 +56,55 @@ def _rehash_w82(value, **changes):
     )
 
 
-def test_w83_runtime_identity_is_reproducible_64_hex():
-    first = safe_dsl_runtime_code_hash()
-    second = safe_dsl_runtime_code_hash()
+def test_w83_runtime_identity_binds_full_semantic_source_set_and_exact_python():
+    first = build_safe_dsl_runtime_identity()
+    second = build_safe_dsl_runtime_identity()
+    expected_python = (
+        f"{sys.implementation.name}-"
+        f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
+    )
+
     assert first == second
-    assert len(first) == 64
-    assert set(first) <= set("0123456789abcdef")
+    assert first.version == RUNTIME_CODE_IDENTITY_VERSION
+    assert first.python_runtime == expected_python
+    for value in (
+        first.dsl_source_hash,
+        first.strategy_source_hash,
+        first.market_source_hash,
+        first.identity_hash,
+    ):
+        assert len(value) == 64
+        assert set(value) <= set("0123456789abcdef")
+    assert safe_dsl_runtime_code_hash() == first.identity_hash
+    assert first.to_dict()["identity_hash"] == first.identity_hash
+
+
+def test_w83_runtime_identity_rejects_component_tamper():
+    identity = build_safe_dsl_runtime_identity()
+    with pytest.raises(
+        PromotionStrategyVersionResolutionIntegrityError,
+        match="runtime identity hash mismatch",
+    ):
+        replace(identity, strategy_source_hash="0" * 64)
+    with pytest.raises(
+        PromotionStrategyVersionResolutionIntegrityError,
+        match="exact patch version",
+    ):
+        replace(identity, python_runtime="cpython-3.12")
+    with pytest.raises(
+        PromotionStrategyVersionResolutionIntegrityError,
+        match="version is not canonical W83",
+    ):
+        replace(identity, version="W83_SAFE_DSL_RUNTIME_CODE_IDENTITY_V1")
+
+
+def test_w83_runtime_identity_fails_closed_when_semantic_source_is_unlocatable(monkeypatch):
+    monkeypatch.setattr(w83_module.inspect, "getsourcefile", lambda _subject: None)
+    with pytest.raises(
+        PromotionStrategyVersionResolutionIntegrityError,
+        match="cannot locate research/dsl.py runtime source",
+    ):
+        build_safe_dsl_runtime_identity()
 
 
 def test_w83_resolution_removes_only_strategy_version_blocker(
@@ -67,12 +113,17 @@ def test_w83_resolution_removes_only_strategy_version_blocker(
     chain, evidence = _runtime_chain(
         limits, market, empty_portfolio, market_buy_intent
     )
+    runtime_identity = build_safe_dsl_runtime_identity()
     result = _resolve(chain, evidence, market_buy_intent)
 
     assert result.contract_version == PROMOTION_STRATEGY_VERSION_RESOLUTION_VERSION
     assert result.runtime_identity_version == RUNTIME_CODE_IDENTITY_VERSION
-    assert result.loaded_runtime_code_hash == safe_dsl_runtime_code_hash()
+    assert result.loaded_runtime_code_hash == runtime_identity.identity_hash
     assert result.trial_code_version == result.loaded_runtime_code_hash
+    assert result.runtime_python == runtime_identity.python_runtime
+    assert result.runtime_dsl_source_hash == runtime_identity.dsl_source_hash
+    assert result.runtime_strategy_source_hash == runtime_identity.strategy_source_hash
+    assert result.runtime_market_source_hash == runtime_identity.market_source_hash
     assert result.binding_evidence_hash == evidence.evidence_hash
     assert result.w82_resolution_hash == chain["w82"].resolution_hash
     assert result.strategy_spec_hash == chain["spec"].canonical_hash
@@ -218,13 +269,44 @@ def test_w83_rejects_temporal_regression(
         )
 
 
-def test_w83_resolution_receipt_cannot_mint_authority(
+def test_w83_resolution_receipt_rejects_runtime_and_authority_tamper(
     limits, market, empty_portfolio, market_buy_intent
 ):
     chain, evidence = _runtime_chain(
         limits, market, empty_portfolio, market_buy_intent
     )
     result = _resolve(chain, evidence, market_buy_intent)
+    with pytest.raises(
+        PromotionStrategyVersionResolutionIntegrityError,
+        match="runtime identity hash mismatch",
+    ):
+        replace(result, runtime_market_source_hash="0" * 64)
+    with pytest.raises(
+        PromotionStrategyVersionResolutionIntegrityError,
+        match="resolution contract version",
+    ):
+        replace(result, contract_version="W83_BAD")
+    with pytest.raises(
+        PromotionStrategyVersionResolutionIntegrityError,
+        match="runtime identity version",
+    ):
+        replace(result, runtime_identity_version="W83_BAD")
+    with pytest.raises(
+        PromotionStrategyVersionResolutionIntegrityError,
+        match="remaining blockers must be unique sorted",
+    ):
+        replace(
+            result,
+            remaining_promotion_blockers=(
+                SHADOW_FORWARD_BLOCKER,
+                SHADOW_FORWARD_BLOCKER,
+            ),
+        )
+    with pytest.raises(
+        PromotionStrategyVersionResolutionIntegrityError,
+        match="binding flags are inconsistent",
+    ):
+        replace(result, strategy_version_execution_bound=False)
     with pytest.raises(
         PromotionStrategyVersionResolutionIntegrityError,
         match="may not grant PAPER",
@@ -245,6 +327,25 @@ def test_w83_resolution_receipt_cannot_mint_authority(
         match="resolution hash mismatch",
     ):
         replace(result, resolution_hash="0" * 64)
+
+
+def test_w83_resolution_receipt_rejects_invalid_identity_fields(
+    limits, market, empty_portfolio, market_buy_intent
+):
+    chain, evidence = _runtime_chain(
+        limits, market, empty_portfolio, market_buy_intent
+    )
+    result = _resolve(chain, evidence, market_buy_intent)
+    with pytest.raises(
+        PromotionStrategyVersionResolutionIntegrityError,
+        match="resolution_id",
+    ):
+        replace(result, resolution_id="bad id")
+    with pytest.raises(
+        PromotionStrategyVersionResolutionIntegrityError,
+        match="timezone-aware",
+    ):
+        replace(result, resolved_at=datetime(2026, 8, 24, 3, 0))
 
 
 @pytest.mark.parametrize(

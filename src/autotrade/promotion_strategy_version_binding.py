@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from enum import StrEnum
 from hashlib import sha256
 import inspect
 import json
@@ -18,6 +17,8 @@ from autotrade.promotion_fee_accounting import (
     STRATEGY_VERSION_BLOCKER,
 )
 from autotrade.research import dsl as research_dsl
+from autotrade.research import market as research_market
+from autotrade.research import strategy as research_strategy
 from autotrade.research.trials import TrialPhase, TrialSpec
 import autotrade.strategy_execution_binding as binding_module
 from autotrade.strategy_execution_binding import (
@@ -29,17 +30,50 @@ from autotrade.strategy_execution_binding import (
 PROMOTION_STRATEGY_VERSION_RESOLUTION_VERSION = (
     "W83_PROMOTION_STRATEGY_VERSION_RESOLUTION_V1"
 )
-RUNTIME_CODE_IDENTITY_VERSION = "W83_SAFE_DSL_RUNTIME_CODE_IDENTITY_V1"
+RUNTIME_CODE_IDENTITY_VERSION = "W83_SAFE_DSL_RUNTIME_CODE_IDENTITY_V2"
 _HASH_RE = re.compile(r"^[0-9a-f]{64}$")
 _ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$")
+_PYTHON_RUNTIME_RE = re.compile(r"^[A-Za-z0-9._-]+-[0-9]+\.[0-9]+\.[0-9]+$")
 
 
 class PromotionStrategyVersionResolutionIntegrityError(RuntimeError):
     pass
 
 
-class PromotionStrategyVersionResolutionStatus(StrEnum):
-    PASS = "PASS"
+@dataclass(frozen=True, slots=True)
+class SafeDslRuntimeIdentity:
+    version: str
+    python_runtime: str
+    dsl_source_hash: str
+    strategy_source_hash: str
+    market_source_hash: str
+    identity_hash: str
+
+    def __post_init__(self) -> None:
+        if self.version != RUNTIME_CODE_IDENTITY_VERSION:
+            raise PromotionStrategyVersionResolutionIntegrityError(
+                "runtime identity version is not canonical W83"
+            )
+        if not isinstance(self.python_runtime, str) or not _PYTHON_RUNTIME_RE.fullmatch(
+            self.python_runtime
+        ):
+            raise PromotionStrategyVersionResolutionIntegrityError(
+                "python runtime identity must include implementation and exact patch version"
+            )
+        for label, value in (
+            ("dsl_source_hash", self.dsl_source_hash),
+            ("strategy_source_hash", self.strategy_source_hash),
+            ("market_source_hash", self.market_source_hash),
+            ("identity_hash", self.identity_hash),
+        ):
+            _require_hash(value, label)
+        if self.identity_hash != _hash(_runtime_identity_payload(self, include_hash=False)):
+            raise PromotionStrategyVersionResolutionIntegrityError(
+                "safe DSL runtime identity hash mismatch"
+            )
+
+    def to_dict(self) -> dict[str, object]:
+        return _runtime_identity_payload(self, include_hash=True)
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,6 +93,10 @@ class PromotionStrategyVersionResolution:
     selected_strategy_version: str
     trial_code_version: str
     loaded_runtime_code_hash: str
+    runtime_python: str
+    runtime_dsl_source_hash: str
+    runtime_strategy_source_hash: str
+    runtime_market_source_hash: str
     strategy_spec_hash: str
     fee_product_economics_hash: str
     intent_fingerprint: str
@@ -91,13 +129,24 @@ class PromotionStrategyVersionResolution:
             ("selected_trial_fingerprint", self.selected_trial_fingerprint),
             ("trial_code_version", self.trial_code_version),
             ("loaded_runtime_code_hash", self.loaded_runtime_code_hash),
+            ("runtime_dsl_source_hash", self.runtime_dsl_source_hash),
+            ("runtime_strategy_source_hash", self.runtime_strategy_source_hash),
+            ("runtime_market_source_hash", self.runtime_market_source_hash),
             ("strategy_spec_hash", self.strategy_spec_hash),
             ("fee_product_economics_hash", self.fee_product_economics_hash),
             ("intent_fingerprint", self.intent_fingerprint),
             ("resolution_hash", self.resolution_hash),
         ):
             _require_hash(value, label)
-        if self.trial_code_version != self.loaded_runtime_code_hash:
+        runtime_identity = SafeDslRuntimeIdentity(
+            version=self.runtime_identity_version,
+            python_runtime=self.runtime_python,
+            dsl_source_hash=self.runtime_dsl_source_hash,
+            strategy_source_hash=self.runtime_strategy_source_hash,
+            market_source_hash=self.runtime_market_source_hash,
+            identity_hash=self.loaded_runtime_code_hash,
+        )
+        if self.trial_code_version != runtime_identity.identity_hash:
             raise PromotionStrategyVersionResolutionIntegrityError(
                 "trial code version must equal loaded safe DSL runtime identity"
             )
@@ -145,23 +194,38 @@ class PromotionStrategyVersionResolution:
         return _payload(self, include_hash=True)
 
 
-def safe_dsl_runtime_code_hash() -> str:
-    """Return a 64-hex identity for loaded safe-DSL bytes + Python major/minor."""
+def build_safe_dsl_runtime_identity() -> SafeDslRuntimeIdentity:
+    """Bind every local source file that can change safe-DSL signal semantics."""
 
-    source_path = inspect.getsourcefile(research_dsl.StrategySpec)
-    if source_path is None:
-        raise PromotionStrategyVersionResolutionIntegrityError(
-            "cannot locate safe DSL runtime source"
-        )
-    payload = {
+    values = {
         "version": RUNTIME_CODE_IDENTITY_VERSION,
-        "python": (
+        "python_runtime": (
             f"{sys.implementation.name}-"
-            f"{sys.version_info.major}.{sys.version_info.minor}"
+            f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
         ),
-        "dsl_source_sha256": sha256(Path(source_path).read_bytes()).hexdigest(),
+        "dsl_source_hash": _source_sha256(
+            research_dsl.StrategySpec,
+            "research/dsl.py",
+        ),
+        "strategy_source_hash": _source_sha256(
+            research_strategy.StrategyContext,
+            "research/strategy.py",
+        ),
+        "market_source_hash": _source_sha256(
+            research_market.Bar,
+            "research/market.py",
+        ),
     }
-    return _hash(payload)
+    return SafeDslRuntimeIdentity(
+        **values,
+        identity_hash=_hash(_runtime_identity_payload_from_values(values)),
+    )
+
+
+def safe_dsl_runtime_code_hash() -> str:
+    """Compatibility helper returning the semantic runtime identity hash."""
+
+    return build_safe_dsl_runtime_identity().identity_hash
 
 
 def resolve_promotion_strategy_version_binding(
@@ -187,11 +251,11 @@ def resolve_promotion_strategy_version_binding(
     _require_aware(resolved_at, "resolved_at")
 
     _validate_binding(binding_evidence)
-    loaded_runtime_hash = safe_dsl_runtime_code_hash()
+    runtime_identity = build_safe_dsl_runtime_identity()
     _validate_trial(
         binding_evidence=binding_evidence,
         selected_trial=selected_trial,
-        loaded_runtime_hash=loaded_runtime_hash,
+        loaded_runtime_hash=runtime_identity.identity_hash,
     )
     _validate_w82(
         binding_evidence=binding_evidence,
@@ -217,7 +281,7 @@ def resolve_promotion_strategy_version_binding(
     values = {
         "resolution_id": resolution_id,
         "contract_version": PROMOTION_STRATEGY_VERSION_RESOLUTION_VERSION,
-        "runtime_identity_version": RUNTIME_CODE_IDENTITY_VERSION,
+        "runtime_identity_version": runtime_identity.version,
         "binding_id": binding_evidence.binding_id,
         "binding_evidence_hash": binding_evidence.evidence_hash,
         "w82_resolution_id": w82_resolution.resolution_id,
@@ -229,7 +293,11 @@ def resolve_promotion_strategy_version_binding(
         "selected_strategy_id": selected_trial.strategy_id,
         "selected_strategy_version": selected_trial.strategy_version,
         "trial_code_version": selected_trial.code_version,
-        "loaded_runtime_code_hash": loaded_runtime_hash,
+        "loaded_runtime_code_hash": runtime_identity.identity_hash,
+        "runtime_python": runtime_identity.python_runtime,
+        "runtime_dsl_source_hash": runtime_identity.dsl_source_hash,
+        "runtime_strategy_source_hash": runtime_identity.strategy_source_hash,
+        "runtime_market_source_hash": runtime_identity.market_source_hash,
         "strategy_spec_hash": binding_evidence.strategy_spec_hash,
         "fee_product_economics_hash": binding_evidence.fee_product_economics_hash,
         "intent_fingerprint": binding_evidence.intent_fingerprint,
@@ -367,6 +435,29 @@ def _validate_w82(
         )
 
 
+def _runtime_identity_payload(
+    value: SafeDslRuntimeIdentity, *, include_hash: bool
+) -> dict[str, object]:
+    payload = _runtime_identity_payload_from_values(
+        {
+            "version": value.version,
+            "python_runtime": value.python_runtime,
+            "dsl_source_hash": value.dsl_source_hash,
+            "strategy_source_hash": value.strategy_source_hash,
+            "market_source_hash": value.market_source_hash,
+        }
+    )
+    if include_hash:
+        payload["identity_hash"] = value.identity_hash
+    return payload
+
+
+def _runtime_identity_payload_from_values(
+    values: dict[str, object],
+) -> dict[str, object]:
+    return dict(values)
+
+
 def _payload(
     value: PromotionStrategyVersionResolution, *, include_hash: bool
 ) -> dict[str, object]:
@@ -389,6 +480,10 @@ def _payload(
                 "selected_strategy_version",
                 "trial_code_version",
                 "loaded_runtime_code_hash",
+                "runtime_python",
+                "runtime_dsl_source_hash",
+                "runtime_strategy_source_hash",
+                "runtime_market_source_hash",
                 "strategy_spec_hash",
                 "fee_product_economics_hash",
                 "intent_fingerprint",
@@ -420,6 +515,15 @@ def _payload_from_values(values: dict[str, object]) -> dict[str, object]:
     )
     payload["resolved_at"] = _utc_iso(payload["resolved_at"])
     return payload
+
+
+def _source_sha256(subject: object, label: str) -> str:
+    source_path = inspect.getsourcefile(subject)
+    if source_path is None:
+        raise PromotionStrategyVersionResolutionIntegrityError(
+            f"cannot locate {label} runtime source"
+        )
+    return sha256(Path(source_path).read_bytes()).hexdigest()
 
 
 def _require_id(value: str, label: str) -> None:
@@ -475,6 +579,8 @@ __all__ = [
     "RUNTIME_CODE_IDENTITY_VERSION",
     "PromotionStrategyVersionResolution",
     "PromotionStrategyVersionResolutionIntegrityError",
+    "SafeDslRuntimeIdentity",
+    "build_safe_dsl_runtime_identity",
     "resolve_promotion_strategy_version_binding",
     "safe_dsl_runtime_code_hash",
 ]
