@@ -5,8 +5,11 @@ on:
     paths:
       - "src/autotrade/paper_candidate_admission.py"
       - "src/autotrade/paper_candidate_admission_lifecycle.py"
+      - "src/autotrade/paper_candidate_admission_final_verification.py"
+      - "src/autotrade/paper_candidate_eligibility_final.py"
       - "tests/test_w85_paper_candidate_admission.py"
       - "tests/test_w85_paper_candidate_lifecycle.py"
+      - "tests/test_w85_final_admission_and_eligibility.py"
       - "scripts/check_w85_paper_candidate_admission_boundary.py"
       - ".github/workflows/w85-paper-candidate-admission.yml"
       - ".github/workflows/core-tests.yml"
@@ -34,16 +37,20 @@ jobs:
           python -m compileall -q
           src/autotrade/paper_candidate_admission.py
           src/autotrade/paper_candidate_admission_lifecycle.py
+          src/autotrade/paper_candidate_admission_final_verification.py
+          src/autotrade/paper_candidate_eligibility_final.py
           tests/test_w85_paper_candidate_admission.py
           tests/test_w85_paper_candidate_lifecycle.py
+          tests/test_w85_final_admission_and_eligibility.py
           scripts/check_w85_paper_candidate_admission_boundary.py
       - name: W85 candidate admission authority boundary
         run: python scripts/check_w85_paper_candidate_admission_boundary.py
-      - name: W85 candidate admission and lifecycle tests
+      - name: W85 candidate admission, lifecycle and final verification tests
         run: >-
           pytest -q
           tests/test_w85_paper_candidate_admission.py
           tests/test_w85_paper_candidate_lifecycle.py
+          tests/test_w85_final_admission_and_eligibility.py
       - name: Re-prove W84 shadow-forward final boundary
         run: python scripts/check_w84_shadow_forward_promotion_boundary.py
       - name: Re-prove W83 strategy-version binding boundary
