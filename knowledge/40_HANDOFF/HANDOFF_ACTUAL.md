@@ -1,120 +1,180 @@
 # HANDOFF ACTUAL — AUTO-TRADE
 
-Fecha: 2026-08-23
-Estado: **R0–R5 formalmente certified; R6 first real PAPER canary broker-truth closed; W78/W79/W80/W81 technically certified; W82 Fee-Complete Execution Accounting next.**
+Fecha: 2026-08-24
+Estado: **R0–R5 formalmente certified; R6 first real PAPER canary broker-truth closed; W78/W79/W80/W81/W82 technically certified; TD-R7D-001/002 CLOSED; W83 strategy-version binding ACTIVE.**
 
 ## Fuente de verdad al retomar
 1. `knowledge/00_CANON/SOURCE_OF_TRUTH.md`;
 2. `knowledge/00_CANON/ESTADO_ACTUAL.md`;
 3. `knowledge/00_CANON/TAREA_ACTIVA.md`;
 4. `knowledge/00_CANON/debt_register_r7d_auto_paper.json`;
-5. `knowledge/30_DECISIONES/ADR-0013-w81-execution-cost-continuity.md`;
+5. `knowledge/30_DECISIONES/ADR-0014-w82-fee-complete-execution-accounting.md`;
 6. este handoff.
 
-R5 sigue siendo el último track formal certificado en el machine debt register principal. R6 y W78–W81 tienen hitos técnicos independientes.
+R5 sigue siendo el último track formal certificado del machine debt register principal. R6 y W78–W82 son hitos técnicos independientes.
 
 ## Stack activo
-- PR #49 — R7 real PAPER close, obligación operacional independiente;
+- PR #49 — R7 real PAPER close / lifecycle operacional independiente;
 - PR #50 — W78 execution qualification;
 - PR #51 — W79 promotion governance + Strategy Lab;
 - PR #52 — W80 durable promotion assessment;
-- PR #53 — W81 execution-cost continuity, DRAFT apilado sobre W80.
+- PR #53 — W81 execution-cost continuity;
+- PR #54 — W82 fee-complete deterministic execution accounting, DRAFT apilado sobre W81;
+- W83 debe abrirse como nuevo DRAFT PR apilado sobre el exact final W82 closure head sólo después de recertificar PR #54.
 
 No fusionar el stack fuera de orden.
 
-## W81 cerrado técnicamente
+## W82 — resultado final de comportamiento
+W82 cierra `TD-R7D-002 / FEE_ACCOUNTING_INCOMPLETE` para deterministic qualification mediante evidencias separadas y un resolver candidate-bound:
+
+1. base fee accounting ligado al exact Research cost model + W78/W81 evidence;
+2. product-aware fee mechanics;
+3. fresh versioned documented Alpaca crypto fee-schedule attestation;
+4. final candidate resolution que revalida identidad y semántica antes de retirar el blocker.
+
+`PromotionFeeAccountingResolution` V3 es el único punto que puede quitar `FEE_ACCOUNTING_INCOMPLETE`.
+
+### Alpaca crypto conservatism
+La attestation documental W82 fija:
+- canonical qualification venue: `alpaca-paper-model`;
+- Tier 1 maker 15 bps;
+- Tier 1 taker 25 bps;
+- conservative qualification floor 25 bps cuando no existe evidencia certificada de volume tier / liquidity role más favorable;
+- source snapshot fijo/versionado con expiry de 30 días.
+
+La resolución final exige además:
+- `FeeChargeConvention.RECEIVED_ASSET_PERCENT`;
+- `FeeLiquidityRole.WORST_CASE`.
+
+Una local caller policy no puede abaratar el floor. Una attestation Alpaca no puede mintarse para otro venue. Una receipt re-hasheada con charge convention o liquidity role distinto falla closed.
+
+### Fee truth real NO se fabrica
+Broker fee activity sigue separada:
+- `broker_authoritative_fee_proven=false`;
+- missing/unpublished activity => `PENDING_PUBLICATION`;
+- `fee_amount=None`;
+- `zero_fee_inferred=false`;
+- `realized_profitability_authorized=false`.
+
+Gross-vs-net position, rounding o residual quantity no son fuente válida de fee truth.
+
+## W82 behavioral exact-head evidence
 Behavioral implementation head:
 
-`a335e301c1252e32c225282b8bcbe8442787c6f2`
+`66dbc63941cb2d6552ff1dfadc292dc020e1ecb2`
 
-### Scientific continuity
-`src/autotrade/execution_cost_continuity.py` demuestra para cada escenario que el impacto side-aware midpoint -> adverse execution price no debilita `Research half_spread + slippage`.
+Dedicated W82 run `32684230790`:
+- **49/49 W82 PASS**;
+- W82 fee-accounting boundary PASS;
+- W82 promotion fee-resolution boundary PASS;
+- canonical Alpaca venue/charge/liquidity semantic hardening PASS;
+- W81/W80/W79/W78/Research boundaries PASS.
 
-Si algún scenario es favorable respecto al preregistro, el aggregate queda BLOCKED.
-
-### Promotion resolution
-`src/autotrade/promotion_cost_continuity.py` evita que un PASS W81 se reutilice para otra estrategia. Para quitar el blocker exige:
-- exact W80 receipt;
-- exact selected strategy;
-- exact intent fingerprint;
-- `EXECUTION_SENSITIVITY=PASS`;
-- exact W81 measurement hash en ese gate;
-- W81 continuity PASS;
-- resolución posterior a ambos source receipts.
-
-Sólo se remueve `TOTAL_EXECUTION_COST_CONTINUITY_UNPROVEN`.
-
-Permanecen:
-- `FEE_ACCOUNTING_INCOMPLETE`;
-- `EXECUTION_STRATEGY_VERSION_UNBOUND`;
-- `SHADOW_FORWARD_PROMOTION_BINDING_REQUIRED`;
-- `TD-R7D-003`.
-
-### Evidence
-Dedicated run `32673372166`:
-- 27/27 W81 PASS;
-- 12/12 W78 qualification PASS;
-- W81 scientific + candidate-resolution boundaries PASS;
-- W78/W79/W80/Research boundaries PASS.
-
-Core run `32673372143`:
-- 2917/2917 PASS;
-- coverage `85.04500398769511%`;
-- W81 modules 81% cada uno;
-- todos los boundaries heredados PASS;
+Core Safety run `32684230698`:
+- **2966/2966 PASS**;
+- exact coverage `85.12870855148343%`;
+- Contract Registry 10 PASS, SHA-256 `ddb94afa8916be37d0d956e6c32f775ea41c0fb79f4ea26d2d65dfa286c62785`;
+- inherited R5/R6/R7/W78–W82 boundaries PASS;
 - Debt Register PASS;
 - Canonical Knowledge PASS.
 
-## Debt result
-`TD-R7D-001` queda CLOSED con evidencia W81. Esto significa continuidad **non-fee** Research -> W78; no significa fee-complete P&L.
+## Canonical closure
+- `TD-R7D-001`: CLOSED;
+- `TD-R7D-002`: CLOSED;
+- `TD-R7D-003`: OPEN P2.
 
-## External PAPER truth
-No existe todavía un candidate-bound PAPER execution-price receipt suficientemente completo para atribuir realized price impact a un W80 candidate sin inferencias. No fabricar uno. Un futuro adapter debe ser read-only y exigir exact account/order/strategy/symbol provenance.
+El cierre de `TD-R7D-002` significa **fee-complete deterministic qualification accounting**. No significa broker-observed realized fee ni realized profitability.
 
-## W82 — retomar aquí
-Objetivo: cerrar `TD-R7D-002 / FEE_ACCOUNTING_INCOMPLETE`.
+Los blockers científicos aún abiertos son:
+- `EXECUTION_STRATEGY_VERSION_UNBOUND`;
+- `SHADOW_FORWARD_PROMOTION_BINDING_REQUIRED`.
 
-Diseñar accounting separado del `Fill` core que distinga:
-- Research fee assumption;
-- simulated W78 fee evidence;
-- authoritative PAPER fees cuando realmente existan;
-- fee currency/basis/product/venue;
-- gross vs fee vs net economics;
-- exact candidate/account/order provenance;
-- hash-bound completeness receipt.
+## Exact-head discipline de PR #54
+El cierre canónico/documental posterior al behavioral head debe volver a demostrar Dedicated W82 + Core Safety sobre el **mismo exact final head**.
 
-No inferir fees a partir de gross-vs-net position, rounding o residual quantity.
+Una vez verde:
+- actualizar PR #54 con ese exact head y los run IDs finales;
+- mantener PR #54 DRAFT por ser parte del stack;
+- no volver a editar canon sólo para copiar el nuevo SHA, evitando un loop de self-invalidating documentation commits.
 
-## Negative tests W82
-- missing/partial fee evidence => no COMPLETE;
-- wrong account/order/symbol/strategy;
-- wrong currency/basis;
-- negative/NaN/Infinity;
-- double-count spread/slippage;
-- assumption presentada como realized fee;
-- W81 BLOCKED usado como fee-complete base;
-- tampered receipt/hash/time;
-- fee blocker removido sin completeness receipt;
-- side-effect closure de partial-fill/version/shadow blockers;
-- broker/writer/Safety/OMS authority;
-- PAPER candidate true;
-- LIVE distinto de BLOCKED.
+## W83 — retomar aquí
+Objetivo: cerrar `EXECUTION_STRATEGY_VERSION_UNBOUND` sin habilitar Auto-Paper.
+
+La identidad disponible hoy es más fuerte que un version string:
+- `TrialSpec`: strategy id/version, parameters, dataset hash, split, phase, code version + canonical fingerprint;
+- W79 `StrategyPromotionPolicy`: selected trial id/fingerprint, selected strategy id/version, tournament fingerprint;
+- W80/W81/W82: candidate/assessment/economic-resolution chain;
+- `OrderIntent`: strategy id + intent fingerprint, sin strategy version.
+
+Por tanto, **no añadir `strategy_version` a `OrderIntent` por reflejo**. Primero inspeccionar el runtime/registry/DSL exactos y construir, si es viable, un sidecar `ExecutionStrategyVersionBinding` que pruebe:
+
+`selected candidate strategy == frozen deterministic strategy artifact == runtime strategy identity used to derive future intent identity`.
+
+Debe ligar como mínimo:
+- exact W79 candidate policy + selected trial fingerprint;
+- exact W80 assessment;
+- exact W81 resolution;
+- exact W82 resolution;
+- strategy id/version;
+- canonical artifact/DSL/config/parameters/defaults;
+- product/symbol/universe identity;
+- runtime/compiler/interpreter version cuando afecte semantics;
+- deterministic intent derivation proof;
+- chronology/freeze provenance;
+- immutable receipt hash.
+
+### Inspección prioritaria W83
+Antes de implementar, revisar:
+- `src/autotrade/research/strategy.py`;
+- `src/autotrade/research/registry.py`;
+- `src/autotrade/research/trials.py`;
+- `src/autotrade/research/tournament.py`;
+- W79 policy creation/validation en `strategy_lab_promotion.py`;
+- cualquier Strategy Runtime real que produzca `OrderIntent`;
+- persistencia/serialization del intent sólo para entender el boundary, sin modificarlo todavía.
+
+### Fail-closed W83
+Debe BLOCK/reject:
+- same id/version con artifact distinto;
+- artifact/params/default/runtime drift;
+- candidate/assessment/W81/W82 mismatch;
+- selected trial fingerprint mismatch;
+- intent derivado de otra estrategia;
+- version string spoof;
+- artifact congelado ex post cuando chronology lo prohíba;
+- receipt tampering/reuse;
+- missing canonical material;
+- nondeterministic reconstruction.
+
+W83 sólo podrá remover `EXECUTION_STRATEGY_VERSION_UNBOUND`.
+
+Debe conservar:
+- `SHADOW_FORWARD_PROMOTION_BINDING_REQUIRED`;
+- `TD-R7D-003` OPEN;
+- PAPER candidate FALSE;
+- external execution FALSE;
+- capital authority NONE;
+- broker-authoritative fee proof FALSE;
+- realized profitability unauthorized;
+- LIVE BLOCKED.
 
 ## R7B sigue independiente
-Nada en W81/W82 cierra la exposición PAPER residual del first canary. PR #49 mantiene su lifecycle risk-reducing, one-shot y GET-only recovery.
+Nada en W78–W83 resuelve por inferencia un lifecycle broker real. PR #49 mantiene su camino one-shot/GET-only recovery y sus propias condiciones operacionales.
 
 ## Regla de producto
-La cadena sigue siendo:
+La cadena futura permanece:
 
-`Research -> Promotion Evidence -> durable assessment -> economic qualification -> future PAPER Candidate Decision -> Strategy Runtime -> OrderIntent -> Portfolio -> Capital Safety -> OMS -> one-shot PAPER writer -> reconciliation -> Health`
+`Research -> Promotion Evidence -> Durable Assessment -> Economic Qualification -> Strategy Version Binding -> Shadow/Forward Binding -> PAPER Candidate Decision -> Strategy Runtime -> OrderIntent -> Portfolio -> Capital Safety -> OMS -> one-shot PAPER writer -> reconciliation -> Health`
 
-IA/model output no puede saltarse esa cadena.
+IA/model output nunca puede saltarse esa cadena ni llegar directamente a broker POST.
 
 ## Estado de autoridad
 - PAPER candidate: FALSE;
-- W81/W82 capital authority: NONE;
+- W78–W83 capital authority: NONE;
 - broker write desde capas científicas: NO;
 - credentials en Strategy Lab: NO;
+- broker-authoritative fee proof por W82: NO;
+- realized profitability claim: NO;
 - LIVE: BLOCKED.
 
 **LIVE TRADING: BLOQUEADO.**
