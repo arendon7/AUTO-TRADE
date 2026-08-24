@@ -5,10 +5,12 @@ on:
     paths:
       - "src/autotrade/forward_shadow_measurement.py"
       - "src/autotrade/promotion_shadow_forward_binding.py"
+      - "src/autotrade/promotion_shadow_forward_source_verification.py"
       - "tests/test_w84_forward_shadow_measurement.py"
       - "tests/test_w84_forward_shadow_measurement_coverage.py"
       - "tests/test_w84_shadow_forward_promotion_binding.py"
       - "tests/test_w84_shadow_forward_promotion_validation.py"
+      - "tests/test_w84_shadow_forward_source_verification.py"
       - "scripts/check_w84_shadow_forward_promotion_boundary.py"
       - ".github/workflows/w84-shadow-forward-promotion.yml"
       - ".github/workflows/core-tests.yml"
@@ -36,10 +38,12 @@ jobs:
           python -m compileall -q
           src/autotrade/forward_shadow_measurement.py
           src/autotrade/promotion_shadow_forward_binding.py
+          src/autotrade/promotion_shadow_forward_source_verification.py
           tests/test_w84_forward_shadow_measurement.py
           tests/test_w84_forward_shadow_measurement_coverage.py
           tests/test_w84_shadow_forward_promotion_binding.py
           tests/test_w84_shadow_forward_promotion_validation.py
+          tests/test_w84_shadow_forward_source_verification.py
           scripts/check_w84_shadow_forward_promotion_boundary.py
       - name: W84 shadow-forward promotion boundary
         run: python scripts/check_w84_shadow_forward_promotion_boundary.py
@@ -50,6 +54,7 @@ jobs:
           tests/test_w84_forward_shadow_measurement_coverage.py
           tests/test_w84_shadow_forward_promotion_binding.py
           tests/test_w84_shadow_forward_promotion_validation.py
+          tests/test_w84_shadow_forward_source_verification.py
       - name: Re-prove W83 strategy-version binding boundary
         run: python scripts/check_w83_strategy_version_binding_boundary.py
       - name: Re-prove W82 fee accounting boundary
