@@ -16,13 +16,17 @@ from autotrade.fee_product_economics import (
     FeeProductEconomicsEvidence,
     FeeProductEconomicsStatus,
 )
+from autotrade.fee_schedule_attestation import (
+    FeeScheduleAttestation,
+    FeeScheduleAttestationIntegrityError,
+)
 from autotrade.promotion_cost_continuity import (
     PromotionCostContinuityResolution,
     PromotionCostContinuityStatus,
 )
 
 
-RESOLUTION_CONTRACT_VERSION = "W82_PROMOTION_FEE_ACCOUNTING_RESOLUTION_V2"
+RESOLUTION_CONTRACT_VERSION = "W82_PROMOTION_FEE_ACCOUNTING_RESOLUTION_V3"
 STRATEGY_VERSION_BLOCKER = "EXECUTION_STRATEGY_VERSION_UNBOUND"
 SHADOW_FORWARD_BLOCKER = "SHADOW_FORWARD_PROMOTION_BINDING_REQUIRED"
 MAX_PERCENT_FEE_BPS = Decimal("10000")
@@ -61,6 +65,9 @@ class PromotionFeeAccountingResolution:
     fee_contract_hash: str
     fee_product_economics_hash: str
     fee_policy_hash: str
+    fee_schedule_attestation_hash: str
+    documented_fee_floor_bps: Decimal
+    fee_schedule_source_checked_at: datetime
     intent_fingerprint: str
     w81_resolved_at: datetime
     fee_assessed_at: datetime
@@ -72,6 +79,7 @@ class PromotionFeeAccountingResolution:
     fee_accounting_complete: bool
     fee_schedule_conservative: bool
     product_fee_economics_complete: bool
+    documented_fee_floor_satisfied: bool
     broker_authoritative_fee_proven: bool
     realized_profitability_authorized: bool
     strategy_version_execution_bound: bool
@@ -107,17 +115,26 @@ class PromotionFeeAccountingResolution:
             ("fee_contract_hash", self.fee_contract_hash),
             ("fee_product_economics_hash", self.fee_product_economics_hash),
             ("fee_policy_hash", self.fee_policy_hash),
+            ("fee_schedule_attestation_hash", self.fee_schedule_attestation_hash),
             ("intent_fingerprint", self.intent_fingerprint),
             ("resolution_hash", self.resolution_hash),
         ):
             _require_hash(value, label)
+        _require_non_negative_decimal(
+            self.documented_fee_floor_bps, "documented_fee_floor_bps"
+        )
         for label, value in (
+            ("fee_schedule_source_checked_at", self.fee_schedule_source_checked_at),
             ("w81_resolved_at", self.w81_resolved_at),
             ("fee_assessed_at", self.fee_assessed_at),
             ("fee_product_assessed_at", self.fee_product_assessed_at),
             ("resolved_at", self.resolved_at),
         ):
             _require_aware(value, label)
+        if _utc(self.resolved_at) < _utc(self.fee_schedule_source_checked_at):
+            raise PromotionFeeAccountingIntegrityError(
+                "W82 resolution may not predate fee schedule source verification"
+            )
         if _utc(self.resolved_at) < _utc(self.w81_resolved_at):
             raise PromotionFeeAccountingIntegrityError(
                 "W82 resolution may not predate W81 resolution"
@@ -170,6 +187,10 @@ class PromotionFeeAccountingResolution:
             if self.product_fee_economics_complete is not True:
                 raise PromotionFeeAccountingIntegrityError(
                     "PASS W82 resolution requires product-aware fee economics"
+                )
+            if self.documented_fee_floor_satisfied is not True:
+                raise PromotionFeeAccountingIntegrityError(
+                    "PASS W82 resolution requires documented broker fee floor"
                 )
         else:
             if not self.reason_codes:
@@ -234,17 +255,18 @@ def resolve_promotion_fee_accounting(
     w81_resolution: PromotionCostContinuityResolution,
     fee_evidence: FeeAccountingEvidence,
     product_economics: FeeProductEconomicsEvidence,
+    fee_schedule_attestation: FeeScheduleAttestation,
     execution_intent: OrderIntent,
     resolved_at: datetime,
 ) -> PromotionFeeAccountingResolution:
     """Resolve only the fee blocker for the exact W81-qualified candidate.
 
-    The base W82 receipt proves quote-equivalent simulated fee arithmetic. The
-    product-economics receipt additionally proves that the Research fee rate is no
-    cheaper than the hash-bound product/venue policy effective at the execution
-    observation and applies the literal charge convention to resulting base
-    quantity and quote cash. Neither receipt is broker-observed fee proof or
-    trading authority.
+    W82 requires three independent scientific layers: exact simulated fee
+    arithmetic, literal product fee mechanics, and a versioned documented broker
+    fee-floor attestation. The Alpaca crypto baseline assumes unknown/Tier-1
+    volume and no maker guarantee, therefore 25 bps until a future certified
+    evidence path proves a lower tier/role. None of these receipts grants broker
+    execution authority or proves realized profitability.
     """
 
     _require_id(resolution_id, "resolution_id")
@@ -257,6 +279,10 @@ def resolve_promotion_fee_accounting(
     if not isinstance(product_economics, FeeProductEconomicsEvidence):
         raise TypeError(
             "product_economics must be FeeProductEconomicsEvidence"
+        )
+    if not isinstance(fee_schedule_attestation, FeeScheduleAttestation):
+        raise TypeError(
+            "fee_schedule_attestation must be FeeScheduleAttestation"
         )
     if not isinstance(execution_intent, OrderIntent):
         raise TypeError("execution_intent must be OrderIntent")
@@ -296,10 +322,6 @@ def resolve_promotion_fee_accounting(
             "W81 resolution does not contain fee blocker"
         )
 
-    # Revalidate the complete W82 parent/child identity graph at the final
-    # blocker-removal boundary. Builders already enforce these relationships,
-    # but a deserialized/reconstructed receipt must not gain authority merely by
-    # retaining a subset of valid hashes.
     if product_economics.fee_accounting_evidence_hash != fee_evidence.evidence_hash:
         raise PromotionFeeAccountingIntegrityError(
             "product fee evidence is not bound to base W82 fee evidence"
@@ -349,10 +371,17 @@ def resolve_promotion_fee_accounting(
             "product fee evidence market-time binding mismatch"
         )
 
-    # All currently supported product fee conventions are percentage-based.
-    # A rate above 100% would create nonsensical received-asset economics (for
-    # example a BUY whose fee exceeds the acquired base quantity). Such evidence
-    # is structurally unusable for promotion even if it is internally hash-valid.
+    try:
+        fee_schedule_attestation.validate_for(
+            product_id=product_economics.product_id,
+            asset_class=product_economics.asset_class,
+            venue=product_economics.venue,
+            symbol=product_economics.symbol,
+            at=resolved_at,
+        )
+    except FeeScheduleAttestationIntegrityError as exc:
+        raise PromotionFeeAccountingIntegrityError(str(exc)) from exc
+
     if (
         product_economics.research_fee_bps > MAX_PERCENT_FEE_BPS
         or product_economics.required_minimum_fee_bps > MAX_PERCENT_FEE_BPS
@@ -391,6 +420,12 @@ def resolve_promotion_fee_accounting(
             "received-asset BUY fee currency binding mismatch"
         )
 
+    documented_floor = fee_schedule_attestation.required_fee_floor_bps
+    documented_fee_floor_satisfied = (
+        product_economics.research_fee_bps >= documented_floor
+        and product_economics.required_minimum_fee_bps >= documented_floor
+    )
+
     reasons: list[str] = []
     if w81_resolution.status is not PromotionCostContinuityStatus.PASS:
         reasons.append("W81_CONTINUITY_RESOLUTION_NOT_PASS")
@@ -409,6 +444,10 @@ def resolve_promotion_fee_accounting(
         reasons.append("FEE_SCHEDULE_NOT_CONSERVATIVE")
     if not product_economics.product_fee_economics_complete:
         reasons.append("PRODUCT_FEE_ECONOMICS_INCOMPLETE")
+    if product_economics.research_fee_bps < documented_floor:
+        reasons.append("RESEARCH_FEE_BELOW_DOCUMENTED_BROKER_FLOOR")
+    if product_economics.required_minimum_fee_bps < documented_floor:
+        reasons.append("PRODUCT_POLICY_BELOW_DOCUMENTED_BROKER_FLOOR")
 
     status = (
         PromotionFeeAccountingStatus.PASS
@@ -440,6 +479,9 @@ def resolve_promotion_fee_accounting(
         "fee_contract_hash": fee_evidence.fee_contract_hash,
         "fee_product_economics_hash": product_economics.evidence_hash,
         "fee_policy_hash": product_economics.fee_policy_hash,
+        "fee_schedule_attestation_hash": fee_schedule_attestation.attestation_hash,
+        "documented_fee_floor_bps": documented_floor,
+        "fee_schedule_source_checked_at": fee_schedule_attestation.source_checked_at,
         "intent_fingerprint": intent_hash,
         "w81_resolved_at": w81_resolution.resolved_at,
         "fee_assessed_at": fee_evidence.assessed_at,
@@ -451,6 +493,7 @@ def resolve_promotion_fee_accounting(
         "fee_accounting_complete": status is PromotionFeeAccountingStatus.PASS,
         "fee_schedule_conservative": product_economics.fee_schedule_conservative,
         "product_fee_economics_complete": product_economics.product_fee_economics_complete,
+        "documented_fee_floor_satisfied": documented_fee_floor_satisfied,
         "broker_authoritative_fee_proven": False,
         "realized_profitability_authorized": False,
         "strategy_version_execution_bound": False,
@@ -488,6 +531,9 @@ def _payload(
             "fee_contract_hash": value.fee_contract_hash,
             "fee_product_economics_hash": value.fee_product_economics_hash,
             "fee_policy_hash": value.fee_policy_hash,
+            "fee_schedule_attestation_hash": value.fee_schedule_attestation_hash,
+            "documented_fee_floor_bps": value.documented_fee_floor_bps,
+            "fee_schedule_source_checked_at": value.fee_schedule_source_checked_at,
             "intent_fingerprint": value.intent_fingerprint,
             "w81_resolved_at": value.w81_resolved_at,
             "fee_assessed_at": value.fee_assessed_at,
@@ -499,6 +545,7 @@ def _payload(
             "fee_accounting_complete": value.fee_accounting_complete,
             "fee_schedule_conservative": value.fee_schedule_conservative,
             "product_fee_economics_complete": value.product_fee_economics_complete,
+            "documented_fee_floor_satisfied": value.documented_fee_floor_satisfied,
             "broker_authoritative_fee_proven": value.broker_authoritative_fee_proven,
             "realized_profitability_authorized": value.realized_profitability_authorized,
             "strategy_version_execution_bound": value.strategy_version_execution_bound,
@@ -525,7 +572,11 @@ def _payload_from_values(values: dict[str, object]) -> dict[str, object]:
     payload["remaining_promotion_blockers"] = list(
         payload["remaining_promotion_blockers"]
     )
+    payload["documented_fee_floor_bps"] = _decimal(
+        payload["documented_fee_floor_bps"]
+    )
     for key in (
+        "fee_schedule_source_checked_at",
         "w81_resolved_at",
         "fee_assessed_at",
         "fee_product_assessed_at",
@@ -560,6 +611,13 @@ def _require_aware(value: datetime, label: str) -> None:
         )
 
 
+def _require_non_negative_decimal(value: Decimal, label: str) -> None:
+    if not isinstance(value, Decimal) or not value.is_finite() or value < 0:
+        raise PromotionFeeAccountingIntegrityError(
+            f"{label} must be finite Decimal >= 0"
+        )
+
+
 def _utc(value: datetime) -> datetime:
     _require_aware(value, "datetime")
     return value.astimezone(timezone.utc)
@@ -567,6 +625,13 @@ def _utc(value: datetime) -> datetime:
 
 def _utc_iso(value: datetime) -> str:
     return _utc(value).isoformat()
+
+
+def _decimal(value: Decimal) -> str:
+    text = format(value, "f")
+    if "." in text:
+        text = text.rstrip("0").rstrip(".")
+    return text or "0"
 
 
 def _enum_value(value: object) -> str:
