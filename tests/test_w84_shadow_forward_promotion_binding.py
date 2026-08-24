@@ -178,16 +178,24 @@ def _rehash_policy(policy, **changes):
 
 
 def _rehash_evidence(evidence, **changes):
+    """Forge a persisted/tampered instance to test resolver-side defenses.
+
+    Normal construction must reject authority escalation in __post_init__. This
+    helper deliberately bypasses that constructor so the resolver is also proven
+    fail-closed against an object materialized from corrupted external storage.
+    """
+
     values = {
         field.name: getattr(evidence, field.name)
         for field in fields(evidence)
         if field.name != "evidence_hash"
     }
     values.update(changes)
-    return w84.ShadowForwardPromotionEvidence(
-        **values,
-        evidence_hash=w84._hash(w84._evidence_payload_from_values(values)),
-    )
+    values["evidence_hash"] = w84._hash(w84._evidence_payload_from_values(values))
+    forged = object.__new__(w84.ShadowForwardPromotionEvidence)
+    for field in fields(w84.ShadowForwardPromotionEvidence):
+        object.__setattr__(forged, field.name, values[field.name])
+    return forged
 
 
 def _base(tmp_path, limits, market, empty_portfolio, market_buy_intent, **policy_overrides):
@@ -637,7 +645,6 @@ def test_w84_capture_lag_and_assessment_delay_fail_closed_before_next_period_can
             captured_at=captured_at,
         )
 
-    # A fresh independent set proves the post-capture decision budget.
     other = tmp_path / "delay"
     other.mkdir()
     _, shadow2, forward2, _, captured2 = _build_registries(
