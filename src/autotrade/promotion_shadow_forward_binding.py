@@ -8,21 +8,36 @@ from hashlib import sha256
 import json
 import re
 
+import autotrade.forward_shadow_measurement as measurement_module
 import autotrade.promotion_strategy_version_binding as w83_resolution_module
-from autotrade.promotion_fee_accounting import SHADOW_FORWARD_BLOCKER
-from autotrade.promotion_strategy_version_binding import PromotionStrategyVersionResolution
-from autotrade.research.forward import FrozenForwardPolicy, SQLiteForwardEvidenceRegistry
-from autotrade.research.shadow import FrozenShadowConfig, SQLitePortfolioShadowRegistry
 import autotrade.strategy_execution_binding as w83_binding_module
+from autotrade.forward_shadow_measurement import (
+    GENESIS_MEASUREMENT_HASH,
+    ForwardMeasurementPlan,
+    ForwardShadowMeasurementIntegrityError,
+    build_forward_shadow_measurements,
+    measurement_receipts_hash,
+    verify_shadow_measurement_binding,
+)
+from autotrade.promotion_fee_accounting import SHADOW_FORWARD_BLOCKER
+from autotrade.promotion_strategy_version_binding import (
+    PromotionStrategyVersionResolution,
+    build_safe_dsl_runtime_identity,
+)
+from autotrade.research.backtest import BacktestConfig
+from autotrade.research.dsl import StrategySpec
+from autotrade.research.forward import FrozenForwardPolicy, SQLiteForwardEvidenceRegistry
+from autotrade.research.market import MarketDataset
+from autotrade.research.shadow import FrozenShadowConfig, SQLitePortfolioShadowRegistry
 from autotrade.strategy_execution_binding import (
     ExecutionStrategyBindingEvidence,
     ExecutionStrategyBindingStatus,
 )
 
 
-SHADOW_FORWARD_PROMOTION_POLICY_VERSION = "W84_SHADOW_FORWARD_PROMOTION_POLICY_V1"
-SHADOW_FORWARD_PROMOTION_EVIDENCE_VERSION = "W84_SHADOW_FORWARD_PROMOTION_EVIDENCE_V1"
-PROMOTION_SHADOW_FORWARD_RESOLUTION_VERSION = "W84_PROMOTION_SHADOW_FORWARD_RESOLUTION_V1"
+SHADOW_FORWARD_PROMOTION_POLICY_VERSION = "W84_SHADOW_FORWARD_PROMOTION_POLICY_V2"
+SHADOW_FORWARD_PROMOTION_EVIDENCE_VERSION = "W84_SHADOW_FORWARD_PROMOTION_EVIDENCE_V2"
+PROMOTION_SHADOW_FORWARD_RESOLUTION_VERSION = "W84_PROMOTION_SHADOW_FORWARD_RESOLUTION_V2"
 GENESIS_HASH = "0" * 64
 _HASH_RE = re.compile(r"^[0-9a-f]{64}$")
 _ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$")
@@ -40,7 +55,7 @@ class ShadowForwardPromotionStatus(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class ShadowForwardPromotionPolicy:
-    """Candidate-bound preregistration committed by the R5 frozen shadow config."""
+    """Complete candidate + measurement + threshold preregistration for W84."""
 
     policy_id: str
     contract_version: str
@@ -58,6 +73,13 @@ class ShadowForwardPromotionPolicy:
     strategy_spec_hash: str
     runtime_code_hash: str
     intent_fingerprint: str
+    measurement_plan_id: str
+    measurement_plan_hash: str
+    measurement_runtime_hash: str
+    backtest_config_hash: str
+    history_dataset_hash: str
+    dataset_source: str
+    timeframe_seconds: int
     shadow_config_id: str
     shadow_initial_nav: Decimal
     shadow_activated_at: datetime
@@ -67,6 +89,8 @@ class ShadowForwardPromotionPolicy:
     minimum_forward_duration_seconds: int
     min_cumulative_return: Decimal
     max_peak_to_trough_drawdown: Decimal
+    max_capture_lag_seconds: int
+    max_assessment_delay_seconds: int
     frozen_at: datetime
     paper_candidate_authorized: bool
     external_execution_authorized: bool
@@ -85,6 +109,7 @@ class ShadowForwardPromotionPolicy:
             ("selected_trial_id", self.selected_trial_id),
             ("selected_strategy_id", self.selected_strategy_id),
             ("selected_strategy_version", self.selected_strategy_version),
+            ("measurement_plan_id", self.measurement_plan_id),
             ("shadow_config_id", self.shadow_config_id),
             ("forward_campaign_id", self.forward_campaign_id),
         ):
@@ -101,19 +126,32 @@ class ShadowForwardPromotionPolicy:
             ("strategy_spec_hash", self.strategy_spec_hash),
             ("runtime_code_hash", self.runtime_code_hash),
             ("intent_fingerprint", self.intent_fingerprint),
+            ("measurement_plan_hash", self.measurement_plan_hash),
+            ("measurement_runtime_hash", self.measurement_runtime_hash),
+            ("backtest_config_hash", self.backtest_config_hash),
+            ("history_dataset_hash", self.history_dataset_hash),
             ("policy_hash", self.policy_hash),
         ):
             _require_hash(value, label)
+        if not isinstance(self.dataset_source, str) or not self.dataset_source.strip():
+            raise ShadowForwardPromotionIntegrityError("dataset_source is required")
         if self.forward_campaign_id == self.development_campaign_id:
             raise ShadowForwardPromotionIntegrityError(
                 "forward campaign must be distinct from DEVELOPMENT campaign"
             )
         _require_positive_decimal(self.shadow_initial_nav, "shadow_initial_nav")
+        _require_positive_int(self.timeframe_seconds, "timeframe_seconds")
         _require_positive_int(self.required_forward_periods, "required_forward_periods")
         _require_positive_int(
             self.minimum_forward_duration_seconds,
             "minimum_forward_duration_seconds",
         )
+        if self.minimum_forward_duration_seconds > (
+            self.required_forward_periods * self.timeframe_seconds
+        ):
+            raise ShadowForwardPromotionIntegrityError(
+                "minimum forward duration cannot exceed fixed qualification horizon"
+            )
         _require_finite_decimal(self.min_cumulative_return, "min_cumulative_return")
         if self.min_cumulative_return <= Decimal("-1"):
             raise ShadowForwardPromotionIntegrityError(
@@ -127,6 +165,18 @@ class ShadowForwardPromotionPolicy:
             raise ShadowForwardPromotionIntegrityError(
                 "max_peak_to_trough_drawdown must be within [0,1]"
             )
+        _require_nonnegative_int(self.max_capture_lag_seconds, "max_capture_lag_seconds")
+        _require_nonnegative_int(
+            self.max_assessment_delay_seconds,
+            "max_assessment_delay_seconds",
+        )
+        if (
+            self.max_capture_lag_seconds + self.max_assessment_delay_seconds
+            >= self.timeframe_seconds
+        ):
+            raise ShadowForwardPromotionIntegrityError(
+                "capture + assessment lag budget must be shorter than one market period"
+            )
         for label, value in (
             ("frozen_at", self.frozen_at),
             ("shadow_activated_at", self.shadow_activated_at),
@@ -136,10 +186,10 @@ class ShadowForwardPromotionPolicy:
         if not (
             _utc(self.frozen_at)
             <= _utc(self.shadow_activated_at)
-            <= _utc(self.forward_activated_at)
+            < _utc(self.forward_activated_at)
         ):
             raise ShadowForwardPromotionIntegrityError(
-                "W84 chronology must be frozen_at <= shadow activation <= forward activation"
+                "W84 chronology must be frozen_at <= shadow activation < forward activation"
             )
         _require_no_authority(
             paper=self.paper_candidate_authorized,
@@ -171,6 +221,18 @@ class ShadowForwardPromotionEvidence:
     selected_strategy_version: str
     strategy_spec_hash: str
     runtime_code_hash: str
+    measurement_plan_id: str
+    measurement_plan_hash: str
+    measurement_runtime_hash: str
+    backtest_config_hash: str
+    history_dataset_hash: str
+    measurement_receipts_hash: str
+    measurement_head_hash: str
+    measurement_receipts_count: int
+    measurement_data_cutoff_at: datetime
+    measurement_captured_at: datetime
+    capture_lag_seconds: int
+    assessment_delay_seconds: int
     shadow_config_fingerprint: str
     shadow_policy_commitment_hash: str
     shadow_control_hash: str
@@ -183,6 +245,7 @@ class ShadowForwardPromotionEvidence:
     required_forward_periods: int
     qualification_periods_used: int
     qualification_head_hash: str
+    qualification_measurement_head_hash: str
     qualification_started_at: datetime | None
     qualification_ended_at: datetime | None
     qualification_duration_seconds: int
@@ -192,6 +255,10 @@ class ShadowForwardPromotionEvidence:
     reason_codes: tuple[str, ...]
     exact_candidate_shadow_bound: bool
     policy_preregistered_in_shadow_config: bool
+    measurement_plan_preregistered: bool
+    per_observation_measurement_bound: bool
+    prefix_only_measurement_bound: bool
+    measurement_freshness_bound: bool
     forward_policy_committed: bool
     full_observed_forward_tail_bound: bool
     fixed_forward_window_bound: bool
@@ -210,6 +277,7 @@ class ShadowForwardPromotionEvidence:
             ("w83_resolution_id", self.w83_resolution_id),
             ("selected_strategy_id", self.selected_strategy_id),
             ("selected_strategy_version", self.selected_strategy_version),
+            ("measurement_plan_id", self.measurement_plan_id),
         ):
             _require_id(value, label)
         if self.contract_version != SHADOW_FORWARD_PROMOTION_EVIDENCE_VERSION:
@@ -222,6 +290,12 @@ class ShadowForwardPromotionEvidence:
             ("w83_binding_hash", self.w83_binding_hash),
             ("strategy_spec_hash", self.strategy_spec_hash),
             ("runtime_code_hash", self.runtime_code_hash),
+            ("measurement_plan_hash", self.measurement_plan_hash),
+            ("measurement_runtime_hash", self.measurement_runtime_hash),
+            ("backtest_config_hash", self.backtest_config_hash),
+            ("history_dataset_hash", self.history_dataset_hash),
+            ("measurement_receipts_hash", self.measurement_receipts_hash),
+            ("measurement_head_hash", self.measurement_head_hash),
             ("shadow_config_fingerprint", self.shadow_config_fingerprint),
             ("shadow_policy_commitment_hash", self.shadow_policy_commitment_hash),
             ("shadow_control_hash", self.shadow_control_hash),
@@ -230,21 +304,35 @@ class ShadowForwardPromotionEvidence:
             ("forward_control_hash", self.forward_control_hash),
             ("forward_head_hash", self.forward_head_hash),
             ("qualification_head_hash", self.qualification_head_hash),
+            ("qualification_measurement_head_hash", self.qualification_measurement_head_hash),
             ("evidence_hash", self.evidence_hash),
         ):
             _require_hash(value, label)
-        _require_nonnegative_int(self.shadow_sequence, "shadow_sequence")
-        _require_nonnegative_int(self.forward_sequence, "forward_sequence")
+        for label, value in (
+            ("measurement_receipts_count", self.measurement_receipts_count),
+            ("capture_lag_seconds", self.capture_lag_seconds),
+            ("assessment_delay_seconds", self.assessment_delay_seconds),
+            ("shadow_sequence", self.shadow_sequence),
+            ("forward_sequence", self.forward_sequence),
+            ("qualification_periods_used", self.qualification_periods_used),
+            ("qualification_duration_seconds", self.qualification_duration_seconds),
+        ):
+            _require_nonnegative_int(value, label)
         _require_positive_int(self.required_forward_periods, "required_forward_periods")
-        _require_nonnegative_int(
-            self.qualification_periods_used, "qualification_periods_used"
-        )
-        _require_nonnegative_int(
-            self.qualification_duration_seconds, "qualification_duration_seconds"
-        )
         if self.qualification_periods_used > self.required_forward_periods:
             raise ShadowForwardPromotionIntegrityError(
                 "qualification period count may not exceed frozen horizon"
+            )
+        _require_aware(self.measurement_data_cutoff_at, "measurement_data_cutoff_at")
+        _require_aware(self.measurement_captured_at, "measurement_captured_at")
+        _require_aware(self.assessed_at, "assessed_at")
+        if _utc(self.measurement_captured_at) < _utc(self.measurement_data_cutoff_at):
+            raise ShadowForwardPromotionIntegrityError(
+                "measurement capture cannot predate data cutoff"
+            )
+        if _utc(self.assessed_at) < _utc(self.measurement_captured_at):
+            raise ShadowForwardPromotionIntegrityError(
+                "assessment cannot predate measurement capture"
             )
         if (self.qualification_started_at is None) != (
             self.qualification_ended_at is None
@@ -257,9 +345,10 @@ class ShadowForwardPromotionEvidence:
                 self.qualification_periods_used != 0
                 or self.qualification_duration_seconds != 0
                 or self.qualification_head_hash != GENESIS_HASH
+                or self.qualification_measurement_head_hash != GENESIS_MEASUREMENT_HASH
             ):
                 raise ShadowForwardPromotionIntegrityError(
-                    "empty qualification window requires zero counts and genesis head"
+                    "empty qualification window requires zero counts and genesis heads"
                 )
         else:
             _require_aware(self.qualification_started_at, "qualification_started_at")
@@ -302,10 +391,11 @@ class ShadowForwardPromotionEvidence:
             )
         for label, value in (
             ("exact_candidate_shadow_bound", self.exact_candidate_shadow_bound),
-            (
-                "policy_preregistered_in_shadow_config",
-                self.policy_preregistered_in_shadow_config,
-            ),
+            ("policy_preregistered_in_shadow_config", self.policy_preregistered_in_shadow_config),
+            ("measurement_plan_preregistered", self.measurement_plan_preregistered),
+            ("per_observation_measurement_bound", self.per_observation_measurement_bound),
+            ("prefix_only_measurement_bound", self.prefix_only_measurement_bound),
+            ("measurement_freshness_bound", self.measurement_freshness_bound),
             ("forward_policy_committed", self.forward_policy_committed),
             ("full_observed_forward_tail_bound", self.full_observed_forward_tail_bound),
             ("fixed_forward_window_bound", self.fixed_forward_window_bound),
@@ -322,13 +412,6 @@ class ShadowForwardPromotionEvidence:
             live=self.live_trading,
             label="W84 evidence",
         )
-        _require_aware(self.assessed_at, "assessed_at")
-        if self.qualification_ended_at is not None and _utc(self.assessed_at) < _utc(
-            self.qualification_ended_at
-        ):
-            raise ShadowForwardPromotionIntegrityError(
-                "W84 assessment cannot predate qualification evidence"
-            )
         if self.evidence_hash != _hash(_evidence_payload(self, include_hash=False)):
             raise ShadowForwardPromotionIntegrityError(
                 "shadow/forward promotion evidence hash mismatch"
@@ -356,6 +439,8 @@ class PromotionShadowForwardResolution:
     selected_strategy_version: str
     strategy_spec_hash: str
     runtime_code_hash: str
+    measurement_plan_hash: str
+    measurement_runtime_hash: str
     resolved_promotion_blockers: tuple[str, ...]
     remaining_promotion_blockers: tuple[str, ...]
     strategy_version_execution_bound: bool
@@ -392,6 +477,8 @@ class PromotionShadowForwardResolution:
             ("selected_trial_fingerprint", self.selected_trial_fingerprint),
             ("strategy_spec_hash", self.strategy_spec_hash),
             ("runtime_code_hash", self.runtime_code_hash),
+            ("measurement_plan_hash", self.measurement_plan_hash),
+            ("measurement_runtime_hash", self.measurement_runtime_hash),
             ("resolution_hash", self.resolution_hash),
         ):
             _require_hash(value, label)
@@ -439,18 +526,19 @@ def build_shadow_forward_promotion_policy(
     policy_id: str,
     w83_resolution: PromotionStrategyVersionResolution,
     binding_evidence: ExecutionStrategyBindingEvidence,
+    measurement_plan: ForwardMeasurementPlan,
     shadow_config_id: str,
     shadow_initial_nav: Decimal,
     shadow_activated_at: datetime,
     forward_campaign_id: str,
-    forward_activated_at: datetime,
     required_forward_periods: int,
     minimum_forward_duration_seconds: int,
     min_cumulative_return: Decimal,
     max_peak_to_trough_drawdown: Decimal,
-    frozen_at: datetime,
+    max_capture_lag_seconds: int,
+    max_assessment_delay_seconds: int,
 ) -> ShadowForwardPromotionPolicy:
-    """Freeze candidate identity, shadow plan, forward horizon and thresholds pre-outcome."""
+    """Freeze candidate, measurement semantics, fixed horizon and thresholds pre-outcome."""
 
     _require_id(policy_id, "policy_id")
     _require_id(shadow_config_id, "shadow_config_id")
@@ -459,12 +547,14 @@ def build_shadow_forward_promotion_policy(
         w83_resolution=w83_resolution,
         binding_evidence=binding_evidence,
     )
-    if _utc(frozen_at) < max(
-        _utc(w83_resolution.resolved_at),
-        _utc(binding_evidence.assessed_at),
-    ):
+    _validate_measurement_plan(
+        measurement_plan=measurement_plan,
+        w83_resolution=w83_resolution,
+        binding_evidence=binding_evidence,
+    )
+    if shadow_initial_nav != measurement_plan.initial_cash:
         raise ShadowForwardPromotionIntegrityError(
-            "W84 policy freeze cannot predate exact W83 proof"
+            "shadow initial NAV must equal frozen forward backtest initial cash"
         )
     values = {
         "policy_id": policy_id,
@@ -483,16 +573,25 @@ def build_shadow_forward_promotion_policy(
         "strategy_spec_hash": w83_resolution.strategy_spec_hash,
         "runtime_code_hash": w83_resolution.loaded_runtime_code_hash,
         "intent_fingerprint": w83_resolution.intent_fingerprint,
+        "measurement_plan_id": measurement_plan.plan_id,
+        "measurement_plan_hash": measurement_plan.plan_hash,
+        "measurement_runtime_hash": measurement_plan.measurement_runtime_hash,
+        "backtest_config_hash": measurement_plan.backtest_config_hash,
+        "history_dataset_hash": measurement_plan.history_dataset_hash,
+        "dataset_source": measurement_plan.dataset_source,
+        "timeframe_seconds": measurement_plan.timeframe_seconds,
         "shadow_config_id": shadow_config_id,
         "shadow_initial_nav": shadow_initial_nav,
         "shadow_activated_at": shadow_activated_at,
         "forward_campaign_id": forward_campaign_id,
-        "forward_activated_at": forward_activated_at,
+        "forward_activated_at": measurement_plan.forward_activated_at,
         "required_forward_periods": required_forward_periods,
         "minimum_forward_duration_seconds": minimum_forward_duration_seconds,
         "min_cumulative_return": min_cumulative_return,
         "max_peak_to_trough_drawdown": max_peak_to_trough_drawdown,
-        "frozen_at": frozen_at,
+        "max_capture_lag_seconds": max_capture_lag_seconds,
+        "max_assessment_delay_seconds": max_assessment_delay_seconds,
+        "frozen_at": measurement_plan.planned_at,
         "paper_candidate_authorized": False,
         "external_execution_authorized": False,
         "runtime_execution_authorized": False,
@@ -508,18 +607,20 @@ def build_shadow_forward_promotion_policy(
 def build_candidate_shadow_config(
     *,
     policy: ShadowForwardPromotionPolicy,
+    measurement_plan: ForwardMeasurementPlan,
     w83_resolution: PromotionStrategyVersionResolution,
     binding_evidence: ExecutionStrategyBindingEvidence,
 ) -> FrozenShadowConfig:
-    """Build the R5 config whose source hash commits the complete W84 preregistration."""
-
     _validate_policy(policy)
-    _validate_w83_pair(
+    _validate_w83_pair(w83_resolution=w83_resolution, binding_evidence=binding_evidence)
+    _validate_measurement_plan(
+        measurement_plan=measurement_plan,
         w83_resolution=w83_resolution,
         binding_evidence=binding_evidence,
     )
-    _validate_policy_w83_binding(
+    _validate_policy_bindings(
         policy=policy,
+        measurement_plan=measurement_plan,
         w83_resolution=w83_resolution,
         binding_evidence=binding_evidence,
     )
@@ -535,17 +636,21 @@ def build_candidate_shadow_config(
 def build_bound_forward_policy(
     *,
     policy: ShadowForwardPromotionPolicy,
+    measurement_plan: ForwardMeasurementPlan,
     shadow_config: FrozenShadowConfig,
     w83_resolution: PromotionStrategyVersionResolution,
     binding_evidence: ExecutionStrategyBindingEvidence,
 ) -> FrozenForwardPolicy:
     _validate_policy(policy)
-    _validate_w83_pair(
+    _validate_w83_pair(w83_resolution=w83_resolution, binding_evidence=binding_evidence)
+    _validate_measurement_plan(
+        measurement_plan=measurement_plan,
         w83_resolution=w83_resolution,
         binding_evidence=binding_evidence,
     )
-    _validate_policy_w83_binding(
+    _validate_policy_bindings(
         policy=policy,
+        measurement_plan=measurement_plan,
         w83_resolution=w83_resolution,
         binding_evidence=binding_evidence,
     )
@@ -559,7 +664,7 @@ def build_bound_forward_policy(
         activated_at=policy.forward_activated_at,
         shadow_config_fingerprint=shadow_config.fingerprint,
         frozen_parameters_hash=policy.policy_hash,
-        source_code_hash=w83_resolution.loaded_runtime_code_hash,
+        source_code_hash=policy.measurement_runtime_hash,
     )
 
 
@@ -567,30 +672,74 @@ def assess_shadow_forward_promotion(
     *,
     evidence_id: str,
     policy: ShadowForwardPromotionPolicy,
+    measurement_plan: ForwardMeasurementPlan,
     w83_resolution: PromotionStrategyVersionResolution,
     binding_evidence: ExecutionStrategyBindingEvidence,
+    strategy_spec: StrategySpec,
+    backtest_config: BacktestConfig,
+    history_dataset: MarketDataset,
+    post_freeze_dataset: MarketDataset,
+    measurement_captured_at: datetime,
     shadow_registry: SQLitePortfolioShadowRegistry,
     forward_registry: SQLiteForwardEvidenceRegistry,
     assessed_at: datetime,
 ) -> ShadowForwardPromotionEvidence:
-    """Read and bind verified R5 evidence to a fixed preregistered qualification window."""
+    """Recompute source returns, verify R5 chains, then evaluate only frozen horizon."""
 
     _require_id(evidence_id, "evidence_id")
     if not isinstance(shadow_registry, SQLitePortfolioShadowRegistry):
         raise TypeError("shadow_registry must be SQLitePortfolioShadowRegistry")
     if not isinstance(forward_registry, SQLiteForwardEvidenceRegistry):
         raise TypeError("forward_registry must be SQLiteForwardEvidenceRegistry")
+    if not isinstance(post_freeze_dataset, MarketDataset):
+        raise TypeError("post_freeze_dataset must be MarketDataset")
     _validate_policy(policy)
-    _validate_w83_pair(
+    _validate_w83_pair(w83_resolution=w83_resolution, binding_evidence=binding_evidence)
+    _validate_measurement_plan(
+        measurement_plan=measurement_plan,
         w83_resolution=w83_resolution,
         binding_evidence=binding_evidence,
     )
-    _validate_policy_w83_binding(
+    _validate_policy_bindings(
         policy=policy,
+        measurement_plan=measurement_plan,
         w83_resolution=w83_resolution,
         binding_evidence=binding_evidence,
     )
+    _require_aware(measurement_captured_at, "measurement_captured_at")
     _require_aware(assessed_at, "assessed_at")
+
+    capture_lag = int(
+        (_utc(measurement_captured_at) - _utc(post_freeze_dataset.ended_at)).total_seconds()
+    )
+    if capture_lag < 0 or capture_lag > policy.max_capture_lag_seconds:
+        raise ShadowForwardPromotionIntegrityError(
+            "forward market dataset capture exceeds frozen freshness budget"
+        )
+    assessment_delay = int(
+        (_utc(assessed_at) - _utc(measurement_captured_at)).total_seconds()
+    )
+    if assessment_delay < 0 or assessment_delay > policy.max_assessment_delay_seconds:
+        raise ShadowForwardPromotionIntegrityError(
+            "W84 assessment exceeds frozen post-capture decision budget"
+        )
+
+    try:
+        receipts = build_forward_shadow_measurements(
+            plan=measurement_plan,
+            policy_hash=policy.policy_hash,
+            w83_resolution=w83_resolution,
+            binding_evidence=binding_evidence,
+            strategy_spec=strategy_spec,
+            backtest_config=backtest_config,
+            history_dataset=history_dataset,
+            post_freeze_dataset=post_freeze_dataset,
+            captured_at=measurement_captured_at,
+        )
+    except ForwardShadowMeasurementIntegrityError as exc:
+        raise ShadowForwardPromotionIntegrityError(
+            "deterministic forward measurement verification failed"
+        ) from exc
 
     shadow_config = shadow_registry.get_config()
     shadow_records = shadow_registry.list_records()
@@ -609,10 +758,10 @@ def assess_shadow_forward_promotion(
         or forward_policy.activated_at != policy.forward_activated_at
         or forward_policy.shadow_config_fingerprint != shadow_config.fingerprint
         or forward_policy.frozen_parameters_hash != policy.policy_hash
-        or forward_policy.source_code_hash != w83_resolution.loaded_runtime_code_hash
+        or forward_policy.source_code_hash != policy.measurement_runtime_hash
     ):
         raise ShadowForwardPromotionIntegrityError(
-            "forward policy does not exactly commit frozen W84 policy/runtime"
+            "forward policy does not exactly commit frozen W84 policy/measurement runtime"
         )
 
     _validate_control_snapshot(
@@ -639,8 +788,7 @@ def assess_shadow_forward_promotion(
         if (
             shadow_record.period_started_at != forward_record.period_started_at
             or shadow_record.period_ended_at != forward_record.period_ended_at
-            or shadow_record.config_fingerprint
-            != forward_record.shadow_config_fingerprint
+            or shadow_record.config_fingerprint != forward_record.shadow_config_fingerprint
             or shadow_record.weighted_return != forward_record.portfolio_return
             or shadow_record.nav_after != forward_record.nav_after
         ):
@@ -648,15 +796,32 @@ def assess_shadow_forward_promotion(
                 "forward evidence no longer matches exact verified shadow record"
             )
 
-    # Detect append races between the first verified snapshot and evidence materialization.
-    shadow_control_after = shadow_registry.control_state()
-    forward_control_after = forward_registry.control_state()
-    if shadow_control_after != shadow_control or forward_control_after != forward_control:
+    try:
+        measurement_head = verify_shadow_measurement_binding(
+            plan=measurement_plan,
+            policy_hash=policy.policy_hash,
+            selected_strategy_id=w83_resolution.selected_strategy_id,
+            shadow_records=eligible_shadow,
+            receipts=receipts,
+            assessed_at=assessed_at,
+        )
+        receipts_hash = measurement_receipts_hash(receipts)
+    except ForwardShadowMeasurementIntegrityError as exc:
+        raise ShadowForwardPromotionIntegrityError(
+            "R5 shadow observations are not exact W84 deterministic measurements"
+        ) from exc
+
+    # Detect appends between the first verified snapshot and receipt materialization.
+    if (
+        shadow_registry.control_state() != shadow_control
+        or forward_registry.control_state() != forward_control
+    ):
         raise ShadowForwardPromotionIntegrityError(
             "R5 evidence changed during W84 assessment"
         )
 
     qualification_records = forward_records[: policy.required_forward_periods]
+    qualification_receipts = receipts[: policy.required_forward_periods]
     periods_used = len(qualification_records)
     start_at = qualification_records[0].period_started_at if qualification_records else None
     end_at = qualification_records[-1].period_ended_at if qualification_records else None
@@ -667,9 +832,12 @@ def assess_shadow_forward_promotion(
     )
     cumulative_return, max_drawdown = _forward_metrics(qualification_records)
     qualification_head = (
-        qualification_records[-1].evidence_hash
-        if qualification_records
-        else GENESIS_HASH
+        qualification_records[-1].evidence_hash if qualification_records else GENESIS_HASH
+    )
+    qualification_measurement_head = (
+        qualification_receipts[-1].measurement_hash
+        if qualification_receipts
+        else GENESIS_MEASUREMENT_HASH
     )
 
     reasons: list[str] = []
@@ -687,16 +855,8 @@ def assess_shadow_forward_promotion(
             reasons.append("FORWARD_CUMULATIVE_RETURN_BELOW_MINIMUM")
         if max_drawdown > policy.max_peak_to_trough_drawdown:
             reasons.append("FORWARD_DRAWDOWN_ABOVE_MAXIMUM")
-        status = (
-            ShadowForwardPromotionStatus.PASS
-            if not reasons
-            else ShadowForwardPromotionStatus.FAIL
-        )
+        status = ShadowForwardPromotionStatus.PASS if not reasons else ShadowForwardPromotionStatus.FAIL
     reasons_tuple = tuple(sorted(reasons))
-    if end_at is not None and _utc(assessed_at) < _utc(end_at):
-        raise ShadowForwardPromotionIntegrityError(
-            "W84 assessment cannot predate qualification evidence"
-        )
 
     values = {
         "evidence_id": evidence_id,
@@ -710,6 +870,18 @@ def assess_shadow_forward_promotion(
         "selected_strategy_version": w83_resolution.selected_strategy_version,
         "strategy_spec_hash": w83_resolution.strategy_spec_hash,
         "runtime_code_hash": w83_resolution.loaded_runtime_code_hash,
+        "measurement_plan_id": measurement_plan.plan_id,
+        "measurement_plan_hash": measurement_plan.plan_hash,
+        "measurement_runtime_hash": measurement_plan.measurement_runtime_hash,
+        "backtest_config_hash": measurement_plan.backtest_config_hash,
+        "history_dataset_hash": measurement_plan.history_dataset_hash,
+        "measurement_receipts_hash": receipts_hash,
+        "measurement_head_hash": measurement_head,
+        "measurement_receipts_count": len(receipts),
+        "measurement_data_cutoff_at": post_freeze_dataset.ended_at,
+        "measurement_captured_at": measurement_captured_at,
+        "capture_lag_seconds": capture_lag,
+        "assessment_delay_seconds": assessment_delay,
         "shadow_config_fingerprint": shadow_config.fingerprint,
         "shadow_policy_commitment_hash": shadow_config.source_config_hash,
         "shadow_control_hash": shadow_control.control_hash,
@@ -722,6 +894,7 @@ def assess_shadow_forward_promotion(
         "required_forward_periods": policy.required_forward_periods,
         "qualification_periods_used": periods_used,
         "qualification_head_hash": qualification_head,
+        "qualification_measurement_head_hash": qualification_measurement_head,
         "qualification_started_at": start_at,
         "qualification_ended_at": end_at,
         "qualification_duration_seconds": duration_seconds,
@@ -731,6 +904,10 @@ def assess_shadow_forward_promotion(
         "reason_codes": reasons_tuple,
         "exact_candidate_shadow_bound": True,
         "policy_preregistered_in_shadow_config": True,
+        "measurement_plan_preregistered": True,
+        "per_observation_measurement_bound": True,
+        "prefix_only_measurement_bound": True,
+        "measurement_freshness_bound": True,
         "forward_policy_committed": True,
         "full_observed_forward_tail_bound": True,
         "fixed_forward_window_bound": True,
@@ -752,22 +929,26 @@ def resolve_promotion_shadow_forward_binding(
     resolution_id: str,
     evidence: ShadowForwardPromotionEvidence,
     policy: ShadowForwardPromotionPolicy,
+    measurement_plan: ForwardMeasurementPlan,
     w83_resolution: PromotionStrategyVersionResolution,
     binding_evidence: ExecutionStrategyBindingEvidence,
     resolved_at: datetime,
 ) -> PromotionShadowForwardResolution:
-    """Remove only the Shadow/Forward blocker for exact PASS W84 evidence."""
+    """Remove only the Shadow/Forward blocker after exact measured PASS evidence."""
 
     _require_id(resolution_id, "resolution_id")
     if not isinstance(evidence, ShadowForwardPromotionEvidence):
         raise TypeError("evidence must be ShadowForwardPromotionEvidence")
     _validate_policy(policy)
-    _validate_w83_pair(
+    _validate_w83_pair(w83_resolution=w83_resolution, binding_evidence=binding_evidence)
+    _validate_measurement_plan(
+        measurement_plan=measurement_plan,
         w83_resolution=w83_resolution,
         binding_evidence=binding_evidence,
     )
-    _validate_policy_w83_binding(
+    _validate_policy_bindings(
         policy=policy,
+        measurement_plan=measurement_plan,
         w83_resolution=w83_resolution,
         binding_evidence=binding_evidence,
     )
@@ -786,12 +967,21 @@ def resolve_promotion_shadow_forward_binding(
         or evidence.selected_strategy_version != w83_resolution.selected_strategy_version
         or evidence.strategy_spec_hash != w83_resolution.strategy_spec_hash
         or evidence.runtime_code_hash != w83_resolution.loaded_runtime_code_hash
+        or evidence.measurement_plan_id != measurement_plan.plan_id
+        or evidence.measurement_plan_hash != measurement_plan.plan_hash
+        or evidence.measurement_runtime_hash != measurement_plan.measurement_runtime_hash
+        or evidence.backtest_config_hash != measurement_plan.backtest_config_hash
+        or evidence.history_dataset_hash != measurement_plan.history_dataset_hash
         or evidence.shadow_policy_commitment_hash != policy.policy_hash
         or evidence.required_forward_periods != policy.required_forward_periods
         or evidence.qualification_periods_used != policy.required_forward_periods
+        or evidence.measurement_receipts_count != policy.required_forward_periods
+        or evidence.measurement_head_hash != evidence.qualification_measurement_head_hash
+        or evidence.capture_lag_seconds > policy.max_capture_lag_seconds
+        or evidence.assessment_delay_seconds > policy.max_assessment_delay_seconds
     ):
         raise ShadowForwardPromotionIntegrityError(
-            "W84 evidence does not match exact frozen candidate/policy/window"
+            "W84 evidence does not match exact frozen candidate/measurement/policy/window"
         )
     _require_aware(resolved_at, "resolved_at")
     if _utc(resolved_at) < max(
@@ -826,6 +1016,8 @@ def resolve_promotion_shadow_forward_binding(
         "selected_strategy_version": w83_resolution.selected_strategy_version,
         "strategy_spec_hash": w83_resolution.strategy_spec_hash,
         "runtime_code_hash": w83_resolution.loaded_runtime_code_hash,
+        "measurement_plan_hash": measurement_plan.plan_hash,
+        "measurement_runtime_hash": measurement_plan.measurement_runtime_hash,
         "resolved_promotion_blockers": (SHADOW_FORWARD_BLOCKER,),
         "remaining_promotion_blockers": remaining,
         "strategy_version_execution_bound": True,
@@ -868,8 +1060,7 @@ def _validate_w83_pair(
         or binding_evidence.strategy_version_binding_proven is not True
         or w83_resolution.strategy_version_execution_bound is not True
         or w83_resolution.shadow_forward_promotion_bound is not False
-        or SHADOW_FORWARD_BLOCKER
-        not in w83_resolution.remaining_promotion_blockers
+        or SHADOW_FORWARD_BLOCKER not in w83_resolution.remaining_promotion_blockers
     ):
         raise ShadowForwardPromotionIntegrityError(
             "W83 prerequisite is not exact unresolved Shadow/Forward input"
@@ -896,19 +1087,58 @@ def _validate_w83_pair(
         or w83_resolution.promotion_policy_id != binding_evidence.promotion_policy_id
         or w83_resolution.promotion_policy_hash != binding_evidence.promotion_policy_hash
         or w83_resolution.selected_trial_id != binding_evidence.selected_trial_id
-        or w83_resolution.selected_trial_fingerprint
-        != binding_evidence.selected_trial_fingerprint
+        or w83_resolution.selected_trial_fingerprint != binding_evidence.selected_trial_fingerprint
         or w83_resolution.selected_strategy_id != binding_evidence.selected_strategy_id
-        or w83_resolution.selected_strategy_version
-        != binding_evidence.selected_strategy_version
+        or w83_resolution.selected_strategy_version != binding_evidence.selected_strategy_version
         or w83_resolution.strategy_spec_hash != binding_evidence.strategy_spec_hash
         or w83_resolution.intent_fingerprint != binding_evidence.intent_fingerprint
         or w83_resolution.trial_code_version != binding_evidence.trial_code_version
-        or w83_resolution.loaded_runtime_code_hash
-        != binding_evidence.trial_code_version
+        or w83_resolution.loaded_runtime_code_hash != binding_evidence.trial_code_version
     ):
         raise ShadowForwardPromotionIntegrityError(
             "W83 resolution and binding evidence identity mismatch"
+        )
+    if build_safe_dsl_runtime_identity().identity_hash != w83_resolution.loaded_runtime_code_hash:
+        raise ShadowForwardPromotionIntegrityError(
+            "loaded research runtime drifted after certified W83 resolution"
+        )
+
+
+def _validate_measurement_plan(
+    *,
+    measurement_plan: ForwardMeasurementPlan,
+    w83_resolution: PromotionStrategyVersionResolution,
+    binding_evidence: ExecutionStrategyBindingEvidence,
+) -> None:
+    if not isinstance(measurement_plan, ForwardMeasurementPlan):
+        raise TypeError("measurement_plan must be ForwardMeasurementPlan")
+    if measurement_plan.plan_hash != measurement_module._hash(
+        measurement_module._plan_payload(measurement_plan, include_hash=False)
+    ):
+        raise ShadowForwardPromotionIntegrityError("W84 measurement plan hash mismatch")
+    runtime = measurement_module.build_forward_measurement_runtime_identity()
+    if (
+        measurement_plan.w83_resolution_id != w83_resolution.resolution_id
+        or measurement_plan.w83_resolution_hash != w83_resolution.resolution_hash
+        or measurement_plan.w83_binding_hash != binding_evidence.evidence_hash
+        or measurement_plan.selected_strategy_id != w83_resolution.selected_strategy_id
+        or measurement_plan.selected_strategy_version != w83_resolution.selected_strategy_version
+        or measurement_plan.strategy_spec_hash != w83_resolution.strategy_spec_hash
+        or measurement_plan.w83_runtime_hash != w83_resolution.loaded_runtime_code_hash
+        or measurement_plan.measurement_runtime_hash != runtime.identity_hash
+        or measurement_plan.backtest_source_hash != runtime.backtest_source_hash
+        or measurement_plan.costs_source_hash != runtime.costs_source_hash
+        or measurement_plan.domain_source_hash != runtime.domain_source_hash
+    ):
+        raise ShadowForwardPromotionIntegrityError(
+            "measurement plan does not match exact loaded W83 candidate/runtime"
+        )
+    if _utc(measurement_plan.planned_at) < max(
+        _utc(w83_resolution.resolved_at),
+        _utc(binding_evidence.assessed_at),
+    ):
+        raise ShadowForwardPromotionIntegrityError(
+            "measurement plan freeze predates exact W83 proof"
         )
 
 
@@ -921,9 +1151,10 @@ def _validate_policy(policy: ShadowForwardPromotionPolicy) -> None:
         )
 
 
-def _validate_policy_w83_binding(
+def _validate_policy_bindings(
     *,
     policy: ShadowForwardPromotionPolicy,
+    measurement_plan: ForwardMeasurementPlan,
     w83_resolution: PromotionStrategyVersionResolution,
     binding_evidence: ExecutionStrategyBindingEvidence,
 ) -> None:
@@ -936,24 +1167,25 @@ def _validate_policy_w83_binding(
         or policy.promotion_policy_hash != w83_resolution.promotion_policy_hash
         or policy.development_campaign_id != binding_evidence.development_campaign_id
         or policy.selected_trial_id != w83_resolution.selected_trial_id
-        or policy.selected_trial_fingerprint
-        != w83_resolution.selected_trial_fingerprint
+        or policy.selected_trial_fingerprint != w83_resolution.selected_trial_fingerprint
         or policy.selected_strategy_id != w83_resolution.selected_strategy_id
-        or policy.selected_strategy_version
-        != w83_resolution.selected_strategy_version
+        or policy.selected_strategy_version != w83_resolution.selected_strategy_version
         or policy.strategy_spec_hash != w83_resolution.strategy_spec_hash
         or policy.runtime_code_hash != w83_resolution.loaded_runtime_code_hash
         or policy.intent_fingerprint != w83_resolution.intent_fingerprint
+        or policy.measurement_plan_id != measurement_plan.plan_id
+        or policy.measurement_plan_hash != measurement_plan.plan_hash
+        or policy.measurement_runtime_hash != measurement_plan.measurement_runtime_hash
+        or policy.backtest_config_hash != measurement_plan.backtest_config_hash
+        or policy.history_dataset_hash != measurement_plan.history_dataset_hash
+        or policy.dataset_source != measurement_plan.dataset_source
+        or policy.timeframe_seconds != measurement_plan.timeframe_seconds
+        or policy.shadow_initial_nav != measurement_plan.initial_cash
+        or _utc(policy.frozen_at) != _utc(measurement_plan.planned_at)
+        or _utc(policy.forward_activated_at) != _utc(measurement_plan.forward_activated_at)
     ):
         raise ShadowForwardPromotionIntegrityError(
-            "W84 policy does not match exact W83 candidate/runtime identity"
-        )
-    if _utc(policy.frozen_at) < max(
-        _utc(w83_resolution.resolved_at),
-        _utc(binding_evidence.assessed_at),
-    ):
-        raise ShadowForwardPromotionIntegrityError(
-            "W84 policy freeze predates exact W83 proof"
+            "W84 policy does not match exact candidate measurement preregistration"
         )
 
 
@@ -992,17 +1224,12 @@ def _validate_control_snapshot(
     forward_records: tuple,
 ) -> None:
     expected_shadow_head = shadow_records[-1].record_hash if shadow_records else GENESIS_HASH
-    expected_forward_head = (
-        forward_records[-1].evidence_hash if forward_records else GENESIS_HASH
-    )
+    expected_forward_head = forward_records[-1].evidence_hash if forward_records else GENESIS_HASH
     if shadow_sequence != len(shadow_records) or shadow_head_hash != expected_shadow_head:
         raise ShadowForwardPromotionIntegrityError(
             "shadow control snapshot does not match verified records"
         )
-    if (
-        forward_sequence != len(forward_records)
-        or forward_head_hash != expected_forward_head
-    ):
+    if forward_sequence != len(forward_records) or forward_head_hash != expected_forward_head:
         raise ShadowForwardPromotionIntegrityError(
             "forward control snapshot does not match verified records"
         )
@@ -1060,6 +1287,13 @@ def _policy_payload(
                 "strategy_spec_hash",
                 "runtime_code_hash",
                 "intent_fingerprint",
+                "measurement_plan_id",
+                "measurement_plan_hash",
+                "measurement_runtime_hash",
+                "backtest_config_hash",
+                "history_dataset_hash",
+                "dataset_source",
+                "timeframe_seconds",
                 "shadow_config_id",
                 "shadow_initial_nav",
                 "shadow_activated_at",
@@ -1069,6 +1303,8 @@ def _policy_payload(
                 "minimum_forward_duration_seconds",
                 "min_cumulative_return",
                 "max_peak_to_trough_drawdown",
+                "max_capture_lag_seconds",
+                "max_assessment_delay_seconds",
                 "frozen_at",
                 "paper_candidate_authorized",
                 "external_execution_authorized",
@@ -1089,9 +1325,7 @@ def _policy_payload_from_values(values: dict[str, object]) -> dict[str, object]:
     payload["shadow_activated_at"] = _utc_iso(payload["shadow_activated_at"])
     payload["forward_activated_at"] = _utc_iso(payload["forward_activated_at"])
     payload["min_cumulative_return"] = str(payload["min_cumulative_return"])
-    payload["max_peak_to_trough_drawdown"] = str(
-        payload["max_peak_to_trough_drawdown"]
-    )
+    payload["max_peak_to_trough_drawdown"] = str(payload["max_peak_to_trough_drawdown"])
     payload["frozen_at"] = _utc_iso(payload["frozen_at"])
     return payload
 
@@ -1099,54 +1333,67 @@ def _policy_payload_from_values(values: dict[str, object]) -> dict[str, object]:
 def _evidence_payload(
     value: ShadowForwardPromotionEvidence, *, include_hash: bool
 ) -> dict[str, object]:
-    payload = _evidence_payload_from_values(
-        {
-            name: getattr(value, name)
-            for name in (
-                "evidence_id",
-                "contract_version",
-                "policy_id",
-                "policy_hash",
-                "w83_resolution_id",
-                "w83_resolution_hash",
-                "w83_binding_hash",
-                "selected_strategy_id",
-                "selected_strategy_version",
-                "strategy_spec_hash",
-                "runtime_code_hash",
-                "shadow_config_fingerprint",
-                "shadow_policy_commitment_hash",
-                "shadow_control_hash",
-                "shadow_sequence",
-                "shadow_head_hash",
-                "forward_policy_fingerprint",
-                "forward_control_hash",
-                "forward_sequence",
-                "forward_head_hash",
-                "required_forward_periods",
-                "qualification_periods_used",
-                "qualification_head_hash",
-                "qualification_started_at",
-                "qualification_ended_at",
-                "qualification_duration_seconds",
-                "cumulative_return",
-                "peak_to_trough_drawdown",
-                "status",
-                "reason_codes",
-                "exact_candidate_shadow_bound",
-                "policy_preregistered_in_shadow_config",
-                "forward_policy_committed",
-                "full_observed_forward_tail_bound",
-                "fixed_forward_window_bound",
-                "paper_candidate_authorized",
-                "external_execution_authorized",
-                "runtime_execution_authorized",
-                "capital_authority",
-                "live_trading",
-                "assessed_at",
-            )
-        }
+    names = (
+        "evidence_id",
+        "contract_version",
+        "policy_id",
+        "policy_hash",
+        "w83_resolution_id",
+        "w83_resolution_hash",
+        "w83_binding_hash",
+        "selected_strategy_id",
+        "selected_strategy_version",
+        "strategy_spec_hash",
+        "runtime_code_hash",
+        "measurement_plan_id",
+        "measurement_plan_hash",
+        "measurement_runtime_hash",
+        "backtest_config_hash",
+        "history_dataset_hash",
+        "measurement_receipts_hash",
+        "measurement_head_hash",
+        "measurement_receipts_count",
+        "measurement_data_cutoff_at",
+        "measurement_captured_at",
+        "capture_lag_seconds",
+        "assessment_delay_seconds",
+        "shadow_config_fingerprint",
+        "shadow_policy_commitment_hash",
+        "shadow_control_hash",
+        "shadow_sequence",
+        "shadow_head_hash",
+        "forward_policy_fingerprint",
+        "forward_control_hash",
+        "forward_sequence",
+        "forward_head_hash",
+        "required_forward_periods",
+        "qualification_periods_used",
+        "qualification_head_hash",
+        "qualification_measurement_head_hash",
+        "qualification_started_at",
+        "qualification_ended_at",
+        "qualification_duration_seconds",
+        "cumulative_return",
+        "peak_to_trough_drawdown",
+        "status",
+        "reason_codes",
+        "exact_candidate_shadow_bound",
+        "policy_preregistered_in_shadow_config",
+        "measurement_plan_preregistered",
+        "per_observation_measurement_bound",
+        "prefix_only_measurement_bound",
+        "measurement_freshness_bound",
+        "forward_policy_committed",
+        "full_observed_forward_tail_bound",
+        "fixed_forward_window_bound",
+        "paper_candidate_authorized",
+        "external_execution_authorized",
+        "runtime_execution_authorized",
+        "capital_authority",
+        "live_trading",
+        "assessed_at",
     )
+    payload = _evidence_payload_from_values({name: getattr(value, name) for name in names})
     if include_hash:
         payload["evidence_hash"] = value.evidence_hash
     return payload
@@ -1154,56 +1401,55 @@ def _evidence_payload(
 
 def _evidence_payload_from_values(values: dict[str, object]) -> dict[str, object]:
     payload = dict(values)
-    payload["qualification_started_at"] = _optional_utc_iso(
-        payload["qualification_started_at"]
-    )
-    payload["qualification_ended_at"] = _optional_utc_iso(
-        payload["qualification_ended_at"]
-    )
+    for name in (
+        "measurement_data_cutoff_at",
+        "measurement_captured_at",
+        "assessed_at",
+    ):
+        payload[name] = _utc_iso(payload[name])
+    payload["qualification_started_at"] = _optional_utc_iso(payload["qualification_started_at"])
+    payload["qualification_ended_at"] = _optional_utc_iso(payload["qualification_ended_at"])
     payload["cumulative_return"] = str(payload["cumulative_return"])
     payload["peak_to_trough_drawdown"] = str(payload["peak_to_trough_drawdown"])
     payload["status"] = str(payload["status"])
     payload["reason_codes"] = list(payload["reason_codes"])
-    payload["assessed_at"] = _utc_iso(payload["assessed_at"])
     return payload
 
 
 def _resolution_payload(
     value: PromotionShadowForwardResolution, *, include_hash: bool
 ) -> dict[str, object]:
-    payload = _resolution_payload_from_values(
-        {
-            name: getattr(value, name)
-            for name in (
-                "resolution_id",
-                "contract_version",
-                "evidence_id",
-                "evidence_hash",
-                "policy_id",
-                "policy_hash",
-                "w83_resolution_id",
-                "w83_resolution_hash",
-                "promotion_policy_id",
-                "promotion_policy_hash",
-                "selected_trial_id",
-                "selected_trial_fingerprint",
-                "selected_strategy_id",
-                "selected_strategy_version",
-                "strategy_spec_hash",
-                "runtime_code_hash",
-                "resolved_promotion_blockers",
-                "remaining_promotion_blockers",
-                "strategy_version_execution_bound",
-                "shadow_forward_promotion_bound",
-                "paper_candidate_authorized",
-                "external_execution_authorized",
-                "runtime_execution_authorized",
-                "capital_authority",
-                "live_trading",
-                "resolved_at",
-            )
-        }
+    names = (
+        "resolution_id",
+        "contract_version",
+        "evidence_id",
+        "evidence_hash",
+        "policy_id",
+        "policy_hash",
+        "w83_resolution_id",
+        "w83_resolution_hash",
+        "promotion_policy_id",
+        "promotion_policy_hash",
+        "selected_trial_id",
+        "selected_trial_fingerprint",
+        "selected_strategy_id",
+        "selected_strategy_version",
+        "strategy_spec_hash",
+        "runtime_code_hash",
+        "measurement_plan_hash",
+        "measurement_runtime_hash",
+        "resolved_promotion_blockers",
+        "remaining_promotion_blockers",
+        "strategy_version_execution_bound",
+        "shadow_forward_promotion_bound",
+        "paper_candidate_authorized",
+        "external_execution_authorized",
+        "runtime_execution_authorized",
+        "capital_authority",
+        "live_trading",
+        "resolved_at",
     )
+    payload = _resolution_payload_from_values({name: getattr(value, name) for name in names})
     if include_hash:
         payload["resolution_hash"] = value.resolution_hash
     return payload
@@ -1211,12 +1457,8 @@ def _resolution_payload(
 
 def _resolution_payload_from_values(values: dict[str, object]) -> dict[str, object]:
     payload = dict(values)
-    payload["resolved_promotion_blockers"] = list(
-        payload["resolved_promotion_blockers"]
-    )
-    payload["remaining_promotion_blockers"] = list(
-        payload["remaining_promotion_blockers"]
-    )
+    payload["resolved_promotion_blockers"] = list(payload["resolved_promotion_blockers"])
+    payload["remaining_promotion_blockers"] = list(payload["remaining_promotion_blockers"])
     payload["resolved_at"] = _utc_iso(payload["resolved_at"])
     return payload
 
