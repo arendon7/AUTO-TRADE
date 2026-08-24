@@ -9,6 +9,7 @@ ROOT = Path(__file__).resolve().parents[1]
 TARGETS = (
     ROOT / "src/autotrade/fee_accounting.py",
     ROOT / "src/autotrade/fee_product_economics.py",
+    ROOT / "src/autotrade/fee_schedule_attestation.py",
     ROOT / "src/autotrade/paper_fee_activity_evidence.py",
 )
 DOMAIN = ROOT / "src/autotrade/domain.py"
@@ -100,6 +101,23 @@ def main() -> int:
             '"broker_authoritative_fee_proven": False',
             '"realized_profitability_authorized": False',
         ),
+        "fee_schedule_attestation.py": (
+            'FEE_SCHEDULE_ATTESTATION_VERSION = "W82_ALPACA_CRYPTO_FEE_SCHEDULE_V1"',
+            'ALPACA_CRYPTO_FEE_SOURCE_URL = "https://docs.alpaca.markets/us/docs/crypto-fees"',
+            "ALPACA_CRYPTO_FEE_SOURCE_CHECKED_AT = datetime(",
+            'ALPACA_CRYPTO_TIER1_MAKER_BPS = Decimal("15")',
+            'ALPACA_CRYPTO_TIER1_TAKER_BPS = Decimal("25")',
+            "ALPACA_CRYPTO_CONSERVATIVE_FLOOR_BPS = ALPACA_CRYPTO_TIER1_TAKER_BPS",
+            'ALPACA_CRYPTO_FEE_CHARGE_BASIS = "CREDITED_ASSET_OR_FIAT"',
+            'ALPACA_CRYPTO_POSTING_SEMANTICS = "END_OF_DAY_MAY_BE_DELAYED"',
+            "MAX_FEE_SCHEDULE_ATTESTATION_AGE = timedelta(days=30)",
+            "fee schedule source verification timestamp is not canonical W82",
+            "fee schedule attestation is stale and must be re-verified",
+            '"broker_authoritative_activity_proven": False',
+            '"external_execution_authorized": False',
+            '"capital_authority": "NONE"',
+            '"live_trading": "BLOCKED"',
+        ),
         "paper_fee_activity_evidence.py": (
             'PAPER_FEE_ACTIVITY_VERSION = "W82_PAPER_FEE_ACTIVITY_V2"',
             'PENDING_PUBLICATION = "PENDING_PUBLICATION"',
@@ -118,19 +136,35 @@ def main() -> int:
         source = target.read_text(encoding="utf-8")
         for marker in required_by_file[target.name]:
             if marker not in source:
-                errors.append(f"{target.name}: required W82 fail-closed marker missing: {marker}")
+                errors.append(
+                    f"{target.name}: required W82 fail-closed marker missing: {marker}"
+                )
 
     marker = "python scripts/check_w82_fee_accounting_boundary.py"
-    for workflow, label in ((W82_WORKFLOW, "W82 workflow"), (CORE_WORKFLOW, "Core Safety")):
+    for workflow, label in (
+        (W82_WORKFLOW, "W82 workflow"),
+        (CORE_WORKFLOW, "Core Safety"),
+    ):
         if workflow.is_file() and marker not in workflow.read_text(encoding="utf-8"):
             errors.append(f"{label}: W82 fee accounting boundary not wired")
+
+    if W82_WORKFLOW.is_file():
+        source = W82_WORKFLOW.read_text(encoding="utf-8")
+        for required_path in (
+            "src/autotrade/fee_schedule_attestation.py",
+            "tests/test_w82_fee_schedule_attestation.py",
+        ):
+            if required_path not in source:
+                errors.append(
+                    f"W82 workflow: documented fee schedule surface not wired: {required_path}"
+                )
 
     if errors:
         for error in errors:
             print(f"ERROR: {error}", file=sys.stderr)
         return 1
     print(
-        "W82 FEE ACCOUNTING BOUNDARY PASS — base fee arithmetic + preregistered product/venue fee floor + received-asset semantics are hash-bound; canonical Fill unchanged; PAPER fee truth stays PENDING until an audited read-only source exists; missing activity never means zero; no broker/network/SQLite/OMS/Safety/writer authority; realized-profitability unauthorized; PAPER candidate false; capital NONE; LIVE blocked"
+        "W82 FEE ACCOUNTING BOUNDARY PASS — base fee arithmetic + hash-bound product mechanics + fixed documented Alpaca crypto 15/25 bps schedule with conservative 25 bps floor + received-asset semantics are separate and hash-bound; documentation verification is versioned and expires after 30 days; canonical Fill unchanged; PAPER fee truth stays PENDING until an audited read-only source exists; missing activity never means zero; no broker/network/SQLite/OMS/Safety/writer authority; realized-profitability unauthorized; PAPER candidate false; capital NONE; LIVE blocked"
     )
     return 0
 
@@ -143,20 +177,30 @@ def _scan_target(path: Path) -> list[str]:
         if isinstance(node, ast.Import):
             for alias in node.names:
                 if _forbidden_module(alias.name):
-                    errors.append(f"{path.name}:{node.lineno}: forbidden import {alias.name}")
+                    errors.append(
+                        f"{path.name}:{node.lineno}: forbidden import {alias.name}"
+                    )
         elif isinstance(node, ast.ImportFrom):
             module = node.module or ""
             if _forbidden_module(module):
-                errors.append(f"{path.name}:{node.lineno}: forbidden import {module}")
+                errors.append(
+                    f"{path.name}:{node.lineno}: forbidden import {module}"
+                )
             for alias in node.names:
                 if alias.name in FORBIDDEN_NAMES:
-                    errors.append(f"{path.name}:{node.lineno}: forbidden authority symbol {alias.name}")
+                    errors.append(
+                        f"{path.name}:{node.lineno}: forbidden authority symbol {alias.name}"
+                    )
         elif isinstance(node, ast.Name) and node.id in FORBIDDEN_NAMES:
-            errors.append(f"{path.name}:{node.lineno}: forbidden authority symbol {node.id}")
+            errors.append(
+                f"{path.name}:{node.lineno}: forbidden authority symbol {node.id}"
+            )
         elif isinstance(node, ast.Call):
             name = _call_name(node.func)
             if name in FORBIDDEN_CALLS:
-                errors.append(f"{path.name}:{node.lineno}: forbidden authority/network call {name}")
+                errors.append(
+                    f"{path.name}:{node.lineno}: forbidden authority/network call {name}"
+                )
     for marker in FORBIDDEN_TEXT:
         if marker in source:
             errors.append(f"{path.name}: forbidden W82 surface present: {marker}")
@@ -164,21 +208,35 @@ def _scan_target(path: Path) -> list[str]:
 
 
 def _check_fill_shape(path: Path) -> list[str]:
-    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path.relative_to(ROOT)))
+    tree = ast.parse(
+        path.read_text(encoding="utf-8"), filename=str(path.relative_to(ROOT))
+    )
     for node in tree.body:
         if isinstance(node, ast.ClassDef) and node.name == "Fill":
             fields = [
                 item.target.id
                 for item in node.body
-                if isinstance(item, ast.AnnAssign) and isinstance(item.target, ast.Name)
+                if isinstance(item, ast.AnnAssign)
+                and isinstance(item.target, ast.Name)
             ]
-            expected = ["fill_id", "order_id", "symbol", "side", "quantity", "price", "occurred_at"]
+            expected = [
+                "fill_id",
+                "order_id",
+                "symbol",
+                "side",
+                "quantity",
+                "price",
+                "occurred_at",
+            ]
             return [] if fields == expected else [f"domain.Fill shape changed: {fields!r}"]
     return ["domain.Fill class not found"]
 
 
 def _forbidden_module(module: str) -> bool:
-    return any(module == prefix or module.startswith(prefix + ".") for prefix in FORBIDDEN_MODULE_PREFIXES)
+    return any(
+        module == prefix or module.startswith(prefix + ".")
+        for prefix in FORBIDDEN_MODULE_PREFIXES
+    )
 
 
 def _call_name(func: ast.expr) -> str:
