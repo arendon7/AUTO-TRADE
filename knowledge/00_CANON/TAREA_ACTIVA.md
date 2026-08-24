@@ -136,7 +136,7 @@ W83 NO debe:
 - conceder PAPER candidate;
 - habilitar LIVE.
 
-## Negative/adversarial tests mínimos
+## Negative tests / adversarial tests mínimos
 - same id/version + different artifact hash;
 - same artifact + different parameters/defaults;
 - strategy version string spoof;
