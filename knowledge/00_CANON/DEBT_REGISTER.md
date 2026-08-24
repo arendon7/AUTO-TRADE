@@ -1,7 +1,7 @@
 # DEBT REGISTER — v0.28R
 
-Fecha: 2026-08-12
-Estado: **R0–R5 CERTIFIED; R6 ACTIVE**
+Fecha: 2026-08-24
+Estado: **R0–R5 CERTIFIED; R6/R7 capability work active; W78–W82 technically certified in stacked branches**
 
 ## Authority
 La autoridad machine-readable es la composición validada por CI de `knowledge/00_CANON/debt_register.json` + sus extensiones `knowledge/00_CANON/debt_register_*.json`. Si esta vista humana discrepa, manda el registro machine-readable compuesto + CI.
@@ -18,6 +18,8 @@ Ningún track puede certificarse con deuda conocida P0/P1/P2 asignada a ese trac
 - **R5 — PASS e integrado/post-merge recertificado en `main` `75dcbef65b061f742745ba7be0665521967e0587`**
 
 Post-merge R5: Core Safety `31466198629` PASS, Knowledge Contract `31466198624` PASS, **606 tests / 86.49% coverage**.
+
+R5 sigue siendo el último track formalmente certificado del registro principal. Los hitos R6/R7 y W78–W82 son certificaciones técnicas/capability específicas y no se reinterpretan como promoción automática del track registry.
 
 ## R6 — deuda registrada antes de implementación
 | ID | Sev | Área | Condición de cierre |
@@ -41,16 +43,61 @@ Post-merge R5: Core Safety `31466198629` PASS, Knowledge Contract `31466198624` 
 | `TD-R6-017` | P1 | crypto 24/7 qualification evidence | repeated PAPER evidence across liquidity/time/weekend conditions; fills, spread/slippage, protection, reconciliation and residual stop-limit risk captured; no profitability claim from connectivity |
 | `TD-R6-018` | P1 | native Multi-Asset Mac Control Center | one localhost Hub exposing Equities + Crypto with ephemeral credentials, machine-readable product status, reliable macOS browser open, no hidden POST path and dual-arch UAT |
 
-R6 P0/P1/P2 OPEN: **11**. R6 cannot certify until all close with evidence.
+La extensión machine-readable de R6/R7 contiene el estado exacto más reciente de estos ítems; esta tabla histórica no sustituye sus cierres posteriores.
 
 ### Multi-asset boundary
-`TD-R6-014`–`018` were added before enabling any crypto broker write. The crypto PAPER route remains rehearsal/read-only while these debts are open. ADR-0009 defines the durable architecture; `skills/crypto-trading/SKILL.md` and `skills/multi-asset-safety/SKILL.md` are mandatory for this workstream.
+`TD-R6-014`–`018` se registraron antes de habilitar autoridad de producto. Cualquier crypto write sigue obligado a ProductCapabilities, Safety/OMS, one-shot writer, UNKNOWN/reconciliation y protección específica; LIVE continúa fuera de autoridad.
 
-## Deuda no bloqueante fuera de R6
+## R7D — Research → deterministic PAPER promotion economics
+| ID | Sev | Estado | Área | Resultado actual |
+|---|---|---|---|---|
+| `TD-R7D-001` | P1 | **CLOSED** | Research-to-PAPER non-fee execution-cost continuity | W81 prueba midpoint→touch→adverse continuity candidate-bound; favorable under-cost scenarios BLOCK |
+| `TD-R7D-002` | P1 | **CLOSED** | Fee-complete execution accounting | W82 prueba fee-complete **deterministic qualification** con exact Research/W78/W81 binding, product fee mechanics y documented Alpaca crypto floor; no realized broker-fee claim |
+| `TD-R7D-003` | P2 | **OPEN** | Partial-fill remaining-quantity risk reservation | conservar full reservation hasta poder probar authoritative remaining open quantity; premature capital release prohibido |
+
+### W82 fee boundary
+El cierre de `TD-R7D-002` no significa que una fee haya sido observada en Alpaca.
+
+W82 separa cuatro verdades:
+1. Research fee assumption;
+2. deterministic simulated fee accounting;
+3. product-specific fee mechanics;
+4. broker-observed fee activity.
+
+Para Alpaca crypto, la attestation documental W82 verificada el 2026-08-24 fija, mientras no haya evidencia separadamente certificada de tier/rol más favorable:
+- Tier 1 maker: 15 bps;
+- Tier 1 taker: 25 bps;
+- conservative qualification floor: **25 bps**;
+- fee sobre el activo/fiat acreditado según lado;
+- fee activity potencialmente publicada con retraso/EOD;
+- snapshot expirable a 30 días.
+
+Una policy local no puede abaratar ese floor. Cualquier lower-tier assumption requiere evidencia futura de 30-day volume tier + liquidity role.
+
+Broker activity sigue fail-closed:
+- `broker_authoritative_fee_proven=false`;
+- `realized_profitability_authorized=false`;
+- missing fee activity != zero fee.
+
+## Promotion blockers aún abiertos
+El cierre W82 no remueve:
+- `EXECUTION_STRATEGY_VERSION_UNBOUND`;
+- `SHADOW_FORWARD_PROMOTION_BINDING_REQUIRED`;
+- `TD-R7D-003`.
+
+W83 debe atacar primero `EXECUTION_STRATEGY_VERSION_UNBOUND`: la versión/artefacto determinista que pudiera producir futuros intents debe quedar criptográficamente ligada a la exact selected strategy id/version congelada por Promotion Governance. Hasta entonces no hay Auto-Paper candidate.
+
+## Deuda no bloqueante fuera del workstream inmediato
 | ID | Sev | Track | Área |
 |---|---|---|---|
 | `TD-OPS-001` | P3 | OPS | Graphify semantic/deep real pending supported runtime |
 
-## Capital
+## Authority
+- Strategy Lab / W78–W82 scientific layers: no broker write;
+- PAPER candidate: FALSE;
+- external execution authority from W82: FALSE;
+- W82 capital authority: NONE;
+- realized profitability authorization: FALSE;
+- LIVE: BLOCKED.
+
 **LIVE TRADING: BLOQUEADO.**
-R6 may qualify bounded external PAPER only; crypto broker writes remain disabled until their product-specific lifecycle is certified; no R6 artifact may authorize LIVE.
