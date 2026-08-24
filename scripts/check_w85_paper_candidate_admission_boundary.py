@@ -9,6 +9,8 @@ ROOT = Path(__file__).resolve().parents[1]
 SOURCES = (
     ROOT / "src/autotrade/paper_candidate_admission.py",
     ROOT / "src/autotrade/paper_candidate_admission_lifecycle.py",
+    ROOT / "src/autotrade/paper_candidate_admission_final_verification.py",
+    ROOT / "src/autotrade/paper_candidate_eligibility_final.py",
 )
 
 errors: list[str] = []
@@ -29,6 +31,8 @@ required_markers = (
     'ADMISSION_RECEIPT_VERSION = "W85_PAPER_CANDIDATE_ADMISSION_RECEIPT_V1"',
     'LIFECYCLE_EVENT_VERSION = "W85_PAPER_CANDIDATE_LIFECYCLE_EVENT_V1"',
     'ELIGIBILITY_PROJECTION_VERSION = "W85_PAPER_CANDIDATE_ELIGIBILITY_PROJECTION_V1"',
+    'FINAL_ADMISSION_VERIFICATION_VERSION = "W85_PAPER_CANDIDATE_ADMISSION_FINAL_VERIFICATION_V1"',
+    'FINAL_ELIGIBILITY_VERSION = "W85_PAPER_CANDIDATE_FINAL_ELIGIBILITY_V1"',
     "PromotionShadowForwardFinalVerification",
     "source_truth_verified is not True",
     "process_clock_freshness_verified is not True",
@@ -53,11 +57,43 @@ required_markers = (
     "revoked candidate admission is terminal",
     "candidate lifecycle predecessor hash discontinuity",
     "paper_candidate_currently_eligible",
+    "admission_source_truth_verified",
+    "w84_source_truth_verified",
+    "w84_policy_hash",
+    "w84_evidence_hash",
+    "w84_measurement_runtime_hash",
+    "w83_binding_hash",
+    "final_admission_verification_hash",
+    "lifecycle_registry.list_for_admission",
+    "def _state_with_expiry_precedence(",
     "def _now_utc()",
 )
 for marker in required_markers:
     if marker not in combined:
         errors.append(f"missing W85 boundary marker: {marker}")
+
+final_eligibility = texts.get("paper_candidate_eligibility_final.py", "")
+expiry_marker = "if _utc(observed_at) > _utc(admission_valid_until):"
+revocation_marker = "if last.action is PaperCandidateLifecycleAction.REVOKE:"
+if expiry_marker not in final_eligibility or revocation_marker not in final_eligibility:
+    errors.append("final eligibility must explicitly encode expiry and revocation state")
+elif final_eligibility.index(expiry_marker) > final_eligibility.index(revocation_marker):
+    errors.append("canonical W85 final eligibility must give expiry precedence over revocation")
+if "current_projection(" in final_eligibility:
+    errors.append("canonical W85 final eligibility may not consume intermediate lifecycle projection")
+
+final_admission = texts.get("paper_candidate_admission_final_verification.py", "")
+for marker in (
+    "admission_registry.get(admission_id)",
+    "admission_registry.get_policy(durable_receipt.policy_id)",
+    "w84_finalization.w83_resolution_hash != w83_resolution.resolution_hash",
+    "w84_finalization.w83_binding_hash != w83_resolution.binding_evidence_hash",
+    "receipt.w84_finalization_hash != w84_finalization.finalization_hash",
+    "receipt.w84_source_verification_hash != w84_finalization.source_verification_hash",
+    "receipt.w84_measurement_plan_hash != w84_finalization.measurement_plan_hash",
+):
+    if marker not in final_admission:
+        errors.append(f"final W85 admission verification missing source-authoritative marker: {marker}")
 
 for source_name, text in texts.items():
     forbidden_text = (
@@ -141,5 +177,5 @@ if errors:
     raise SystemExit(1)
 
 print(
-    "W85 PAPER CANDIDATE ADMISSION BOUNDARY PASS — exact W79→W84 evidence may produce only a bounded durable candidate admission; append-only suspension/reinstatement/revocation and process-clock expiry determine current eligibility; candidate eligibility is distinct from PAPER execution authorization; probation descriptors grant no capital authority; no broker/network/OMS/Safety/writer/OrderIntent authority; LIVE blocked"
+    "W85 PAPER CANDIDATE ADMISSION BOUNDARY PASS — durable admission/lifecycle receipts are intermediate; canonical W85 final verification re-reads exact W79→W84 + W85 durable source truth and exposes explicit W84 provenance; canonical current eligibility independently re-reads lifecycle history with internal process clock and expiry precedence; PAPER candidate eligibility remains distinct from PAPER execution authorization; no broker/network/OMS/Safety/writer/OrderIntent authority; capital NONE; LIVE blocked"
 )
