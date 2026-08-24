@@ -13,6 +13,7 @@ from autotrade.execution_cost_continuity import FEE_ACCOUNTING_BLOCKER
 from autotrade.fee_accounting import FeeAccountingEvidence, FeeAccountingStatus
 from autotrade.fee_product_economics import (
     FeeChargeConvention,
+    FeeLiquidityRole,
     FeeProductEconomicsEvidence,
     FeeProductEconomicsStatus,
 )
@@ -381,6 +382,18 @@ def resolve_promotion_fee_accounting(
         )
     except FeeScheduleAttestationIntegrityError as exc:
         raise PromotionFeeAccountingIntegrityError(str(exc)) from exc
+
+    if (
+        product_economics.charge_convention
+        is not FeeChargeConvention.RECEIVED_ASSET_PERCENT
+    ):
+        raise PromotionFeeAccountingIntegrityError(
+            "Alpaca fee schedule requires received-asset fee convention"
+        )
+    if product_economics.liquidity_role is not FeeLiquidityRole.WORST_CASE:
+        raise PromotionFeeAccountingIntegrityError(
+            "Alpaca fee schedule requires worst-case liquidity role"
+        )
 
     if (
         product_economics.research_fee_bps > MAX_PERCENT_FEE_BPS
