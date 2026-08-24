@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import fields, replace
 from datetime import timedelta
 from decimal import Decimal
-import json
 
 import pytest
 
@@ -77,7 +76,7 @@ def _finalize_w84(ctx, monkeypatch):
         ctx["base"].resolved_at + timedelta(seconds=1),
     )
     monkeypatch.setattr(final_verification, "_now_utc", lambda: process_time)
-    result = final_verification.finalize_promotion_shadow_forward_resolution(
+    return final_verification.finalize_promotion_shadow_forward_resolution(
         finalization_id="w84-final-for-w85",
         source_verification_id="w84-source-for-w85",
         base_resolution=ctx["base"],
@@ -90,7 +89,34 @@ def _finalize_w84(ctx, monkeypatch):
         forward_registry=ctx["forward"],
         measurement_receipts=ctx["receipts"],
     )
-    return result
+
+
+def _source_package(ctx):
+    return w85.W84AdmissionSourcePackage(
+        base_resolution=ctx["base"],
+        evidence=ctx["evidence"],
+        policy=ctx["policy"],
+        measurement_plan=ctx["plan"],
+        binding_evidence=ctx["binding"],
+        shadow_registry=ctx["shadow"],
+        forward_registry=ctx["forward"],
+        measurement_receipts=ctx["receipts"],
+    )
+
+
+def _rehash_finalization(final, **changes):
+    values = {
+        field.name: getattr(final, field.name)
+        for field in fields(final)
+        if field.name != "finalization_hash"
+    }
+    values.update(changes)
+    return type(final)(
+        **values,
+        finalization_hash=final_verification._hash(
+            final_verification._payload_from_values(values)
+        ),
+    )
 
 
 def _seed_w79_schema(path, promotion_policy):
@@ -168,6 +194,7 @@ def _full_context(
     return {
         "ctx": ctx,
         "final": final,
+        "source_package": _source_package(ctx),
         "assessment": assessment,
         "w81": w81,
         "w82": ctx["chain"]["w82"],
@@ -181,7 +208,15 @@ def _full_context(
     }
 
 
-def _admit(bundle, monkeypatch, *, admission_id="w85-admission", final=None, seconds=1):
+def _admit(
+    bundle,
+    monkeypatch,
+    *,
+    admission_id="w85-admission",
+    final=None,
+    source_package=None,
+    seconds=1,
+):
     process_time = bundle["registered_at"] + timedelta(seconds=seconds)
     monkeypatch.setattr(w85, "_now_utc", lambda: process_time)
     return bundle["registry"].assess_and_record(
@@ -193,6 +228,9 @@ def _admit(bundle, monkeypatch, *, admission_id="w85-admission", final=None, sec
         w82_resolution=bundle["w82"],
         w83_resolution=bundle["w83"],
         w84_finalization=bundle["final"] if final is None else final,
+        w84_source_package=(
+            bundle["source_package"] if source_package is None else source_package
+        ),
     )
 
 
@@ -216,6 +254,10 @@ def test_w85_pass_admits_candidate_but_never_execution_or_capital(
     assert result.capital_authority == "NONE"
     assert result.live_trading == "BLOCKED"
     assert result.w84_finalization_hash == bundle["final"].finalization_hash
+    assert result.w84_admission_source_proof_hash is not None
+    assert result.w84_admission_source_verification_hash is not None
+    assert result.w84_admission_source_capture_at is not None
+    assert result.w84_admission_source_verified_at == result.admitted_at
     assert result.valid_until == result.admitted_at + timedelta(
         seconds=bundle["policy"].candidate_validity_seconds
     )
@@ -240,6 +282,7 @@ def test_w85_missing_w84_is_incomplete_and_cannot_mint_candidate(
         w82_resolution=bundle["w82"],
         w83_resolution=bundle["w83"],
         w84_finalization=None,
+        w84_source_package=None,
     )
     assert result.status is w85.PaperCandidateAdmissionStatus.INCOMPLETE
     assert result.reason_codes == ("W84_FINAL_VERIFICATION_MISSING",)
@@ -249,13 +292,39 @@ def test_w85_missing_w84_is_incomplete_and_cannot_mint_candidate(
     assert result.capital_authority == "NONE"
 
 
-def test_w85_stale_w84_is_blocked_by_internal_process_clock(
+def test_w85_finalization_without_source_reproof_is_incomplete(
     tmp_path, monkeypatch, limits, market, empty_portfolio, market_buy_intent
 ):
     bundle = _full_context(
         tmp_path, monkeypatch, limits, market, empty_portfolio, market_buy_intent
     )
-    stale_time = bundle["final"].process_verified_at + timedelta(
+    process_time = bundle["registered_at"] + timedelta(seconds=1)
+    monkeypatch.setattr(w85, "_now_utc", lambda: process_time)
+    result = bundle["registry"].assess_and_record(
+        admission_id="w85-missing-source-reproof",
+        policy_id=bundle["policy"].policy_id,
+        promotion_policy=bundle["promotion_policy"],
+        w80_assessment=bundle["assessment"],
+        w81_resolution=bundle["w81"],
+        w82_resolution=bundle["w82"],
+        w83_resolution=bundle["w83"],
+        w84_finalization=bundle["final"],
+        w84_source_package=None,
+    )
+    assert result.status is w85.PaperCandidateAdmissionStatus.INCOMPLETE
+    assert result.reason_codes == ("W84_ADMISSION_SOURCE_PROOF_MISSING",)
+    assert result.paper_candidate_authorized is False
+    assert result.w84_admission_source_proof_hash is None
+
+
+def test_w85_stale_w84_is_blocked_by_durable_source_capture_not_final_timestamp(
+    tmp_path, monkeypatch, limits, market, empty_portfolio, market_buy_intent
+):
+    bundle = _full_context(
+        tmp_path, monkeypatch, limits, market, empty_portfolio, market_buy_intent
+    )
+    capture = bundle["final"].measurement_capture_at
+    stale_time = capture + timedelta(
         seconds=bundle["policy"].max_w84_finalization_age_seconds + 1
     )
     assert stale_time > bundle["registered_at"]
@@ -269,11 +338,72 @@ def test_w85_stale_w84_is_blocked_by_internal_process_clock(
         w82_resolution=bundle["w82"],
         w83_resolution=bundle["w83"],
         w84_finalization=bundle["final"],
+        w84_source_package=bundle["source_package"],
     )
     assert result.status is w85.PaperCandidateAdmissionStatus.BLOCKED
-    assert result.reason_codes == ("W84_FINALIZATION_STALE",)
+    assert result.reason_codes == ("W84_DURABLE_SOURCE_STALE",)
     assert result.paper_candidate_authorized is False
     assert result.valid_until is None
+
+
+def test_w85_rehashed_fake_fresh_finalization_cannot_refresh_stale_source(
+    tmp_path, monkeypatch, limits, market, empty_portfolio, market_buy_intent
+):
+    bundle = _full_context(
+        tmp_path, monkeypatch, limits, market, empty_portfolio, market_buy_intent
+    )
+    capture = bundle["final"].measurement_capture_at
+    admission_time = capture + timedelta(
+        seconds=bundle["policy"].max_w84_finalization_age_seconds + 1
+    )
+    forged = _rehash_finalization(
+        bundle["final"],
+        process_verified_at=admission_time,
+        decision_delay_seconds=int((admission_time - capture).total_seconds()),
+    )
+    assert forged.finalization_hash != bundle["final"].finalization_hash
+    assert forged.process_verified_at == admission_time
+
+    monkeypatch.setattr(w85, "_now_utc", lambda: admission_time)
+    result = bundle["registry"].assess_and_record(
+        admission_id="w85-forged-fresh-finalization",
+        policy_id=bundle["policy"].policy_id,
+        promotion_policy=bundle["promotion_policy"],
+        w80_assessment=bundle["assessment"],
+        w81_resolution=bundle["w81"],
+        w82_resolution=bundle["w82"],
+        w83_resolution=bundle["w83"],
+        w84_finalization=forged,
+        w84_source_package=bundle["source_package"],
+    )
+    assert result.status is w85.PaperCandidateAdmissionStatus.BLOCKED
+    assert result.reason_codes == ("W84_DURABLE_SOURCE_STALE",)
+    assert result.paper_candidate_authorized is False
+    assert result.w84_admission_source_capture_at == capture
+    assert result.w84_admission_source_verified_at == admission_time
+
+
+def test_w85_intermediate_w84_receipt_cannot_be_used_as_finalization(
+    tmp_path, monkeypatch, limits, market, empty_portfolio, market_buy_intent
+):
+    bundle = _full_context(
+        tmp_path, monkeypatch, limits, market, empty_portfolio, market_buy_intent
+    )
+    monkeypatch.setattr(
+        w85, "_now_utc", lambda: bundle["registered_at"] + timedelta(seconds=1)
+    )
+    with pytest.raises(TypeError, match="PromotionShadowForwardFinalVerification"):
+        bundle["registry"].assess_and_record(
+            admission_id="w85-intermediate-w84",
+            policy_id=bundle["policy"].policy_id,
+            promotion_policy=bundle["promotion_policy"],
+            w80_assessment=bundle["assessment"],
+            w81_resolution=bundle["w81"],
+            w82_resolution=bundle["w82"],
+            w83_resolution=bundle["w83"],
+            w84_finalization=bundle["ctx"]["base"],  # type: ignore[arg-type]
+            w84_source_package=bundle["source_package"],
+        )
 
 
 def test_w85_policy_is_bounded_and_cannot_become_execution_authority(
@@ -322,6 +452,7 @@ def test_w85_same_admission_id_is_idempotent_but_conflicting_identity_fails(
         w82_resolution=bundle["w82"],
         w83_resolution=bundle["w83"],
         w84_finalization=bundle["final"],
+        w84_source_package=bundle["source_package"],
     )
     assert same == first
 
@@ -342,6 +473,7 @@ def test_w85_same_admission_id_is_idempotent_but_conflicting_identity_fails(
             w82_resolution=bundle["w82"],
             w83_resolution=forged_w83,
             w84_finalization=bundle["final"],
+            w84_source_package=bundle["source_package"],
         )
 
 
