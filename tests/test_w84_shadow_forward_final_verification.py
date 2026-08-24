@@ -116,8 +116,6 @@ def test_w84_final_verification_rejects_coherently_rehashed_assessment_time_lie(
         evidence_hash=forged_evidence.evidence_hash,
         resolved_at=forged_assessed_at + timedelta(seconds=1),
     )
-    # Actual process time is stale despite the forged evidence/base claiming a
-    # prompt assessment. The finalizer must use the real process clock instead.
     monkeypatch.setattr(
         final_verification,
         "_now_utc",
@@ -183,7 +181,7 @@ def test_w84_final_verification_receipt_constructor_fail_closed(
     monkeypatch.setattr(
         final_verification,
         "_now_utc",
-        lambda: _capture_at(ctx) + timedelta(seconds=2),
+        lambda: _capture_at(ctx) + timedelta(seconds=4),
     )
     result = _finalize(ctx)
 
