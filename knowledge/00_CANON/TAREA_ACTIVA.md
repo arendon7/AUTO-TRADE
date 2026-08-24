@@ -13,7 +13,7 @@ Fecha: 2026-08-24
 - W79 Strategy Promotion Governance + Strategy Lab read-only: certificado;
 - W80 Durable Promotion Assessment: certificado;
 - W81 Execution Cost Continuity: certificado;
-- W82 Fee-Complete Execution Accounting: behavioral implementation certificada y `TD-R7D-002` CLOSED; exact final documentation head aún debe recertificarse antes del cierre integral de PR #54.
+- W82 Fee-Complete Execution Accounting: behavioral implementation certificada y `TD-R7D-002` CLOSED; el cierre integral de PR #54 exige exact-head Dedicated W82 + Core Safety + Knowledge Contract verdes sobre el mismo SHA que contiene este canon.
 
 ## W82 — resultado consolidado
 W82 separa:
@@ -61,7 +61,7 @@ Core Safety run `32682423322`:
 - Debt Register PASS;
 - Canonical Knowledge PASS.
 
-Antes de cerrar integralmente PR #54 debe repetirse Dedicated W82 + Core Safety sobre el exact final documentation head.
+La certificación integral de PR #54 sólo es válida cuando el exact head que contiene este canon vuelve a demostrar Dedicated W82 + Core Safety + Knowledge Contract; no se reutiliza una corrida de un SHA anterior como certificación del SHA final.
 
 ## Problema exacto W83
 Promotion Governance hoy conoce y congela `strategy_id` / `strategy_version`, pero el sistema todavía conserva el blocker:
