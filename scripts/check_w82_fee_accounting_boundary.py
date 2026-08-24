@@ -6,7 +6,12 @@ import sys
 
 
 ROOT = Path(__file__).resolve().parents[1]
-TARGET = ROOT / "src/autotrade/fee_accounting.py"
+TARGETS = (
+    ROOT / "src/autotrade/fee_accounting.py",
+    ROOT / "src/autotrade/fee_product_economics.py",
+    ROOT / "src/autotrade/paper_fee_activity_evidence.py",
+)
+DOMAIN = ROOT / "src/autotrade/domain.py"
 W82_WORKFLOW = ROOT / ".github/workflows/w82-fee-accounting.yml"
 CORE_WORKFLOW = ROOT / ".github/workflows/core-tests.yml"
 
@@ -61,58 +66,58 @@ FORBIDDEN_TEXT = (
 
 def main() -> int:
     errors: list[str] = []
-    for path in (TARGET, W82_WORKFLOW, CORE_WORKFLOW):
+    for path in (*TARGETS, DOMAIN, W82_WORKFLOW, CORE_WORKFLOW):
         if not path.is_file():
             errors.append(f"missing W82 contract file: {path.relative_to(ROOT)}")
 
-    if TARGET.is_file():
-        source = TARGET.read_text(encoding="utf-8")
-        tree = ast.parse(source, filename=str(TARGET.relative_to(ROOT)))
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Import):
-                for alias in node.names:
-                    if _forbidden_module(alias.name):
-                        errors.append(f"line {node.lineno}: forbidden import {alias.name}")
-            elif isinstance(node, ast.ImportFrom):
-                module = node.module or ""
-                if _forbidden_module(module):
-                    errors.append(f"line {node.lineno}: forbidden import {module}")
-                for alias in node.names:
-                    if alias.name in FORBIDDEN_NAMES:
-                        errors.append(f"line {node.lineno}: forbidden authority symbol {alias.name}")
-            elif isinstance(node, ast.Name) and node.id in FORBIDDEN_NAMES:
-                errors.append(f"line {node.lineno}: forbidden authority symbol {node.id}")
-            elif isinstance(node, ast.Call):
-                name = _call_name(node.func)
-                if name in FORBIDDEN_CALLS:
-                    errors.append(f"line {node.lineno}: forbidden authority/network call {name}")
-        for marker in FORBIDDEN_TEXT:
-            if marker in source:
-                errors.append(f"forbidden W82 surface present: {marker}")
+    for target in TARGETS:
+        if target.is_file():
+            errors.extend(_scan_target(target))
 
-        required = (
+    if DOMAIN.is_file():
+        errors.extend(_check_fill_shape(DOMAIN))
+
+    required_by_file = {
+        "fee_accounting.py": (
             'FEE_ACCOUNTING_CONTRACT_VERSION = "W82_FEE_ACCOUNTING_V1"',
             'FEE_ACCOUNTING_SCOPE = "SIMULATED_QUALIFICATION_ONLY"',
-            'SIMULATED_MODEL = "SIMULATED_MODEL"',
-            'BROKER_AUTHORITATIVE = "BROKER_AUTHORITATIVE"',
             'FILLED_NOTIONAL_QUOTE = "FILLED_NOTIONAL_QUOTE"',
             "qualification.research_fee_bps != cost_model.fee_bps",
             "continuity.status is not ExecutionCostContinuityStatus.PASS",
-            "continuity.sensitivity_measurement_hash != sensitivity_report.measurement_report_hash",
-            "continuity_observation.outcome_hash != outcome.outcome_hash",
             "non_fee_components_counted_as_fee",
-            '"broker_authoritative": False',
             '"broker_authoritative_fee_proven": False',
             '"realized_profitability_authorized": False',
-            '"paper_candidate_authorized": False',
-            '"external_execution_authorized": False',
-            '"capital_authority": "NONE"',
-            '"live_trading": "BLOCKED"',
             "BROKER_AUTHORITATIVE fee accounting is unsupported",
-        )
-        for marker in required:
+        ),
+        "fee_product_economics.py": (
+            'FEE_PRODUCT_ECONOMICS_VERSION = "W82_FEE_PRODUCT_ECONOMICS_V1"',
+            'RECEIVED_ASSET_PERCENT = "RECEIVED_ASSET_PERCENT"',
+            'WORST_CASE = "WORST_CASE"',
+            "research_fee_bps >= policy.minimum_fee_bps",
+            '"RESEARCH_FEE_BELOW_POLICY"',
+            "filled - charged_amount",
+            '"literal_broker_fee_semantics_modeled": True',
+            '"broker_authoritative_fee_proven": False',
+            '"realized_profitability_authorized": False',
+        ),
+        "paper_fee_activity_evidence.py": (
+            'PAPER_FEE_ACTIVITY_VERSION = "W82_PAPER_FEE_ACTIVITY_V1"',
+            'OBSERVED = "OBSERVED"',
+            'PENDING_PUBLICATION = "PENDING_PUBLICATION"',
+            '"CFEE", "FEE"',
+            '"FEE_ACTIVITY_NOT_YET_OBSERVED"',
+            '"zero_fee_inferred": False',
+            '"broker_authoritative_fee_proven": False',
+            '"paper_only": True',
+        ),
+    }
+    for target in TARGETS:
+        if not target.is_file():
+            continue
+        source = target.read_text(encoding="utf-8")
+        for marker in required_by_file[target.name]:
             if marker not in source:
-                errors.append(f"required W82 fail-closed marker missing: {marker}")
+                errors.append(f"{target.name}: required W82 fail-closed marker missing: {marker}")
 
     marker = "python scripts/check_w82_fee_accounting_boundary.py"
     for workflow, label in ((W82_WORKFLOW, "W82 workflow"), (CORE_WORKFLOW, "Core Safety")):
@@ -124,11 +129,51 @@ def main() -> int:
             print(f"ERROR: {error}", file=sys.stderr)
         return 1
     print(
-        "W82 FEE ACCOUNTING BOUNDARY PASS — Research fee schedule + W78 measurement + W81 continuity are hash-bound; "
-        "simulated filled-notional quote-currency fees are separate from spread/slippage; gross/net position deltas are not broker fee proof; "
-        "no broker/network/SQLite/OMS/Safety/writer authority; realized-profitability unauthorized; PAPER candidate false; capital NONE; LIVE blocked"
+        "W82 FEE ACCOUNTING BOUNDARY PASS — base fee arithmetic, preregistered product/venue fee floor, received-asset semantics and delayed PAPER fee activity are separate/hash-bound; canonical Fill unchanged; missing activity never means zero; no broker/network/SQLite/OMS/Safety/writer authority; realized-profitability unauthorized; PAPER candidate false; capital NONE; LIVE blocked"
     )
     return 0
+
+
+def _scan_target(path: Path) -> list[str]:
+    errors: list[str] = []
+    source = path.read_text(encoding="utf-8")
+    tree = ast.parse(source, filename=str(path.relative_to(ROOT)))
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if _forbidden_module(alias.name):
+                    errors.append(f"{path.name}:{node.lineno}: forbidden import {alias.name}")
+        elif isinstance(node, ast.ImportFrom):
+            module = node.module or ""
+            if _forbidden_module(module):
+                errors.append(f"{path.name}:{node.lineno}: forbidden import {module}")
+            for alias in node.names:
+                if alias.name in FORBIDDEN_NAMES:
+                    errors.append(f"{path.name}:{node.lineno}: forbidden authority symbol {alias.name}")
+        elif isinstance(node, ast.Name) and node.id in FORBIDDEN_NAMES:
+            errors.append(f"{path.name}:{node.lineno}: forbidden authority symbol {node.id}")
+        elif isinstance(node, ast.Call):
+            name = _call_name(node.func)
+            if name in FORBIDDEN_CALLS:
+                errors.append(f"{path.name}:{node.lineno}: forbidden authority/network call {name}")
+    for marker in FORBIDDEN_TEXT:
+        if marker in source:
+            errors.append(f"{path.name}: forbidden W82 surface present: {marker}")
+    return errors
+
+
+def _check_fill_shape(path: Path) -> list[str]:
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path.relative_to(ROOT)))
+    for node in tree.body:
+        if isinstance(node, ast.ClassDef) and node.name == "Fill":
+            fields = [
+                item.target.id
+                for item in node.body
+                if isinstance(item, ast.AnnAssign) and isinstance(item.target, ast.Name)
+            ]
+            expected = ["fill_id", "order_id", "symbol", "side", "quantity", "price", "occurred_at"]
+            return [] if fields == expected else [f"domain.Fill shape changed: {fields!r}"]
+    return ["domain.Fill class not found"]
 
 
 def _forbidden_module(module: str) -> bool:
