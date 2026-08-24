@@ -10,13 +10,17 @@ import re
 from autotrade.domain import OrderIntent, intent_fingerprint
 from autotrade.execution_cost_continuity import FEE_ACCOUNTING_BLOCKER
 from autotrade.fee_accounting import FeeAccountingEvidence, FeeAccountingStatus
+from autotrade.fee_product_economics import (
+    FeeProductEconomicsEvidence,
+    FeeProductEconomicsStatus,
+)
 from autotrade.promotion_cost_continuity import (
     PromotionCostContinuityResolution,
     PromotionCostContinuityStatus,
 )
 
 
-RESOLUTION_CONTRACT_VERSION = "W82_PROMOTION_FEE_ACCOUNTING_RESOLUTION_V1"
+RESOLUTION_CONTRACT_VERSION = "W82_PROMOTION_FEE_ACCOUNTING_RESOLUTION_V2"
 STRATEGY_VERSION_BLOCKER = "EXECUTION_STRATEGY_VERSION_UNBOUND"
 SHADOW_FORWARD_BLOCKER = "SHADOW_FORWARD_PROMOTION_BINDING_REQUIRED"
 _HASH_RE = re.compile(r"^[0-9a-f]{64}$")
@@ -52,14 +56,19 @@ class PromotionFeeAccountingResolution:
     continuity_measurement_hash: str
     fee_accounting_evidence_hash: str
     fee_contract_hash: str
+    fee_product_economics_hash: str
+    fee_policy_hash: str
     intent_fingerprint: str
     w81_resolved_at: datetime
     fee_assessed_at: datetime
+    fee_product_assessed_at: datetime
     status: PromotionFeeAccountingStatus
     reason_codes: tuple[str, ...]
     resolved_promotion_blockers: tuple[str, ...]
     remaining_promotion_blockers: tuple[str, ...]
     fee_accounting_complete: bool
+    fee_schedule_conservative: bool
+    product_fee_economics_complete: bool
     broker_authoritative_fee_proven: bool
     realized_profitability_authorized: bool
     strategy_version_execution_bound: bool
@@ -91,6 +100,8 @@ class PromotionFeeAccountingResolution:
             ("continuity_measurement_hash", self.continuity_measurement_hash),
             ("fee_accounting_evidence_hash", self.fee_accounting_evidence_hash),
             ("fee_contract_hash", self.fee_contract_hash),
+            ("fee_product_economics_hash", self.fee_product_economics_hash),
+            ("fee_policy_hash", self.fee_policy_hash),
             ("intent_fingerprint", self.intent_fingerprint),
             ("resolution_hash", self.resolution_hash),
         ):
@@ -98,6 +109,7 @@ class PromotionFeeAccountingResolution:
         for label, value in (
             ("w81_resolved_at", self.w81_resolved_at),
             ("fee_assessed_at", self.fee_assessed_at),
+            ("fee_product_assessed_at", self.fee_product_assessed_at),
             ("resolved_at", self.resolved_at),
         ):
             _require_aware(value, label)
@@ -105,6 +117,8 @@ class PromotionFeeAccountingResolution:
             raise PromotionFeeAccountingIntegrityError("W82 resolution may not predate W81 resolution")
         if _utc(self.resolved_at) < _utc(self.fee_assessed_at):
             raise PromotionFeeAccountingIntegrityError("W82 resolution may not predate fee evidence")
+        if _utc(self.resolved_at) < _utc(self.fee_product_assessed_at):
+            raise PromotionFeeAccountingIntegrityError("W82 resolution may not predate product fee evidence")
         if self.reason_codes != tuple(sorted(set(self.reason_codes))):
             raise PromotionFeeAccountingIntegrityError("resolution reason codes must be unique sorted")
         if any(not isinstance(value, str) or not value.strip() for value in self.reason_codes):
@@ -119,6 +133,10 @@ class PromotionFeeAccountingResolution:
                 raise PromotionFeeAccountingIntegrityError("PASS W82 resolution may not retain fee blocker")
             if self.fee_accounting_complete is not True:
                 raise PromotionFeeAccountingIntegrityError("PASS W82 resolution requires complete fee accounting")
+            if self.fee_schedule_conservative is not True:
+                raise PromotionFeeAccountingIntegrityError("PASS W82 resolution requires conservative fee schedule")
+            if self.product_fee_economics_complete is not True:
+                raise PromotionFeeAccountingIntegrityError("PASS W82 resolution requires product-aware fee economics")
         else:
             if not self.reason_codes:
                 raise PromotionFeeAccountingIntegrityError("BLOCKED W82 resolution requires reason code")
@@ -154,14 +172,17 @@ def resolve_promotion_fee_accounting(
     resolution_id: str,
     w81_resolution: PromotionCostContinuityResolution,
     fee_evidence: FeeAccountingEvidence,
+    product_economics: FeeProductEconomicsEvidence,
     execution_intent: OrderIntent,
     resolved_at: datetime,
 ) -> PromotionFeeAccountingResolution:
     """Resolve only the fee blocker for the exact W81-qualified candidate.
 
-    W82 simulated completeness proves deterministic qualification economics under
-    the preregistered Research fee model. It does not prove broker-observed fees,
-    realized profitability, PAPER candidacy, capital authority, or LIVE readiness.
+    The base W82 receipt proves quote-equivalent simulated fee arithmetic. The
+    product-economics receipt additionally proves that the Research fee rate is no
+    cheaper than the preregistered product/venue policy and applies the literal
+    charge convention to resulting base quantity and quote cash. Neither receipt
+    is broker-observed fee proof or trading authority.
     """
 
     _require_id(resolution_id, "resolution_id")
@@ -169,6 +190,8 @@ def resolve_promotion_fee_accounting(
         raise TypeError("w81_resolution must be PromotionCostContinuityResolution")
     if not isinstance(fee_evidence, FeeAccountingEvidence):
         raise TypeError("fee_evidence must be FeeAccountingEvidence")
+    if not isinstance(product_economics, FeeProductEconomicsEvidence):
+        raise TypeError("product_economics must be FeeProductEconomicsEvidence")
     if not isinstance(execution_intent, OrderIntent):
         raise TypeError("execution_intent must be OrderIntent")
     _require_aware(resolved_at, "resolved_at")
@@ -176,16 +199,26 @@ def resolve_promotion_fee_accounting(
         raise PromotionFeeAccountingIntegrityError("W82 resolution may not predate W81 resolution")
     if _utc(resolved_at) < _utc(fee_evidence.assessed_at):
         raise PromotionFeeAccountingIntegrityError("W82 resolution may not predate fee evidence")
+    if _utc(resolved_at) < _utc(product_economics.assessed_at):
+        raise PromotionFeeAccountingIntegrityError("W82 resolution may not predate product fee evidence")
 
     intent_hash = intent_fingerprint(execution_intent)
     if w81_resolution.intent_fingerprint != intent_hash:
         raise PromotionFeeAccountingIntegrityError("W81 resolution/intent fingerprint mismatch")
     if fee_evidence.intent_fingerprint != intent_hash:
         raise PromotionFeeAccountingIntegrityError("fee evidence/intent fingerprint mismatch")
+    if product_economics.intent_fingerprint != intent_hash:
+        raise PromotionFeeAccountingIntegrityError("product fee evidence/intent fingerprint mismatch")
     if execution_intent.strategy_id != w81_resolution.selected_strategy_id:
         raise PromotionFeeAccountingIntegrityError("execution strategy differs from frozen candidate")
     if FEE_ACCOUNTING_BLOCKER not in w81_resolution.remaining_promotion_blockers:
         raise PromotionFeeAccountingIntegrityError("W81 resolution does not contain fee blocker")
+    if product_economics.fee_accounting_evidence_hash != fee_evidence.evidence_hash:
+        raise PromotionFeeAccountingIntegrityError("product fee evidence is not bound to base W82 fee evidence")
+    if product_economics.fee_contract_hash != fee_evidence.fee_contract_hash:
+        raise PromotionFeeAccountingIntegrityError("product fee evidence contract binding mismatch")
+    if product_economics.w81_continuity_evidence_hash != w81_resolution.continuity_evidence_hash:
+        raise PromotionFeeAccountingIntegrityError("product fee evidence is not bound to W81 continuity")
 
     reasons: list[str] = []
     if w81_resolution.status is not PromotionCostContinuityStatus.PASS:
@@ -196,6 +229,12 @@ def resolve_promotion_fee_accounting(
         reasons.append("FEE_EVIDENCE_NOT_BOUND_TO_W81_CONTINUITY")
     if fee_evidence.sensitivity_measurement_hash != w81_resolution.continuity_measurement_hash:
         reasons.append("FEE_EVIDENCE_NOT_BOUND_TO_W81_MEASUREMENT")
+    if product_economics.status is not FeeProductEconomicsStatus.PASS:
+        reasons.append("FEE_PRODUCT_ECONOMICS_NOT_PASS")
+    if not product_economics.fee_schedule_conservative:
+        reasons.append("FEE_SCHEDULE_NOT_CONSERVATIVE")
+    if not product_economics.product_fee_economics_complete:
+        reasons.append("PRODUCT_FEE_ECONOMICS_INCOMPLETE")
 
     status = PromotionFeeAccountingStatus.PASS if not reasons else PromotionFeeAccountingStatus.BLOCKED
     resolved = (FEE_ACCOUNTING_BLOCKER,) if status is PromotionFeeAccountingStatus.PASS else ()
@@ -215,14 +254,19 @@ def resolve_promotion_fee_accounting(
         "continuity_measurement_hash": w81_resolution.continuity_measurement_hash,
         "fee_accounting_evidence_hash": fee_evidence.evidence_hash,
         "fee_contract_hash": fee_evidence.fee_contract_hash,
+        "fee_product_economics_hash": product_economics.evidence_hash,
+        "fee_policy_hash": product_economics.fee_policy_hash,
         "intent_fingerprint": intent_hash,
         "w81_resolved_at": w81_resolution.resolved_at,
         "fee_assessed_at": fee_evidence.assessed_at,
+        "fee_product_assessed_at": product_economics.assessed_at,
         "status": status,
         "reason_codes": tuple(sorted(reasons)),
         "resolved_promotion_blockers": resolved,
         "remaining_promotion_blockers": remaining,
         "fee_accounting_complete": status is PromotionFeeAccountingStatus.PASS,
+        "fee_schedule_conservative": product_economics.fee_schedule_conservative,
+        "product_fee_economics_complete": product_economics.product_fee_economics_complete,
         "broker_authoritative_fee_proven": False,
         "realized_profitability_authorized": False,
         "strategy_version_execution_bound": False,
@@ -255,14 +299,19 @@ def _payload(value: PromotionFeeAccountingResolution, *, include_hash: bool) -> 
         "continuity_measurement_hash": value.continuity_measurement_hash,
         "fee_accounting_evidence_hash": value.fee_accounting_evidence_hash,
         "fee_contract_hash": value.fee_contract_hash,
+        "fee_product_economics_hash": value.fee_product_economics_hash,
+        "fee_policy_hash": value.fee_policy_hash,
         "intent_fingerprint": value.intent_fingerprint,
         "w81_resolved_at": value.w81_resolved_at,
         "fee_assessed_at": value.fee_assessed_at,
+        "fee_product_assessed_at": value.fee_product_assessed_at,
         "status": value.status,
         "reason_codes": value.reason_codes,
         "resolved_promotion_blockers": value.resolved_promotion_blockers,
         "remaining_promotion_blockers": value.remaining_promotion_blockers,
         "fee_accounting_complete": value.fee_accounting_complete,
+        "fee_schedule_conservative": value.fee_schedule_conservative,
+        "product_fee_economics_complete": value.product_fee_economics_complete,
         "broker_authoritative_fee_proven": value.broker_authoritative_fee_proven,
         "realized_profitability_authorized": value.realized_profitability_authorized,
         "strategy_version_execution_bound": value.strategy_version_execution_bound,
@@ -281,11 +330,11 @@ def _payload(value: PromotionFeeAccountingResolution, *, include_hash: bool) -> 
 def _payload_from_values(values: dict[str, object]) -> dict[str, object]:
     payload = dict(values)
     payload["status"] = _enum_value(payload["status"])
-    payload["reason_codes"] = list(payload["reason_codes"])  # type: ignore[arg-type]
-    payload["resolved_promotion_blockers"] = list(payload["resolved_promotion_blockers"])  # type: ignore[arg-type]
-    payload["remaining_promotion_blockers"] = list(payload["remaining_promotion_blockers"])  # type: ignore[arg-type]
-    for key in ("w81_resolved_at", "fee_assessed_at", "resolved_at"):
-        payload[key] = _utc_iso(payload[key])  # type: ignore[arg-type]
+    payload["reason_codes"] = list(payload["reason_codes"])
+    payload["resolved_promotion_blockers"] = list(payload["resolved_promotion_blockers"])
+    payload["remaining_promotion_blockers"] = list(payload["remaining_promotion_blockers"])
+    for key in ("w81_resolved_at", "fee_assessed_at", "fee_product_assessed_at", "resolved_at"):
+        payload[key] = _utc_iso(payload[key])
     return payload
 
 
