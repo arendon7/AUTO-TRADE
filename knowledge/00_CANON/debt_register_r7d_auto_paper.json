@@ -25,23 +25,35 @@
         "knowledge/30_DECISIONES/ADR-0013-w81-execution-cost-continuity.md"
       ],
       "resolution": "W81 proves non-fee Research-to-W78 execution-cost continuity from the observed midpoint using the exact preregistered Research half-spread plus slippage target and exact W78 multiplicative side-aware execution impact. Favorable observations that reduce effective friction are BLOCKED. A promotion blocker may be removed only by a hash-bound resolution tied to the exact W80 candidate assessment and its EXECUTION_SENSITIVITY measurement, with temporal provenance. Fee accounting, strategy-version execution binding, shadow/forward promotion binding and partial-fill reservation remain separate blockers. No compatible external PAPER execution-price receipt is fabricated; any future PAPER adapter must be read-only and identity-bound.",
-      "next_action": "Maintain W81 boundaries permanently. If a future authoritative PAPER execution-price source contains exact account/order/strategy/symbol identity, attach it through a separately reviewed read-only adapter; never substitute unrelated first-canary position truth. Continue with TD-R7D-002 fee-complete execution accounting."
+      "next_action": "Maintain W81 boundaries permanently. If a future authoritative PAPER execution-price source contains exact account/order/strategy/symbol identity, attach it through a separately reviewed read-only adapter; never substitute unrelated first-canary position truth. Fee-complete deterministic qualification accounting is now handled by W82 / TD-R7D-002."
     },
     {
       "id": "TD-R7D-002",
       "track": "R7D",
       "area": "Fee-complete execution accounting before profitability or Auto-Paper promotion claims",
       "severity": "P1",
-      "status": "OPEN",
+      "status": "CLOSED",
       "evidence": [
         "src/autotrade/domain.py",
         "src/autotrade/research/costs.py",
-        "src/autotrade/paper_execution_evidence.py",
-        "src/autotrade/paper_execution_qualification.py",
-        "knowledge/30_DECISIONES/ADR-0010-w78-deterministic-paper-execution-model.md",
-        "knowledge/30_DECISIONES/ADR-0013-w81-execution-cost-continuity.md"
+        "src/autotrade/fee_accounting.py",
+        "src/autotrade/fee_product_economics.py",
+        "src/autotrade/fee_schedule_attestation.py",
+        "src/autotrade/paper_fee_activity_evidence.py",
+        "src/autotrade/promotion_fee_accounting.py",
+        "tests/test_w82_fee_accounting.py",
+        "tests/test_w82_fee_accounting_adversarial.py",
+        "tests/test_w82_fee_product_validation.py",
+        "tests/test_w82_fee_schedule_attestation.py",
+        "tests/test_w82_promotion_fee_accounting.py",
+        "tests/test_w82_promotion_fee_accounting_hardening.py",
+        "scripts/check_w82_fee_accounting_boundary.py",
+        "scripts/check_w82_promotion_fee_accounting_boundary.py",
+        ".github/workflows/w82-fee-accounting.yml",
+        "knowledge/30_DECISIONES/ADR-0014-w82-fee-complete-execution-accounting.md"
       ],
-      "next_action": "W82: add a separately reviewed fee-complete execution accounting contract that binds Research fee assumptions to explicit simulated or authoritative PAPER fee evidence without fabricating fees inside the existing core Fill. Separate fee schedule assumptions from observed broker fees, preserve product/venue/account/order provenance, and keep profitability/PAPER-candidate claims blocked whenever fee evidence is missing or incomplete."
+      "resolution": "W82 closes fee completeness for deterministic candidate qualification without changing canonical Fill or fabricating broker activity. Base simulated fee accounting is hash-bound to the exact Research fee assumption, W78 measurement universe and W81 continuity; a separate product-economics layer applies literal charge semantics; and final blocker removal additionally requires a fresh versioned documented Alpaca crypto fee-schedule attestation. The current conservative unknown-volume/no-maker-guarantee baseline is 25 bps, from documented Tier-1 15 bps maker / 25 bps taker fees, so caller-defined local policy cannot undercut the external floor. The documentation snapshot has a fixed verification timestamp and expires after 30 days. PAPER fee activity remains PENDING with fee_amount=null and zero_fee_inferred=false until an audited read-only broker source exists. Therefore broker_authoritative_fee_proven=false and realized_profitability_authorized=false remain mandatory; W82 proves conservative qualification economics, not an actually debited Alpaca fee or future profitability.",
+      "next_action": "Maintain W82 fee/accounting/product/schedule boundaries permanently. Re-verify and version the Alpaca fee schedule snapshot before its 30-day expiry. Any lower fee floor requires separately certified evidence of the applicable account volume tier and liquidity role; any realized-fee claim requires an audited read-only broker fee-activity source with exact provenance. Continue with W83 execution-strategy-version binding; do not promote Auto-Paper while EXECUTION_STRATEGY_VERSION_UNBOUND or SHADOW_FORWARD_PROMOTION_BINDING_REQUIRED remains."
     },
     {
       "id": "TD-R7D-003",
