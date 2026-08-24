@@ -17,6 +17,12 @@ import autotrade.promotion_shadow_forward_final_verification as w84
 import autotrade.promotion_strategy_version_binding as w83
 import autotrade.strategy_lab_promotion as w79
 import autotrade.strategy_promotion_assessment as w80
+from autotrade.paper_candidate_admission_source_verification import (
+    PaperCandidateAdmissionSourceIntegrityError,
+    W84AdmissionSourcePackage,
+    W84AdmissionSourceProof,
+    verify_w84_sources_for_candidate_admission,
+)
 from autotrade.promotion_cost_continuity import (
     PromotionCostContinuityResolution,
     PromotionCostContinuityStatus,
@@ -30,14 +36,12 @@ from autotrade.promotion_shadow_forward_final_verification import (
 )
 from autotrade.promotion_strategy_version_binding import PromotionStrategyVersionResolution
 from autotrade.strategy_lab_promotion import StrategyPromotionPolicy
-from autotrade.strategy_promotion_assessment import (
-    StrategyPromotionAssessmentReceipt,
-)
+from autotrade.strategy_promotion_assessment import StrategyPromotionAssessmentReceipt
 
 
-ADMISSION_POLICY_VERSION = "W85_PAPER_CANDIDATE_ADMISSION_POLICY_V1"
-POLICY_REGISTRATION_VERSION = "W85_PAPER_CANDIDATE_POLICY_REGISTRATION_V1"
-ADMISSION_RECEIPT_VERSION = "W85_PAPER_CANDIDATE_ADMISSION_RECEIPT_V1"
+ADMISSION_POLICY_VERSION = "W85_PAPER_CANDIDATE_ADMISSION_POLICY_V2"
+POLICY_REGISTRATION_VERSION = "W85_PAPER_CANDIDATE_POLICY_REGISTRATION_V2"
+ADMISSION_RECEIPT_VERSION = "W85_PAPER_CANDIDATE_ADMISSION_RECEIPT_V2"
 ZERO_ADMISSION_HASH = "0" * 64
 MAX_FINALIZATION_AGE_SECONDS = 86_400
 MAX_CANDIDATE_VALIDITY_SECONDS = 604_800
@@ -68,11 +72,13 @@ class PaperCandidateAdmissionStatus(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class PaperCandidateAdmissionPolicy:
-    """Frozen W85 admission governance, deliberately separate from W79 science.
+    """Frozen candidate-specific W85 admission governance.
 
-    W79 already preregistered the scientific performance thresholds. W85 may
-    govern only admission freshness, bounded probation descriptors and identity;
-    it may not introduce post-outcome performance thresholds or execution power.
+    W79 owns scientific performance thresholds. W85 freezes only candidate
+    identity, source-age/validity budgets and descriptive probation ceilings.
+    `max_w84_finalization_age_seconds` is intentionally evaluated against the
+    independently re-proved durable W84 measurement capture, never against a
+    caller-provided/historical `process_verified_at` field.
     """
 
     policy_id: str
@@ -160,22 +166,19 @@ class PaperCandidateAdmissionPolicy:
             live=self.live_trading,
             label="W85 admission policy",
         )
-        expected_authority_key = _authority_key(
+        if self.authority_key != _authority_key(
             promotion_policy_hash=self.promotion_policy_hash,
             selected_trial_fingerprint=self.selected_trial_fingerprint,
             strategy_spec_hash=self.strategy_spec_hash,
             loaded_runtime_code_hash=self.loaded_runtime_code_hash,
             fee_product_economics_hash=self.fee_product_economics_hash,
             intent_fingerprint=self.intent_fingerprint,
-        )
-        if self.authority_key != expected_authority_key:
+        ):
             raise PaperCandidateAdmissionIntegrityError(
                 "admission policy authority_key does not match frozen candidate identity"
             )
         if self.policy_hash != _hash(_policy_payload(self, include_hash=False)):
-            raise PaperCandidateAdmissionIntegrityError(
-                "admission policy hash mismatch"
-            )
+            raise PaperCandidateAdmissionIntegrityError("admission policy hash mismatch")
 
     def to_dict(self) -> dict[str, object]:
         return _policy_payload(self, include_hash=True)
@@ -234,6 +237,10 @@ class PaperCandidateAdmissionReceipt:
     w84_finalization_hash: str | None
     w84_source_verification_hash: str | None
     w84_measurement_plan_hash: str | None
+    w84_admission_source_proof_hash: str | None
+    w84_admission_source_verification_hash: str | None
+    w84_admission_source_capture_at: datetime | None
+    w84_admission_source_verified_at: datetime | None
     selected_trial_id: str
     selected_trial_fingerprint: str
     selected_strategy_id: str
@@ -305,9 +312,20 @@ class PaperCandidateAdmissionReceipt:
             ("w84_finalization_hash", self.w84_finalization_hash),
             ("w84_source_verification_hash", self.w84_source_verification_hash),
             ("w84_measurement_plan_hash", self.w84_measurement_plan_hash),
+            ("w84_admission_source_proof_hash", self.w84_admission_source_proof_hash),
+            (
+                "w84_admission_source_verification_hash",
+                self.w84_admission_source_verification_hash,
+            ),
         ):
             if value is not None:
                 _require_hash(value, label)
+        for label, value in (
+            ("w84_admission_source_capture_at", self.w84_admission_source_capture_at),
+            ("w84_admission_source_verified_at", self.w84_admission_source_verified_at),
+        ):
+            if value is not None:
+                _require_aware(value, label)
         if not isinstance(self.status, PaperCandidateAdmissionStatus):
             raise PaperCandidateAdmissionIntegrityError("invalid W85 admission status")
         if self.reason_codes != tuple(sorted(set(self.reason_codes))):
@@ -330,6 +348,12 @@ class PaperCandidateAdmissionReceipt:
             raise PaperCandidateAdmissionIntegrityError(
                 "paper_candidate_authorized does not match admission status"
             )
+        proof_values = (
+            self.w84_admission_source_proof_hash,
+            self.w84_admission_source_verification_hash,
+            self.w84_admission_source_capture_at,
+            self.w84_admission_source_verified_at,
+        )
         if self.status is PaperCandidateAdmissionStatus.PASS:
             if self.reason_codes:
                 raise PaperCandidateAdmissionIntegrityError(
@@ -343,9 +367,20 @@ class PaperCandidateAdmissionReceipt:
                 self.w84_finalization_hash is None
                 or self.w84_source_verification_hash is None
                 or self.w84_measurement_plan_hash is None
+                or any(value is None for value in proof_values)
             ):
                 raise PaperCandidateAdmissionIntegrityError(
-                    "PASS admission requires final W84 provenance"
+                    "PASS admission requires final W84 provenance plus admission-time source proof"
+                )
+            assert self.w84_admission_source_capture_at is not None
+            assert self.w84_admission_source_verified_at is not None
+            if _utc(self.w84_admission_source_verified_at) != _utc(self.admitted_at):
+                raise PaperCandidateAdmissionIntegrityError(
+                    "PASS admission source verification must use exact admission process clock"
+                )
+            if _utc(self.w84_admission_source_capture_at) > _utc(self.admitted_at):
+                raise PaperCandidateAdmissionIntegrityError(
+                    "PASS admission cannot predate durable source capture"
                 )
         else:
             if not self.reason_codes:
@@ -379,9 +414,7 @@ class PaperCandidateAdmissionReceipt:
             label="W85 admission receipt",
         )
         if self.admission_hash != _hash(_receipt_payload(self, include_hash=False)):
-            raise PaperCandidateAdmissionIntegrityError(
-                "admission receipt hash mismatch"
-            )
+            raise PaperCandidateAdmissionIntegrityError("admission receipt hash mismatch")
 
     def to_dict(self) -> dict[str, object]:
         return _receipt_payload(self, include_hash=True)
@@ -541,6 +574,7 @@ class SQLitePaperCandidateAdmissionRegistry:
         w82_resolution: PromotionFeeAccountingResolution,
         w83_resolution: PromotionStrategyVersionResolution,
         w84_finalization: PromotionShadowForwardFinalVerification | None,
+        w84_source_package: W84AdmissionSourcePackage | None = None,
     ) -> PaperCandidateAdmissionReceipt:
         _require_id(admission_id, "admission_id")
         _require_id(policy_id, "policy_id")
@@ -565,14 +599,29 @@ class SQLitePaperCandidateAdmissionRegistry:
                 "admission decision must occur strictly after frozen policy registration"
             )
 
+        source_proof: W84AdmissionSourceProof | None = None
+        if w84_finalization is not None and w84_source_package is not None:
+            try:
+                source_proof = verify_w84_sources_for_candidate_admission(
+                    proof_id=f"{admission_id}:w84-source-reproof",
+                    finalization=w84_finalization,
+                    w83_resolution=w83_resolution,
+                    source_package=w84_source_package,
+                    verified_at=now,
+                )
+            except (TypeError, PaperCandidateAdmissionSourceIntegrityError) as exc:
+                raise PaperCandidateAdmissionIntegrityError(
+                    "W85 admission could not independently re-prove W84 durable sources"
+                ) from exc
+
         status, reasons = _decision(
-            now=now,
             policy=registration.policy,
             w80_assessment=w80_assessment,
             w81_resolution=w81_resolution,
             w82_resolution=w82_resolution,
             w83_resolution=w83_resolution,
             w84_finalization=w84_finalization,
+            source_proof=source_proof,
         )
         valid_until = (
             now + timedelta(seconds=registration.policy.candidate_validity_seconds)
@@ -666,14 +715,10 @@ class SQLitePaperCandidateAdmissionRegistry:
                 "w83_resolution_id": w83_resolution.resolution_id,
                 "w83_resolution_hash": w83_resolution.resolution_hash,
                 "w84_finalization_id": (
-                    w84_finalization.finalization_id
-                    if w84_finalization is not None
-                    else None
+                    w84_finalization.finalization_id if w84_finalization is not None else None
                 ),
                 "w84_finalization_hash": (
-                    w84_finalization.finalization_hash
-                    if w84_finalization is not None
-                    else None
+                    w84_finalization.finalization_hash if w84_finalization is not None else None
                 ),
                 "w84_source_verification_hash": (
                     w84_finalization.source_verification_hash
@@ -684,6 +729,20 @@ class SQLitePaperCandidateAdmissionRegistry:
                     w84_finalization.measurement_plan_hash
                     if w84_finalization is not None
                     else None
+                ),
+                "w84_admission_source_proof_hash": (
+                    source_proof.proof_hash if source_proof is not None else None
+                ),
+                "w84_admission_source_verification_hash": (
+                    source_proof.admission_source_verification_hash
+                    if source_proof is not None
+                    else None
+                ),
+                "w84_admission_source_capture_at": (
+                    source_proof.source_capture_at if source_proof is not None else None
+                ),
+                "w84_admission_source_verified_at": (
+                    source_proof.verified_at if source_proof is not None else None
                 ),
                 "selected_trial_id": w83_resolution.selected_trial_id,
                 "selected_trial_fingerprint": w83_resolution.selected_trial_fingerprint,
@@ -801,7 +860,7 @@ def build_paper_candidate_admission_policy(
     probation_notional_cap_usd: Decimal = Decimal("5"),
     probation_order_cap: int = 1,
 ) -> PaperCandidateAdmissionPolicy:
-    """Build a bounded W85 admission policy without post-outcome science knobs."""
+    """Build bounded W85 admission governance without post-outcome science knobs."""
 
     _require_id(policy_id, "policy_id")
     _validate_w79_policy(promotion_policy)
@@ -860,37 +919,46 @@ def build_paper_candidate_admission_policy(
 
 def _decision(
     *,
-    now: datetime,
     policy: PaperCandidateAdmissionPolicy,
     w80_assessment: StrategyPromotionAssessmentReceipt,
     w81_resolution: PromotionCostContinuityResolution,
     w82_resolution: PromotionFeeAccountingResolution,
     w83_resolution: PromotionStrategyVersionResolution,
     w84_finalization: PromotionShadowForwardFinalVerification | None,
+    source_proof: W84AdmissionSourceProof | None,
 ) -> tuple[PaperCandidateAdmissionStatus, tuple[str, ...]]:
     if w84_finalization is None:
         return (
             PaperCandidateAdmissionStatus.INCOMPLETE,
             ("W84_FINAL_VERIFICATION_MISSING",),
         )
+    if source_proof is None:
+        return (
+            PaperCandidateAdmissionStatus.INCOMPLETE,
+            ("W84_ADMISSION_SOURCE_PROOF_MISSING",),
+        )
+    if source_proof.finalization_hash != w84_finalization.finalization_hash:
+        raise PaperCandidateAdmissionIntegrityError(
+            "W85 source proof does not bind exact W84 finalization"
+        )
+
     reasons: list[str] = []
     if w80_assessment.assessment_state is not w79.PromotionAssessmentState.EVIDENCE_QUALIFIED:
         reasons.append("W80_EVIDENCE_NOT_QUALIFIED")
+    if w80_assessment.evidence_complete is not True:
+        reasons.append("W80_EVIDENCE_INCOMPLETE")
     if w81_resolution.status is not PromotionCostContinuityStatus.PASS:
         reasons.append("W81_COST_CONTINUITY_NOT_PASS")
     if w82_resolution.status is not PromotionFeeAccountingStatus.PASS:
         reasons.append("W82_FEE_ACCOUNTING_NOT_PASS")
     if w84_finalization.remaining_promotion_blockers:
         reasons.append("PROMOTION_BLOCKERS_REMAIN")
-    age_seconds = int(
-        (_utc(now) - _utc(w84_finalization.process_verified_at)).total_seconds()
-    )
-    if age_seconds < 0:
-        raise PaperCandidateAdmissionIntegrityError(
-            "W85 admission process clock predates W84 final verification"
-        )
-    if age_seconds > policy.max_w84_finalization_age_seconds:
-        reasons.append("W84_FINALIZATION_STALE")
+    if source_proof.source_truth_verified is not True:
+        reasons.append("W84_DURABLE_SOURCE_NOT_VERIFIED")
+    if source_proof.historical_finalization_timestamp_trusted_for_freshness is not False:
+        reasons.append("W84_HISTORICAL_TIMESTAMP_TRUSTED")
+    if source_proof.source_age_seconds > policy.max_w84_finalization_age_seconds:
+        reasons.append("W84_DURABLE_SOURCE_STALE")
     if reasons:
         return PaperCandidateAdmissionStatus.BLOCKED, tuple(sorted(set(reasons)))
     return PaperCandidateAdmissionStatus.PASS, ()
@@ -921,8 +989,7 @@ def _validate_chain(
         or w80_assessment.policy_hash != promotion_policy.policy_hash
         or w80_assessment.threshold_policy_hash != promotion_policy.threshold_policy_hash
         or w80_assessment.selected_strategy_id != promotion_policy.selected_strategy_id
-        or w80_assessment.selected_strategy_version
-        != promotion_policy.selected_strategy_version
+        or w80_assessment.selected_strategy_version != promotion_policy.selected_strategy_version
     ):
         raise PaperCandidateAdmissionIntegrityError(
             "W80 assessment does not match exact frozen W79 promotion policy"
@@ -933,8 +1000,7 @@ def _validate_chain(
         or w81_resolution.promotion_policy_id != promotion_policy.policy_id
         or w81_resolution.promotion_policy_hash != promotion_policy.policy_hash
         or w81_resolution.selected_strategy_id != promotion_policy.selected_strategy_id
-        or w81_resolution.selected_strategy_version
-        != promotion_policy.selected_strategy_version
+        or w81_resolution.selected_strategy_version != promotion_policy.selected_strategy_version
     ):
         raise PaperCandidateAdmissionIntegrityError(
             "W81 resolution does not continue exact W79/W80 candidate chain"
@@ -956,19 +1022,14 @@ def _validate_chain(
         or w83_resolution.promotion_policy_id != promotion_policy.policy_id
         or w83_resolution.promotion_policy_hash != promotion_policy.policy_hash
         or w83_resolution.selected_strategy_id != promotion_policy.selected_strategy_id
-        or w83_resolution.selected_strategy_version
-        != promotion_policy.selected_strategy_version
+        or w83_resolution.selected_strategy_version != promotion_policy.selected_strategy_version
     ):
         raise PaperCandidateAdmissionIntegrityError(
             "W83 resolution does not continue exact W82 candidate chain"
         )
     if w84_finalization is not None:
         _validate_w84_finalization(w84_finalization)
-        if (
-            w84_finalization.w83_resolution_hash != w83_resolution.resolution_hash
-            or w84_finalization.policy_hash == "0" * 64
-            or w84_finalization.policy_hash != w84_finalization.policy_hash
-        ):
+        if w84_finalization.w83_resolution_hash != w83_resolution.resolution_hash:
             raise PaperCandidateAdmissionIntegrityError(
                 "W84 finalization does not bind exact W83 resolution"
             )
@@ -1104,7 +1165,9 @@ def _validate_admission_chain(receipts: tuple[PaperCandidateAdmissionReceipt, ..
             raise PaperCandidateAdmissionIntegrityError(
                 "admission journal ordinal discontinuity"
             )
-        expected_previous = previous.admission_hash if previous is not None else ZERO_ADMISSION_HASH
+        expected_previous = (
+            previous.admission_hash if previous is not None else ZERO_ADMISSION_HASH
+        )
         if receipt.previous_admission_hash != expected_previous:
             raise PaperCandidateAdmissionIntegrityError(
                 "admission journal predecessor hash discontinuity"
@@ -1219,11 +1282,15 @@ def _policy_from_dict(value: dict[str, object]) -> PaperCandidateAdmissionPolicy
         fee_product_economics_hash=_string(value, "fee_product_economics_hash"),
         intent_fingerprint=_string(value, "intent_fingerprint"),
         authority_key=_string(value, "authority_key"),
-        max_w84_finalization_age_seconds=_integer(value, "max_w84_finalization_age_seconds"),
+        max_w84_finalization_age_seconds=_integer(
+            value, "max_w84_finalization_age_seconds"
+        ),
         candidate_validity_seconds=_integer(value, "candidate_validity_seconds"),
         probation_notional_cap_usd=Decimal(_string(value, "probation_notional_cap_usd")),
         probation_order_cap=_integer(value, "probation_order_cap"),
-        probation_budget_is_execution_authority=_boolean(value, "probation_budget_is_execution_authority"),
+        probation_budget_is_execution_authority=_boolean(
+            value, "probation_budget_is_execution_authority"
+        ),
         paper_execution_authorized=_boolean(value, "paper_execution_authorized"),
         external_execution_authorized=_boolean(value, "external_execution_authorized"),
         runtime_execution_authorized=_boolean(value, "runtime_execution_authorized"),
@@ -1236,21 +1303,12 @@ def _policy_from_dict(value: dict[str, object]) -> PaperCandidateAdmissionPolicy
 def _receipt_from_dict(value: object) -> PaperCandidateAdmissionReceipt:
     if not isinstance(value, dict):
         raise PaperCandidateAdmissionIntegrityError("admission receipt must be object")
-    status_raw = _string(value, "status")
     try:
-        status = PaperCandidateAdmissionStatus(status_raw)
+        status = PaperCandidateAdmissionStatus(_string(value, "status"))
     except ValueError as exc:
         raise PaperCandidateAdmissionIntegrityError("admission status invalid") from exc
     admitted_at = _datetime_or_error(value, "admitted_at")
-    valid_raw = value.get("valid_until")
-    valid_until = None
-    if valid_raw is not None:
-        if not isinstance(valid_raw, str):
-            raise PaperCandidateAdmissionIntegrityError("valid_until must be text or null")
-        try:
-            valid_until = datetime.fromisoformat(valid_raw)
-        except ValueError as exc:
-            raise PaperCandidateAdmissionIntegrityError("valid_until invalid") from exc
+    valid_until = _optional_datetime(value, "valid_until")
     reasons = value.get("reason_codes")
     if not isinstance(reasons, list) or any(not isinstance(item, str) for item in reasons):
         raise PaperCandidateAdmissionIntegrityError("reason_codes must be string list")
@@ -1275,8 +1333,22 @@ def _receipt_from_dict(value: object) -> PaperCandidateAdmissionReceipt:
         w83_resolution_hash=_string(value, "w83_resolution_hash"),
         w84_finalization_id=_optional_string(value, "w84_finalization_id"),
         w84_finalization_hash=_optional_string(value, "w84_finalization_hash"),
-        w84_source_verification_hash=_optional_string(value, "w84_source_verification_hash"),
+        w84_source_verification_hash=_optional_string(
+            value, "w84_source_verification_hash"
+        ),
         w84_measurement_plan_hash=_optional_string(value, "w84_measurement_plan_hash"),
+        w84_admission_source_proof_hash=_optional_string(
+            value, "w84_admission_source_proof_hash"
+        ),
+        w84_admission_source_verification_hash=_optional_string(
+            value, "w84_admission_source_verification_hash"
+        ),
+        w84_admission_source_capture_at=_optional_datetime(
+            value, "w84_admission_source_capture_at"
+        ),
+        w84_admission_source_verified_at=_optional_datetime(
+            value, "w84_admission_source_verified_at"
+        ),
         selected_trial_id=_string(value, "selected_trial_id"),
         selected_trial_fingerprint=_string(value, "selected_trial_fingerprint"),
         selected_strategy_id=_string(value, "selected_strategy_id"),
@@ -1292,7 +1364,9 @@ def _receipt_from_dict(value: object) -> PaperCandidateAdmissionReceipt:
         valid_until=valid_until,
         probation_notional_cap_usd=Decimal(_string(value, "probation_notional_cap_usd")),
         probation_order_cap=_integer(value, "probation_order_cap"),
-        probation_budget_is_execution_authority=_boolean(value, "probation_budget_is_execution_authority"),
+        probation_budget_is_execution_authority=_boolean(
+            value, "probation_budget_is_execution_authority"
+        ),
         paper_candidate_authorized=_boolean(value, "paper_candidate_authorized"),
         paper_execution_authorized=_boolean(value, "paper_execution_authorized"),
         external_execution_authorized=_boolean(value, "external_execution_authorized"),
@@ -1305,15 +1379,30 @@ def _receipt_from_dict(value: object) -> PaperCandidateAdmissionReceipt:
 
 def _policy_payload(value: PaperCandidateAdmissionPolicy, *, include_hash: bool) -> dict[str, object]:
     names = (
-        "policy_id", "contract_version", "promotion_policy_id", "promotion_policy_hash",
-        "threshold_policy_hash", "selected_trial_id", "selected_trial_fingerprint",
-        "selected_strategy_id", "selected_strategy_version", "strategy_spec_hash",
-        "loaded_runtime_code_hash", "fee_product_economics_hash", "intent_fingerprint",
-        "authority_key", "max_w84_finalization_age_seconds", "candidate_validity_seconds",
-        "probation_notional_cap_usd", "probation_order_cap",
-        "probation_budget_is_execution_authority", "paper_execution_authorized",
-        "external_execution_authorized", "runtime_execution_authorized",
-        "capital_authority", "live_trading",
+        "policy_id",
+        "contract_version",
+        "promotion_policy_id",
+        "promotion_policy_hash",
+        "threshold_policy_hash",
+        "selected_trial_id",
+        "selected_trial_fingerprint",
+        "selected_strategy_id",
+        "selected_strategy_version",
+        "strategy_spec_hash",
+        "loaded_runtime_code_hash",
+        "fee_product_economics_hash",
+        "intent_fingerprint",
+        "authority_key",
+        "max_w84_finalization_age_seconds",
+        "candidate_validity_seconds",
+        "probation_notional_cap_usd",
+        "probation_order_cap",
+        "probation_budget_is_execution_authority",
+        "paper_execution_authorized",
+        "external_execution_authorized",
+        "runtime_execution_authorized",
+        "capital_authority",
+        "live_trading",
     )
     payload = _policy_payload_from_values({name: getattr(value, name) for name in names})
     if include_hash:
@@ -1378,15 +1467,17 @@ def _receipt_payload_from_values(values: dict[str, object]) -> dict[str, object]
     if not isinstance(reasons, tuple):
         raise PaperCandidateAdmissionIntegrityError("receipt reason_codes type invalid")
     payload["reason_codes"] = list(reasons)
-    admitted_at = payload["admitted_at"]
-    if not isinstance(admitted_at, datetime):
-        raise PaperCandidateAdmissionIntegrityError("admitted_at type invalid")
-    payload["admitted_at"] = _utc(admitted_at).isoformat()
-    valid_until = payload["valid_until"]
-    if valid_until is not None:
-        if not isinstance(valid_until, datetime):
-            raise PaperCandidateAdmissionIntegrityError("valid_until type invalid")
-        payload["valid_until"] = _utc(valid_until).isoformat()
+    for key in (
+        "admitted_at",
+        "valid_until",
+        "w84_admission_source_capture_at",
+        "w84_admission_source_verified_at",
+    ):
+        value = payload[key]
+        if value is not None:
+            if not isinstance(value, datetime):
+                raise PaperCandidateAdmissionIntegrityError(f"{key} type invalid")
+            payload[key] = _utc(value).isoformat()
     payload["probation_notional_cap_usd"] = str(payload["probation_notional_cap_usd"])
     return payload
 
@@ -1422,7 +1513,13 @@ def _authority_key(
 
 
 def _require_no_execution_authority(
-    *, paper_execution: bool, external: bool, runtime: bool, capital: str, live: str, label: str
+    *,
+    paper_execution: bool,
+    external: bool,
+    runtime: bool,
+    capital: str,
+    live: str,
+    label: str,
 ) -> None:
     if (
         paper_execution is not False
@@ -1473,6 +1570,20 @@ def _require_aware(value: datetime, label: str) -> None:
 
 def _datetime_or_error(value: dict[str, object], key: str) -> datetime:
     raw = _string(value, key)
+    try:
+        result = datetime.fromisoformat(raw)
+    except ValueError as exc:
+        raise PaperCandidateAdmissionIntegrityError(f"{key} invalid") from exc
+    _require_aware(result, key)
+    return result
+
+
+def _optional_datetime(value: dict[str, object], key: str) -> datetime | None:
+    raw = value.get(key)
+    if raw is None:
+        return None
+    if not isinstance(raw, str):
+        raise PaperCandidateAdmissionIntegrityError(f"{key} must be datetime text or null")
     try:
         result = datetime.fromisoformat(raw)
     except ValueError as exc:
@@ -1549,5 +1660,7 @@ __all__ = [
     "PaperCandidateAdmissionReceipt",
     "PaperCandidateAdmissionStatus",
     "SQLitePaperCandidateAdmissionRegistry",
+    "W84AdmissionSourcePackage",
+    "W84AdmissionSourceProof",
     "build_paper_candidate_admission_policy",
 ]
