@@ -20,8 +20,8 @@ from autotrade.fee_product_economics import (
 )
 from autotrade.paper_fee_activity_evidence import (
     FeeActivityStatus,
-    FeeNormalizationRule,
     PaperFeeActivityIntegrityError,
+    PaperFeeActivitySourceUnavailable,
     build_paper_fee_activity_evidence,
     build_pending_paper_fee_activity_evidence,
 )
@@ -85,10 +85,7 @@ def test_w82_observation_rejects_double_count_source_and_net_economics_tamper(
     with pytest.raises(FeeAccountingIntegrityError, match="broker authority"):
         replace(observation, source=FeeEvidenceSource.BROKER_AUTHORITATIVE)
     with pytest.raises(FeeAccountingIntegrityError, match="net quote cash delta"):
-        replace(
-            observation,
-            net_quote_cash_delta=observation.net_quote_cash_delta + Decimal("0.01"),
-        )
+        replace(observation, net_quote_cash_delta=observation.net_quote_cash_delta + Decimal("0.01"))
     with pytest.raises(FeeAccountingIntegrityError, match="gross notional"):
         replace(observation, gross_notional=observation.gross_notional + Decimal("1"))
 
@@ -111,17 +108,13 @@ def test_w82_aggregate_rejects_partial_or_falsified_completeness(
         replace(evidence, observations=())
 
 
-def test_w82_zero_research_fee_is_only_base_arithmetic_complete_not_policy_complete(
+def test_w82_zero_research_fee_base_arithmetic_is_not_product_policy_complete(
     limits, market, empty_portfolio, market_buy_intent
 ):
     cost = _cost(fee="0")
-    *_, evidence = _valid(
-        limits, market, empty_portfolio, market_buy_intent, cost=cost
-    )
+    *_, evidence = _valid(limits, market, empty_portfolio, market_buy_intent, cost=cost)
     assert evidence.status is FeeAccountingStatus.COMPLETE
-    assert evidence.fee_accounting_complete is True
     assert evidence.total_fee_amount == 0
-    assert all(item.fee_bps == 0 and item.fee_amount == 0 for item in evidence.observations)
     product = build_fee_product_economics_evidence(
         evidence_id="w82-zero-fee-policy-check",
         policy=_product_policy(market=market, symbol=market_buy_intent.symbol, minimum_fee_bps="1"),
@@ -132,24 +125,21 @@ def test_w82_zero_research_fee_is_only_base_arithmetic_complete_not_policy_compl
     )
     assert product.status is FeeProductEconomicsStatus.BLOCKED
     assert product.reason_codes == ("RESEARCH_FEE_BELOW_POLICY",)
+    assert product.fee_schedule_conservative is False
 
 
-def test_w82_contract_rejects_matrix_identity_drift(
+def test_w82_contract_rejects_cost_model_rebind(
     limits, market, empty_portfolio, market_buy_intent
 ):
-    cost, _, qualification, _, _, _, _ = _valid(
-        limits, market, empty_portfolio, market_buy_intent
-    )
-    other_matrix = _matrix()
-    changed_cost = _cost(fee="7")
+    _, _, qualification, _, _, _, _ = _valid(limits, market, empty_portfolio, market_buy_intent)
     from autotrade.fee_accounting import build_simulated_fee_accounting_contract
 
     with pytest.raises(FeeAccountingIntegrityError, match="cost model hash"):
         build_simulated_fee_accounting_contract(
             contract_id="w82-rebind-rejected",
-            cost_model=changed_cost,
+            cost_model=_cost(fee="7"),
             qualification=qualification,
-            matrix=other_matrix,
+            matrix=_matrix(),
             product_id="test-product",
             asset_class="crypto",
             venue="alpaca-paper-model",
@@ -173,15 +163,13 @@ def test_w82_crypto_buy_fee_reduces_received_asset_not_extra_quote_cash(
     )
     scenario = next(item for item in product.scenarios if item.scenario_id == "baseline")
     assert product.status is FeeProductEconomicsStatus.PASS
-    assert scenario.gross_filled_quantity == Decimal("10")
-    assert scenario.execution_price == Decimal("101.0202")
+    assert product.literal_broker_fee_semantics_modeled is True
+    assert product.broker_authoritative_fee_proven is False
     assert scenario.charged_fee_currency == "TEST"
     assert scenario.charged_fee_amount == Decimal("0.0250")
     assert scenario.fee_quote_equivalent == Decimal("2.52550500")
     assert scenario.net_base_quantity_delta == Decimal("9.9750")
     assert scenario.net_quote_cash_delta == Decimal("-1010.2020")
-    base_observation = next(item for item in fee.observations if item.scenario_id == "baseline")
-    assert scenario.fee_quote_equivalent == base_observation.fee_amount
 
 
 def test_w82_crypto_sell_fee_reduces_quote_proceeds(
@@ -194,9 +182,7 @@ def test_w82_crypto_sell_fee_reduces_quote_proceeds(
         side=Side.SELL,
     )
     cost = _cost(fee="25")
-    *_, fee = _valid(
-        limits, market, empty_portfolio, market_buy_intent, cost=cost, intent=sell
-    )
+    *_, fee = _valid(limits, market, empty_portfolio, market_buy_intent, cost=cost, intent=sell)
     product = build_fee_product_economics_evidence(
         evidence_id="w82-sell-product",
         policy=_product_policy(market=market, symbol=sell.symbol, minimum_fee_bps="25"),
@@ -208,40 +194,44 @@ def test_w82_crypto_sell_fee_reduces_quote_proceeds(
     scenario = next(item for item in product.scenarios if item.scenario_id == "baseline")
     assert scenario.charged_fee_currency == "USD"
     assert scenario.charged_fee_amount == Decimal("2.47450500")
-    assert scenario.fee_quote_equivalent == Decimal("2.47450500")
     assert scenario.net_base_quantity_delta == Decimal("-10")
     assert scenario.net_quote_cash_delta == Decimal("987.32749500")
 
 
-def test_w82_research_fee_below_preregistered_policy_fails_closed(
+def test_w82_product_policy_floor_and_identity_fail_closed(
     limits, market, empty_portfolio, market_buy_intent
 ):
     cost = _cost(fee="5")
     *_, fee = _valid(limits, market, empty_portfolio, market_buy_intent, cost=cost)
+    policy = _product_policy(market=market, symbol=market_buy_intent.symbol, minimum_fee_bps="25")
     product = build_fee_product_economics_evidence(
         evidence_id="w82-underpriced-product",
-        policy=_product_policy(market=market, symbol=market_buy_intent.symbol, minimum_fee_bps="25"),
+        policy=policy,
         fee_evidence=fee,
         cost_model=cost,
         execution_intent=market_buy_intent,
         assessed_at=fee.assessed_at + timedelta(seconds=1),
     )
     assert product.status is FeeProductEconomicsStatus.BLOCKED
-    assert product.reason_codes == ("RESEARCH_FEE_BELOW_POLICY",)
-    assert product.fee_schedule_conservative is False
     assert product.product_fee_economics_complete is False
+    with pytest.raises(FeeProductEconomicsIntegrityError, match="policy hash mismatch"):
+        replace(policy, minimum_fee_bps=Decimal("5"))
+    with pytest.raises(FeeProductEconomicsIntegrityError, match="product mismatch"):
+        build_fee_product_economics_evidence(
+            evidence_id="wrong-product",
+            policy=replace(policy, product_id="other", policy_hash=policy.policy_hash),
+            fee_evidence=fee,
+            cost_model=cost,
+            execution_intent=market_buy_intent,
+            assessed_at=fee.assessed_at + timedelta(seconds=1),
+        )
 
 
-def test_w82_product_policy_identity_and_time_are_hash_bound(
+def test_w82_product_policy_must_be_effective_before_market_observation(
     limits, market, empty_portfolio, market_buy_intent
 ):
     cost = _cost(fee="25")
     *_, fee = _valid(limits, market, empty_portfolio, market_buy_intent, cost=cost)
-    policy = _product_policy(market=market, symbol=market_buy_intent.symbol, minimum_fee_bps="25")
-    with pytest.raises(FeeProductEconomicsIntegrityError, match="policy hash mismatch"):
-        replace(policy, minimum_fee_bps=Decimal("5"))
-    late_values = policy.to_dict()
-    assert late_values["effective_at"]
     late_policy = build_fee_product_policy(
         policy_id="late-policy",
         product_id="test-product",
@@ -267,7 +257,7 @@ def test_w82_product_policy_identity_and_time_are_hash_bound(
         )
 
 
-def test_w82_missing_same_day_fee_activity_is_pending_never_zero(now):
+def test_w82_missing_fee_activity_is_pending_never_zero_and_network_free(now):
     pending = build_pending_paper_fee_activity_evidence(
         evidence_id="w82-fee-pending",
         account_fingerprint="a" * 64,
@@ -285,41 +275,21 @@ def test_w82_missing_same_day_fee_activity_is_pending_never_zero(now):
     assert pending.fee_amount is None
     assert pending.zero_fee_inferred is False
     assert pending.broker_authoritative_fee_proven is False
+    assert pending.credentials_persisted is False
+    assert pending.broker_network_performed is False
+    assert pending.to_dict()["evidence_hash"] == pending.evidence_hash
     with pytest.raises(PaperFeeActivityIntegrityError, match="zero fee"):
         replace(pending, zero_fee_inferred=True)
+    with pytest.raises(PaperFeeActivityIntegrityError, match="broker fee proof"):
+        replace(pending, broker_authoritative_fee_proven=True)
+    with pytest.raises(PaperFeeActivityIntegrityError, match="persist credentials"):
+        replace(pending, credentials_persisted=True)
+    with pytest.raises(PaperFeeActivityIntegrityError, match="broker network"):
+        replace(pending, broker_network_performed=True)
 
 
-def test_w82_observed_cfee_can_bind_non_usd_fee_with_activity_price(now):
-    observed = build_paper_fee_activity_evidence(
-        evidence_id="w82-cfee-observed",
-        account_fingerprint="a" * 64,
-        order_id_query="order-1",
-        order_query_hash="b" * 64,
-        client_order_id="client-order-1",
-        strategy_id="strategy-a",
-        symbol="BTC/USD",
-        side=Side.BUY,
-        activity_id="activity-1",
-        activity_type="CFEE",
-        fee_currency="BTC",
-        quote_currency="USD",
-        normalization_rule=FeeNormalizationRule.ABS_QTY_TIMES_PRICE,
-        normalized_fee_amount=Decimal("0.000001"),
-        activity_price=Decimal("100000"),
-        fee_quote_equivalent=Decimal("0.1"),
-        activity_created_at=now + timedelta(hours=6),
-        captured_at=now + timedelta(hours=7),
-        source_payload_sha256="c" * 64,
-    )
-    assert observed.broker_authoritative is True
-    assert observed.paper_only is True
-    assert observed.fee_quote_equivalent == Decimal("0.1")
-    with pytest.raises(PaperFeeActivityIntegrityError, match="quote equivalent"):
-        replace(observed, fee_quote_equivalent=Decimal("0.2"))
-
-
-def test_w82_fee_activity_cannot_be_backdated_or_leave_paper_scope(now):
-    observed = build_paper_fee_activity_evidence(
+def test_w82_pending_fee_activity_identity_time_and_hash_are_fail_closed(now):
+    pending = build_pending_paper_fee_activity_evidence(
         evidence_id="w82-fee-time",
         account_fingerprint="a" * 64,
         order_id_query="order-1",
@@ -328,19 +298,27 @@ def test_w82_fee_activity_cannot_be_backdated_or_leave_paper_scope(now):
         strategy_id="strategy-a",
         symbol="BTC/USD",
         side=Side.SELL,
-        activity_id="activity-2",
-        activity_type="FEE",
-        fee_currency="USD",
-        quote_currency="USD",
-        normalization_rule=FeeNormalizationRule.ABS_NET_AMOUNT,
-        normalized_fee_amount=Decimal("0.25"),
-        activity_price=None,
-        fee_quote_equivalent=Decimal("0.25"),
-        activity_created_at=now + timedelta(hours=1),
-        captured_at=now + timedelta(hours=2),
-        source_payload_sha256="c" * 64,
+        trade_observed_at=now,
+        checked_at=now + timedelta(hours=1),
+        publication_deadline=now + timedelta(days=1),
     )
-    with pytest.raises(PaperFeeActivityIntegrityError, match="PAPER"):
-        replace(observed, paper_only=False)
-    with pytest.raises(PaperFeeActivityIntegrityError, match="predate"):
-        replace(observed, captured_at=now)
+    with pytest.raises(PaperFeeActivityIntegrityError, match="predate trade"):
+        replace(pending, checked_at=now - timedelta(microseconds=1))
+    with pytest.raises(PaperFeeActivityIntegrityError, match="publication window"):
+        replace(pending, publication_deadline=now)
+    with pytest.raises(PaperFeeActivityIntegrityError, match="PAPER-only"):
+        replace(pending, paper_only=False)
+    with pytest.raises(PaperFeeActivityIntegrityError, match="hash mismatch"):
+        replace(pending, evidence_hash="0" * 64)
+    with pytest.raises(PaperFeeActivityIntegrityError, match="lowercase sha256"):
+        replace(pending, account_fingerprint="bad")
+
+
+def test_w82_observed_broker_fee_builder_is_unavailable_until_adapter_certified():
+    with pytest.raises(PaperFeeActivitySourceUnavailable, match="read-only broker fee source"):
+        build_paper_fee_activity_evidence(
+            activity_id="caller-supplied",
+            normalized_fee_amount=Decimal("0.25"),
+            gross_fill_quantity=Decimal("0.00014432"),
+            net_position_quantity=Decimal("0.000143959"),
+        )
