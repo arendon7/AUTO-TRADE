@@ -16,6 +16,8 @@ on:
       - "scripts/check_w86_paper_runtime_asset_truth_boundary.py"
       - "scripts/check_w86_paper_runtime_broker_truth_boundary.py"
       - "scripts/check_w86_paper_runtime_candidate_identity_boundary.py"
+      - "scripts/check_r6_market_data_boundary.py"
+      - "scripts/check_r6_crypto_quote_primary_policy.py"
       - ".github/workflows/w86-paper-runtime-market-truth.yml"
       - ".github/workflows/core-tests.yml"
 
@@ -54,8 +56,10 @@ jobs:
         run: python scripts/check_w86_paper_runtime_broker_truth_boundary.py
       - name: Re-prove W86 exact candidate identity
         run: python scripts/check_w86_paper_runtime_candidate_identity_boundary.py
-      - name: Re-prove R6 crypto market-data boundary
-        run: python scripts/check_r6_crypto_market_data_boundary.py
+      - name: Re-prove R6 market-data read-only boundary
+        run: python scripts/check_r6_market_data_boundary.py
+      - name: Re-prove R6 crypto quote-primary policy
+        run: python scripts/check_r6_crypto_quote_primary_policy.py
       - name: Re-prove R6 PAPER-only authority boundary
         run: python scripts/check_r6_authority.py
       - name: Re-prove R6 permanent LIVE deny
