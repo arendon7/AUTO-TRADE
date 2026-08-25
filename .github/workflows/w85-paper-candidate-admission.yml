@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - "src/autotrade/paper_candidate_admission.py"
+      - "src/autotrade/paper_candidate_admission_source_verification.py"
       - "src/autotrade/paper_candidate_admission_lifecycle.py"
       - "src/autotrade/paper_candidate_admission_final_verification.py"
       - "src/autotrade/paper_candidate_eligibility_final.py"
@@ -36,6 +37,7 @@ jobs:
         run: >-
           python -m compileall -q
           src/autotrade/paper_candidate_admission.py
+          src/autotrade/paper_candidate_admission_source_verification.py
           src/autotrade/paper_candidate_admission_lifecycle.py
           src/autotrade/paper_candidate_admission_final_verification.py
           src/autotrade/paper_candidate_eligibility_final.py
