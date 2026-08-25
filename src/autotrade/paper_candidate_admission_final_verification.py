@@ -24,7 +24,7 @@ from autotrade.strategy_lab_promotion import StrategyPromotionPolicy
 from autotrade.strategy_promotion_assessment import StrategyPromotionAssessmentReceipt
 
 
-FINAL_ADMISSION_VERIFICATION_VERSION = "W85_PAPER_CANDIDATE_ADMISSION_FINAL_VERIFICATION_V1"
+FINAL_ADMISSION_VERIFICATION_VERSION = "W85_PAPER_CANDIDATE_ADMISSION_FINAL_VERIFICATION_V2"
 _HASH_RE = re.compile(r"^[0-9a-f]{64}$")
 _ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$")
 
@@ -37,10 +37,11 @@ class PaperCandidateAdmissionFinalVerificationIntegrityError(RuntimeError):
 class PaperCandidateAdmissionFinalVerification:
     """Canonical W85 historical admission proof.
 
-    This verifies that a PASS admission was derived from the exact durable W79→W84
-    chain. It intentionally says nothing about *current* candidate eligibility;
-    expiry/suspension/revocation are handled by the separate final eligibility
-    projection.
+    A historical W84 finalization is necessary provenance but is not the W85
+    freshness authority. V2 also binds the admission-time source proof already
+    persisted inside the durable PASS receipt and derives freshness only from
+    its durable measurement capture. Current candidate eligibility remains a
+    separate lifecycle projection.
     """
 
     verification_id: str
@@ -64,6 +65,10 @@ class PaperCandidateAdmissionFinalVerification:
     w84_evidence_hash: str
     w84_measurement_plan_hash: str
     w84_measurement_runtime_hash: str
+    w84_admission_source_proof_hash: str
+    w84_admission_source_verification_hash: str
+    w84_admission_source_capture_at: datetime
+    w84_admission_source_verified_at: datetime
     selected_trial_fingerprint: str
     strategy_spec_hash: str
     loaded_runtime_code_hash: str
@@ -74,6 +79,8 @@ class PaperCandidateAdmissionFinalVerification:
     process_verified_at: datetime
     admission_source_truth_verified: bool
     w84_source_truth_verified: bool
+    w84_admission_source_proof_bound: bool
+    historical_w84_timestamp_used_for_freshness: bool
     paper_candidate_was_admitted: bool
     paper_execution_authorized: bool
     external_execution_authorized: bool
@@ -111,6 +118,11 @@ class PaperCandidateAdmissionFinalVerification:
             ("w84_evidence_hash", self.w84_evidence_hash),
             ("w84_measurement_plan_hash", self.w84_measurement_plan_hash),
             ("w84_measurement_runtime_hash", self.w84_measurement_runtime_hash),
+            ("w84_admission_source_proof_hash", self.w84_admission_source_proof_hash),
+            (
+                "w84_admission_source_verification_hash",
+                self.w84_admission_source_verification_hash,
+            ),
             ("selected_trial_fingerprint", self.selected_trial_fingerprint),
             ("strategy_spec_hash", self.strategy_spec_hash),
             ("loaded_runtime_code_hash", self.loaded_runtime_code_hash),
@@ -119,9 +131,14 @@ class PaperCandidateAdmissionFinalVerification:
             ("verification_hash", self.verification_hash),
         ):
             _require_hash(value, label)
-        _require_aware(self.admitted_at, "admitted_at")
-        _require_aware(self.valid_until, "valid_until")
-        _require_aware(self.process_verified_at, "process_verified_at")
+        for label, value in (
+            ("w84_admission_source_capture_at", self.w84_admission_source_capture_at),
+            ("w84_admission_source_verified_at", self.w84_admission_source_verified_at),
+            ("admitted_at", self.admitted_at),
+            ("valid_until", self.valid_until),
+            ("process_verified_at", self.process_verified_at),
+        ):
+            _require_aware(value, label)
         if _utc(self.valid_until) <= _utc(self.admitted_at):
             raise PaperCandidateAdmissionFinalVerificationIntegrityError(
                 "verified admission validity must follow admission time"
@@ -130,6 +147,14 @@ class PaperCandidateAdmissionFinalVerification:
             raise PaperCandidateAdmissionFinalVerificationIntegrityError(
                 "final verification process clock may not predate admission"
             )
+        if _utc(self.w84_admission_source_capture_at) > _utc(self.admitted_at):
+            raise PaperCandidateAdmissionFinalVerificationIntegrityError(
+                "verified admission cannot predate durable W84 source capture"
+            )
+        if _utc(self.w84_admission_source_verified_at) != _utc(self.admitted_at):
+            raise PaperCandidateAdmissionFinalVerificationIntegrityError(
+                "final verification must bind exact admission-time W84 source proof"
+            )
         if self.admission_source_truth_verified is not True:
             raise PaperCandidateAdmissionFinalVerificationIntegrityError(
                 "canonical W85 verification requires durable admission source truth"
@@ -137,6 +162,14 @@ class PaperCandidateAdmissionFinalVerification:
         if self.w84_source_truth_verified is not True:
             raise PaperCandidateAdmissionFinalVerificationIntegrityError(
                 "canonical W85 verification requires final W84 source truth"
+            )
+        if self.w84_admission_source_proof_bound is not True:
+            raise PaperCandidateAdmissionFinalVerificationIntegrityError(
+                "canonical W85 verification requires admission-time source proof binding"
+            )
+        if self.historical_w84_timestamp_used_for_freshness is not False:
+            raise PaperCandidateAdmissionFinalVerificationIntegrityError(
+                "historical W84 process timestamp may not be W85 freshness authority"
             )
         if self.paper_candidate_was_admitted is not True:
             raise PaperCandidateAdmissionFinalVerificationIntegrityError(
@@ -170,7 +203,7 @@ def finalize_paper_candidate_admission(
     w83_resolution: PromotionStrategyVersionResolution,
     w84_finalization: PromotionShadowForwardFinalVerification,
 ) -> PaperCandidateAdmissionFinalVerification:
-    """Re-read durable W85 admission and independently bind the exact W79→W84 chain."""
+    """Re-read durable V2 W85 admission and bind its exact W79→W84 chain."""
 
     _require_id(verification_id, "verification_id")
     _require_id(admission_id, "admission_id")
@@ -207,6 +240,11 @@ def finalize_paper_candidate_admission(
             "final W85 verification process clock predates admission"
         )
 
+    assert durable_receipt.valid_until is not None
+    assert durable_receipt.w84_admission_source_proof_hash is not None
+    assert durable_receipt.w84_admission_source_verification_hash is not None
+    assert durable_receipt.w84_admission_source_capture_at is not None
+    assert durable_receipt.w84_admission_source_verified_at is not None
     values = {
         "verification_id": verification_id,
         "contract_version": FINAL_ADMISSION_VERIFICATION_VERSION,
@@ -229,6 +267,12 @@ def finalize_paper_candidate_admission(
         "w84_evidence_hash": w84_finalization.evidence_hash,
         "w84_measurement_plan_hash": w84_finalization.measurement_plan_hash,
         "w84_measurement_runtime_hash": w84_finalization.measurement_runtime_hash,
+        "w84_admission_source_proof_hash": durable_receipt.w84_admission_source_proof_hash,
+        "w84_admission_source_verification_hash": (
+            durable_receipt.w84_admission_source_verification_hash
+        ),
+        "w84_admission_source_capture_at": durable_receipt.w84_admission_source_capture_at,
+        "w84_admission_source_verified_at": durable_receipt.w84_admission_source_verified_at,
         "selected_trial_fingerprint": w83_resolution.selected_trial_fingerprint,
         "strategy_spec_hash": w83_resolution.strategy_spec_hash,
         "loaded_runtime_code_hash": w83_resolution.loaded_runtime_code_hash,
@@ -239,6 +283,8 @@ def finalize_paper_candidate_admission(
         "process_verified_at": now,
         "admission_source_truth_verified": True,
         "w84_source_truth_verified": True,
+        "w84_admission_source_proof_bound": True,
+        "historical_w84_timestamp_used_for_freshness": False,
         "paper_candidate_was_admitted": True,
         "paper_execution_authorized": False,
         "external_execution_authorized": False,
@@ -265,6 +311,15 @@ def _validate_durable_admission(
             "PASS admission does not contain finite candidate admission"
         )
     if (
+        receipt.w84_admission_source_proof_hash is None
+        or receipt.w84_admission_source_verification_hash is None
+        or receipt.w84_admission_source_capture_at is None
+        or receipt.w84_admission_source_verified_at is None
+    ):
+        raise PaperCandidateAdmissionFinalVerificationIntegrityError(
+            "PASS admission is missing durable V2 W84 admission-source provenance"
+        )
+    if (
         receipt.policy_id != registration.policy.policy_id
         or receipt.policy_hash != registration.policy.policy_hash
         or receipt.policy_registration_hash != registration.registration_hash
@@ -276,6 +331,14 @@ def _validate_durable_admission(
     if _utc(receipt.admitted_at) <= _utc(registration.registered_at):
         raise PaperCandidateAdmissionFinalVerificationIntegrityError(
             "durable admission must follow policy registration"
+        )
+    if _utc(receipt.w84_admission_source_verified_at) != _utc(receipt.admitted_at):
+        raise PaperCandidateAdmissionFinalVerificationIntegrityError(
+            "durable source proof must be bound to exact W85 admission clock"
+        )
+    if _utc(receipt.w84_admission_source_capture_at) > _utc(receipt.admitted_at):
+        raise PaperCandidateAdmissionFinalVerificationIntegrityError(
+            "durable W84 source capture cannot follow W85 admission"
         )
     expected_valid_until = receipt.admitted_at + admission.timedelta(
         seconds=registration.policy.candidate_validity_seconds
@@ -307,8 +370,6 @@ def _validate_exact_chain(
     w83_resolution: PromotionStrategyVersionResolution,
     w84_finalization: PromotionShadowForwardFinalVerification,
 ) -> None:
-    # Reuse the base semantic validators, then add the exact W84 identity checks
-    # that make this final verification independent of intermediate receipt gaps.
     try:
         admission._validate_chain(
             policy=registration.policy,
@@ -379,16 +440,26 @@ def _validate_exact_chain(
         raise PaperCandidateAdmissionFinalVerificationIntegrityError(
             "admission receipt does not bind exact W79→W84 source chain"
         )
+
+    assert receipt.w84_admission_source_capture_at is not None
+    assert receipt.w84_admission_source_verified_at is not None
     age_at_admission = int(
-        (_utc(receipt.admitted_at) - _utc(w84_finalization.process_verified_at)).total_seconds()
+        (
+            _utc(receipt.admitted_at)
+            - _utc(receipt.w84_admission_source_capture_at)
+        ).total_seconds()
     )
     if age_at_admission < 0:
         raise PaperCandidateAdmissionFinalVerificationIntegrityError(
-            "admission predates W84 final verification"
+            "admission predates durable W84 source capture"
         )
     if age_at_admission > registration.policy.max_w84_finalization_age_seconds:
         raise PaperCandidateAdmissionFinalVerificationIntegrityError(
-            "admission exceeded frozen W84 freshness budget"
+            "admission exceeded frozen durable-source freshness budget"
+        )
+    if _utc(receipt.w84_admission_source_verified_at) != _utc(receipt.admitted_at):
+        raise PaperCandidateAdmissionFinalVerificationIntegrityError(
+            "admission source proof verification clock is not exact admission clock"
         )
 
 
@@ -408,7 +479,13 @@ def _payload(
 
 def _payload_from_values(values: dict[str, object]) -> dict[str, object]:
     payload = dict(values)
-    for key in ("admitted_at", "valid_until", "process_verified_at"):
+    for key in (
+        "w84_admission_source_capture_at",
+        "w84_admission_source_verified_at",
+        "admitted_at",
+        "valid_until",
+        "process_verified_at",
+    ):
         raw = payload[key]
         if not isinstance(raw, datetime):
             raise PaperCandidateAdmissionFinalVerificationIntegrityError(
