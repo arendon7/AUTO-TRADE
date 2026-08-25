@@ -193,7 +193,7 @@ def test_w86_rejects_cross_account_crypto_status(
     other = "22222222-2222-4222-8222-222222222222"
     with pytest.raises(
         broker_truth.PaperRuntimeBrokerTruthIntegrityError,
-        match="different.*account",
+        match="account.*differs.*account",
     ):
         _bind(candidate, market.observed_at, crypto=_crypto(market.observed_at, account_id=other))
 
