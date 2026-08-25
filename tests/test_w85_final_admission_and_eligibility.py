@@ -5,6 +5,7 @@ from datetime import timedelta
 
 import pytest
 
+import autotrade.paper_candidate_admission as admission
 import autotrade.paper_candidate_admission_final_verification as admission_final
 import autotrade.paper_candidate_eligibility_final as eligibility_final
 import autotrade.paper_candidate_admission_lifecycle as lifecycle
@@ -37,6 +38,34 @@ def _bundle_with_final_admission(
     return bundle, admitted, verified, lifecycle_registry
 
 
+def _rehash_receipt(value, **changes):
+    values = {
+        field.name: getattr(value, field.name)
+        for field in fields(value)
+        if field.name != "admission_hash"
+    }
+    values.update(changes)
+    return type(value)(
+        **values,
+        admission_hash=admission._hash(admission._receipt_payload_from_values(values)),
+    )
+
+
+def _rehash_final_verification(value, **changes):
+    values = {
+        field.name: getattr(value, field.name)
+        for field in fields(value)
+        if field.name != "verification_hash"
+    }
+    values.update(changes)
+    return type(value)(
+        **values,
+        verification_hash=admission_final._hash(
+            admission_final._payload_from_values(values)
+        ),
+    )
+
+
 def test_w85_final_admission_explicitly_binds_w84_provenance_and_no_execution(
     tmp_path, monkeypatch, limits, market, empty_portfolio, market_buy_intent
 ):
@@ -46,6 +75,8 @@ def test_w85_final_admission_explicitly_binds_w84_provenance_and_no_execution(
 
     assert verified.admission_source_truth_verified is True
     assert verified.w84_source_truth_verified is True
+    assert verified.w84_admission_source_proof_bound is True
+    assert verified.historical_w84_timestamp_used_for_freshness is False
     assert verified.paper_candidate_was_admitted is True
     assert verified.admission_hash == admitted.admission_hash
     assert verified.w83_binding_hash == bundle["w83"].binding_evidence_hash
@@ -55,6 +86,13 @@ def test_w85_final_admission_explicitly_binds_w84_provenance_and_no_execution(
     assert verified.w84_evidence_hash == bundle["final"].evidence_hash
     assert verified.w84_measurement_plan_hash == bundle["final"].measurement_plan_hash
     assert verified.w84_measurement_runtime_hash == bundle["final"].measurement_runtime_hash
+    assert verified.w84_admission_source_proof_hash == admitted.w84_admission_source_proof_hash
+    assert (
+        verified.w84_admission_source_verification_hash
+        == admitted.w84_admission_source_verification_hash
+    )
+    assert verified.w84_admission_source_capture_at == admitted.w84_admission_source_capture_at
+    assert verified.w84_admission_source_verified_at == admitted.admitted_at
     assert verified.paper_execution_authorized is False
     assert verified.external_execution_authorized is False
     assert verified.runtime_execution_authorized is False
@@ -99,6 +137,37 @@ def test_w85_final_admission_rejects_validly_rehashed_wrong_w83_binding(
             w82_resolution=bundle["w82"],
             w83_resolution=bundle["w83"],
             w84_finalization=forged,
+        )
+
+
+def test_w85_final_admission_freshness_uses_durable_capture_not_historical_w84_clock(
+    tmp_path, monkeypatch, limits, market, empty_portfolio, market_buy_intent
+):
+    bundle = _full_context(
+        tmp_path, monkeypatch, limits, market, empty_portfolio, market_buy_intent
+    )
+    admitted = _admit(bundle, monkeypatch)
+    stale_capture = admitted.admitted_at - timedelta(
+        seconds=bundle["policy"].max_w84_finalization_age_seconds + 1
+    )
+    forged = _rehash_receipt(
+        admitted,
+        w84_admission_source_capture_at=stale_capture,
+    )
+
+    with pytest.raises(
+        admission_final.PaperCandidateAdmissionFinalVerificationIntegrityError,
+        match="durable-source freshness budget",
+    ):
+        admission_final._validate_exact_chain(
+            receipt=forged,
+            registration=bundle["registration"],
+            promotion_policy=bundle["promotion_policy"],
+            w80_assessment=bundle["assessment"],
+            w81_resolution=bundle["w81"],
+            w82_resolution=bundle["w82"],
+            w83_resolution=bundle["w83"],
+            w84_finalization=bundle["final"],
         )
 
 
@@ -152,6 +221,7 @@ def test_w85_final_eligibility_active_then_suspended_without_execution_authority
     )
     assert active.state is lifecycle.PaperCandidateEligibilityState.ACTIVE
     assert active.paper_candidate_currently_eligible is True
+    assert active.w84_admission_source_proof_hash == admitted.w84_admission_source_proof_hash
     assert active.paper_execution_authorized is False
     assert active.capital_authority == "NONE"
 
@@ -211,6 +281,33 @@ def test_w85_final_eligibility_expiry_precedes_historical_revocation(
     assert projection.lifecycle_events_count == 1
     assert projection.lifecycle_head_hash == revoked.event_hash
     assert registry.list_for_admission(admitted) == (revoked,)
+
+
+def test_w85_final_eligibility_rejects_validly_rehashed_source_proof_drift(
+    tmp_path, monkeypatch, limits, market, empty_portfolio, market_buy_intent
+):
+    _, admitted, verified, registry = _bundle_with_final_admission(
+        tmp_path, monkeypatch, limits, market, empty_portfolio, market_buy_intent
+    )
+    forged = _rehash_final_verification(
+        verified,
+        w84_admission_source_proof_hash="f" * 64,
+    )
+    monkeypatch.setattr(
+        eligibility_final,
+        "_now_utc",
+        lambda: verified.process_verified_at + timedelta(seconds=1),
+    )
+    with pytest.raises(
+        eligibility_final.PaperCandidateFinalEligibilityIntegrityError,
+        match="does not match canonical W85 V2 verification",
+    ):
+        eligibility_final.project_final_paper_candidate_eligibility(
+            projection_id="w85-source-proof-drift",
+            final_verification=forged,
+            admission_receipt=admitted,
+            lifecycle_registry=registry,
+        )
 
 
 def test_w85_final_eligibility_rejects_verification_and_projection_authority_tamper(
