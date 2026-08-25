@@ -8,6 +8,7 @@ on:
       - "src/autotrade/paper_runtime_broker_truth.py"
       - "src/autotrade/brokers/alpaca_paper_gateway.py"
       - "tests/test_w86_paper_runtime_funding_capacity.py"
+      - "tests/test_w86_paper_runtime_funding_capacity_hardening.py"
       - "tests/test_w86_paper_runtime_final_readiness.py"
       - "scripts/check_w86_paper_runtime_funding_capacity_boundary.py"
       - "scripts/check_w86_paper_runtime_final_readiness_boundary.py"
@@ -35,11 +36,15 @@ jobs:
           python -m compileall -q
           src/autotrade/paper_runtime_funding_capacity.py
           tests/test_w86_paper_runtime_funding_capacity.py
+          tests/test_w86_paper_runtime_funding_capacity_hardening.py
           scripts/check_w86_paper_runtime_funding_capacity_boundary.py
       - name: W86 funding-capacity authority boundary
         run: python scripts/check_w86_paper_runtime_funding_capacity_boundary.py
       - name: W86 funding-capacity adversarial tests
-        run: pytest -q tests/test_w86_paper_runtime_funding_capacity.py
+        run: >-
+          pytest -q
+          tests/test_w86_paper_runtime_funding_capacity.py
+          tests/test_w86_paper_runtime_funding_capacity_hardening.py
       - name: Re-prove W86 final runtime readiness tests
         run: pytest -q tests/test_w86_paper_runtime_final_readiness.py
       - name: Re-prove W86 final runtime readiness boundary
