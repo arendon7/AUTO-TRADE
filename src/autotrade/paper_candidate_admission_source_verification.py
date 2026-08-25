@@ -81,10 +81,10 @@ class W84AdmissionSourcePackage:
 class W84AdmissionSourceProof:
     """Hash-bound proof that W85 reran the canonical W84 finalizer.
 
-    `finalization_*` identifies the historical W84 receipt supplied to W85.
-    `admission_finalization_*` identifies the fresh canonical W84 rerun whose
-    process clock is internal to W84. Historical `process_verified_at` is never
-    used as W85 freshness authority.
+    `verified_at` is the W85 admission decision clock supplied internally by the
+    admission registry. `canonical_finalization_verified_at` is the independent
+    process clock read inside W84's canonical finalizer. Both are hash-bound;
+    historical W84 `process_verified_at` is never used as W85 freshness truth.
     """
 
     proof_id: str
@@ -104,6 +104,7 @@ class W84AdmissionSourceProof:
     measurement_runtime_hash: str
     source_capture_at: datetime
     verified_at: datetime
+    canonical_finalization_verified_at: datetime
     source_age_seconds: int
     source_truth_verified: bool
     canonical_w84_finalization_reproved: bool
@@ -144,6 +145,10 @@ class W84AdmissionSourceProof:
             _require_hash(value, label)
         _require_aware(self.source_capture_at, "source_capture_at")
         _require_aware(self.verified_at, "verified_at")
+        _require_aware(
+            self.canonical_finalization_verified_at,
+            "canonical_finalization_verified_at",
+        )
         if isinstance(self.source_age_seconds, bool) or not isinstance(
             self.source_age_seconds, int
         ) or self.source_age_seconds < 0:
@@ -155,7 +160,7 @@ class W84AdmissionSourceProof:
         )
         if self.source_age_seconds != expected_age:
             raise PaperCandidateAdmissionSourceIntegrityError(
-                "source age does not match canonical W84 rerun clock and durable capture"
+                "source age does not match W85 admission clock and durable capture"
             )
         if self.source_truth_verified is not True:
             raise PaperCandidateAdmissionSourceIntegrityError(
@@ -195,13 +200,14 @@ def verify_w84_sources_for_candidate_admission(
     finalization: PromotionShadowForwardFinalVerification,
     w83_resolution: PromotionStrategyVersionResolution,
     source_package: W84AdmissionSourcePackage,
+    verified_at: datetime,
 ) -> W84AdmissionSourceProof:
     """Re-prove W84 via its canonical internal-process-clock finalizer.
 
     W85 deliberately does not call W84's intermediate source verifier. The
     canonical W84 finalizer re-reads durable R5/measurement truth, obtains its
     own process clock, and re-enforces W84 freshness before W85 can consider
-    candidate admission.
+    candidate admission. W85 separately binds its own internal decision clock.
     """
 
     _require_id(proof_id, "proof_id")
@@ -211,6 +217,7 @@ def verify_w84_sources_for_candidate_admission(
         raise TypeError("w83_resolution must be PromotionStrategyVersionResolution")
     if not isinstance(source_package, W84AdmissionSourcePackage):
         raise TypeError("source_package must be W84AdmissionSourcePackage")
+    _require_aware(verified_at, "verified_at")
 
     _validate_historical_finalization(finalization)
 
@@ -240,6 +247,14 @@ def verify_w84_sources_for_candidate_admission(
         w83_resolution=w83_resolution,
     )
 
+    source_age_seconds = int(
+        (_utc(verified_at) - _utc(admission_finalization.measurement_capture_at)).total_seconds()
+    )
+    if source_age_seconds < 0:
+        raise PaperCandidateAdmissionSourceIntegrityError(
+            "W85 admission clock predates durable W84 measurement capture"
+        )
+
     values = {
         "proof_id": proof_id,
         "contract_version": ADMISSION_SOURCE_PROOF_VERSION,
@@ -257,8 +272,9 @@ def verify_w84_sources_for_candidate_admission(
         "measurement_plan_hash": admission_finalization.measurement_plan_hash,
         "measurement_runtime_hash": admission_finalization.measurement_runtime_hash,
         "source_capture_at": admission_finalization.measurement_capture_at,
-        "verified_at": admission_finalization.process_verified_at,
-        "source_age_seconds": admission_finalization.decision_delay_seconds,
+        "verified_at": verified_at,
+        "canonical_finalization_verified_at": admission_finalization.process_verified_at,
+        "source_age_seconds": source_age_seconds,
         "source_truth_verified": True,
         "canonical_w84_finalization_reproved": True,
         "historical_finalization_timestamp_trusted_for_freshness": False,
@@ -366,7 +382,11 @@ def _proof_payload(
 
 def _proof_payload_from_values(values: dict[str, object]) -> dict[str, object]:
     payload = dict(values)
-    for key in ("source_capture_at", "verified_at"):
+    for key in (
+        "source_capture_at",
+        "verified_at",
+        "canonical_finalization_verified_at",
+    ):
         value = payload[key]
         if not isinstance(value, datetime):
             raise PaperCandidateAdmissionSourceIntegrityError(f"{key} must be datetime")
