@@ -9,6 +9,7 @@ ROOT = Path(__file__).resolve().parents[1]
 TARGET = ROOT / "src/autotrade/paper_runtime_funding_capacity.py"
 TEST = "tests/test_w86_paper_runtime_funding_capacity.py"
 DEDICATED = ROOT / ".github/workflows/w86-paper-runtime-funding-capacity.yml"
+CORE = ROOT / ".github/workflows/core-tests.yml"
 SELF_COMMAND = "python scripts/check_w86_paper_runtime_funding_capacity_boundary.py"
 
 FORBIDDEN_IMPORT_PREFIXES = (
@@ -173,21 +174,28 @@ def main() -> int:
                         f"W86 funding-capacity contains forbidden mutating/network call at line {node.lineno}: {name}"
                     )
 
-    if not DEDICATED.is_file():
-        errors.append("W86 Funding Capacity: dedicated workflow missing")
-    else:
-        workflow_source = DEDICATED.read_text(encoding="utf-8")
+    for workflow, label in (
+        (DEDICATED, "W86 Funding Capacity"),
+        (CORE, "Core Safety"),
+    ):
+        if not workflow.is_file():
+            errors.append(f"{label}: workflow missing")
+            continue
+        workflow_source = workflow.read_text(encoding="utf-8")
         if SELF_COMMAND not in workflow_source:
-            errors.append("W86 Funding Capacity: boundary is not wired into dedicated CI")
+            errors.append(f"{label}: funding-capacity boundary is not wired into CI")
         if TEST not in workflow_source:
-            errors.append("W86 Funding Capacity: adversarial tests are not wired into dedicated CI")
+            errors.append(f"{label}: funding-capacity adversarial tests are not wired into CI")
+
+    if DEDICATED.is_file():
+        dedicated_source = DEDICATED.read_text(encoding="utf-8")
         for reproved in (
             "python scripts/check_w86_paper_runtime_final_readiness_boundary.py",
             "python scripts/check_w86_paper_runtime_broker_truth_boundary.py",
             "python scripts/check_r6_authority.py",
             "python scripts/check_r6_live_deny_boundary.py",
         ):
-            if reproved not in workflow_source:
+            if reproved not in dedicated_source:
                 errors.append(
                     f"W86 Funding Capacity: dedicated CI does not re-prove {reproved}"
                 )
@@ -201,7 +209,8 @@ def main() -> int:
         "AUTO-TRADE W86 PAPER funding-capacity boundary: PASS "
         "(exact broker-bound account attestation; internal <=5s account freshness; "
         "buying power must cover conservative minimum executable notional; <=2s READY TTL; "
-        "no network read in overlay, no OrderIntent, OMS, reservation, broker write, execution or LIVE authority)"
+        "dedicated + Core Safety permanence; no network read in overlay, no OrderIntent, OMS, "
+        "reservation, broker write, execution or LIVE authority)"
     )
     return 0
 
