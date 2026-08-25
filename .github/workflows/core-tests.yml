@@ -148,6 +148,10 @@ jobs:
         run: python scripts/check_w86_paper_runtime_candidate_identity_boundary.py
       - name: W86 PAPER runtime broker-truth boundary
         run: python scripts/check_w86_paper_runtime_broker_truth_boundary.py
+      - name: W86 PAPER runtime asset-truth boundary
+        run: python scripts/check_w86_paper_runtime_asset_truth_boundary.py
+      - name: W86 PAPER runtime market-truth boundary
+        run: python scripts/check_w86_paper_runtime_market_truth_boundary.py
       - name: Debt register contract
         run: python scripts/check_debt_register.py
       - name: Canonical knowledge contract
