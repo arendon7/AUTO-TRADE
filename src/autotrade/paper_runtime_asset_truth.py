@@ -29,6 +29,7 @@ PAPER_RUNTIME_ASSET_TRUTH_VERSION = "W86_PAPER_RUNTIME_ASSET_TRUTH_V1"
 ALPACA_PAPER_CRYPTO_MODEL_VENUE = "alpaca-paper-model"
 _HASH_RE = re.compile(r"^[0-9a-f]{64}$")
 _ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$")
+_ACCOUNT_ID_RE = re.compile(r"^[0-9a-fA-F-]{16,64}$")
 _REQUEST_ID_RE = re.compile(r"^[\x21-\x7e]{1,256}$")
 
 
@@ -73,6 +74,7 @@ class PaperRuntimeAssetTruthProof:
     authority_key: str
     admission_hash: str
     product_id: str
+    venue: str
     candidate_symbol: str
     base_currency: str
     quote_currency: str
@@ -116,9 +118,7 @@ class PaperRuntimeAssetTruthProof:
     def __post_init__(self) -> None:
         _require_id(self.proof_id, "proof_id")
         if self.contract_version != PAPER_RUNTIME_ASSET_TRUTH_VERSION:
-            raise PaperRuntimeAssetTruthIntegrityError(
-                "W86 asset truth version is not canonical"
-            )
+            raise PaperRuntimeAssetTruthIntegrityError("W86 asset truth version is not canonical")
         for label, value in (
             ("candidate_identity_hash", self.candidate_identity_hash),
             ("broker_truth_hash", self.broker_truth_hash),
@@ -135,12 +135,19 @@ class PaperRuntimeAssetTruthProof:
             _require_hash(value, label)
         for label, value in (
             ("product_id", self.product_id),
+            ("venue", self.venue),
             ("asset_id", self.asset_id),
             ("asset_class", self.asset_class),
             ("exchange", self.exchange),
             ("status", self.status),
         ):
             _require_id(value, label)
+        if self.venue != ALPACA_PAPER_CRYPTO_MODEL_VENUE or self.quote_currency != "USD":
+            raise PaperRuntimeAssetTruthIntegrityError(
+                "W86 asset truth supports only the frozen Alpaca PAPER crypto/USD product"
+            )
+        if not _ACCOUNT_ID_RE.fullmatch(self.account_id):
+            raise PaperRuntimeAssetTruthIntegrityError("account_id is invalid")
         if not isinstance(self.candidate_symbol, str) or not self.candidate_symbol:
             raise PaperRuntimeAssetTruthIntegrityError("candidate_symbol is required")
         expected_candidate_symbol = f"{self.base_currency}-{self.quote_currency}"
@@ -148,9 +155,7 @@ class PaperRuntimeAssetTruthProof:
             raise PaperRuntimeAssetTruthIntegrityError(
                 "candidate symbol is not exact BASE-QUOTE identity"
             )
-        expected_pair = normalize_crypto_pair(
-            f"{self.base_currency}/{self.quote_currency}"
-        )
+        expected_pair = normalize_crypto_pair(f"{self.base_currency}/{self.quote_currency}")
         if self.canonical_broker_pair != expected_pair:
             raise PaperRuntimeAssetTruthIntegrityError(
                 "canonical broker pair does not match frozen candidate currencies"
@@ -272,10 +277,7 @@ def read_and_bind_paper_runtime_asset_truth(
             "PAPER credentials differ from frozen broker-truth credential reference"
         )
     pair = derive_alpaca_crypto_pair(candidate_identity)
-    asset = AlpacaPaperCryptoAssetGateway(
-        config=config,
-        transport=transport,
-    ).attest_asset(
+    asset = AlpacaPaperCryptoAssetGateway(config=config, transport=transport).attest_asset(
         credentials=credentials,
         account_attestation_fingerprint=broker_truth.account_attestation_fingerprint,
         expected_credential_reference=broker_truth.credential_reference,
@@ -351,6 +353,7 @@ def bind_paper_runtime_asset_truth(
         "authority_key": candidate_identity.authority_key,
         "admission_hash": candidate_identity.admission_hash,
         "product_id": candidate_identity.product_id,
+        "venue": candidate_identity.venue,
         "candidate_symbol": candidate_identity.symbol,
         "base_currency": candidate_identity.base_currency,
         "quote_currency": candidate_identity.quote_currency,
@@ -401,9 +404,7 @@ def _validate_candidate(value: PaperRuntimeCandidateIdentityProof) -> None:
         raise TypeError("candidate_identity must be PaperRuntimeCandidateIdentityProof")
     expected = candidate_module._hash(candidate_module._payload(value, include_hash=False))
     if value.proof_hash != expected:
-        raise PaperRuntimeAssetTruthIntegrityError(
-            "W86 candidate identity proof hash mismatch"
-        )
+        raise PaperRuntimeAssetTruthIntegrityError("W86 candidate identity proof hash mismatch")
     if (
         value.asset_class != "crypto"
         or value.venue != ALPACA_PAPER_CRYPTO_MODEL_VENUE
@@ -497,13 +498,9 @@ def _validate_asset(
             "PAPER asset is bound to a different credential reference"
         )
     if value.source_host != ALPACA_PAPER_TRADING_HOST:
-        raise PaperRuntimeAssetTruthIntegrityError(
-            "PAPER asset source host is not canonical"
-        )
+        raise PaperRuntimeAssetTruthIntegrityError("PAPER asset source host is not canonical")
     if value.source_path != crypto_asset_path(pair):
-        raise PaperRuntimeAssetTruthIntegrityError(
-            "PAPER asset source path is not canonical"
-        )
+        raise PaperRuntimeAssetTruthIntegrityError("PAPER asset source path is not canonical")
     if (
         value.asset_class != "crypto"
         or value.exchange != "CRYPTO"
