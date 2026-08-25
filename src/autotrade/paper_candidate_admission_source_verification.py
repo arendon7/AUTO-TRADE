@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from hashlib import sha256
 import json
 import re
@@ -18,21 +18,15 @@ from autotrade.promotion_shadow_forward_binding import (
 )
 from autotrade.promotion_shadow_forward_final_verification import (
     PromotionShadowForwardFinalVerification,
+    ShadowForwardFinalVerificationIntegrityError,
 )
-from autotrade.promotion_shadow_forward_source_verification import (
-    PromotionShadowForwardSourceVerification,
-    ShadowForwardSourceVerificationIntegrityError,
-    verify_promotion_shadow_forward_resolution_sources,
-)
-from autotrade.promotion_strategy_version_binding import (
-    PromotionStrategyVersionResolution,
-)
+from autotrade.promotion_strategy_version_binding import PromotionStrategyVersionResolution
 from autotrade.research.forward import SQLiteForwardEvidenceRegistry
 from autotrade.research.shadow import SQLitePortfolioShadowRegistry
 from autotrade.strategy_execution_binding import ExecutionStrategyBindingEvidence
 
 
-ADMISSION_SOURCE_PROOF_VERSION = "W85_W84_ADMISSION_SOURCE_PROOF_V1"
+ADMISSION_SOURCE_PROOF_VERSION = "W85_W84_ADMISSION_SOURCE_PROOF_V2"
 _HASH_RE = re.compile(r"^[0-9a-f]{64}$")
 _ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$")
 
@@ -43,10 +37,11 @@ class PaperCandidateAdmissionSourceIntegrityError(RuntimeError):
 
 @dataclass(frozen=True, slots=True)
 class W84AdmissionSourcePackage:
-    """Transient W84 source package used only to re-prove admission truth.
+    """Transient inputs needed to rerun canonical W84 final verification.
 
-    Registries remain the existing R5 durable authorities. This object creates
-    no database, broker, OMS, Safety, order-construction or execution authority.
+    The durable authorities remain the existing R5 Shadow/Forward registries.
+    This package grants no database mutation, broker, OMS, Safety, order or
+    capital authority.
     """
 
     base_resolution: PromotionShadowForwardResolution
@@ -84,11 +79,21 @@ class W84AdmissionSourcePackage:
 
 @dataclass(frozen=True, slots=True)
 class W84AdmissionSourceProof:
+    """Hash-bound proof that W85 reran the canonical W84 finalizer.
+
+    `finalization_*` identifies the historical W84 receipt supplied to W85.
+    `admission_finalization_*` identifies the fresh canonical W84 rerun whose
+    process clock is internal to W84. Historical `process_verified_at` is never
+    used as W85 freshness authority.
+    """
+
     proof_id: str
     contract_version: str
     finalization_id: str
     finalization_hash: str
     original_source_verification_hash: str
+    admission_finalization_id: str
+    admission_finalization_hash: str
     admission_source_verification_hash: str
     base_resolution_hash: str
     evidence_hash: str
@@ -97,12 +102,11 @@ class W84AdmissionSourceProof:
     w83_binding_hash: str
     measurement_plan_hash: str
     measurement_runtime_hash: str
-    measurement_receipts_hash: str
-    measurement_head_hash: str
     source_capture_at: datetime
     verified_at: datetime
     source_age_seconds: int
     source_truth_verified: bool
+    canonical_w84_finalization_reproved: bool
     historical_finalization_timestamp_trusted_for_freshness: bool
     paper_candidate_authorized: bool
     paper_execution_authorized: bool
@@ -116,6 +120,7 @@ class W84AdmissionSourceProof:
         for label, value in (
             ("proof_id", self.proof_id),
             ("finalization_id", self.finalization_id),
+            ("admission_finalization_id", self.admission_finalization_id),
         ):
             _require_id(value, label)
         if self.contract_version != ADMISSION_SOURCE_PROOF_VERSION:
@@ -125,6 +130,7 @@ class W84AdmissionSourceProof:
         for label, value in (
             ("finalization_hash", self.finalization_hash),
             ("original_source_verification_hash", self.original_source_verification_hash),
+            ("admission_finalization_hash", self.admission_finalization_hash),
             ("admission_source_verification_hash", self.admission_source_verification_hash),
             ("base_resolution_hash", self.base_resolution_hash),
             ("evidence_hash", self.evidence_hash),
@@ -133,8 +139,6 @@ class W84AdmissionSourceProof:
             ("w83_binding_hash", self.w83_binding_hash),
             ("measurement_plan_hash", self.measurement_plan_hash),
             ("measurement_runtime_hash", self.measurement_runtime_hash),
-            ("measurement_receipts_hash", self.measurement_receipts_hash),
-            ("measurement_head_hash", self.measurement_head_hash),
             ("proof_hash", self.proof_hash),
         ):
             _require_hash(value, label)
@@ -151,11 +155,15 @@ class W84AdmissionSourceProof:
         )
         if self.source_age_seconds != expected_age:
             raise PaperCandidateAdmissionSourceIntegrityError(
-                "source age does not match admission clock and durable capture"
+                "source age does not match canonical W84 rerun clock and durable capture"
             )
         if self.source_truth_verified is not True:
             raise PaperCandidateAdmissionSourceIntegrityError(
                 "W85 source proof requires source_truth_verified=true"
+            )
+        if self.canonical_w84_finalization_reproved is not True:
+            raise PaperCandidateAdmissionSourceIntegrityError(
+                "W85 source proof requires canonical W84 finalization rerun"
             )
         if self.historical_finalization_timestamp_trusted_for_freshness is not False:
             raise PaperCandidateAdmissionSourceIntegrityError(
@@ -187,53 +195,29 @@ def verify_w84_sources_for_candidate_admission(
     finalization: PromotionShadowForwardFinalVerification,
     w83_resolution: PromotionStrategyVersionResolution,
     source_package: W84AdmissionSourcePackage,
-    verified_at: datetime,
 ) -> W84AdmissionSourceProof:
-    """Re-prove W84 source truth at the W85 admission instant.
+    """Re-prove W84 via its canonical internal-process-clock finalizer.
 
-    `finalization.process_verified_at` is retained as historical provenance but
-    is deliberately not trusted as the freshness clock for candidate admission.
-    A caller can reconstruct/self-hash a dataclass; it cannot make stale durable
-    R5/measurement source truth young because W85 derives age from the source-
-    verified final measurement capture and its own process clock.
+    W85 deliberately does not call W84's intermediate source verifier. The
+    canonical W84 finalizer re-reads durable R5/measurement truth, obtains its
+    own process clock, and re-enforces W84 freshness before W85 can consider
+    candidate admission.
     """
 
     _require_id(proof_id, "proof_id")
     if not isinstance(finalization, PromotionShadowForwardFinalVerification):
-        raise TypeError(
-            "finalization must be PromotionShadowForwardFinalVerification"
-        )
+        raise TypeError("finalization must be PromotionShadowForwardFinalVerification")
     if not isinstance(w83_resolution, PromotionStrategyVersionResolution):
         raise TypeError("w83_resolution must be PromotionStrategyVersionResolution")
     if not isinstance(source_package, W84AdmissionSourcePackage):
         raise TypeError("source_package must be W84AdmissionSourcePackage")
-    _require_aware(verified_at, "verified_at")
 
-    expected_final_hash = final_module._hash(
-        final_module._payload(finalization, include_hash=False)
-    )
-    if finalization.finalization_hash != expected_final_hash:
-        raise PaperCandidateAdmissionSourceIntegrityError(
-            "W84 finalization self-hash mismatch"
-        )
-    if (
-        finalization.source_truth_verified is not True
-        or finalization.process_clock_freshness_verified is not True
-        or finalization.strategy_version_execution_bound is not True
-        or finalization.shadow_forward_promotion_bound is not True
-        or finalization.paper_candidate_authorized is not False
-        or finalization.external_execution_authorized is not False
-        or finalization.runtime_execution_authorized is not False
-        or finalization.capital_authority != "NONE"
-        or finalization.live_trading != "BLOCKED"
-    ):
-        raise PaperCandidateAdmissionSourceIntegrityError(
-            "W84 finalization semantic/authority boundary is not intact"
-        )
+    _validate_historical_finalization(finalization)
 
     try:
-        source = verify_promotion_shadow_forward_resolution_sources(
-            verification_id=f"{proof_id}:source",
+        admission_finalization = final_module.finalize_promotion_shadow_forward_resolution(
+            finalization_id=f"{proof_id}:final",
+            source_verification_id=f"{proof_id}:source",
             base_resolution=source_package.base_resolution,
             evidence=source_package.evidence,
             policy=source_package.policy,
@@ -243,30 +227,18 @@ def verify_w84_sources_for_candidate_admission(
             shadow_registry=source_package.shadow_registry,
             forward_registry=source_package.forward_registry,
             measurement_receipts=source_package.measurement_receipts,
-            verified_at=verified_at,
         )
-    except (TypeError, ShadowForwardSourceVerificationIntegrityError) as exc:
+    except (TypeError, ShadowForwardFinalVerificationIntegrityError) as exc:
         raise PaperCandidateAdmissionSourceIntegrityError(
-            "W85 admission could not re-prove durable W84 source truth"
+            "W85 admission could not rerun canonical W84 final verification"
         ) from exc
 
-    _require_finalization_matches_source(
-        finalization=finalization,
-        source=source,
+    _require_finalizations_match(
+        historical=finalization,
+        admission=admission_finalization,
         source_package=source_package,
         w83_resolution=w83_resolution,
     )
-
-    source_capture_at = source.qualification_ended_at + timedelta(
-        seconds=source.capture_lag_seconds
-    )
-    source_age_seconds = int(
-        (_utc(verified_at) - _utc(source_capture_at)).total_seconds()
-    )
-    if source_age_seconds < 0:
-        raise PaperCandidateAdmissionSourceIntegrityError(
-            "W85 admission clock predates durable W84 measurement capture"
-        )
 
     values = {
         "proof_id": proof_id,
@@ -274,20 +246,21 @@ def verify_w84_sources_for_candidate_admission(
         "finalization_id": finalization.finalization_id,
         "finalization_hash": finalization.finalization_hash,
         "original_source_verification_hash": finalization.source_verification_hash,
-        "admission_source_verification_hash": source.verification_hash,
-        "base_resolution_hash": source.base_resolution_hash,
-        "evidence_hash": source.evidence_hash,
-        "policy_hash": source.policy_hash,
-        "w83_resolution_hash": source.w83_resolution_hash,
-        "w83_binding_hash": source.w83_binding_hash,
-        "measurement_plan_hash": source.measurement_plan_hash,
-        "measurement_runtime_hash": source.measurement_runtime_hash,
-        "measurement_receipts_hash": source.measurement_receipts_hash,
-        "measurement_head_hash": source.measurement_head_hash,
-        "source_capture_at": source_capture_at,
-        "verified_at": verified_at,
-        "source_age_seconds": source_age_seconds,
+        "admission_finalization_id": admission_finalization.finalization_id,
+        "admission_finalization_hash": admission_finalization.finalization_hash,
+        "admission_source_verification_hash": admission_finalization.source_verification_hash,
+        "base_resolution_hash": admission_finalization.base_resolution_hash,
+        "evidence_hash": admission_finalization.evidence_hash,
+        "policy_hash": admission_finalization.policy_hash,
+        "w83_resolution_hash": admission_finalization.w83_resolution_hash,
+        "w83_binding_hash": admission_finalization.w83_binding_hash,
+        "measurement_plan_hash": admission_finalization.measurement_plan_hash,
+        "measurement_runtime_hash": admission_finalization.measurement_runtime_hash,
+        "source_capture_at": admission_finalization.measurement_capture_at,
+        "verified_at": admission_finalization.process_verified_at,
+        "source_age_seconds": admission_finalization.decision_delay_seconds,
         "source_truth_verified": True,
+        "canonical_w84_finalization_reproved": True,
         "historical_finalization_timestamp_trusted_for_freshness": False,
         "paper_candidate_authorized": False,
         "paper_execution_authorized": False,
@@ -302,67 +275,80 @@ def verify_w84_sources_for_candidate_admission(
     )
 
 
-def _require_finalization_matches_source(
-    *,
+def _validate_historical_finalization(
     finalization: PromotionShadowForwardFinalVerification,
-    source: PromotionShadowForwardSourceVerification,
+) -> None:
+    expected_hash = final_module._hash(
+        final_module._payload(finalization, include_hash=False)
+    )
+    if finalization.finalization_hash != expected_hash:
+        raise PaperCandidateAdmissionSourceIntegrityError(
+            "historical W84 finalization self-hash mismatch"
+        )
+    if (
+        finalization.source_truth_verified is not True
+        or finalization.process_clock_freshness_verified is not True
+        or finalization.strategy_version_execution_bound is not True
+        or finalization.shadow_forward_promotion_bound is not True
+        or finalization.paper_candidate_authorized is not False
+        or finalization.external_execution_authorized is not False
+        or finalization.runtime_execution_authorized is not False
+        or finalization.capital_authority != "NONE"
+        or finalization.live_trading != "BLOCKED"
+    ):
+        raise PaperCandidateAdmissionSourceIntegrityError(
+            "historical W84 finalization semantic/authority boundary is not intact"
+        )
+
+
+def _require_finalizations_match(
+    *,
+    historical: PromotionShadowForwardFinalVerification,
+    admission: PromotionShadowForwardFinalVerification,
     source_package: W84AdmissionSourcePackage,
     w83_resolution: PromotionStrategyVersionResolution,
 ) -> None:
-    expected_capture = source.qualification_ended_at + timedelta(
-        seconds=source.capture_lag_seconds
-    )
     checks = (
+        (historical.base_resolution_hash, admission.base_resolution_hash, "base resolution hash"),
+        (historical.evidence_hash, admission.evidence_hash, "evidence hash"),
+        (historical.policy_hash, admission.policy_hash, "W84 policy hash"),
+        (historical.w83_resolution_hash, admission.w83_resolution_hash, "W83 resolution hash"),
+        (historical.w83_binding_hash, admission.w83_binding_hash, "W83 binding hash"),
+        (historical.measurement_plan_hash, admission.measurement_plan_hash, "measurement plan hash"),
         (
-            finalization.base_resolution_hash,
-            source.base_resolution_hash,
-            "base resolution hash",
-        ),
-        (finalization.evidence_hash, source.evidence_hash, "evidence hash"),
-        (finalization.policy_hash, source.policy_hash, "W84 policy hash"),
-        (
-            finalization.w83_resolution_hash,
-            w83_resolution.resolution_hash,
-            "W83 resolution hash",
-        ),
-        (
-            source.w83_resolution_hash,
-            w83_resolution.resolution_hash,
-            "source W83 resolution hash",
-        ),
-        (
-            finalization.w83_binding_hash,
-            source_package.binding_evidence.evidence_hash,
-            "W83 binding hash",
-        ),
-        (
-            source.w83_binding_hash,
-            source_package.binding_evidence.evidence_hash,
-            "source W83 binding hash",
-        ),
-        (
-            finalization.measurement_plan_hash,
-            source.measurement_plan_hash,
-            "measurement plan hash",
-        ),
-        (
-            finalization.measurement_runtime_hash,
-            source.measurement_runtime_hash,
+            historical.measurement_runtime_hash,
+            admission.measurement_runtime_hash,
             "measurement runtime hash",
         ),
     )
-    for actual, expected, label in checks:
+    for expected, actual, label in checks:
         if actual != expected:
             raise PaperCandidateAdmissionSourceIntegrityError(
-                f"W84 finalization/source {label} mismatch"
+                f"W84 admission rerun changed {label}"
             )
-    if _utc(finalization.measurement_capture_at) != _utc(expected_capture):
+    if historical.w83_resolution_hash != w83_resolution.resolution_hash:
         raise PaperCandidateAdmissionSourceIntegrityError(
-            "W84 finalization measurement capture disagrees with durable source truth"
+            "historical W84 finalization does not bind exact W83 resolution"
         )
-    if finalization.remaining_promotion_blockers != source.remaining_promotion_blockers:
+    if historical.w83_binding_hash != source_package.binding_evidence.evidence_hash:
         raise PaperCandidateAdmissionSourceIntegrityError(
-            "W84 finalization/source remaining blocker mismatch"
+            "historical W84 finalization does not bind exact W83 execution evidence"
+        )
+    if historical.measurement_plan_hash != source_package.measurement_plan.plan_hash:
+        raise PaperCandidateAdmissionSourceIntegrityError(
+            "historical W84 finalization does not bind supplied measurement plan"
+        )
+    if _utc(historical.measurement_capture_at) != _utc(admission.measurement_capture_at):
+        raise PaperCandidateAdmissionSourceIntegrityError(
+            "historical W84 measurement capture disagrees with canonical admission rerun"
+        )
+    if historical.resolved_promotion_blockers != admission.resolved_promotion_blockers:
+        raise PaperCandidateAdmissionSourceIntegrityError(
+            "historical/admission W84 resolved blocker set mismatch"
+        )
+    if historical.remaining_promotion_blockers != admission.remaining_promotion_blockers:
+        raise PaperCandidateAdmissionSourceIntegrityError(
+            "historical/admission W84 remaining blocker set mismatch"
         )
 
 
@@ -370,13 +356,9 @@ def _proof_payload(
     value: W84AdmissionSourceProof, *, include_hash: bool
 ) -> dict[str, object]:
     names = tuple(
-        name
-        for name in W84AdmissionSourceProof.__dataclass_fields__
-        if name != "proof_hash"
+        name for name in W84AdmissionSourceProof.__dataclass_fields__ if name != "proof_hash"
     )
-    payload = _proof_payload_from_values(
-        {name: getattr(value, name) for name in names}
-    )
+    payload = _proof_payload_from_values({name: getattr(value, name) for name in names})
     if include_hash:
         payload["proof_hash"] = value.proof_hash
     return payload
@@ -387,9 +369,7 @@ def _proof_payload_from_values(values: dict[str, object]) -> dict[str, object]:
     for key in ("source_capture_at", "verified_at"):
         value = payload[key]
         if not isinstance(value, datetime):
-            raise PaperCandidateAdmissionSourceIntegrityError(
-                f"{key} must be datetime"
-            )
+            raise PaperCandidateAdmissionSourceIntegrityError(f"{key} must be datetime")
         payload[key] = _utc(value).isoformat()
     return payload
 
