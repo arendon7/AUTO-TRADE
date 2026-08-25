@@ -62,10 +62,14 @@ def main() -> int:
         'expected_symbol = f"{candidate_identity.base_currency}-{candidate_identity.quote_currency}"',
         'f"{candidate_identity.base_currency}/{candidate_identity.quote_currency}"',
         "normalize_crypto_pair(",
-        "value.symbol != pair",
         "candidate_identity.symbol != expected_symbol",
+        "value.symbol != pair",
         "value.proof_hash != expected",
         "broker_module._proof_payload(value, include_hash=False)",
+        '"venue": candidate_identity.venue',
+        "self.venue != ALPACA_PAPER_CRYPTO_MODEL_VENUE",
+        'self.quote_currency != "USD"',
+        "_ACCOUNT_ID_RE.fullmatch(self.account_id)",
         "value.account_attestation_fingerprint != broker_truth.account_attestation_fingerprint",
         "value.credential_reference != broker_truth.credential_reference",
         "value.source_host != ALPACA_PAPER_TRADING_HOST",
@@ -153,8 +157,9 @@ def main() -> int:
         return 1
     print(
         "AUTO-TRADE W86 PAPER runtime asset truth boundary: PASS "
-        "(frozen BASE-QUOTE -> exact BASE/QUOTE mapping; one existing GET-only asset reader; "
-        "account/credential/freshness binding; no readiness, execution, capital or LIVE authority)"
+        "(frozen crypto/USD PAPER product; BASE-QUOTE -> exact BASE/QUOTE mapping; "
+        "one existing GET-only asset reader; account/credential/freshness binding; "
+        "no readiness, execution, capital or LIVE authority)"
     )
     return 0
 
