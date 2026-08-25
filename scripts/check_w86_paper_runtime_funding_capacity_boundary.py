@@ -8,6 +8,7 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 TARGET = ROOT / "src/autotrade/paper_runtime_funding_capacity.py"
 TEST = "tests/test_w86_paper_runtime_funding_capacity.py"
+HARDENING_TEST = "tests/test_w86_paper_runtime_funding_capacity_hardening.py"
 DEDICATED = ROOT / ".github/workflows/w86-paper-runtime-funding-capacity.yml"
 CORE = ROOT / ".github/workflows/core-tests.yml"
 SELF_COMMAND = "python scripts/check_w86_paper_runtime_funding_capacity_boundary.py"
@@ -59,6 +60,10 @@ def main() -> int:
         "max_account_age_seconds: int = 5",
         "ready_ttl_seconds: int = 2",
         "class PaperRuntimeFundingCapacityProof:",
+        "max_account_age_seconds: int",
+        "ready_ttl_seconds: int",
+        "final_readiness_ready: bool",
+        "final_readiness_valid_until: datetime",
         "class PaperRuntimeFundingCapacityStatus(StrEnum):",
         'READY = "READY"',
         'BLOCKED = "BLOCKED"',
@@ -67,6 +72,8 @@ def main() -> int:
         'ACCOUNT_ATTESTATION_STALE = "ACCOUNT_ATTESTATION_STALE"',
         'FINAL_RUNTIME_RECEIPT_EXPIRED = "FINAL_RUNTIME_RECEIPT_EXPIRED"',
         "def bind_paper_runtime_funding_capacity(",
+        "def _expected_blockers(",
+        "def _policy_hash(",
         "final_module._payload(final_readiness, include_hash=False)",
         "broker_module._proof_payload(broker_truth, include_hash=False)",
         "final_readiness.broker_truth_hash != broker_truth.proof_hash",
@@ -80,6 +87,13 @@ def main() -> int:
         "account.source_path != ALPACA_PAPER_ACCOUNT_PATH",
         "now = _utc(_now_utc())",
         "buying_power_sufficient = buying_power >= minimum_notional",
+        "expected_policy_hash = _policy_hash(",
+        "if self.policy_hash != expected_policy_hash:",
+        "expected_account_fresh = observed - account_at <= timedelta(",
+        "expected_blockers = _expected_blockers(",
+        "if self.blocker_codes != expected_blockers:",
+        "expected_valid_until = min(",
+        "if actual_valid_until != expected_valid_until:",
         "PaperRuntimeFundingCapacityBlocker.INSUFFICIENT_BUYING_POWER",
         '"separate_execution_approval_required": True',
         '"capital_reserved": False',
@@ -189,6 +203,10 @@ def main() -> int:
 
     if DEDICATED.is_file():
         dedicated_source = DEDICATED.read_text(encoding="utf-8")
+        if HARDENING_TEST not in dedicated_source:
+            errors.append(
+                "W86 Funding Capacity: semantic hardening tests are not wired into dedicated CI"
+            )
         for reproved in (
             "python scripts/check_w86_paper_runtime_final_readiness_boundary.py",
             "python scripts/check_w86_paper_runtime_broker_truth_boundary.py",
@@ -207,10 +225,10 @@ def main() -> int:
 
     print(
         "AUTO-TRADE W86 PAPER funding-capacity boundary: PASS "
-        "(exact broker-bound account attestation; internal <=5s account freshness; "
-        "buying power must cover conservative minimum executable notional; <=2s READY TTL; "
-        "dedicated + Core Safety permanence; no network read in overlay, no OrderIntent, OMS, "
-        "reservation, broker write, execution or LIVE authority)"
+        "(exact broker-bound account attestation; embedded finite policy; constructor-level "
+        "freshness/blocker/TTL self-validation; buying power covers conservative minimum executable "
+        "notional; dedicated + Core Safety permanence; no network read in overlay, no OrderIntent, "
+        "OMS, reservation, broker write, execution or LIVE authority)"
     )
     return 0
 
