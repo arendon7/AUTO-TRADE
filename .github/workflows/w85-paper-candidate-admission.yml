@@ -11,6 +11,7 @@ on:
       - "tests/test_w85_paper_candidate_admission.py"
       - "tests/test_w85_paper_candidate_lifecycle.py"
       - "tests/test_w85_final_admission_and_eligibility.py"
+      - "tests/test_w85_security_invariants.py"
       - "scripts/check_w85_paper_candidate_admission_boundary.py"
       - ".github/workflows/w85-paper-candidate-admission.yml"
       - ".github/workflows/core-tests.yml"
@@ -44,15 +45,17 @@ jobs:
           tests/test_w85_paper_candidate_admission.py
           tests/test_w85_paper_candidate_lifecycle.py
           tests/test_w85_final_admission_and_eligibility.py
+          tests/test_w85_security_invariants.py
           scripts/check_w85_paper_candidate_admission_boundary.py
       - name: W85 candidate admission authority boundary
         run: python scripts/check_w85_paper_candidate_admission_boundary.py
-      - name: W85 candidate admission, lifecycle and final verification tests
+      - name: W85 candidate admission, lifecycle, final and adversarial tests
         run: >-
           pytest -q
           tests/test_w85_paper_candidate_admission.py
           tests/test_w85_paper_candidate_lifecycle.py
           tests/test_w85_final_admission_and_eligibility.py
+          tests/test_w85_security_invariants.py
       - name: Re-prove W84 shadow-forward final boundary
         run: python scripts/check_w84_shadow_forward_promotion_boundary.py
       - name: Re-prove W83 strategy-version binding boundary
