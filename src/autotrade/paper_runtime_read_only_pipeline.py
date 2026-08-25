@@ -9,12 +9,8 @@ import re
 
 import autotrade.paper_runtime_candidate_identity as candidate_module
 import autotrade.paper_runtime_readiness_source_snapshot as source_module
-from autotrade.brokers.alpaca_paper_crypto_account_status import (
-    attest_active_crypto_account,
-)
-from autotrade.brokers.alpaca_paper_flat_account import (
-    AlpacaPaperFlatAccountGateway,
-)
+from autotrade.brokers.alpaca_paper_crypto_account_status import attest_active_crypto_account
+from autotrade.brokers.alpaca_paper_flat_account import AlpacaPaperFlatAccountGateway
 from autotrade.brokers.alpaca_paper_gateway import (
     ALPACA_PAPER_TRADING_HOST,
     AlpacaPaperAccountAttestation,
@@ -23,12 +19,9 @@ from autotrade.brokers.alpaca_paper_gateway import (
     AlpacaPaperGatewayConfig,
     AlpacaPaperReadTransport,
 )
-from autotrade.brokers.alpaca_paper_market_data import (
-    AlpacaPaperMarketDataTransport,
-)
-from autotrade.brokers.alpaca_paper_crypto_market_data import (
-    AlpacaPaperCryptoMarketDataConfig,
-)
+from autotrade.brokers.alpaca_paper_market_data import AlpacaPaperMarketDataTransport
+from autotrade.brokers.alpaca_paper_crypto_market_data import AlpacaPaperCryptoMarketDataConfig
+from autotrade.paper_candidate_admission_lifecycle import PaperCandidateEligibilityState
 from autotrade.paper_runtime_asset_truth import (
     PaperRuntimeAssetTruthPolicy,
     PaperRuntimeAssetTruthProof,
@@ -39,9 +32,7 @@ from autotrade.paper_runtime_broker_truth import (
     PaperRuntimeBrokerTruthProof,
     bind_paper_runtime_broker_truth,
 )
-from autotrade.paper_runtime_candidate_identity import (
-    PaperRuntimeCandidateIdentityProof,
-)
+from autotrade.paper_runtime_candidate_identity import PaperRuntimeCandidateIdentityProof
 from autotrade.paper_runtime_final_readiness import (
     PaperRuntimeFinalReadinessPolicy,
     PaperRuntimeFinalReadinessReceipt,
@@ -57,9 +48,7 @@ from autotrade.paper_runtime_market_truth import (
     PaperRuntimeMarketTruthProof,
     read_and_bind_paper_runtime_market_truth,
 )
-from autotrade.paper_runtime_readiness_source_snapshot import (
-    W85DurableEligibilitySnapshotProof,
-)
+from autotrade.paper_runtime_readiness_source_snapshot import W85DurableEligibilitySnapshotProof
 from autotrade.paper_runtime_safety_health_truth import (
     PaperRuntimeSafetyHealthTruthPolicy,
     PaperRuntimeSafetyHealthTruthProof,
@@ -213,15 +202,21 @@ def collect_paper_runtime_readiness(
     asset_transport: AlpacaPaperReadTransport | None = None,
     market_transport: AlpacaPaperMarketDataTransport | None = None,
 ) -> PaperRuntimeReadOnlyPipelineResult:
-    """Collect the complete W86 readiness chain using GET/read-only boundaries only.
+    """Collect complete W86 readiness through GET/read-only boundaries only.
 
-    The production process clock is internal. Caller-supplied timestamps are not
-    accepted. The exact account attestation is retained so funding capacity uses
-    the same hash-bound buying-power observation that broker truth consumed.
+    The production process clock is internal; no caller timestamp is accepted.
+    W85 lifecycle/expiry and immutable provenance are checked before the first
+    network gateway is constructed. The exact account receipt is retained so the
+    funding gate consumes the same hash-bound buying power used by broker truth.
     """
 
     _id(collection_id, "collection_id")
-    _preflight_source_candidate(source_snapshot, candidate_identity)
+    started_at = _clock(None)
+    _preflight_source_candidate(
+        source_snapshot,
+        candidate_identity,
+        observed_at=started_at,
+    )
     if not isinstance(credentials, AlpacaPaperCredentials):
         raise TypeError("credentials must be AlpacaPaperCredentials")
     if not isinstance(trading_config, AlpacaPaperGatewayConfig):
@@ -244,7 +239,6 @@ def collect_paper_runtime_readiness(
             "W86 runtime pipeline requires explicitly enabled market-data reads"
         )
 
-    started_at = _clock(None)
     broker_at = _clock(started_at)
     account = AlpacaPaperAccountGateway(
         config=trading_config,
@@ -381,7 +375,11 @@ def collect_paper_runtime_readiness(
 def _preflight_source_candidate(
     source_snapshot: W85DurableEligibilitySnapshotProof,
     candidate_identity: PaperRuntimeCandidateIdentityProof,
+    *,
+    observed_at: datetime,
 ) -> None:
+    _aware(observed_at, "observed_at")
+    instant = _utc(observed_at)
     if not isinstance(source_snapshot, W85DurableEligibilitySnapshotProof):
         raise TypeError("source_snapshot must be W85DurableEligibilitySnapshotProof")
     if not isinstance(candidate_identity, PaperRuntimeCandidateIdentityProof):
@@ -422,7 +420,8 @@ def _preflight_source_candidate(
             "W86 candidate/source provenance mismatch before network read"
         )
     if (
-        source_snapshot.candidate_currently_eligible is not True
+        source_snapshot.current_state is not PaperCandidateEligibilityState.ACTIVE
+        or source_snapshot.candidate_currently_eligible is not True
         or source_snapshot.durable_admission_verified is not True
         or source_snapshot.durable_lifecycle_verified is not True
         or source_snapshot.sqlite_read_only is not True
@@ -430,7 +429,15 @@ def _preflight_source_candidate(
         or source_snapshot.concurrent_durable_change_detected is not False
     ):
         raise PaperRuntimeReadOnlyPipelineIntegrityError(
-            "W86 source snapshot is not currently eligible/read-only/consistent"
+            "W86 source snapshot is not ACTIVE/current/read-only/consistent"
+        )
+    if _utc(source_snapshot.reproved_at) > instant:
+        raise PaperRuntimeReadOnlyPipelineIntegrityError(
+            "W86 source snapshot is in process future before network read"
+        )
+    if instant > _utc(source_snapshot.admission_valid_until):
+        raise PaperRuntimeReadOnlyPipelineIntegrityError(
+            "W86 source admission expired before network read"
         )
     for value in (source_snapshot, candidate_identity):
         if (
