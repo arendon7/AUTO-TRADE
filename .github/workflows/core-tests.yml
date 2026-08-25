@@ -160,6 +160,10 @@ jobs:
         run: python scripts/check_w86_paper_runtime_final_readiness_boundary.py
       - name: W86 PAPER final runtime readiness adversarial tests
         run: pytest -q tests/test_w86_paper_runtime_final_readiness.py
+      - name: W86 PAPER funding-capacity boundary
+        run: python scripts/check_w86_paper_runtime_funding_capacity_boundary.py
+      - name: W86 PAPER funding-capacity adversarial tests
+        run: pytest -q tests/test_w86_paper_runtime_funding_capacity.py
       - name: Debt register contract
         run: python scripts/check_debt_register.py
       - name: Canonical knowledge contract
