@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import replace
+from dataclasses import fields, replace
 from datetime import timedelta
 
 import pytest
@@ -11,7 +11,7 @@ from test_w85_final_admission_and_eligibility import (
     _bundle_with_final_admission,
     _rehash_final_verification,
 )
-from test_w85_paper_candidate_admission import _full_context
+from test_w85_paper_candidate_admission import _full_context, _rehash_finalization
 
 
 def _source_proof(
@@ -78,6 +78,127 @@ def test_w85_source_proof_rejects_clock_age_and_hash_tamper(
         replace(proof, proof_hash="0" * 64)
 
 
+@pytest.mark.parametrize(
+    "field_name",
+    (
+        "base_resolution",
+        "evidence",
+        "policy",
+        "measurement_plan",
+        "binding_evidence",
+        "shadow_registry",
+        "forward_registry",
+    ),
+)
+def test_w85_source_package_rejects_wrong_typed_parent(
+    tmp_path,
+    monkeypatch,
+    limits,
+    market,
+    empty_portfolio,
+    market_buy_intent,
+    field_name,
+):
+    bundle = _full_context(
+        tmp_path, monkeypatch, limits, market, empty_portfolio, market_buy_intent
+    )
+    with pytest.raises(
+        source_verification.PaperCandidateAdmissionSourceIntegrityError,
+        match=field_name,
+    ):
+        replace(bundle["source_package"], **{field_name: object()})
+
+
+def test_w85_source_package_rejects_non_tuple_or_wrong_receipt_type(
+    tmp_path, monkeypatch, limits, market, empty_portfolio, market_buy_intent
+):
+    bundle = _full_context(
+        tmp_path, monkeypatch, limits, market, empty_portfolio, market_buy_intent
+    )
+    with pytest.raises(
+        source_verification.PaperCandidateAdmissionSourceIntegrityError,
+        match="measurement_receipts",
+    ):
+        replace(bundle["source_package"], measurement_receipts=[])
+    with pytest.raises(
+        source_verification.PaperCandidateAdmissionSourceIntegrityError,
+        match="measurement_receipts",
+    ):
+        replace(bundle["source_package"], measurement_receipts=(object(),))
+
+
+@pytest.mark.parametrize(
+    ("argument", "value", "match"),
+    (
+        ("finalization", object(), "finalization"),
+        ("w83_resolution", object(), "w83_resolution"),
+        ("source_package", object(), "source_package"),
+    ),
+)
+def test_w85_source_reproof_rejects_wrong_typed_public_inputs(
+    tmp_path,
+    monkeypatch,
+    limits,
+    market,
+    empty_portfolio,
+    market_buy_intent,
+    argument,
+    value,
+    match,
+):
+    bundle = _full_context(
+        tmp_path, monkeypatch, limits, market, empty_portfolio, market_buy_intent
+    )
+    kwargs = {
+        "proof_id": "w85-wrong-public-input",
+        "finalization": bundle["final"],
+        "w83_resolution": bundle["w83"],
+        "source_package": bundle["source_package"],
+        "verified_at": bundle["registered_at"] + timedelta(seconds=1),
+    }
+    kwargs[argument] = value
+    with pytest.raises(TypeError, match=match):
+        source_verification.verify_w84_sources_for_candidate_admission(**kwargs)
+
+
+def test_w85_source_reproof_rejects_naive_decision_clock(
+    tmp_path, monkeypatch, limits, market, empty_portfolio, market_buy_intent
+):
+    bundle = _full_context(
+        tmp_path, monkeypatch, limits, market, empty_portfolio, market_buy_intent
+    )
+    with pytest.raises(
+        source_verification.PaperCandidateAdmissionSourceIntegrityError,
+        match="timezone-aware",
+    ):
+        source_verification.verify_w84_sources_for_candidate_admission(
+            proof_id="w85-naive-decision-clock",
+            finalization=bundle["final"],
+            w83_resolution=bundle["w83"],
+            source_package=bundle["source_package"],
+            verified_at=bundle["registered_at"].replace(tzinfo=None),
+        )
+
+
+def test_w85_source_reproof_rejects_decision_clock_before_durable_capture(
+    tmp_path, monkeypatch, limits, market, empty_portfolio, market_buy_intent
+):
+    bundle = _full_context(
+        tmp_path, monkeypatch, limits, market, empty_portfolio, market_buy_intent
+    )
+    with pytest.raises(
+        source_verification.PaperCandidateAdmissionSourceIntegrityError,
+        match="predates durable W84 measurement capture",
+    ):
+        source_verification.verify_w84_sources_for_candidate_admission(
+            proof_id="w85-before-capture",
+            finalization=bundle["final"],
+            w83_resolution=bundle["w83"],
+            source_package=bundle["source_package"],
+            verified_at=bundle["final"].measurement_capture_at - timedelta(seconds=1),
+        )
+
+
 def test_w85_source_reproof_rejects_incomplete_durable_measurement_package(
     tmp_path, monkeypatch, limits, market, empty_portfolio, market_buy_intent
 ):
@@ -96,6 +217,66 @@ def test_w85_source_reproof_rejects_incomplete_durable_measurement_package(
             source_package=incomplete,
             verified_at=bundle["registered_at"] + timedelta(seconds=1),
         )
+
+
+@pytest.mark.parametrize(
+    ("field_name", "match"),
+    (
+        ("base_resolution_hash", "base resolution hash"),
+        ("evidence_hash", "evidence hash"),
+        ("policy_hash", "W84 policy hash"),
+        ("w83_resolution_hash", "W83 resolution hash"),
+        ("w83_binding_hash", "W83 binding hash"),
+        ("measurement_plan_hash", "measurement plan hash"),
+        ("measurement_runtime_hash", "measurement runtime hash"),
+    ),
+)
+def test_w85_source_reproof_rejects_identity_drift_between_historical_and_canonical_final(
+    tmp_path,
+    monkeypatch,
+    limits,
+    market,
+    empty_portfolio,
+    market_buy_intent,
+    field_name,
+    match,
+):
+    bundle = _full_context(
+        tmp_path, monkeypatch, limits, market, empty_portfolio, market_buy_intent
+    )
+    forged_admission_final = _rehash_finalization(
+        bundle["final"],
+        **{field_name: "f" * 64},
+    )
+    with pytest.raises(
+        source_verification.PaperCandidateAdmissionSourceIntegrityError,
+        match=match,
+    ):
+        source_verification._require_finalizations_match(
+            historical=bundle["final"],
+            admission=forged_admission_final,
+            source_package=bundle["source_package"],
+            w83_resolution=bundle["w83"],
+        )
+
+
+def test_w85_source_proof_payload_rejects_non_datetime_provenance(
+    tmp_path, monkeypatch, limits, market, empty_portfolio, market_buy_intent
+):
+    _, proof = _source_proof(
+        tmp_path, monkeypatch, limits, market, empty_portfolio, market_buy_intent
+    )
+    values = {
+        field.name: getattr(proof, field.name)
+        for field in fields(proof)
+        if field.name != "proof_hash"
+    }
+    values["source_capture_at"] = "not-a-datetime"
+    with pytest.raises(
+        source_verification.PaperCandidateAdmissionSourceIntegrityError,
+        match="source_capture_at must be datetime",
+    ):
+        source_verification._proof_payload_from_values(values)
 
 
 @pytest.mark.parametrize(
@@ -186,4 +367,40 @@ def test_w85_final_eligibility_rejects_coherently_rehashed_source_provenance_dri
             final_verification=forged,
             admission_receipt=admitted,
             lifecycle_registry=registry,
+        )
+
+
+def test_w85_final_eligibility_rejects_wrong_public_types(
+    tmp_path, monkeypatch, limits, market, empty_portfolio, market_buy_intent
+):
+    _, admitted, verified, registry = _bundle_with_final_admission(
+        tmp_path, monkeypatch, limits, market, empty_portfolio, market_buy_intent
+    )
+    with pytest.raises(TypeError, match="final_verification"):
+        eligibility_final.project_final_paper_candidate_eligibility(
+            projection_id="w85-wrong-final-type",
+            final_verification=object(),
+            admission_receipt=admitted,
+            lifecycle_registry=registry,
+        )
+    with pytest.raises(TypeError, match="lifecycle_registry"):
+        eligibility_final.project_final_paper_candidate_eligibility(
+            projection_id="w85-wrong-lifecycle-type",
+            final_verification=verified,
+            admission_receipt=admitted,
+            lifecycle_registry=object(),
+        )
+
+
+def test_w85_final_eligibility_state_requires_finite_validity():
+    with pytest.raises(
+        eligibility_final.PaperCandidateFinalEligibilityIntegrityError,
+        match="finite admission validity",
+    ):
+        eligibility_final._state_with_expiry_precedence(
+            admission_valid_until=None,
+            events=(),
+            observed_at=source_verification.datetime.now(
+                source_verification.timezone.utc
+            ),
         )
