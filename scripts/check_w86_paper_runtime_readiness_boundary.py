@@ -143,13 +143,14 @@ for sql_keyword in (
         errors.append(f"forbidden mutating SQL in W86 source reader: {sql_keyword.strip()}")
 
 # No source proof produced by this layer may turn readiness-source verification
-# into execution authority.
+# into execution authority. Validate the semantic helper guard rather than a
+# field-name-specific spelling in the dataclass.
 if '"candidate_currently_eligible": state is PaperCandidateEligibilityState.ACTIVE' not in text:
     errors.append("W86 source proof must distinguish candidate eligibility from execution")
-if "paper_execution_authorized is not False" not in text:
+if "paper_execution is not False" not in text:
     errors.append("W86 source proof constructor must reject PAPER execution authority")
-if "runtime_execution_authorized" not in text or '"runtime_execution_authorized": False' not in text:
-    errors.append("W86 source proof must preserve runtime execution=false")
+if "runtime is not False" not in text or '"runtime_execution_authorized": False' not in text:
+    errors.append("W86 source proof must preserve and enforce runtime execution=false")
 if 'capital != "NONE"' not in text or 'live != "BLOCKED"' not in text:
     errors.append("W86 source proof must reject capital/LIVE escalation")
 
