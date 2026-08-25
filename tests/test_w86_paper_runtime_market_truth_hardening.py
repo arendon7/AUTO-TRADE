@@ -392,6 +392,8 @@ def test_unverified_upstream_truth_and_upstream_authority_are_rejected():
     candidate, broker, asset = _chain()
     object.__setattr__(broker, "paper_runtime_ready", True)
     _rehash_broker(broker)
+    object.__setattr__(asset, "broker_truth_hash", broker.proof_hash)
+    _rehash_asset(asset)
     with pytest.raises(PaperRuntimeMarketTruthIntegrityError, match="may not grant"):
         bind_paper_runtime_market_truth(
             proof_id="upstream-authority",
