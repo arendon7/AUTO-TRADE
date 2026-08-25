@@ -13,6 +13,7 @@ on:
       - "src/autotrade/research/health.py"
       - "scripts/mac_crypto_health_commissioning.py"
       - "scripts/mac_crypto_execution_health_readiness.py"
+      - "tests/conftest.py"
       - "tests/test_w86_paper_runtime_safety_health_truth.py"
       - "scripts/check_w86_paper_runtime_safety_health_truth_boundary.py"
       - "scripts/check_mac_crypto_health_commissioning.py"
