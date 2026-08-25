@@ -1,16 +1,14 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import timedelta
 from decimal import Decimal
 import inspect
 
 import pytest
 
-import autotrade.paper_runtime_asset_truth as asset_module
-import autotrade.paper_runtime_candidate_identity as candidate_module
 import autotrade.paper_runtime_final_readiness as final_module
 import autotrade.paper_runtime_funding_capacity as funding_module
-import autotrade.paper_runtime_market_truth as market_module
 import autotrade.paper_runtime_read_only_pipeline as pipeline_module
 import autotrade.paper_runtime_readiness_source_snapshot as source_module
 from autotrade.brokers.alpaca_paper_crypto_account_status import (
@@ -63,8 +61,7 @@ def _source_candidate():
         "proof_hash",
         source_module._hash(source_module._proof_payload(source, include_hash=False)),
     )
-    candidate = _bind_candidate(source)
-    return source, candidate
+    return source, _bind_candidate(source)
 
 
 def _account(credentials, *, buying_power=Decimal("1000")):
@@ -214,17 +211,8 @@ def _install_read_only_stubs(monkeypatch, *, buying_power=Decimal("1000")):
 
         def verify_current(self, *, proof_id, candidate_identity, observed_at, policy=None):
             observed.append(("safety", observed_at))
-            proof = _safety(candidate_identity)
-            object.__setattr__(proof, "proof_id", proof_id)
-            object.__setattr__(
-                proof,
-                "proof_hash",
-                pipeline_module.PaperRuntimeSafetyHealthTruthReader.__module__
-                and pipeline_module.PaperRuntimeSafetyHealthTruthReader.__name__
-                and proof.proof_hash,
-            )
-            # _safety() is already canonical at AT; the pipeline clock is fixed at AT.
-            return proof
+            assert observed_at == AT
+            return _safety(candidate_identity)
 
     monkeypatch.setattr(pipeline_module, "AlpacaPaperAccountGateway", AccountGateway)
     monkeypatch.setattr(pipeline_module, "AlpacaPaperFlatAccountGateway", FlatGateway)
@@ -292,7 +280,11 @@ def test_complete_pipeline_retains_exact_account_receipt_and_never_grants_execut
     assert credentials.key_id not in repr(result)
     assert credentials.secret_key not in repr(result)
 
-    stage_times = [value for name, value in observed if name in {"account", "crypto", "flat", "asset", "market", "safety"}]
+    stage_times = [
+        value
+        for name, value in observed
+        if name in {"account", "crypto", "flat", "asset", "market", "safety"}
+    ]
     assert stage_times == [AT, AT, AT, AT, AT, AT]
 
 
@@ -377,10 +369,6 @@ def test_pipeline_receipt_hash_and_authority_guards(monkeypatch):
     receipt = result.receipt
 
     with pytest.raises(PaperRuntimeReadOnlyPipelineIntegrityError, match="receipt hash mismatch"):
-        from dataclasses import replace
-
         replace(receipt, receipt_hash="0" * 64)
     with pytest.raises(PaperRuntimeReadOnlyPipelineIntegrityError, match="may not grant"):
-        from dataclasses import replace
-
         replace(receipt, paper_execution_authorized=True)
