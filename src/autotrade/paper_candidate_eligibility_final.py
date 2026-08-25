@@ -19,7 +19,7 @@ from autotrade.paper_candidate_admission_lifecycle import (
 )
 
 
-FINAL_ELIGIBILITY_VERSION = "W85_PAPER_CANDIDATE_FINAL_ELIGIBILITY_V1"
+FINAL_ELIGIBILITY_VERSION = "W85_PAPER_CANDIDATE_FINAL_ELIGIBILITY_V2"
 _HASH_RE = re.compile(r"^[0-9a-f]{64}$")
 _ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$")
 
@@ -30,12 +30,12 @@ class PaperCandidateFinalEligibilityIntegrityError(RuntimeError):
 
 @dataclass(frozen=True, slots=True)
 class PaperCandidateFinalEligibility:
-    """Canonical W85 current eligibility snapshot for downstream W86.
+    """Canonical W85 current eligibility snapshot for downstream work.
 
-    Historical admission remains immutable. Current eligibility is recomputed from
-    durable lifecycle history and the internal process clock. Expiry always wins
-    over earlier suspension/revocation state because a candidate cannot remain
-    currently eligible (or merely revoked-but-unexpired) beyond its validity.
+    Historical admission remains immutable. Current eligibility is recomputed
+    from durable lifecycle history and an internal process clock. Expiry always
+    wins over earlier suspension/revocation state. This snapshot carries no
+    PAPER execution, external/runtime execution, capital or LIVE authority.
     """
 
     projection_id: str
@@ -44,6 +44,7 @@ class PaperCandidateFinalEligibility:
     admission_id: str
     admission_hash: str
     final_admission_verification_hash: str
+    w84_admission_source_proof_hash: str
     admission_valid_until: datetime
     lifecycle_head_hash: str
     lifecycle_events_count: int
@@ -67,6 +68,7 @@ class PaperCandidateFinalEligibility:
             ("authority_key", self.authority_key),
             ("admission_hash", self.admission_hash),
             ("final_admission_verification_hash", self.final_admission_verification_hash),
+            ("w84_admission_source_proof_hash", self.w84_admission_source_proof_hash),
             ("lifecycle_head_hash", self.lifecycle_head_hash),
             ("projection_hash", self.projection_hash),
         ):
@@ -123,14 +125,26 @@ def project_final_paper_candidate_eligibility(
     _validate_final_verification(final_verification)
     if not isinstance(lifecycle_registry, SQLitePaperCandidateLifecycleRegistry):
         raise TypeError("lifecycle_registry must be SQLitePaperCandidateLifecycleRegistry")
+    if admission_receipt.w84_admission_source_proof_hash is None:
+        raise PaperCandidateFinalEligibilityIntegrityError(
+            "final eligibility requires durable V2 admission source proof"
+        )
     if (
         admission_receipt.admission_id != final_verification.admission_id
         or admission_receipt.admission_hash != final_verification.admission_hash
         or admission_receipt.authority_key != final_verification.authority_key
         or admission_receipt.valid_until != final_verification.valid_until
+        or admission_receipt.w84_admission_source_proof_hash
+        != final_verification.w84_admission_source_proof_hash
+        or admission_receipt.w84_admission_source_verification_hash
+        != final_verification.w84_admission_source_verification_hash
+        or admission_receipt.w84_admission_source_capture_at
+        != final_verification.w84_admission_source_capture_at
+        or admission_receipt.w84_admission_source_verified_at
+        != final_verification.w84_admission_source_verified_at
     ):
         raise PaperCandidateFinalEligibilityIntegrityError(
-            "final eligibility source admission does not match canonical W85 verification"
+            "final eligibility source admission does not match canonical W85 V2 verification"
         )
 
     events = lifecycle_registry.list_for_admission(admission_receipt)
@@ -154,6 +168,7 @@ def project_final_paper_candidate_eligibility(
         "admission_id": admission_receipt.admission_id,
         "admission_hash": admission_receipt.admission_hash,
         "final_admission_verification_hash": final_verification.verification_hash,
+        "w84_admission_source_proof_hash": final_verification.w84_admission_source_proof_hash,
         "admission_valid_until": admission_receipt.valid_until,
         "lifecycle_head_hash": head_hash,
         "lifecycle_events_count": len(events),
@@ -213,6 +228,8 @@ def _validate_final_verification(
     if (
         value.admission_source_truth_verified is not True
         or value.w84_source_truth_verified is not True
+        or value.w84_admission_source_proof_bound is not True
+        or value.historical_w84_timestamp_used_for_freshness is not False
         or value.paper_candidate_was_admitted is not True
         or value.paper_execution_authorized is not False
         or value.external_execution_authorized is not False
