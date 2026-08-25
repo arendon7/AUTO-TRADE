@@ -33,8 +33,8 @@ required_markers = (
     'ADMISSION_SOURCE_PROOF_VERSION = "W85_W84_ADMISSION_SOURCE_PROOF_V2"',
     'LIFECYCLE_EVENT_VERSION = "W85_PAPER_CANDIDATE_LIFECYCLE_EVENT_V1"',
     'ELIGIBILITY_PROJECTION_VERSION = "W85_PAPER_CANDIDATE_ELIGIBILITY_PROJECTION_V1"',
-    'FINAL_ADMISSION_VERIFICATION_VERSION = "W85_PAPER_CANDIDATE_ADMISSION_FINAL_VERIFICATION_V1"',
-    'FINAL_ELIGIBILITY_VERSION = "W85_PAPER_CANDIDATE_FINAL_ELIGIBILITY_V1"',
+    'FINAL_ADMISSION_VERIFICATION_VERSION = "W85_PAPER_CANDIDATE_ADMISSION_FINAL_VERIFICATION_V2"',
+    'FINAL_ELIGIBILITY_VERSION = "W85_PAPER_CANDIDATE_FINAL_ELIGIBILITY_V2"',
     "PromotionShadowForwardFinalVerification",
     "W84AdmissionSourcePackage",
     "W84AdmissionSourceProof",
@@ -62,6 +62,8 @@ required_markers = (
     "w84_admission_source_verification_hash",
     "w84_admission_source_capture_at",
     "w84_admission_source_verified_at",
+    "w84_admission_source_proof_bound",
+    "historical_w84_timestamp_used_for_freshness",
     "W84_FINAL_VERIFICATION_MISSING",
     "candidate already has an active W85 admission",
     "admission journal predecessor hash discontinuity",
@@ -125,16 +127,6 @@ if "verify_promotion_shadow_forward_resolution_sources" in source_verification:
         "W85 source reproof may not bypass canonical W84 finalization through its intermediate verifier"
     )
 
-final_eligibility = texts.get("paper_candidate_eligibility_final.py", "")
-expiry_marker = "if _utc(observed_at) > _utc(admission_valid_until):"
-revocation_marker = "if last.action is PaperCandidateLifecycleAction.REVOKE:"
-if expiry_marker not in final_eligibility or revocation_marker not in final_eligibility:
-    errors.append("final eligibility must explicitly encode expiry and revocation state")
-elif final_eligibility.index(expiry_marker) > final_eligibility.index(revocation_marker):
-    errors.append("canonical W85 final eligibility must give expiry precedence over revocation")
-if "current_projection(" in final_eligibility:
-    errors.append("canonical W85 final eligibility may not consume intermediate lifecycle projection")
-
 final_admission = texts.get("paper_candidate_admission_final_verification.py", "")
 for marker in (
     "admission_registry.get(admission_id)",
@@ -144,9 +136,43 @@ for marker in (
     "receipt.w84_finalization_hash != w84_finalization.finalization_hash",
     "receipt.w84_source_verification_hash != w84_finalization.source_verification_hash",
     "receipt.w84_measurement_plan_hash != w84_finalization.measurement_plan_hash",
+    "receipt.w84_admission_source_proof_hash is None",
+    "receipt.w84_admission_source_verification_hash is None",
+    "receipt.w84_admission_source_capture_at is None",
+    "receipt.w84_admission_source_verified_at is None",
+    "_utc(receipt.admitted_at)",
+    "_utc(receipt.w84_admission_source_capture_at)",
+    '"w84_admission_source_proof_bound": True',
+    '"historical_w84_timestamp_used_for_freshness": False',
+    "admission exceeded frozen durable-source freshness budget",
 ):
     if marker not in final_admission:
-        errors.append(f"final W85 admission verification missing source-authoritative marker: {marker}")
+        errors.append(f"final W85 admission verification missing V2 source marker: {marker}")
+if "w84_finalization.process_verified_at" in final_admission:
+    errors.append(
+        "final W85 admission verification may not use historical W84 process_verified_at as freshness authority"
+    )
+
+final_eligibility = texts.get("paper_candidate_eligibility_final.py", "")
+expiry_marker = "if _utc(observed_at) > _utc(admission_valid_until):"
+revocation_marker = "if last.action is PaperCandidateLifecycleAction.REVOKE:"
+if expiry_marker not in final_eligibility or revocation_marker not in final_eligibility:
+    errors.append("final eligibility must explicitly encode expiry and revocation state")
+elif final_eligibility.index(expiry_marker) > final_eligibility.index(revocation_marker):
+    errors.append("canonical W85 final eligibility must give expiry precedence over revocation")
+if "current_projection(" in final_eligibility:
+    errors.append("canonical W85 final eligibility may not consume intermediate lifecycle projection")
+for marker in (
+    "admission_receipt.w84_admission_source_proof_hash",
+    "final_verification.w84_admission_source_proof_hash",
+    "final_verification.w84_admission_source_verification_hash",
+    "final_verification.w84_admission_source_capture_at",
+    "final_verification.w84_admission_source_verified_at",
+    "value.w84_admission_source_proof_bound is not True",
+    "value.historical_w84_timestamp_used_for_freshness is not False",
+):
+    if marker not in final_eligibility:
+        errors.append(f"final W85 eligibility missing V2 provenance marker: {marker}")
 
 for source_name, text in texts.items():
     forbidden_text = (
@@ -255,5 +281,5 @@ if errors:
     raise SystemExit(1)
 
 print(
-    "W85 PAPER CANDIDATE ADMISSION BOUNDARY PASS — V2 admission requires a fresh canonical W84 finalization rerun over existing durable R5 Shadow/Forward + deterministic measurement truth; W85 and W84 process clocks are separately hash-bound; historical W84 process_verified_at is not W85 freshness authority; admission/lifecycle artifacts grant no PAPER execution, broker, OMS, Safety, capital or LIVE authority"
+    "W85 PAPER CANDIDATE ADMISSION BOUNDARY PASS — candidate admission requires canonical W84 finalizer rerun over durable R5/measurement truth; V2 final verification derives freshness only from durable admission-source capture and binds the source-proof hash; V2 final eligibility cross-checks that provenance against the durable receipt; historical W84 process_verified_at is never W85 freshness authority; no PAPER execution, broker, OMS, Safety, capital or LIVE authority"
 )
