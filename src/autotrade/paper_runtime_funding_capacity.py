@@ -50,20 +50,22 @@ class PaperRuntimeFundingCapacityPolicy:
     ready_ttl_seconds: int = 2
 
     def __post_init__(self) -> None:
-        for name, value, upper in (
-            ("max_account_age_seconds", self.max_account_age_seconds, 5),
-            ("ready_ttl_seconds", self.ready_ttl_seconds, 2),
-        ):
-            if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= upper:
-                raise ValueError(f"{name} must be integer seconds in [1, {upper}]")
+        _policy_seconds(
+            self.max_account_age_seconds,
+            "max_account_age_seconds",
+            upper=5,
+        )
+        _policy_seconds(
+            self.ready_ttl_seconds,
+            "ready_ttl_seconds",
+            upper=2,
+        )
 
     @property
     def fingerprint(self) -> str:
-        return _hash(
-            {
-                "max_account_age_seconds": self.max_account_age_seconds,
-                "ready_ttl_seconds": self.ready_ttl_seconds,
-            }
+        return _policy_hash(
+            self.max_account_age_seconds,
+            self.ready_ttl_seconds,
         )
 
 
@@ -72,7 +74,11 @@ class PaperRuntimeFundingCapacityProof:
     proof_id: str
     contract_version: str
     policy_hash: str
+    max_account_age_seconds: int
+    ready_ttl_seconds: int
     final_readiness_hash: str
+    final_readiness_ready: bool
+    final_readiness_valid_until: datetime
     broker_truth_hash: str
     candidate_identity_hash: str
     authority_key: str
@@ -126,15 +132,51 @@ class PaperRuntimeFundingCapacityProof:
             "proof_hash",
         ):
             _sha(getattr(self, name), name)
-        for name in ("product_id",):
-            _id(getattr(self, name), name)
+        _id(self.product_id, "product_id")
         if not isinstance(self.symbol, str) or not self.symbol.strip():
             raise PaperRuntimeFundingCapacityIntegrityError("symbol is required")
         if not _ACCOUNT_ID_RE.fullmatch(self.account_id):
             raise PaperRuntimeFundingCapacityIntegrityError("account_id is invalid")
-        _aware(self.account_attested_at, "account_attested_at")
-        _aware(self.observed_at, "observed_at")
-        _aware(self.valid_until, "valid_until")
+        if not isinstance(self.final_readiness_ready, bool):
+            raise PaperRuntimeFundingCapacityIntegrityError(
+                "final_readiness_ready must be bool"
+            )
+
+        _policy_seconds(
+            self.max_account_age_seconds,
+            "max_account_age_seconds",
+            upper=5,
+        )
+        _policy_seconds(
+            self.ready_ttl_seconds,
+            "ready_ttl_seconds",
+            upper=2,
+        )
+        expected_policy_hash = _policy_hash(
+            self.max_account_age_seconds,
+            self.ready_ttl_seconds,
+        )
+        if self.policy_hash != expected_policy_hash:
+            raise PaperRuntimeFundingCapacityIntegrityError(
+                "funding policy hash disagrees with embedded finite policy"
+            )
+
+        for name in (
+            "final_readiness_valid_until",
+            "account_attested_at",
+            "observed_at",
+            "valid_until",
+        ):
+            _aware(getattr(self, name), name)
+        account_at = _utc(self.account_attested_at)
+        observed = _utc(self.observed_at)
+        final_valid_until = _utc(self.final_readiness_valid_until)
+        actual_valid_until = _utc(self.valid_until)
+        if account_at > observed:
+            raise PaperRuntimeFundingCapacityIntegrityError(
+                "account attestation is in funding-proof future"
+            )
+
         _nonnegative_decimal(self.buying_power_usd, "buying_power_usd")
         _nonnegative_decimal(self.portfolio_value_usd, "portfolio_value_usd")
         _positive_decimal(
@@ -148,17 +190,42 @@ class PaperRuntimeFundingCapacityProof:
             raise PaperRuntimeFundingCapacityIntegrityError(
                 "buying_power_headroom_usd must be finite Decimal"
             )
-        expected_headroom = self.buying_power_usd - self.minimum_executable_notional_usd
+        expected_headroom = (
+            self.buying_power_usd - self.minimum_executable_notional_usd
+        )
         if self.buying_power_headroom_usd != expected_headroom:
             raise PaperRuntimeFundingCapacityIntegrityError(
                 "buying-power headroom is inconsistent"
             )
-        expected_sufficient = self.buying_power_usd >= self.minimum_executable_notional_usd
+
+        expected_account_fresh = observed - account_at <= timedelta(
+            seconds=self.max_account_age_seconds
+        )
+        if self.account_fresh is not expected_account_fresh:
+            raise PaperRuntimeFundingCapacityIntegrityError(
+                "account freshness flag is inconsistent"
+            )
+        expected_sufficient = (
+            self.buying_power_usd >= self.minimum_executable_notional_usd
+        )
         if self.buying_power_sufficient is not expected_sufficient:
             raise PaperRuntimeFundingCapacityIntegrityError(
                 "buying-power sufficiency flag is inconsistent"
             )
-        ready = not self.blocker_codes
+
+        expected_blockers = _expected_blockers(
+            final_readiness_ready=self.final_readiness_ready,
+            final_readiness_valid_until=final_valid_until,
+            account_fresh=expected_account_fresh,
+            buying_power_sufficient=expected_sufficient,
+            observed_at=observed,
+        )
+        if self.blocker_codes != expected_blockers:
+            raise PaperRuntimeFundingCapacityIntegrityError(
+                "funding blocker set is not the exact fail-closed projection"
+            )
+
+        ready = not expected_blockers
         expected_status = (
             PaperRuntimeFundingCapacityStatus.READY
             if ready
@@ -166,17 +233,25 @@ class PaperRuntimeFundingCapacityProof:
         )
         if self.status is not expected_status or self.paper_runtime_ready is not ready:
             raise PaperRuntimeFundingCapacityIntegrityError(
-                "funding status/readiness disagrees with blocker set"
+                "funding status/readiness disagrees with exact blocker projection"
             )
-        if ready and self.valid_until < self.observed_at:
+
+        expected_valid_until = observed
+        if ready:
+            expected_valid_until = min(
+                final_valid_until,
+                account_at + timedelta(seconds=self.max_account_age_seconds),
+                observed + timedelta(seconds=self.ready_ttl_seconds),
+            )
+        if actual_valid_until != expected_valid_until:
             raise PaperRuntimeFundingCapacityIntegrityError(
-                "READY funding proof is already stale"
+                "funding valid_until is inconsistent with finite upstream/policy TTL"
             )
-        if not ready and self.valid_until != self.observed_at:
-            raise PaperRuntimeFundingCapacityIntegrityError(
-                "BLOCKED funding proof must expire immediately"
-            )
-        if self.upstream_integrity_verified is not True or self.account_binding_verified is not True:
+
+        if (
+            self.upstream_integrity_verified is not True
+            or self.account_binding_verified is not True
+        ):
             raise PaperRuntimeFundingCapacityIntegrityError(
                 "funding proof lacks verified upstream/account binding"
             )
@@ -228,6 +303,7 @@ def bind_paper_runtime_funding_capacity(
 
     now = _utc(_now_utc())
     account_at = _utc(account_attestation.attested_at)
+    final_valid_until = _utc(final_readiness.valid_until)
     if account_at > now:
         raise PaperRuntimeFundingCapacityIntegrityError(
             "PAPER account funding attestation is in process future"
@@ -237,35 +313,32 @@ def bind_paper_runtime_funding_capacity(
             "final runtime readiness receipt is in process future"
         )
 
-    account_age = now - account_at
-    account_fresh = account_age <= timedelta(
+    account_fresh = now - account_at <= timedelta(
         seconds=effective_policy.max_account_age_seconds
     )
     minimum_notional = final_readiness.minimum_executable_notional_usd
     buying_power = account_attestation.buying_power
     portfolio_value = account_attestation.portfolio_value
     buying_power_sufficient = buying_power >= minimum_notional
+    final_readiness_ready = (
+        final_readiness.status is PaperRuntimeReadinessStatus.READY
+        and final_readiness.paper_runtime_ready is True
+    )
 
-    blockers: list[PaperRuntimeFundingCapacityBlocker] = []
-    if (
-        final_readiness.status is not PaperRuntimeReadinessStatus.READY
-        or final_readiness.paper_runtime_ready is not True
-    ):
-        blockers.append(PaperRuntimeFundingCapacityBlocker.FINAL_RUNTIME_NOT_READY)
-    elif now > _utc(final_readiness.valid_until):
-        blockers.append(PaperRuntimeFundingCapacityBlocker.FINAL_RUNTIME_RECEIPT_EXPIRED)
-    if not account_fresh:
-        blockers.append(PaperRuntimeFundingCapacityBlocker.ACCOUNT_ATTESTATION_STALE)
-    if not buying_power_sufficient:
-        blockers.append(PaperRuntimeFundingCapacityBlocker.INSUFFICIENT_BUYING_POWER)
-
-    blocker_codes = tuple(blockers)
+    blocker_codes = _expected_blockers(
+        final_readiness_ready=final_readiness_ready,
+        final_readiness_valid_until=final_valid_until,
+        account_fresh=account_fresh,
+        buying_power_sufficient=buying_power_sufficient,
+        observed_at=now,
+    )
     ready = not blocker_codes
     valid_until = now
     if ready:
         valid_until = min(
-            _utc(final_readiness.valid_until),
-            account_at + timedelta(seconds=effective_policy.max_account_age_seconds),
+            final_valid_until,
+            account_at
+            + timedelta(seconds=effective_policy.max_account_age_seconds),
             now + timedelta(seconds=effective_policy.ready_ttl_seconds),
         )
 
@@ -273,7 +346,11 @@ def bind_paper_runtime_funding_capacity(
         "proof_id": proof_id,
         "contract_version": PAPER_RUNTIME_FUNDING_CAPACITY_VERSION,
         "policy_hash": effective_policy.fingerprint,
+        "max_account_age_seconds": effective_policy.max_account_age_seconds,
+        "ready_ttl_seconds": effective_policy.ready_ttl_seconds,
         "final_readiness_hash": final_readiness.receipt_hash,
+        "final_readiness_ready": final_readiness_ready,
+        "final_readiness_valid_until": final_valid_until,
         "broker_truth_hash": broker_truth.proof_hash,
         "candidate_identity_hash": final_readiness.candidate_identity_hash,
         "authority_key": final_readiness.authority_key,
@@ -317,6 +394,30 @@ def bind_paper_runtime_funding_capacity(
     )
 
 
+def _expected_blockers(
+    *,
+    final_readiness_ready: bool,
+    final_readiness_valid_until: datetime,
+    account_fresh: bool,
+    buying_power_sufficient: bool,
+    observed_at: datetime,
+) -> tuple[PaperRuntimeFundingCapacityBlocker, ...]:
+    blockers: list[PaperRuntimeFundingCapacityBlocker] = []
+    if not final_readiness_ready:
+        blockers.append(PaperRuntimeFundingCapacityBlocker.FINAL_RUNTIME_NOT_READY)
+    elif observed_at > final_readiness_valid_until:
+        blockers.append(
+            PaperRuntimeFundingCapacityBlocker.FINAL_RUNTIME_RECEIPT_EXPIRED
+        )
+    if not account_fresh:
+        blockers.append(PaperRuntimeFundingCapacityBlocker.ACCOUNT_ATTESTATION_STALE)
+    if not buying_power_sufficient:
+        blockers.append(
+            PaperRuntimeFundingCapacityBlocker.INSUFFICIENT_BUYING_POWER
+        )
+    return tuple(blockers)
+
+
 def _validate_upstream(
     final_readiness: PaperRuntimeFinalReadinessReceipt,
     broker_truth: PaperRuntimeBrokerTruthProof,
@@ -340,7 +441,8 @@ def _validate_upstream(
             "funding gate received a different broker truth than final readiness"
         )
     if (
-        final_readiness.candidate_identity_hash != broker_truth.candidate_identity_hash
+        final_readiness.candidate_identity_hash
+        != broker_truth.candidate_identity_hash
         or final_readiness.authority_key != broker_truth.authority_key
         or final_readiness.admission_hash != broker_truth.admission_hash
         or final_readiness.product_id != broker_truth.product_id
@@ -435,13 +537,30 @@ def _payload_values(values: dict[str, object]) -> dict[str, object]:
             payload[key] = _utc(value).isoformat()
         elif isinstance(value, Decimal):
             payload[key] = str(value)
-        elif isinstance(value, (PaperRuntimeFundingCapacityStatus, PaperRuntimeFundingCapacityBlocker)):
+        elif isinstance(
+            value,
+            (PaperRuntimeFundingCapacityStatus, PaperRuntimeFundingCapacityBlocker),
+        ):
             payload[key] = value.value
         elif isinstance(value, tuple):
             payload[key] = [item.value for item in value]
         else:
             payload[key] = value
     return payload
+
+
+def _policy_hash(max_account_age_seconds: int, ready_ttl_seconds: int) -> str:
+    return _hash(
+        {
+            "max_account_age_seconds": max_account_age_seconds,
+            "ready_ttl_seconds": ready_ttl_seconds,
+        }
+    )
+
+
+def _policy_seconds(value: int, name: str, *, upper: int) -> None:
+    if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= upper:
+        raise ValueError(f"{name} must be integer seconds in [1, {upper}]")
 
 
 def _id(value: str, name: str) -> None:
@@ -473,7 +592,11 @@ def _nonnegative_decimal(value: Decimal, name: str) -> None:
 
 
 def _aware(value: datetime, name: str) -> None:
-    if not isinstance(value, datetime) or value.tzinfo is None or value.utcoffset() is None:
+    if (
+        not isinstance(value, datetime)
+        or value.tzinfo is None
+        or value.utcoffset() is None
+    ):
         raise PaperRuntimeFundingCapacityIntegrityError(
             f"{name} must be timezone-aware"
         )
