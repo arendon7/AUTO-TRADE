@@ -30,7 +30,7 @@ required_markers = (
     'ADMISSION_POLICY_VERSION = "W85_PAPER_CANDIDATE_ADMISSION_POLICY_V2"',
     'POLICY_REGISTRATION_VERSION = "W85_PAPER_CANDIDATE_POLICY_REGISTRATION_V2"',
     'ADMISSION_RECEIPT_VERSION = "W85_PAPER_CANDIDATE_ADMISSION_RECEIPT_V2"',
-    'ADMISSION_SOURCE_PROOF_VERSION = "W85_W84_ADMISSION_SOURCE_PROOF_V1"',
+    'ADMISSION_SOURCE_PROOF_VERSION = "W85_W84_ADMISSION_SOURCE_PROOF_V2"',
     'LIFECYCLE_EVENT_VERSION = "W85_PAPER_CANDIDATE_LIFECYCLE_EVENT_V1"',
     'ELIGIBILITY_PROJECTION_VERSION = "W85_PAPER_CANDIDATE_ELIGIBILITY_PROJECTION_V1"',
     'FINAL_ADMISSION_VERIFICATION_VERSION = "W85_PAPER_CANDIDATE_ADMISSION_FINAL_VERIFICATION_V1"',
@@ -39,7 +39,9 @@ required_markers = (
     "W84AdmissionSourcePackage",
     "W84AdmissionSourceProof",
     "verify_w84_sources_for_candidate_admission",
-    "verify_promotion_shadow_forward_resolution_sources",
+    "finalize_promotion_shadow_forward_resolution(",
+    "canonical_w84_finalization_reproved",
+    "canonical_finalization_verified_at",
     "historical_finalization_timestamp_trusted_for_freshness",
     '"historical_finalization_timestamp_trusted_for_freshness": False',
     "W84_ADMISSION_SOURCE_PROOF_MISSING",
@@ -106,9 +108,10 @@ source_verification = texts.get(
     "paper_candidate_admission_source_verification.py", ""
 )
 for marker in (
-    "finalization.process_verified_at` is retained as historical provenance",
-    "source_capture_at = source.qualification_ended_at + timedelta(",
+    "W85 deliberately does not call W84's intermediate source verifier",
+    "admission_finalization = final_module.finalize_promotion_shadow_forward_resolution(",
     "source_age_seconds = int(",
+    "canonical_w84_finalization_reproved\": True",
     "historical_finalization_timestamp_trusted_for_freshness\": False",
     "paper_candidate_authorized\": False",
     "paper_execution_authorized\": False",
@@ -117,6 +120,10 @@ for marker in (
 ):
     if marker not in source_verification:
         errors.append(f"W85 source reproof missing fail-closed marker: {marker}")
+if "verify_promotion_shadow_forward_resolution_sources" in source_verification:
+    errors.append(
+        "W85 source reproof may not bypass canonical W84 finalization through its intermediate verifier"
+    )
 
 final_eligibility = texts.get("paper_candidate_eligibility_final.py", "")
 expiry_marker = "if _utc(observed_at) > _utc(admission_valid_until):"
@@ -230,6 +237,8 @@ if source_tree is not None:
     used = sorted(source_calls & forbidden_source_mutations)
     if used:
         errors.append(f"W85 source reproof may not mutate durable authorities: {used}")
+    if "finalize_promotion_shadow_forward_resolution" not in source_calls:
+        errors.append("W85 source reproof must call canonical W84 finalizer")
 
 if "paper_candidate_authorized is not True" not in texts.get(
     "paper_candidate_admission_lifecycle.py", ""
@@ -246,5 +255,5 @@ if errors:
     raise SystemExit(1)
 
 print(
-    "W85 PAPER CANDIDATE ADMISSION BOUNDARY PASS — V2 admission requires admission-time durable W84 source reproof from existing R5 Shadow/Forward + measurement truth; historical W84 process_verified_at is not freshness authority; durable admission/lifecycle receipts remain non-execution governance artifacts; PAPER candidate eligibility is distinct from PAPER execution authorization; no broker/network/OMS/Safety/writer/OrderIntent authority; capital NONE; LIVE blocked"
+    "W85 PAPER CANDIDATE ADMISSION BOUNDARY PASS — V2 admission requires a fresh canonical W84 finalization rerun over existing durable R5 Shadow/Forward + deterministic measurement truth; W85 and W84 process clocks are separately hash-bound; historical W84 process_verified_at is not W85 freshness authority; admission/lifecycle artifacts grant no PAPER execution, broker, OMS, Safety, capital or LIVE authority"
 )
