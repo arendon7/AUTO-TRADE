@@ -2,11 +2,10 @@ from __future__ import annotations
 
 from dataclasses import fields, replace
 from datetime import timedelta
-from pathlib import Path
+import sqlite3
 
 import pytest
 
-import autotrade.paper_candidate_admission_final_verification as admission_final
 import autotrade.paper_candidate_admission_lifecycle as lifecycle
 import autotrade.paper_candidate_eligibility_final as eligibility_final
 import autotrade.paper_runtime_readiness_source as source
@@ -106,18 +105,24 @@ def test_w86_source_reader_rejects_missing_or_symlinked_core(tmp_path):
         source.W85DurableEligibilitySourceReader(link)
 
 
-def test_w86_source_reader_requires_complete_w85_schema(tmp_path):
+def test_w86_source_reader_requires_complete_w85_schema(
+    tmp_path, monkeypatch, limits, market, empty_portfolio, market_buy_intent
+):
+    _, _, verified, _, eligibility, reproved_at = _active_source_bundle(
+        tmp_path, monkeypatch, limits, market, empty_portfolio, market_buy_intent
+    )
     path = tmp_path / "empty.sqlite3"
-    conn = __import__("sqlite3").connect(path)
+    conn = sqlite3.connect(path)
     conn.close()
+    monkeypatch.setattr(source, "_now_utc", lambda: reproved_at)
     with pytest.raises(
         source.PaperRuntimeReadinessSourceIntegrityError,
         match="complete durable W85",
     ):
         source.W85DurableEligibilitySourceReader(path).verify_current(
             proof_id="w86-empty",
-            eligibility=object(),
-            final_verification=object(),
+            eligibility=eligibility,
+            final_verification=verified,
         )
 
 
