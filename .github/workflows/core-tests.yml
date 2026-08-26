@@ -170,6 +170,10 @@ jobs:
         run: pytest -q tests/test_w86_paper_runtime_read_only_pipeline.py
       - name: W86 PAPER runtime read-only pipeline hardening tests
         run: pytest -q tests/test_w86_paper_runtime_read_only_pipeline_hardening.py
+      - name: W86 PAPER post-collection readiness seal boundary
+        run: python scripts/check_w86_paper_runtime_readiness_seal_boundary.py
+      - name: W86 PAPER post-collection readiness seal adversarial tests
+        run: pytest -q tests/test_w86_paper_runtime_readiness_seal.py
       - name: Debt register contract
         run: python scripts/check_debt_register.py
       - name: Canonical knowledge contract
