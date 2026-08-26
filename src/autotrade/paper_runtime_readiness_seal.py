@@ -362,7 +362,9 @@ def _validate_upstream(
 
     source_snapshot.__post_init__()
     candidate_identity.__post_init__()
-    pipeline_result.account_attestation.__post_init__()
+    # AlpacaPaperAccountAttestation has no __post_init__. Its fingerprint is
+    # recomputed from every field by PaperRuntimeReadOnlyPipelineResult and
+    # compared with the hash-bound collection receipt below.
     pipeline_result.broker_truth.__post_init__()
     pipeline_result.asset_truth.__post_init__()
     pipeline_result.market_truth.__post_init__()
