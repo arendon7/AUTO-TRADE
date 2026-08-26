@@ -5,8 +5,8 @@ from datetime import datetime, timedelta, timezone
 from enum import StrEnum
 from hashlib import sha256
 import json
-import re
 from pathlib import Path
+import re
 
 from autotrade.paper_candidate_admission_lifecycle import PaperCandidateEligibilityState
 from autotrade.paper_runtime_candidate_identity import PaperRuntimeCandidateIdentityProof
@@ -56,6 +56,10 @@ class PaperRuntimeReadinessSealReceipt:
     product_id: str
     symbol: str
     account_id: str
+    upstream_runtime_ready: bool
+    upstream_funding_valid_until: datetime
+    source_current_state: PaperCandidateEligibilityState
+    source_admission_valid_until: datetime
     status: PaperRuntimeReadinessSealStatus
     blocker_codes: tuple[PaperRuntimeReadinessSealBlocker, ...]
     observed_at: datetime
@@ -97,9 +101,63 @@ class PaperRuntimeReadinessSealReceipt:
             raise PaperRuntimeReadinessSealIntegrityError("symbol is required")
         if not isinstance(self.account_id, str) or not self.account_id.strip():
             raise PaperRuntimeReadinessSealIntegrityError("account_id is required")
-        _aware(self.observed_at, "observed_at")
-        _aware(self.valid_until, "valid_until")
-        expected_ready = not self.blocker_codes
+        if not isinstance(self.upstream_runtime_ready, bool):
+            raise PaperRuntimeReadinessSealIntegrityError(
+                "upstream_runtime_ready must be bool"
+            )
+        if not isinstance(self.source_current_state, PaperCandidateEligibilityState):
+            raise PaperRuntimeReadinessSealIntegrityError(
+                "source_current_state must be PaperCandidateEligibilityState"
+            )
+        for name in (
+            "upstream_funding_valid_until",
+            "source_admission_valid_until",
+            "observed_at",
+            "valid_until",
+        ):
+            _aware(getattr(self, name), name)
+        if not isinstance(self.source_unchanged_after_network, bool):
+            raise PaperRuntimeReadinessSealIntegrityError(
+                "source_unchanged_after_network must be bool"
+            )
+        if not isinstance(self.post_collection_source_verified, bool):
+            raise PaperRuntimeReadinessSealIntegrityError(
+                "post_collection_source_verified must be bool"
+            )
+        if not isinstance(self.blocker_codes, tuple) or any(
+            not isinstance(code, PaperRuntimeReadinessSealBlocker)
+            for code in self.blocker_codes
+        ):
+            raise PaperRuntimeReadinessSealIntegrityError(
+                "blocker_codes must be canonical W86 seal blockers"
+            )
+
+        observed = _utc(self.observed_at)
+        funding_valid_until = _utc(self.upstream_funding_valid_until)
+        source_valid_until = _utc(self.source_admission_valid_until)
+        expected_source_verified = (
+            self.source_unchanged_after_network
+            and self.source_current_state is PaperCandidateEligibilityState.ACTIVE
+            and observed <= source_valid_until
+        )
+        if self.post_collection_source_verified is not expected_source_verified:
+            raise PaperRuntimeReadinessSealIntegrityError(
+                "post-collection source verification flag is not exact projection"
+            )
+
+        expected_blockers = _expected_blockers(
+            upstream_runtime_ready=self.upstream_runtime_ready,
+            upstream_funding_valid_until=funding_valid_until,
+            source_unchanged=self.source_unchanged_after_network,
+            source_current_state=self.source_current_state,
+            source_admission_valid_until=source_valid_until,
+            observed_at=observed,
+        )
+        if self.blocker_codes != expected_blockers:
+            raise PaperRuntimeReadinessSealIntegrityError(
+                "seal blockers are not the exact fail-closed projection"
+            )
+        expected_ready = not expected_blockers
         expected_status = (
             PaperRuntimeReadinessSealStatus.READY
             if expected_ready
@@ -109,19 +167,21 @@ class PaperRuntimeReadinessSealReceipt:
             raise PaperRuntimeReadinessSealIntegrityError(
                 "seal status/readiness disagrees with exact blocker projection"
             )
+
+        expected_valid_until = observed
         if expected_ready:
-            if _utc(self.valid_until) < _utc(self.observed_at):
-                raise PaperRuntimeReadinessSealIntegrityError("READY seal is already stale")
-            if _utc(self.valid_until) - _utc(self.observed_at) > timedelta(
-                seconds=READINESS_SEAL_TTL_SECONDS
-            ):
-                raise PaperRuntimeReadinessSealIntegrityError(
-                    "READY seal exceeds finite one-second postcheck TTL"
-                )
-        elif _utc(self.valid_until) != _utc(self.observed_at):
-            raise PaperRuntimeReadinessSealIntegrityError(
-                "BLOCKED seal must expire immediately"
+            expected_valid_until = min(
+                funding_valid_until,
+                source_valid_until,
+                observed + timedelta(seconds=READINESS_SEAL_TTL_SECONDS),
             )
+        if _utc(self.valid_until) != expected_valid_until:
+            raise PaperRuntimeReadinessSealIntegrityError(
+                "seal valid_until is not the exact finite upstream/postcheck TTL"
+            )
+        if expected_ready and expected_valid_until < observed:
+            raise PaperRuntimeReadinessSealIntegrityError("READY seal is already stale")
+
         if (
             self.upstream_pipeline_integrity_verified is not True
             or self.separate_execution_approval_required is not True
@@ -136,11 +196,6 @@ class PaperRuntimeReadinessSealReceipt:
             raise PaperRuntimeReadinessSealIntegrityError(
                 "W86 seal may not grant execution/capital/broker-write/LIVE authority"
             )
-        if self.post_collection_source_verified is not self.source_unchanged_after_network:
-            if self.post_collection_source_verified:
-                raise PaperRuntimeReadinessSealIntegrityError(
-                    "verified post-collection source cannot be marked changed"
-                )
         if self.receipt_hash != _hash(_payload(self, include_hash=False)):
             raise PaperRuntimeReadinessSealIntegrityError(
                 "W86 readiness seal receipt hash mismatch"
@@ -169,6 +224,14 @@ class PaperRuntimeReadinessSealedResult:
             raise PaperRuntimeReadinessSealIntegrityError(
                 "sealed result does not bind exact post-collection source proof"
             )
+        if self.pipeline.receipt.source_snapshot_hash != self.seal.source_snapshot_hash:
+            raise PaperRuntimeReadinessSealIntegrityError(
+                "sealed result source snapshot binding mismatch"
+            )
+        if self.pipeline.receipt.candidate_identity_hash != self.seal.candidate_identity_hash:
+            raise PaperRuntimeReadinessSealIntegrityError(
+                "sealed result candidate identity binding mismatch"
+            )
 
 
 def seal_paper_runtime_readiness_after_collection(
@@ -193,33 +256,16 @@ def seal_paper_runtime_readiness_after_collection(
         proof_id=f"{seal_id}:source-postcheck",
         source_snapshot=source_snapshot,
     )
+    post.__post_init__()
     observed_at = _utc(post.observed_at)
-
-    blockers: list[PaperRuntimeReadinessSealBlocker] = []
-    if pipeline_result.receipt.paper_runtime_ready is not True:
-        blockers.append(PaperRuntimeReadinessSealBlocker.UPSTREAM_RUNTIME_NOT_READY)
-    if observed_at > _utc(pipeline_result.funding_capacity.valid_until):
-        blockers.append(PaperRuntimeReadinessSealBlocker.UPSTREAM_RUNTIME_EXPIRED)
-    if post.source_unchanged is not True:
-        blockers.append(PaperRuntimeReadinessSealBlocker.W85_SOURCE_CHANGED)
-    if post.current_state is not PaperCandidateEligibilityState.ACTIVE:
-        blockers.append(PaperRuntimeReadinessSealBlocker.W85_CANDIDATE_NOT_ACTIVE)
-    if observed_at > _utc(post.admission_valid_until):
-        blockers.append(PaperRuntimeReadinessSealBlocker.W85_ADMISSION_EXPIRED)
-    if post.post_collection_source_verified is not True and not any(
-        code
-        in {
-            PaperRuntimeReadinessSealBlocker.W85_SOURCE_CHANGED,
-            PaperRuntimeReadinessSealBlocker.W85_CANDIDATE_NOT_ACTIVE,
-            PaperRuntimeReadinessSealBlocker.W85_ADMISSION_EXPIRED,
-        }
-        for code in blockers
-    ):
-        raise PaperRuntimeReadinessSealIntegrityError(
-            "post-collection source failed without a canonical fail-closed blocker"
-        )
-
-    blocker_codes = tuple(blockers)
+    blocker_codes = _expected_blockers(
+        upstream_runtime_ready=pipeline_result.receipt.paper_runtime_ready,
+        upstream_funding_valid_until=_utc(pipeline_result.funding_capacity.valid_until),
+        source_unchanged=post.source_unchanged,
+        source_current_state=post.current_state,
+        source_admission_valid_until=_utc(post.admission_valid_until),
+        observed_at=observed_at,
+    )
     ready = not blocker_codes
     valid_until = observed_at
     if ready:
@@ -243,6 +289,10 @@ def seal_paper_runtime_readiness_after_collection(
         "product_id": candidate_identity.product_id,
         "symbol": candidate_identity.symbol,
         "account_id": pipeline_result.broker_truth.account_id,
+        "upstream_runtime_ready": pipeline_result.receipt.paper_runtime_ready,
+        "upstream_funding_valid_until": pipeline_result.funding_capacity.valid_until,
+        "source_current_state": post.current_state,
+        "source_admission_valid_until": post.admission_valid_until,
         "status": (
             PaperRuntimeReadinessSealStatus.READY
             if ready
@@ -275,6 +325,29 @@ def seal_paper_runtime_readiness_after_collection(
     )
 
 
+def _expected_blockers(
+    *,
+    upstream_runtime_ready: bool,
+    upstream_funding_valid_until: datetime,
+    source_unchanged: bool,
+    source_current_state: PaperCandidateEligibilityState,
+    source_admission_valid_until: datetime,
+    observed_at: datetime,
+) -> tuple[PaperRuntimeReadinessSealBlocker, ...]:
+    blockers: list[PaperRuntimeReadinessSealBlocker] = []
+    if upstream_runtime_ready is not True:
+        blockers.append(PaperRuntimeReadinessSealBlocker.UPSTREAM_RUNTIME_NOT_READY)
+    if observed_at > upstream_funding_valid_until:
+        blockers.append(PaperRuntimeReadinessSealBlocker.UPSTREAM_RUNTIME_EXPIRED)
+    if source_unchanged is not True:
+        blockers.append(PaperRuntimeReadinessSealBlocker.W85_SOURCE_CHANGED)
+    if source_current_state is not PaperCandidateEligibilityState.ACTIVE:
+        blockers.append(PaperRuntimeReadinessSealBlocker.W85_CANDIDATE_NOT_ACTIVE)
+    if observed_at > source_admission_valid_until:
+        blockers.append(PaperRuntimeReadinessSealBlocker.W85_ADMISSION_EXPIRED)
+    return tuple(blockers)
+
+
 def _validate_upstream(
     pipeline_result: PaperRuntimeReadOnlyPipelineResult,
     source_snapshot: W85DurableEligibilitySnapshotProof,
@@ -287,13 +360,16 @@ def _validate_upstream(
     if not isinstance(candidate_identity, PaperRuntimeCandidateIdentityProof):
         raise TypeError("candidate_identity must be PaperRuntimeCandidateIdentityProof")
 
-    # Re-run immutable dataclass guards so object.__setattr__ tamper cannot be
-    # smuggled into the final seal merely because the object was valid at creation.
     source_snapshot.__post_init__()
     candidate_identity.__post_init__()
-    pipeline_result.receipt.__post_init__()
+    pipeline_result.account_attestation.__post_init__()
+    pipeline_result.broker_truth.__post_init__()
+    pipeline_result.asset_truth.__post_init__()
+    pipeline_result.market_truth.__post_init__()
+    pipeline_result.safety_health_truth.__post_init__()
     pipeline_result.final_readiness.__post_init__()
     pipeline_result.funding_capacity.__post_init__()
+    pipeline_result.receipt.__post_init__()
     pipeline_result.__post_init__()
 
     if pipeline_result.receipt.source_snapshot_hash != source_snapshot.proof_hash:
@@ -353,7 +429,7 @@ def _payload_values(values: dict[str, object]) -> dict[str, object]:
     for key, value in values.items():
         if isinstance(value, datetime):
             payload[key] = _utc(value).isoformat()
-        elif isinstance(value, PaperRuntimeReadinessSealStatus):
+        elif isinstance(value, StrEnum):
             payload[key] = value.value
         elif isinstance(value, tuple):
             payload[key] = [item.value if isinstance(item, StrEnum) else item for item in value]
