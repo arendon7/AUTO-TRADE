@@ -20,11 +20,11 @@ jobs:
       - name: Install
         run: python -m pip install -e '.[dev]'
       - name: Compile W86 seal surfaces
-        run: python -m compileall -q src/autotrade/paper_runtime_source_postcheck.py src/autotrade/paper_runtime_readiness_seal.py scripts/check_w86_paper_runtime_readiness_seal_boundary.py tests/test_w86_paper_runtime_readiness_seal.py
+        run: python -m compileall -q src/autotrade/paper_runtime_source_postcheck.py src/autotrade/paper_runtime_readiness_seal.py scripts/check_w86_paper_runtime_readiness_seal_boundary.py tests/test_w86_paper_runtime_readiness_seal.py tests/test_w86_paper_runtime_readiness_seal_hardening.py
       - name: W86 post-collection readiness seal boundary
         run: python scripts/check_w86_paper_runtime_readiness_seal_boundary.py
       - name: W86 post-collection readiness seal adversarial tests
-        run: pytest -q tests/test_w86_paper_runtime_readiness_seal.py
+        run: pytest -q tests/test_w86_paper_runtime_readiness_seal.py tests/test_w86_paper_runtime_readiness_seal_hardening.py
       - name: Re-prove W86 read-only collection pipeline
         run: python scripts/check_w86_paper_runtime_read_only_pipeline_boundary.py
       - name: Re-prove W86 funding capacity
