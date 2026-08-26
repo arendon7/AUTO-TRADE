@@ -14,6 +14,20 @@ if str(ROOT) not in sys.path:
     sys.path.append(str(ROOT))
 
 
+_W86_SAFETY_HEALTH_TEST = "test_w86_paper_runtime_safety_health_truth.py"
+
+
+@pytest.fixture(autouse=True)
+def _w86_safety_health_nested_workspaces(request) -> None:
+    """Create nested SQLite workspaces only for the W86 Safety/Health test module."""
+    path = Path(str(request.node.path))
+    if path.name != _W86_SAFETY_HEALTH_TEST:
+        return
+    tmp_path = request.getfixturevalue("tmp_path")
+    (tmp_path / "second").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "good").mkdir(parents=True, exist_ok=True)
+
+
 @pytest.fixture
 def now() -> datetime:
     return datetime(2026, 8, 10, 22, 30, tzinfo=timezone.utc)

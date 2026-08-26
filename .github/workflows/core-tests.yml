@@ -140,6 +140,40 @@ jobs:
         run: python scripts/check_w84_shadow_forward_promotion_boundary.py
       - name: W85 PAPER candidate admission boundary
         run: python scripts/check_w85_paper_candidate_admission_boundary.py
+      - name: W86 PAPER runtime-readiness source boundary
+        run: python scripts/check_w86_paper_runtime_readiness_boundary.py
+      - name: W86 PAPER runtime-readiness atomic snapshot boundary
+        run: python scripts/check_w86_paper_runtime_readiness_snapshot_boundary.py
+      - name: W86 PAPER runtime candidate identity boundary
+        run: python scripts/check_w86_paper_runtime_candidate_identity_boundary.py
+      - name: W86 PAPER runtime broker-truth boundary
+        run: python scripts/check_w86_paper_runtime_broker_truth_boundary.py
+      - name: W86 PAPER runtime asset-truth boundary
+        run: python scripts/check_w86_paper_runtime_asset_truth_boundary.py
+      - name: W86 PAPER runtime market-truth boundary
+        run: python scripts/check_w86_paper_runtime_market_truth_boundary.py
+      - name: W86 PAPER runtime Safety Health truth boundary
+        run: python scripts/check_w86_paper_runtime_safety_health_truth_boundary.py
+      - name: W86 PAPER runtime Safety Health truth adversarial tests
+        run: pytest -q tests/test_w86_paper_runtime_safety_health_truth.py
+      - name: W86 PAPER final runtime readiness boundary
+        run: python scripts/check_w86_paper_runtime_final_readiness_boundary.py
+      - name: W86 PAPER final runtime readiness adversarial tests
+        run: pytest -q tests/test_w86_paper_runtime_final_readiness.py
+      - name: W86 PAPER funding-capacity boundary
+        run: python scripts/check_w86_paper_runtime_funding_capacity_boundary.py
+      - name: W86 PAPER funding-capacity adversarial tests
+        run: pytest -q tests/test_w86_paper_runtime_funding_capacity.py
+      - name: W86 PAPER runtime read-only pipeline boundary
+        run: python scripts/check_w86_paper_runtime_read_only_pipeline_boundary.py
+      - name: W86 PAPER runtime read-only pipeline tests
+        run: pytest -q tests/test_w86_paper_runtime_read_only_pipeline.py
+      - name: W86 PAPER runtime read-only pipeline hardening tests
+        run: pytest -q tests/test_w86_paper_runtime_read_only_pipeline_hardening.py
+      - name: W86 PAPER post-collection readiness seal boundary
+        run: python scripts/check_w86_paper_runtime_readiness_seal_boundary.py
+      - name: W86 PAPER post-collection readiness seal adversarial tests
+        run: pytest -q tests/test_w86_paper_runtime_readiness_seal.py
       - name: Debt register contract
         run: python scripts/check_debt_register.py
       - name: Canonical knowledge contract
