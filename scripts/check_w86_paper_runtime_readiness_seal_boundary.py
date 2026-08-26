@@ -107,9 +107,26 @@ def main() -> int:
         "class PaperRuntimeReadinessSealedResult:",
         "def seal_paper_runtime_readiness_after_collection(",
         "PaperRuntimeSourcePostcheckReader(core_path).verify_after_collection(",
-        "pipeline_result.funding_capacity.valid_until",
-        "post.source_unchanged is not True",
-        "post.current_state is not PaperCandidateEligibilityState.ACTIVE",
+        "post.__post_init__()",
+        "def _expected_blockers(",
+        "if upstream_runtime_ready is not True:",
+        "if observed_at > upstream_funding_valid_until:",
+        "if source_unchanged is not True:",
+        "if source_current_state is not PaperCandidateEligibilityState.ACTIVE:",
+        "if observed_at > source_admission_valid_until:",
+        "seal blockers are not the exact fail-closed projection",
+        "post-collection source verification flag is not exact projection",
+        "upstream_runtime_ready",
+        "upstream_funding_valid_until",
+        "source_current_state",
+        "source_admission_valid_until",
+        "pipeline_result.account_attestation.__post_init__()",
+        "pipeline_result.broker_truth.__post_init__()",
+        "pipeline_result.asset_truth.__post_init__()",
+        "pipeline_result.market_truth.__post_init__()",
+        "pipeline_result.safety_health_truth.__post_init__()",
+        "pipeline_result.final_readiness.__post_init__()",
+        "pipeline_result.funding_capacity.__post_init__()",
         "PaperRuntimeReadinessSealBlocker.W85_SOURCE_CHANGED",
         "PaperRuntimeReadinessSealBlocker.UPSTREAM_RUNTIME_EXPIRED",
         '"separate_execution_approval_required": True',
@@ -183,10 +200,10 @@ def main() -> int:
 
     print(
         "AUTO-TRADE W86 post-collection readiness seal boundary: PASS "
-        "(second exact W85 lifecycle read after network collection; SUSPEND/REVOKE/"
-        "REINSTATE/expiry fail closed; immutable admission+policy chain revalidated; "
-        "one-second finite seal; no OrderIntent, OMS, capital reservation, broker write, "
-        "execution authority or LIVE authority)"
+        "(second exact W85 lifecycle read after network collection; exact self-verifying "
+        "blocker projection; SUSPEND/REVOKE/REINSTATE/expiry fail closed; immutable "
+        "admission+policy chain revalidated; one-second finite seal; no OrderIntent, OMS, "
+        "capital reservation, broker write, execution authority or LIVE authority)"
     )
     return 0
 
