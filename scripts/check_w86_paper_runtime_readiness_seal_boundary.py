@@ -120,7 +120,7 @@ def main() -> int:
         "upstream_funding_valid_until",
         "source_current_state",
         "source_admission_valid_until",
-        "pipeline_result.account_attestation.__post_init__()",
+        "pipeline_result.__post_init__()",
         "pipeline_result.broker_truth.__post_init__()",
         "pipeline_result.asset_truth.__post_init__()",
         "pipeline_result.market_truth.__post_init__()",
@@ -142,6 +142,7 @@ def main() -> int:
             errors.append(f"readiness seal missing boundary marker: {marker}")
 
     for forbidden in (
+        "pipeline_result.account_attestation.__post_init__()",
         "OrderIntent(",
         "CapitalSafetyKernel(",
         "SQLiteRuntime(",
