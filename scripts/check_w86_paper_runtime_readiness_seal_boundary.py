@@ -8,7 +8,10 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 POSTCHECK = ROOT / "src/autotrade/paper_runtime_source_postcheck.py"
 SEAL = ROOT / "src/autotrade/paper_runtime_readiness_seal.py"
-TEST = "tests/test_w86_paper_runtime_readiness_seal.py"
+TESTS = (
+    "tests/test_w86_paper_runtime_readiness_seal.py",
+    "tests/test_w86_paper_runtime_readiness_seal_hardening.py",
+)
 DEDICATED = ROOT / ".github/workflows/w86-paper-runtime-readiness-seal.yml"
 CORE = ROOT / ".github/workflows/core-tests.yml"
 SELF_COMMAND = "python scripts/check_w86_paper_runtime_readiness_seal_boundary.py"
@@ -175,8 +178,11 @@ def main() -> int:
         workflow_source = workflow.read_text(encoding="utf-8")
         if SELF_COMMAND not in workflow_source:
             errors.append(f"{label}: W86 seal boundary not wired into CI")
-        if TEST not in workflow_source:
-            errors.append(f"{label}: W86 seal tests not wired into CI")
+        for test in TESTS:
+            if test not in workflow_source and workflow == DEDICATED:
+                errors.append(f"{label}: W86 seal test not wired into CI: {test}")
+        if workflow == CORE and TESTS[0] not in workflow_source:
+            errors.append(f"{label}: primary W86 seal tests not wired into CI")
 
     if DEDICATED.is_file():
         workflow_source = DEDICATED.read_text(encoding="utf-8")
@@ -203,8 +209,9 @@ def main() -> int:
         "AUTO-TRADE W86 post-collection readiness seal boundary: PASS "
         "(second exact W85 lifecycle read after network collection; exact self-verifying "
         "blocker projection; SUSPEND/REVOKE/REINSTATE/expiry fail closed; immutable "
-        "admission+policy chain revalidated; one-second finite seal; no OrderIntent, OMS, "
-        "capital reservation, broker write, execution authority or LIVE authority)"
+        "admission+policy chain revalidated; one-second finite seal; dedicated integrity "
+        "hardening enforced; no OrderIntent, OMS, capital reservation, broker write, "
+        "execution authority or LIVE authority)"
     )
     return 0
 
