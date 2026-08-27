@@ -1,0 +1,41 @@
+name: W87 PAPER Human Review Handoff
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  human-review-handoff:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: python -m pip install -e '.[dev]'
+      - name: Compile W87-D handoff and review surfaces
+        run: python -m compileall -q src/autotrade/paper_execution_risk_handoff.py src/autotrade/paper_execution_human_review.py scripts/check_w87_paper_execution_human_review_boundary.py tests/test_w87_paper_execution_human_review.py
+      - name: W87-D PAPER human-review handoff boundary
+        run: python scripts/check_w87_paper_execution_human_review_boundary.py
+      - name: W87-D PAPER human-review adversarial tests
+        run: pytest -q tests/test_w87_paper_execution_human_review.py
+      - name: Re-prove W87-C canary preparation
+        run: python scripts/check_w87_paper_execution_canary_preparation_boundary.py
+      - name: Re-prove W87-B risk contract
+        run: python scripts/check_w87_paper_execution_risk_contract_boundary.py
+      - name: Re-prove W86 readiness seal
+        run: python scripts/check_w86_paper_runtime_readiness_seal_boundary.py
+      - name: Re-prove R6 human operator decision boundary
+        run: python scripts/check_r6_operator_decision_boundary.py
+      - name: Re-prove R6 Final Guard binding
+        run: python scripts/check_mac_crypto_cold_start_final_guard_binding.py
+      - name: Re-prove R6 one-shot writer human gate
+        run: python scripts/check_r6_writer_human_gate.py
+      - name: Re-prove permanent LIVE deny
+        run: python scripts/check_r6_live_deny_boundary.py
