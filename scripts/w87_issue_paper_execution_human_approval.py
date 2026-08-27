@@ -36,6 +36,13 @@ def issue_w87_human_approval(
     if not isinstance(review, PaperExecutionHumanReviewResult):
         raise TypeError("review must be PaperExecutionHumanReviewResult")
     review.__post_init__()
+    if (
+        review.receipt.symbol != canonical_issuer.EXPECTED_SYMBOL
+        or review.operator_context.symbol != canonical_issuer.EXPECTED_SYMBOL
+    ):
+        raise W87HumanApprovalError(
+            "W87-E accepts canonical BTC/USD first-canary human review only"
+        )
     operator = operator_id.strip()
     if not operator:
         raise W87HumanApprovalError("operator_id is required")
