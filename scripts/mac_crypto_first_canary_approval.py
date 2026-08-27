@@ -50,6 +50,35 @@ def attempt_database(*, workspace_path: Path, attempt_id: str) -> Path:
         raise CryptoFirstCanaryApprovalError(str(exc)) from exc
 
 
+def _validate_existing_state(
+    *,
+    state,
+    context: CryptoOperatorDecisionContext,
+    operator: str,
+    instant: datetime,
+) -> None:
+    if state.status is not CryptoOperatorDecisionStatus.ISSUED:
+        raise CryptoFirstCanaryApprovalError(
+            "durable execution approval is not pristine ISSUED"
+        )
+    if state.decision.context != context:
+        raise CryptoFirstCanaryApprovalError(
+            "durable execution approval is bound to another attempt/package"
+        )
+    if state.decision.operator_id != operator:
+        raise CryptoFirstCanaryApprovalError(
+            "durable execution approval was issued by another operator"
+        )
+    if state.consumed_at is not None or state.consumed_attempt_id is not None:
+        raise CryptoFirstCanaryApprovalError(
+            "durable execution approval is already consumed"
+        )
+    if not state.decision.is_valid_at(instant):
+        raise CryptoFirstCanaryApprovalError(
+            "durable execution approval expired before receipt recovery"
+        )
+
+
 def issue_approval(
     *,
     workspace_path: Path,
@@ -86,30 +115,46 @@ def issue_approval(
         )
 
     deadline = _aware(context.execution_deadline, label="execution_deadline")
-    if deadline <= instant + MIN_REMAINING_PACKAGE_LIFE:
-        raise CryptoFirstCanaryApprovalError(
-            "execution package is too close to expiry; prepare fresh broker evidence"
-        )
-    expires_at = min(deadline, instant + MAX_APPROVAL_TTL)
     attempt = FirstCanaryAttemptWorkspace.open(
         workspace_path=workspace_path,
         attempt_id=attempt_id,
     )
     attempt.assert_unexecuted()
     registry = SQLiteCryptoOperatorDecisionRegistry(SQLiteRuntime(attempt.database_path))
-    state = registry.record_operator_approval(
-        context=context,
-        operator_id=operator,
-        issued_at=instant,
-        expires_at=expires_at,
-    )
+
+    try:
+        state = registry.get(context.preparation_hash)
+    except KeyError:
+        if deadline <= instant + MIN_REMAINING_PACKAGE_LIFE:
+            raise CryptoFirstCanaryApprovalError(
+                "execution package is too close to expiry; prepare fresh broker evidence"
+            )
+        expires_at = min(deadline, instant + MAX_APPROVAL_TTL)
+        state = registry.record_operator_approval(
+            context=context,
+            operator_id=operator,
+            issued_at=instant,
+            expires_at=expires_at,
+        )
+    else:
+        _validate_existing_state(
+            state=state,
+            context=context,
+            operator=operator,
+            instant=instant,
+        )
+
     verified = registry.get(context.preparation_hash)
     if verified != state or state.status is not CryptoOperatorDecisionStatus.ISSUED:
         raise CryptoFirstCanaryApprovalError(
             "durable execution approval registry did not verify exact ISSUED state"
         )
-    if state.consumed_at is not None or state.consumed_attempt_id is not None:
-        raise CryptoFirstCanaryApprovalError("new execution approval unexpectedly appears consumed")
+    _validate_existing_state(
+        state=state,
+        context=context,
+        operator=operator,
+        instant=instant,
+    )
 
     receipt: dict[str, object] = {
         "schema_version": 1,

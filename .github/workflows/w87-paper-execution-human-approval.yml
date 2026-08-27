@@ -1,0 +1,57 @@
+name: W87 PAPER Human Approval
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  human-approval:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: python -m pip install -e '.[dev]'
+      - name: Compile W87-E authority surfaces
+        run: python -m compileall -q src/autotrade/paper_execution_human_review.py scripts/mac_crypto_first_canary_approval.py scripts/w87_issue_paper_execution_human_approval.py scripts/check_w87_paper_execution_human_approval_boundary.py tests/test_w87_paper_execution_human_approval.py
+      - name: W87-E PAPER human approval boundary
+        run: python scripts/check_w87_paper_execution_human_approval_boundary.py
+      - name: W87-E exact BTC durable approval stays unconsumed and NO-POST
+        run: pytest -q tests/test_w87_paper_execution_human_approval.py::test_w87_e_issues_exact_durable_human_approval_without_consuming_or_posting
+      - name: W87-E non-BTC review denied before persistence
+        run: pytest -q tests/test_w87_paper_execution_human_approval.py::test_w87_e_rejects_non_btc_review_before_attempt_persistence
+      - name: W87-E wrong confirmation creates no authority
+        run: pytest -q tests/test_w87_paper_execution_human_approval.py::test_w87_e_wrong_confirmation_creates_no_attempt_or_authority
+      - name: W87-E write enablement blocks approval mint
+        run: pytest -q tests/test_w87_paper_execution_human_approval.py::test_w87_e_write_enablement_is_fail_closed_before_authority_mint
+      - name: W87-E crash recovery reconstructs receipt only
+        run: pytest -q tests/test_w87_paper_execution_human_approval.py::test_canonical_issuer_recovers_missing_receipt_from_exact_durable_issued_state
+      - name: W87-E crash recovery rejects another operator
+        run: pytest -q tests/test_w87_paper_execution_human_approval.py::test_canonical_issuer_rejects_different_operator_on_durable_recovery
+      - name: W87-E canonical attempt identity is stable
+        run: pytest -q tests/test_w87_paper_execution_human_approval.py::test_w87_e_attempt_identity_is_stable_and_exactly_bound_to_review
+      - name: W87-E aggregate adversarial suite
+        run: pytest -q tests/test_w87_paper_execution_human_approval.py
+      - name: Re-prove W87-D review-only boundary
+        run: python scripts/check_w87_paper_execution_human_review_boundary.py
+      - name: Re-prove W87-D tests
+        run: pytest -q tests/test_w87_paper_execution_human_review.py
+      - name: Re-prove R6 sole issuer boundary
+        run: python scripts/check_r6_operator_decision_boundary.py
+      - name: Re-prove W87-C canary preparation
+        run: python scripts/check_w87_paper_execution_canary_preparation_boundary.py
+      - name: Re-prove W87-B risk contract
+        run: python scripts/check_w87_paper_execution_risk_contract_boundary.py
+      - name: Re-prove R6 Final Guard binding
+        run: python scripts/check_mac_crypto_cold_start_final_guard_binding.py
+      - name: Re-prove R6 one-shot writer human gate
+        run: python scripts/check_r6_writer_human_gate.py
+      - name: Re-prove permanent LIVE deny
+        run: python scripts/check_r6_live_deny_boundary.py

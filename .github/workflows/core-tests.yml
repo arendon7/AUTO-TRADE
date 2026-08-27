@@ -174,6 +174,14 @@ jobs:
         run: python scripts/check_w86_paper_runtime_readiness_seal_boundary.py
       - name: W86 PAPER post-collection readiness seal adversarial tests
         run: pytest -q tests/test_w86_paper_runtime_readiness_seal.py
+      - name: W87 PAPER execution admission boundary
+        run: python scripts/check_w87_paper_execution_admission_boundary.py
+      - name: W87 PAPER execution admission adversarial tests
+        run: pytest -q tests/test_w87_paper_execution_admission.py
+      - name: W87 PAPER risk contract boundary
+        run: python scripts/check_w87_paper_execution_risk_contract_boundary.py
+      - name: W87 PAPER risk contract adversarial tests
+        run: pytest -q tests/test_w87_paper_execution_risk_contract.py
       - name: Debt register contract
         run: python scripts/check_debt_register.py
       - name: Canonical knowledge contract
