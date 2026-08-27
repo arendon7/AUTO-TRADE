@@ -3,12 +3,16 @@ from __future__ import annotations
 import ast
 import inspect
 from pathlib import Path
+import sys
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 from scripts import mac_crypto_first_canary_approval as canonical_issuer
 from scripts import w87_issue_paper_execution_human_approval as wrapper
 
 
-ROOT = Path(__file__).resolve().parents[1]
 REVIEW = ROOT / "src/autotrade/paper_execution_human_review.py"
 ISSUER = ROOT / "scripts/mac_crypto_first_canary_approval.py"
 WRAPPER = ROOT / "scripts/w87_issue_paper_execution_human_approval.py"
