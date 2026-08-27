@@ -23,8 +23,10 @@ jobs:
         run: python -m compileall -q src/autotrade/paper_execution_human_review.py scripts/mac_crypto_first_canary_approval.py scripts/w87_issue_paper_execution_human_approval.py scripts/check_w87_paper_execution_human_approval_boundary.py tests/test_w87_paper_execution_human_approval.py
       - name: W87-E PAPER human approval boundary
         run: python scripts/check_w87_paper_execution_human_approval_boundary.py
-      - name: W87-E exact durable approval stays unconsumed and NO-POST
+      - name: W87-E exact BTC durable approval stays unconsumed and NO-POST
         run: pytest -q tests/test_w87_paper_execution_human_approval.py::test_w87_e_issues_exact_durable_human_approval_without_consuming_or_posting
+      - name: W87-E non-BTC review denied before persistence
+        run: pytest -q tests/test_w87_paper_execution_human_approval.py::test_w87_e_rejects_non_btc_review_before_attempt_persistence
       - name: W87-E wrong confirmation creates no authority
         run: pytest -q tests/test_w87_paper_execution_human_approval.py::test_w87_e_wrong_confirmation_creates_no_attempt_or_authority
       - name: W87-E write enablement blocks approval mint
