@@ -115,11 +115,6 @@ def issue_approval(
         )
 
     deadline = _aware(context.execution_deadline, label="execution_deadline")
-    if deadline <= instant + MIN_REMAINING_PACKAGE_LIFE:
-        raise CryptoFirstCanaryApprovalError(
-            "execution package is too close to expiry; prepare fresh broker evidence"
-        )
-    expires_at = min(deadline, instant + MAX_APPROVAL_TTL)
     attempt = FirstCanaryAttemptWorkspace.open(
         workspace_path=workspace_path,
         attempt_id=attempt_id,
@@ -130,6 +125,11 @@ def issue_approval(
     try:
         state = registry.get(context.preparation_hash)
     except KeyError:
+        if deadline <= instant + MIN_REMAINING_PACKAGE_LIFE:
+            raise CryptoFirstCanaryApprovalError(
+                "execution package is too close to expiry; prepare fresh broker evidence"
+            )
+        expires_at = min(deadline, instant + MAX_APPROVAL_TTL)
         state = registry.record_operator_approval(
             context=context,
             operator_id=operator,
