@@ -9,9 +9,11 @@ ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / "src/autotrade/paper_execution_canary_preparation.py"
 GUARD = ROOT / "src/autotrade/paper_execution_canary_preparation_guard.py"
 TEST = ROOT / "tests/test_w87_paper_execution_canary_preparation.py"
+INTEGRITY_TEST = ROOT / "tests/test_w87_paper_execution_canary_preparation_integrity.py"
 WORKFLOW = ROOT / ".github/workflows/w87-paper-execution-admission.yml"
 SELF_COMMAND = "python scripts/check_w87_paper_execution_canary_preparation_boundary.py"
 TEST_COMMAND = "pytest -q tests/test_w87_paper_execution_canary_preparation.py"
+INTEGRITY_TEST_NAME = "tests/test_w87_paper_execution_canary_preparation_integrity.py"
 
 FORBIDDEN_IMPORT_PREFIXES = (
     "requests",
@@ -50,6 +52,7 @@ def main() -> int:
         (SOURCE, "W87-C preparation source"),
         (GUARD, "W87-C preparation guard"),
         (TEST, "W87-C adversarial tests"),
+        (INTEGRITY_TEST, "W87-C structural integrity tests"),
         (WORKFLOW, "W87 dedicated workflow"),
     ):
         if not path.is_file():
@@ -136,11 +139,28 @@ def main() -> int:
             if marker not in tests:
                 errors.append(f"W87-C tests missing adversarial contract: {marker}")
 
+    if INTEGRITY_TEST.is_file():
+        integrity_tests = INTEGRITY_TEST.read_text(encoding="utf-8")
+        for marker in (
+            "test_w87_c_receipt_rejects_structural_corruption",
+            "test_w87_c_bridge_rejects_wrong_boundary_object_types",
+            "test_w87_c_exact_binding_checks_fail_closed_independently",
+            "test_w87_c_reconstructed_asset_and_market_hashes_are_authoritative",
+            "test_w87_c_cross_evidence_checks_reject_each_identity_drift",
+            "test_w87_c_prepared_result_requires_exact_oms_and_lifecycle_stop",
+            "test_w87_c_local_unknown_reader_rejects_corrupt_durable_state",
+            "test_w87_c_guard_rejects_invalid_readers_and_nonflat_integrity",
+            "test_w87_c_r6_capacity_guard_rejects_notional_mismatch_and_zero_capacity",
+        ):
+            if marker not in integrity_tests:
+                errors.append(f"W87-C integrity tests missing fail-closed contract: {marker}")
+
     if WORKFLOW.is_file():
         workflow = WORKFLOW.read_text(encoding="utf-8")
         for required in (
             SELF_COMMAND,
             TEST_COMMAND,
+            INTEGRITY_TEST_NAME,
             "python scripts/check_w87_paper_execution_risk_contract_boundary.py",
             "python scripts/check_w86_paper_runtime_readiness_seal_boundary.py",
             "python scripts/check_r6_authority.py",
@@ -158,9 +178,9 @@ def main() -> int:
         "AUTO-TRADE W87-C PAPER canary preparation boundary: PASS "
         "(exact W86/W87 bindings; authoritative Safety/Portfolio pre/post guard; "
         "existing R6 conservative account cap enforced before OMS/lifecycle; "
-        "existing R6 coordinator only; OMS VALIDATED + ENTRY_PREPARED; local UNKNOWN=0; "
-        "deadline cannot outlive W87 risk/seal window; OPERATOR_DECISION_REQUIRED; "
-        "no credentials, writer, broker POST, capital, external execution or LIVE authority)"
+        "structural/durable corruption tests required; existing R6 coordinator only; "
+        "OMS VALIDATED + ENTRY_PREPARED; local UNKNOWN=0; deadline cannot outlive W87 risk/seal window; "
+        "OPERATOR_DECISION_REQUIRED; no credentials, writer, broker POST, capital, external execution or LIVE authority)"
     )
     return 0
 
