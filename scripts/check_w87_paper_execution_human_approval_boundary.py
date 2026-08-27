@@ -92,6 +92,8 @@ def main() -> None:
 
     for anchor in (
         "from scripts import mac_crypto_first_canary_approval as canonical_issuer",
+        "review.receipt.symbol != canonical_issuer.EXPECTED_SYMBOL",
+        "review.operator_context.symbol != canonical_issuer.EXPECTED_SYMBOL",
         "FirstCanaryAttemptWorkspace.open",
         "canonical_issuer.issue_approval(",
         "review.operator_context.to_dict()",
@@ -105,6 +107,9 @@ def main() -> None:
         if anchor not in wrapper_source:
             raise SystemExit(f"W87-E wrapper invariant missing: {anchor}")
 
+    if wrapper_source.index("review.receipt.symbol != canonical_issuer.EXPECTED_SYMBOL") > wrapper_source.index("FirstCanaryAttemptWorkspace.open"):
+        raise SystemExit("W87-E must reject non-BTC review before attempt persistence")
+
     parameters = inspect.signature(wrapper.issue_w87_human_approval).parameters
     for forbidden in ("now", "credentials", "writer", "transport", "runtime", "live", "environment"):
         if forbidden in parameters:
@@ -114,12 +119,15 @@ def main() -> None:
 
     if canonical_issuer.WRITE_ENV != "R6_EXTERNAL_PAPER_WRITE":
         raise SystemExit("canonical issuer write-enablement isolation changed")
+    if canonical_issuer.EXPECTED_SYMBOL != "BTC/USD":
+        raise SystemExit("canonical first-canary execution symbol is no longer exact BTC/USD")
 
     print(
         "AUTO-TRADE W87 PAPER human approval boundary: PASS "
-        "(canonical first-canary identity; sole audited R6 issuer; restart-safe receipt recovery "
-        "from exact durable ISSUED state; approval remains unconsumed; no Final Guard consume, "
-        "OMS staging, credentials, network, writer, POST, capital or LIVE authority)"
+        "(canonical BTC/USD first-canary identity; non-BTC denied before persistence; "
+        "sole audited R6 issuer; restart-safe receipt recovery from exact durable ISSUED state; "
+        "approval remains unconsumed; no Final Guard consume, OMS staging, credentials, network, "
+        "writer, POST, capital or LIVE authority)"
     )
 
 
