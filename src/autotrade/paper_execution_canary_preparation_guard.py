@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import autotrade.brokers.alpaca_paper_crypto_canary_coordinator as r6_coordinator
 from autotrade.paper_execution_admission import PaperExecutionAdmissionReceipt
 from autotrade.paper_execution_canary_preparation import (
     PaperExecutionCanaryPreparationBlocked,
@@ -35,8 +36,10 @@ def prepare_guarded_paper_execution_canary(
     The exact Safety control-plane version and exact durable portfolio snapshot
     used by W87-B must still be current immediately before preparation and must
     remain unchanged until the R6 coordinator has stopped at OMS VALIDATED /
-    ENTRY_PREPARED. A race may leave only local PREPARED evidence; it never grants
-    POST, capital, operator approval or LIVE authority.
+    ENTRY_PREPARED. The exact W87 notional must also fit the already-certified
+    R6 first-canary account cap *before* OMS/lifecycle mutation. A race may leave
+    only local PREPARED evidence; it never grants POST, capital, operator approval
+    or LIVE authority.
     """
 
     if not isinstance(safety, CapitalSafetyKernel):
@@ -49,6 +52,11 @@ def prepare_guarded_paper_execution_canary(
     _validate_guard_state(
         safety_state=before_safety,
         portfolio=before_portfolio,
+        risk_result=risk_result,
+    )
+    _require_r6_first_canary_capacity(
+        admission=admission,
+        sealed_result=sealed_result,
         risk_result=risk_result,
     )
 
@@ -77,6 +85,29 @@ def prepare_guarded_paper_execution_canary(
         risk_result=risk_result,
     )
     return result
+
+
+def _require_r6_first_canary_capacity(
+    *,
+    admission: PaperExecutionAdmissionReceipt,
+    sealed_result: PaperRuntimeReadinessSealedResult,
+    risk_result: PaperExecutionRiskContractResult,
+) -> None:
+    account = sealed_result.pipeline.account_attestation
+    approved = risk_result.receipt.approved_notional_usd
+    if approved != admission.canary_notional_usd:
+        raise PaperExecutionCanaryPreparationGuardBlocked(
+            "W87 admitted and Safety-approved notionals differ before R6 preparation"
+        )
+    effective_cap = min(
+        r6_coordinator.FIRST_CANARY_MAX_NOTIONAL,
+        account.portfolio_value * r6_coordinator.FIRST_CANARY_MAX_ACCOUNT_FRACTION,
+        account.buying_power,
+    )
+    if effective_cap <= 0 or approved > effective_cap:
+        raise PaperExecutionCanaryPreparationGuardBlocked(
+            "W87 canary exceeds existing R6 first-canary conservative cap before OMS/lifecycle"
+        )
 
 
 def _validate_guard_state(*, safety_state, portfolio, risk_result: PaperExecutionRiskContractResult) -> None:
