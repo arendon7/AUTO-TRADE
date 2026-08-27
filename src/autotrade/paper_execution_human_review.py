@@ -29,6 +29,7 @@ PAPER_EXECUTION_HUMAN_REVIEW_VERSION = "W87_PAPER_EXECUTION_HUMAN_REVIEW_V1"
 MIN_HUMAN_APPROVAL_REMAINING = timedelta(seconds=5)
 _HASH_RE = re.compile(r"^[0-9a-f]{64}$")
 _ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:@-]{0,127}$")
+_ATTEMPT_RE = re.compile(r"^first-canary-[0-9a-f]{32}$")
 
 
 class PaperExecutionHumanReviewError(RuntimeError):
@@ -87,6 +88,10 @@ class PaperExecutionHumanReviewReceipt:
     def __post_init__(self) -> None:
         for name in ("review_id", "attempt_id"):
             _id(getattr(self, name), name)
+        if not _ATTEMPT_RE.fullmatch(self.attempt_id):
+            raise PaperExecutionHumanReviewIntegrityError(
+                "human-review attempt_id must be canonical first-canary identity"
+            )
         if self.contract_version != PAPER_EXECUTION_HUMAN_REVIEW_VERSION:
             raise PaperExecutionHumanReviewIntegrityError(
                 "W87 human-review version is not canonical"
@@ -278,7 +283,7 @@ def prepare_paper_execution_human_review(
             "prepared R6 package is too close to expiry for human approval"
         )
 
-    attempt_id = f"w87-human:{preparation.receipt.receipt_hash[:24]}"
+    attempt_id = f"first-canary-{preparation.receipt.receipt_hash[:32]}"
     context = CryptoOperatorDecisionContext.from_prepared_package(
         preparation.package,
         attempt_id=attempt_id,
