@@ -80,6 +80,12 @@ def main() -> int:
         "def prepare_guarded_paper_execution_canary(",
         "before_safety = safety.state_store.get()",
         "before_portfolio = portfolio_store.get()",
+        "_require_r6_first_canary_capacity(",
+        "r6_coordinator.FIRST_CANARY_MAX_NOTIONAL",
+        "r6_coordinator.FIRST_CANARY_MAX_ACCOUNT_FRACTION",
+        "account.portfolio_value * r6_coordinator.FIRST_CANARY_MAX_ACCOUNT_FRACTION",
+        "account.buying_power",
+        "W87 canary exceeds existing R6 first-canary conservative cap before OMS/lifecycle",
         "after_safety = safety.state_store.get()",
         "after_portfolio = portfolio_store.get()",
         "after_safety != before_safety",
@@ -116,10 +122,12 @@ def main() -> int:
         for marker in (
             "test_w87_canary_preparation_reuses_r6_and_stops_at_operator_decision",
             "test_w87_canary_preparation_entrypoint_exposes_no_clock_flags_or_execution_inputs",
+            "test_w87_canary_preparation_refuses_r6_conservative_cap_before_oms",
             "test_w87_canary_preparation_refuses_stale_w86_or_risk_before_oms",
             "test_w87_canary_preparation_refuses_kill_switch_or_safety_version_drift",
             "test_w87_canary_preparation_refuses_portfolio_drift_before_oms",
             "test_w87_canary_preparation_detects_safety_race_after_local_preparation",
+            "test_w87_canary_preparation_detects_portfolio_race_after_local_preparation",
             "test_w87_canary_preparation_refuses_local_unknown_state",
             "test_w87_canary_preparation_is_idempotent_for_same_exact_contract_and_instant",
             "test_w87_canary_preparation_rejects_evidence_binding_tamper",
@@ -149,6 +157,7 @@ def main() -> int:
     print(
         "AUTO-TRADE W87-C PAPER canary preparation boundary: PASS "
         "(exact W86/W87 bindings; authoritative Safety/Portfolio pre/post guard; "
+        "existing R6 conservative account cap enforced before OMS/lifecycle; "
         "existing R6 coordinator only; OMS VALIDATED + ENTRY_PREPARED; local UNKNOWN=0; "
         "deadline cannot outlive W87 risk/seal window; OPERATOR_DECISION_REQUIRED; "
         "no credentials, writer, broker POST, capital, external execution or LIVE authority)"
