@@ -347,7 +347,7 @@ def test_w87_c_guard_rejects_invalid_readers_and_nonflat_integrity(monkeypatch, 
     original = portfolio_store.get()
     corrupt = VersionedPortfolioSnapshot(
         version=original.version,
-        snapshot=replace(original.snapshot, reconciliation_ok=False),
+        snapshot=replace(original.snapshot, gross_exposure=Decimal("1")),
     )
     with pytest.raises(PaperExecutionCanaryPreparationGuardBlocked, match="integrity failed"):
         guard_module._validate_guard_state(
@@ -358,7 +358,7 @@ def test_w87_c_guard_rejects_invalid_readers_and_nonflat_integrity(monkeypatch, 
 
     nonflat = VersionedPortfolioSnapshot(
         version=original.version,
-        snapshot=replace(original.snapshot, open_orders=1),
+        snapshot=replace(original.snapshot, reconciliation_ok=False),
     )
     with pytest.raises(PaperExecutionCanaryPreparationGuardBlocked, match="flat reconciled"):
         guard_module._validate_guard_state(
