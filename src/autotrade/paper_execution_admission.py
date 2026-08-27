@@ -62,6 +62,7 @@ class PaperExecutionAdmissionReceipt:
     strategy_id: str
     product_id: str
     symbol: str
+    broker_pair: str
     account_id: str
     side: str
     broker_minimum_executable_quantity: Decimal
@@ -110,12 +111,19 @@ class PaperExecutionAdmissionReceipt:
             "receipt_hash",
         ):
             _sha(getattr(self, name), name)
-        if not isinstance(self.symbol, str) or self.symbol.count("/") != 1 or self.symbol != self.symbol.upper():
-            raise PaperExecutionAdmissionIntegrityError("symbol must be canonical BASE/QUOTE")
+
+        _candidate_symbol(self.symbol)
+        _broker_pair(self.broker_pair)
+        if self.symbol.replace("-", "/") != self.broker_pair:
+            raise PaperExecutionAdmissionIntegrityError(
+                "candidate symbol and broker pair are not the same instrument identity"
+            )
         if not isinstance(self.account_id, str) or not _ACCOUNT_RE.fullmatch(self.account_id):
             raise PaperExecutionAdmissionIntegrityError("account_id is invalid")
         if self.side != "BUY":
-            raise PaperExecutionAdmissionIntegrityError("W87 first admitted PAPER canary is BUY-only")
+            raise PaperExecutionAdmissionIntegrityError(
+                "W87 first admitted PAPER canary is BUY-only"
+            )
 
         for name in (
             "broker_minimum_executable_quantity",
@@ -131,11 +139,17 @@ class PaperExecutionAdmissionReceipt:
                 "W87 probation cap may not exceed USD 5"
             )
         if self.probation_order_cap != W87_PROBATION_ORDER_CAP:
-            raise PaperExecutionAdmissionIntegrityError("W87 probation order cap must remain 1")
+            raise PaperExecutionAdmissionIntegrityError(
+                "W87 probation order cap must remain 1"
+            )
         if self.status is not PaperExecutionAdmissionStatus.ADMITTED:
             raise PaperExecutionAdmissionIntegrityError("W87 receipt must be ADMITTED")
 
-        for name in ("captured_at", "source_seal_observed_at", "source_seal_valid_until"):
+        for name in (
+            "captured_at",
+            "source_seal_observed_at",
+            "source_seal_valid_until",
+        ):
             _aware(getattr(self, name), name)
         captured = _utc(self.captured_at)
         seal_observed = _utc(self.source_seal_observed_at)
@@ -160,8 +174,14 @@ class PaperExecutionAdmissionReceipt:
             )
         expected_notional = self.canary_quantity * self.conservative_limit_price
         if self.canary_notional_usd != expected_notional:
-            raise PaperExecutionAdmissionIntegrityError("canary notional is inconsistent")
-        if not W87_MIN_CANARY_NOTIONAL_USD <= self.canary_notional_usd <= self.probation_notional_cap_usd:
+            raise PaperExecutionAdmissionIntegrityError(
+                "canary notional is inconsistent"
+            )
+        if not (
+            W87_MIN_CANARY_NOTIONAL_USD
+            <= self.canary_notional_usd
+            <= self.probation_notional_cap_usd
+        ):
             raise PaperExecutionAdmissionIntegrityError(
                 "canary notional must remain inside USD 1..probation cap"
             )
@@ -186,7 +206,9 @@ class PaperExecutionAdmissionReceipt:
                 "it may not grant OMS, execution, capital, broker-write or LIVE authority"
             )
         if self.receipt_hash != _hash(_payload(self, include_hash=False)):
-            raise PaperExecutionAdmissionIntegrityError("W87 admission receipt hash mismatch")
+            raise PaperExecutionAdmissionIntegrityError(
+                "W87 admission receipt hash mismatch"
+            )
 
     def to_dict(self) -> dict[str, object]:
         return _payload(self, include_hash=True)
@@ -197,31 +219,57 @@ def capture_paper_execution_admission(
     admission_id: str,
     sealed_result: PaperRuntimeReadinessSealedResult,
 ) -> PaperExecutionAdmissionReceipt:
-    """Capture one exact non-executing canary envelope from a still-fresh W86 READY seal.
+    """Capture one exact, non-executing PAPER canary envelope from W86.
 
-    W87 deliberately grants only authority to construct one exact OrderIntent candidate.
-    It grants no RiskDecision, OMS handoff, capital reservation, broker POST or LIVE authority.
+    This transition only permits construction of a single exact OrderIntent
+    candidate. It grants no RiskDecision, OMS handoff, capital reservation,
+    broker POST, runtime execution or LIVE authority.
     """
+
     _id(admission_id, "admission_id")
     _validate_w86(sealed_result)
     now = _utc(_now_utc())
     seal = sealed_result.seal
-    if seal.status is not PaperRuntimeReadinessSealStatus.READY or seal.paper_runtime_ready is not True:
+
+    if (
+        seal.status is not PaperRuntimeReadinessSealStatus.READY
+        or seal.paper_runtime_ready is not True
+    ):
         raise PaperExecutionAdmissionBlocked("W86 readiness seal is not READY")
     if not (_utc(seal.observed_at) <= now <= _utc(seal.valid_until)):
-        raise PaperExecutionAdmissionBlocked("W86 readiness seal expired before W87 capture")
+        raise PaperExecutionAdmissionBlocked(
+            "W86 readiness seal expired before W87 capture"
+        )
 
     final = sealed_result.pipeline.final_readiness
     asset = sealed_result.pipeline.asset_truth
+    market = sealed_result.pipeline.market_truth
     funding = sealed_result.pipeline.funding_capacity
 
+    _candidate_symbol(seal.symbol)
+    _broker_pair(asset.canonical_broker_pair)
+    if asset.canonical_broker_pair != market.canonical_broker_pair:
+        raise PaperExecutionAdmissionIntegrityError(
+            "W86 asset and market broker-pair identities disagree"
+        )
+    if seal.symbol.replace("-", "/") != asset.canonical_broker_pair:
+        raise PaperExecutionAdmissionIntegrityError(
+            "W86 candidate symbol does not bind to canonical broker pair"
+        )
+
     if final.probation_order_cap != W87_PROBATION_ORDER_CAP:
-        raise PaperExecutionAdmissionBlocked("W85/W86 probation order cap is not exactly one")
-    cap = min(final.probation_notional_cap_usd, W87_MAX_CANARY_NOTIONAL_USD)
+        raise PaperExecutionAdmissionBlocked(
+            "W85/W86 probation order cap is not exactly one"
+        )
+    cap = min(
+        final.probation_notional_cap_usd,
+        W87_MAX_CANARY_NOTIONAL_USD,
+    )
     if cap < W87_MIN_CANARY_NOTIONAL_USD:
         raise PaperExecutionAdmissionBlocked(
             "upstream probation cap is below canonical W87 USD 1 minimum canary"
         )
+
     quantity = _canonical_canary_quantity(
         minimum_quantity=final.minimum_executable_quantity,
         trade_increment=asset.min_trade_increment,
@@ -251,6 +299,7 @@ def capture_paper_execution_admission(
         "strategy_id": seal.strategy_id,
         "product_id": seal.product_id,
         "symbol": seal.symbol,
+        "broker_pair": asset.canonical_broker_pair,
         "account_id": seal.account_id,
         "side": "BUY",
         "broker_minimum_executable_quantity": final.minimum_executable_quantity,
@@ -285,12 +334,11 @@ def capture_paper_execution_admission(
 
 
 class SQLitePaperExecutionAdmissionRegistry:
-    """Durable append-only registry for exact W87 admission receipts.
+    """Durable local registry for exact W87 admission receipts.
 
-    Capturing W87 evidence is a local control-plane write only. This registry has
-    no credentials, broker transport, OMS, Safety writer, capital reservation or
-    execution API. Replaying the exact receipt is idempotent; any conflicting
-    reuse of admission_id or readiness seal fails closed.
+    The registry has no credentials, network, OMS, Safety writer, capital
+    reservation or execution API. A readiness seal can bind to at most one
+    admission. Exact replay is idempotent; conflicting reuse fails closed.
     """
 
     def __init__(self, runtime: SQLiteRuntime) -> None:
@@ -318,10 +366,14 @@ class SQLitePaperExecutionAdmissionRegistry:
         finally:
             conn.close()
 
-    def capture(self, receipt: PaperExecutionAdmissionReceipt) -> PaperExecutionAdmissionReceipt:
+    def capture(
+        self,
+        receipt: PaperExecutionAdmissionReceipt,
+    ) -> PaperExecutionAdmissionReceipt:
         if not isinstance(receipt, PaperExecutionAdmissionReceipt):
             raise TypeError("PaperExecutionAdmissionReceipt is required")
         receipt.__post_init__()
+
         payload_json = _canonical(receipt.to_dict())
         event_payload = {
             "admission_id": receipt.admission_id,
@@ -330,7 +382,8 @@ class SQLitePaperExecutionAdmissionRegistry:
             "candidate_identity_hash": receipt.candidate_identity_hash,
             "authority_key": receipt.authority_key,
             "strategy_id": receipt.strategy_id,
-            "symbol": receipt.symbol,
+            "candidate_symbol": receipt.symbol,
+            "broker_pair": receipt.broker_pair,
             "canary_notional_usd": str(receipt.canary_notional_usd),
             "order_intent_creation_permitted": True,
             "paper_execution_authorized": False,
@@ -346,31 +399,31 @@ class SQLitePaperExecutionAdmissionRegistry:
         try:
             conn.execute("BEGIN IMMEDIATE")
             by_id = conn.execute(
-                "SELECT payload_json, receipt_hash, readiness_seal_hash "
-                "FROM w87_paper_execution_admission WHERE admission_id = ?",
+                "SELECT payload_json,receipt_hash,readiness_seal_hash "
+                "FROM w87_paper_execution_admission WHERE admission_id=?",
                 (receipt.admission_id,),
             ).fetchone()
             by_seal = conn.execute(
-                "SELECT admission_id, payload_json, receipt_hash "
-                "FROM w87_paper_execution_admission WHERE readiness_seal_hash = ?",
+                "SELECT admission_id,payload_json,receipt_hash "
+                "FROM w87_paper_execution_admission WHERE readiness_seal_hash=?",
                 (receipt.readiness_seal_hash,),
             ).fetchone()
+
             if by_id is not None or by_seal is not None:
-                row = by_id if by_id is not None else by_seal
-                assert row is not None
-                same = (
-                    row["payload_json"] == payload_json
-                    and row["receipt_hash"] == receipt.receipt_hash
-                )
-                if by_id is not None:
-                    same = same and by_id["readiness_seal_hash"] == receipt.readiness_seal_hash
-                if by_seal is not None:
-                    same = same and by_seal["admission_id"] == receipt.admission_id
-                if not same:
+                if not _same_existing_receipt(
+                    by_id=by_id,
+                    by_seal=by_seal,
+                    receipt=receipt,
+                    payload_json=payload_json,
+                ):
                     raise PaperExecutionAdmissionConflict(
                         "W87 admission id/readiness seal already bound to different receipt"
                     )
-                self._verify_event_tx(conn, event_id=event_id, event_json=event_json)
+                self._verify_event_tx(
+                    conn,
+                    event_id=event_id,
+                    event_json=event_json,
+                )
                 conn.execute("COMMIT")
                 return receipt
 
@@ -391,6 +444,7 @@ class SQLitePaperExecutionAdmissionRegistry:
                     _utc(receipt.captured_at).isoformat(),
                 ),
             )
+
             previous = conn.execute(
                 "SELECT event_hash FROM ledger_events ORDER BY seq DESC LIMIT 1"
             ).fetchone()
@@ -432,7 +486,8 @@ class SQLitePaperExecutionAdmissionRegistry:
         conn = self._runtime.connect()
         try:
             row = conn.execute(
-                "SELECT payload_json FROM w87_paper_execution_admission WHERE admission_id = ?",
+                "SELECT payload_json FROM w87_paper_execution_admission "
+                "WHERE admission_id=?",
                 (admission_id,),
             ).fetchone()
         finally:
@@ -442,9 +497,14 @@ class SQLitePaperExecutionAdmissionRegistry:
         return _from_payload(json.loads(row["payload_json"]))
 
     @staticmethod
-    def _verify_event_tx(conn: sqlite3.Connection, *, event_id: str, event_json: str) -> None:
+    def _verify_event_tx(
+        conn: sqlite3.Connection,
+        *,
+        event_id: str,
+        event_json: str,
+    ) -> None:
         row = conn.execute(
-            "SELECT event_type,payload_json FROM ledger_events WHERE event_id = ?",
+            "SELECT event_type,payload_json FROM ledger_events WHERE event_id=?",
             (event_id,),
         ).fetchone()
         if (
@@ -457,9 +517,36 @@ class SQLitePaperExecutionAdmissionRegistry:
             )
 
 
+def _same_existing_receipt(
+    *,
+    by_id: sqlite3.Row | None,
+    by_seal: sqlite3.Row | None,
+    receipt: PaperExecutionAdmissionReceipt,
+    payload_json: str,
+) -> bool:
+    if by_id is not None:
+        if (
+            by_id["payload_json"] != payload_json
+            or by_id["receipt_hash"] != receipt.receipt_hash
+            or by_id["readiness_seal_hash"] != receipt.readiness_seal_hash
+        ):
+            return False
+    if by_seal is not None:
+        if (
+            by_seal["admission_id"] != receipt.admission_id
+            or by_seal["payload_json"] != payload_json
+            or by_seal["receipt_hash"] != receipt.receipt_hash
+        ):
+            return False
+    return True
+
+
 def _validate_w86(value: PaperRuntimeReadinessSealedResult) -> None:
     if not isinstance(value, PaperRuntimeReadinessSealedResult):
-        raise TypeError("sealed_result must be PaperRuntimeReadinessSealedResult")
+        raise TypeError(
+            "sealed_result must be PaperRuntimeReadinessSealedResult"
+        )
+
     value.pipeline.broker_truth.__post_init__()
     value.pipeline.asset_truth.__post_init__()
     value.pipeline.market_truth.__post_init__()
@@ -483,8 +570,13 @@ def _validate_w86(value: PaperRuntimeReadinessSealedResult) -> None:
         raise PaperExecutionAdmissionIntegrityError(
             "W86 source contains forbidden authority escalation"
         )
-    if value.pipeline.final_readiness.probation_notional_cap_usd > W87_MAX_CANARY_NOTIONAL_USD:
-        raise PaperExecutionAdmissionIntegrityError("upstream probation cap exceeds USD 5")
+    if (
+        value.pipeline.final_readiness.probation_notional_cap_usd
+        > W87_MAX_CANARY_NOTIONAL_USD
+    ):
+        raise PaperExecutionAdmissionIntegrityError(
+            "upstream probation cap exceeds USD 5"
+        )
 
 
 def _canonical_canary_quantity(
@@ -502,14 +594,45 @@ def _canonical_canary_quantity(
 
 
 def _ceil(value: Decimal, increment: Decimal) -> Decimal:
-    return (value / increment).to_integral_value(rounding=ROUND_CEILING) * increment
+    return (
+        (value / increment).to_integral_value(rounding=ROUND_CEILING)
+        * increment
+    )
 
 
 def _multiple(value: Decimal, increment: Decimal) -> bool:
     return value % increment == 0
 
 
-def _payload(receipt: PaperExecutionAdmissionReceipt, *, include_hash: bool) -> dict[str, object]:
+def _candidate_symbol(value: str) -> None:
+    if (
+        not isinstance(value, str)
+        or value.count("-") != 1
+        or value != value.upper()
+        or any(not part for part in value.split("-"))
+    ):
+        raise PaperExecutionAdmissionIntegrityError(
+            "symbol must be canonical BASE-QUOTE"
+        )
+
+
+def _broker_pair(value: str) -> None:
+    if (
+        not isinstance(value, str)
+        or value.count("/") != 1
+        or value != value.upper()
+        or any(not part for part in value.split("/"))
+    ):
+        raise PaperExecutionAdmissionIntegrityError(
+            "broker_pair must be canonical BASE/QUOTE"
+        )
+
+
+def _payload(
+    receipt: PaperExecutionAdmissionReceipt,
+    *,
+    include_hash: bool,
+) -> dict[str, object]:
     values = {
         name: getattr(receipt, name)
         for name in PaperExecutionAdmissionReceipt.__dataclass_fields__
@@ -535,10 +658,14 @@ def _payload_values(values: Mapping[str, object]) -> dict[str, object]:
     return result
 
 
-def _from_payload(payload: Mapping[str, object]) -> PaperExecutionAdmissionReceipt:
+def _from_payload(
+    payload: Mapping[str, object],
+) -> PaperExecutionAdmissionReceipt:
     expected = set(PaperExecutionAdmissionReceipt.__dataclass_fields__)
     if set(payload) != expected:
-        raise PaperExecutionAdmissionIntegrityError("stored W87 admission payload is non-canonical")
+        raise PaperExecutionAdmissionIntegrityError(
+            "stored W87 admission payload is non-canonical"
+        )
     return PaperExecutionAdmissionReceipt(
         admission_id=_text(payload, "admission_id"),
         contract_version=_text(payload, "contract_version"),
@@ -553,14 +680,21 @@ def _from_payload(payload: Mapping[str, object]) -> PaperExecutionAdmissionRecei
         strategy_id=_text(payload, "strategy_id"),
         product_id=_text(payload, "product_id"),
         symbol=_text(payload, "symbol"),
+        broker_pair=_text(payload, "broker_pair"),
         account_id=_text(payload, "account_id"),
         side=_text(payload, "side"),
-        broker_minimum_executable_quantity=_decimal(payload, "broker_minimum_executable_quantity"),
+        broker_minimum_executable_quantity=_decimal(
+            payload,
+            "broker_minimum_executable_quantity",
+        ),
         broker_trade_increment=_decimal(payload, "broker_trade_increment"),
         conservative_limit_price=_decimal(payload, "conservative_limit_price"),
         canary_quantity=_decimal(payload, "canary_quantity"),
         canary_notional_usd=_decimal(payload, "canary_notional_usd"),
-        probation_notional_cap_usd=_decimal(payload, "probation_notional_cap_usd"),
+        probation_notional_cap_usd=_decimal(
+            payload,
+            "probation_notional_cap_usd",
+        ),
         probation_order_cap=_integer(payload, "probation_order_cap"),
         status=PaperExecutionAdmissionStatus(_text(payload, "status")),
         captured_at=_datetime(payload, "captured_at"),
@@ -568,15 +702,33 @@ def _from_payload(payload: Mapping[str, object]) -> PaperExecutionAdmissionRecei
         source_seal_valid_until=_datetime(payload, "source_seal_valid_until"),
         captured_from_ready_seal=_boolean(payload, "captured_from_ready_seal"),
         exact_canary_envelope=_boolean(payload, "exact_canary_envelope"),
-        order_intent_creation_permitted=_boolean(payload, "order_intent_creation_permitted"),
-        separate_risk_decision_required=_boolean(payload, "separate_risk_decision_required"),
-        separate_human_execution_approval_required=_boolean(payload, "separate_human_execution_approval_required"),
+        order_intent_creation_permitted=_boolean(
+            payload,
+            "order_intent_creation_permitted",
+        ),
+        separate_risk_decision_required=_boolean(
+            payload,
+            "separate_risk_decision_required",
+        ),
+        separate_human_execution_approval_required=_boolean(
+            payload,
+            "separate_human_execution_approval_required",
+        ),
         oms_handoff_permitted=_boolean(payload, "oms_handoff_permitted"),
         capital_reserved=_boolean(payload, "capital_reserved"),
         broker_write_performed=_boolean(payload, "broker_write_performed"),
-        paper_execution_authorized=_boolean(payload, "paper_execution_authorized"),
-        external_execution_authorized=_boolean(payload, "external_execution_authorized"),
-        runtime_execution_authorized=_boolean(payload, "runtime_execution_authorized"),
+        paper_execution_authorized=_boolean(
+            payload,
+            "paper_execution_authorized",
+        ),
+        external_execution_authorized=_boolean(
+            payload,
+            "external_execution_authorized",
+        ),
+        runtime_execution_authorized=_boolean(
+            payload,
+            "runtime_execution_authorized",
+        ),
         capital_authority=_text(payload, "capital_authority"),
         live_trading=_text(payload, "live_trading"),
         receipt_hash=_text(payload, "receipt_hash"),
@@ -585,22 +737,38 @@ def _from_payload(payload: Mapping[str, object]) -> PaperExecutionAdmissionRecei
 
 def _id(value: str, name: str) -> None:
     if not isinstance(value, str) or not _ID_RE.fullmatch(value):
-        raise PaperExecutionAdmissionIntegrityError(f"{name} must be canonical identifier")
+        raise PaperExecutionAdmissionIntegrityError(
+            f"{name} must be canonical identifier"
+        )
 
 
 def _sha(value: str, name: str) -> None:
     if not isinstance(value, str) or not _HASH_RE.fullmatch(value):
-        raise PaperExecutionAdmissionIntegrityError(f"{name} must be lowercase sha256")
+        raise PaperExecutionAdmissionIntegrityError(
+            f"{name} must be lowercase sha256"
+        )
 
 
 def _positive(value: Decimal, name: str) -> None:
-    if not isinstance(value, Decimal) or not value.is_finite() or value <= 0:
-        raise PaperExecutionAdmissionIntegrityError(f"{name} must be finite positive Decimal")
+    if (
+        not isinstance(value, Decimal)
+        or not value.is_finite()
+        or value <= 0
+    ):
+        raise PaperExecutionAdmissionIntegrityError(
+            f"{name} must be finite positive Decimal"
+        )
 
 
 def _aware(value: datetime, name: str) -> None:
-    if not isinstance(value, datetime) or value.tzinfo is None or value.utcoffset() is None:
-        raise PaperExecutionAdmissionIntegrityError(f"{name} must be timezone-aware")
+    if (
+        not isinstance(value, datetime)
+        or value.tzinfo is None
+        or value.utcoffset() is None
+    ):
+        raise PaperExecutionAdmissionIntegrityError(
+            f"{name} must be timezone-aware"
+        )
 
 
 def _utc(value: datetime) -> datetime:
@@ -618,13 +786,19 @@ def _text(payload: Mapping[str, object], key: str) -> str:
 def _decimal(payload: Mapping[str, object], key: str) -> Decimal:
     value = payload.get(key)
     if not isinstance(value, str):
-        raise PaperExecutionAdmissionIntegrityError(f"{key} must be canonical decimal text")
+        raise PaperExecutionAdmissionIntegrityError(
+            f"{key} must be canonical decimal text"
+        )
     try:
         result = Decimal(value)
     except Exception as exc:
-        raise PaperExecutionAdmissionIntegrityError(f"{key} is invalid Decimal") from exc
+        raise PaperExecutionAdmissionIntegrityError(
+            f"{key} is invalid Decimal"
+        ) from exc
     if not result.is_finite():
-        raise PaperExecutionAdmissionIntegrityError(f"{key} must be finite")
+        raise PaperExecutionAdmissionIntegrityError(
+            f"{key} must be finite"
+        )
     return result
 
 
@@ -647,13 +821,20 @@ def _datetime(payload: Mapping[str, object], key: str) -> datetime:
     try:
         result = datetime.fromisoformat(value)
     except ValueError as exc:
-        raise PaperExecutionAdmissionIntegrityError(f"{key} is invalid datetime") from exc
+        raise PaperExecutionAdmissionIntegrityError(
+            f"{key} is invalid datetime"
+        ) from exc
     _aware(result, key)
     return result
 
 
 def _canonical(value: object) -> str:
-    return json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False)
+    return json.dumps(
+        value,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    )
 
 
 def _hash(value: object) -> str:
