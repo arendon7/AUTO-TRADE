@@ -7,6 +7,7 @@ import inspect
 
 import pytest
 
+import autotrade.brokers.alpaca_paper_crypto_canary_coordinator as r6_coordinator
 import autotrade.paper_execution_canary_preparation as prep_module
 import autotrade.paper_execution_canary_preparation_guard as guard_module
 import autotrade.paper_execution_risk_contract as risk_module
@@ -50,7 +51,20 @@ class _NoWriteBroker:
         raise AssertionError("W87-C must never call ExecutionBroker.submit")
 
 
-def _stack(monkeypatch, tmp_path):
+def _stack(monkeypatch, tmp_path, *, relax_r6_cap: bool = True):
+    # The shared W86 fixture deliberately models a USD 1,000 portfolio. The
+    # production R6 cap is 0.1%, i.e. USD 1.00, while the canonical W87 fixture
+    # rounds to USD 1.010 because of broker quantity increments. Most W87-C tests
+    # need to exercise behavior *after* that cap, so they temporarily widen only
+    # the coordinator constant to 0.2%. A dedicated test below leaves production
+    # 0.1% untouched and proves the bridge blocks before OMS/lifecycle mutation.
+    if relax_r6_cap:
+        monkeypatch.setattr(
+            r6_coordinator,
+            "FIRST_CANARY_MAX_ACCOUNT_FRACTION",
+            Decimal("0.002"),
+        )
+
     sealed, admission = _admission(monkeypatch)
     safety = _safety(
         target_version=sealed.pipeline.safety_health_truth.safety_version
@@ -93,7 +107,7 @@ def _prepare(monkeypatch, tmp_path, *, bridge_id="w87-preparation"):
         risk_result,
         safety,
         portfolio_store,
-        broker,
+        _,
         coordinator,
         runtime,
     ) = stack
@@ -169,6 +183,53 @@ def test_w87_canary_preparation_entrypoint_exposes_no_clock_flags_or_execution_i
         "live",
     ):
         assert forbidden not in parameters
+
+
+def test_w87_canary_preparation_refuses_r6_conservative_cap_before_oms(
+    monkeypatch, tmp_path
+):
+    (
+        sealed,
+        admission,
+        risk_result,
+        safety,
+        portfolio_store,
+        broker,
+        coordinator,
+        runtime,
+    ) = _stack(monkeypatch, tmp_path, relax_r6_cap=False)
+
+    assert r6_coordinator.FIRST_CANARY_MAX_ACCOUNT_FRACTION == Decimal("0.001")
+    assert admission.canary_notional_usd == Decimal("1.010")
+    assert sealed.pipeline.account_attestation.portfolio_value == Decimal("1000")
+
+    with pytest.raises(
+        PaperExecutionCanaryPreparationGuardBlocked,
+        match="R6 first-canary conservative cap before OMS/lifecycle",
+    ):
+        prepare_guarded_paper_execution_canary(
+            bridge_id="w87-prep-r6-cap",
+            admission=admission,
+            sealed_result=sealed,
+            risk_result=risk_result,
+            safety=safety,
+            portfolio_store=portfolio_store,
+            coordinator=coordinator,
+            runtime=runtime,
+        )
+
+    conn = runtime.connect()
+    try:
+        lifecycle_table = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' "
+            "AND name='alpaca_crypto_lifecycle_control'"
+        ).fetchone()
+        orders = conn.execute("SELECT COUNT(*) AS n FROM orders").fetchone()["n"]
+    finally:
+        conn.close()
+    assert lifecycle_table is None
+    assert orders == 0
+    assert broker.submit_calls == 0
 
 
 def test_w87_canary_preparation_refuses_stale_w86_or_risk_before_oms(monkeypatch, tmp_path):
@@ -300,6 +361,51 @@ def test_w87_canary_preparation_detects_safety_race_after_local_preparation(
             risk_result=risk_result,
             safety=safety,
             portfolio_store=portfolio_store,
+            coordinator=coordinator,
+            runtime=runtime,
+        )
+    assert broker.submit_calls == 0
+
+
+def test_w87_canary_preparation_detects_portfolio_race_after_local_preparation(
+    monkeypatch, tmp_path
+):
+    (
+        sealed,
+        admission,
+        risk_result,
+        safety,
+        portfolio_store,
+        broker,
+        coordinator,
+        runtime,
+    ) = _stack(monkeypatch, tmp_path)
+    original = portfolio_store.get()
+    real_prepare = guard_module.prepare_paper_execution_canary
+
+    class RacingPortfolioReader:
+        def __init__(self):
+            self.calls = 0
+
+        def get(self):
+            self.calls += 1
+            if self.calls == 1:
+                return original
+            return VersionedPortfolioSnapshot(
+                version=original.version + 1,
+                snapshot=original.snapshot,
+            )
+
+    reader = RacingPortfolioReader()
+    monkeypatch.setattr(guard_module, "prepare_paper_execution_canary", real_prepare)
+    with pytest.raises(PaperExecutionCanaryPreparationGuardBlocked, match="changed during"):
+        prepare_guarded_paper_execution_canary(
+            bridge_id="w87-prep-portfolio-post-race",
+            admission=admission,
+            sealed_result=sealed,
+            risk_result=risk_result,
+            safety=safety,
+            portfolio_store=reader,
             coordinator=coordinator,
             runtime=runtime,
         )
