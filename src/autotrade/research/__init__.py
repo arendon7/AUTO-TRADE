@@ -6,7 +6,12 @@ Nothing in this package is an executable authorization for the live control plan
 from .backtest import BacktestConfig, BacktestEngine, BacktestResult
 from .bootstrap import MovingBlockBootstrapConfig, MovingBlockBootstrapResult, moving_block_bootstrap
 from .costs import ExecutionCostModel
-from .dsl import InvalidStrategySpec, MovingAverageCrossStrategy, StrategySpec
+from .dsl import (
+    InvalidStrategySpec,
+    MovingAverageCrossStrategy,
+    SafeDeclarativeStrategy,
+    StrategySpec,
+)
 from .gates import (
     RobustnessDecision,
     RobustnessPolicy,
@@ -16,6 +21,7 @@ from .gates import (
     evaluate_walk_forward_robustness,
 )
 from .market import Bar, InstrumentMetadata, MarketDataset
+from .oss_campaign import OSSCampaignPlan, build_oss1_development_campaign, oss1_candidate_count
 from .strategy import ResearchSignal, ResearchStrategy
 from .validation import SQLiteValidationRegistry, ValidationEvidence, ValidationEvidenceSpec
 
@@ -31,17 +37,21 @@ __all__ = [
     "MovingAverageCrossStrategy",
     "MovingBlockBootstrapConfig",
     "MovingBlockBootstrapResult",
+    "OSSCampaignPlan",
     "ResearchSignal",
     "ResearchStrategy",
     "RobustnessDecision",
     "RobustnessPolicy",
+    "SafeDeclarativeStrategy",
     "SampleAdequacyDecision",
     "SampleAdequacyPolicy",
     "SQLiteValidationRegistry",
     "StrategySpec",
     "ValidationEvidence",
     "ValidationEvidenceSpec",
+    "build_oss1_development_campaign",
     "evaluate_sample_adequacy",
     "evaluate_walk_forward_robustness",
     "moving_block_bootstrap",
+    "oss1_candidate_count",
 ]
