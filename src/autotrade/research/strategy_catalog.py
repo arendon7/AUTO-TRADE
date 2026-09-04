@@ -102,7 +102,7 @@ CATALOG: tuple[StrategyCatalogEntry, ...] = (
         required_features=("realized_volatility", "atr", "trend_strength", "drawdown_state"),
         preferred_timeframes=("1h", "4h", "1d"),
         primary_market="multi_asset",
-        implementation_mode="portfolio_meta_layer",
+        implementation_mode="native_safe_dsl_single_symbol_regime_filter",
         source_projects=("microsoft/qlib", "QuantConnect/Lean"),
         source_licenses=("MIT", "Apache-2.0"),
     ),
