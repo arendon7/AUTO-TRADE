@@ -6,13 +6,16 @@ on:
     paths:
       - ".github/workflows/r7-research-tests.yml"
       - "src/autotrade/research/autopilot.py"
+      - "src/autotrade/research/experiment_b.py"
       - "src/autotrade/research/robustness.py"
       - "src/autotrade/research/regime_stability.py"
       - "src/autotrade/research/statistical_diagnostics.py"
       - "src/autotrade/research/strategy_catalog.py"
       - "src/autotrade/research/strategy_library.py"
       - "src/autotrade/research/strategy_space.py"
+      - "scripts/run_r7_experiment_b.py"
       - "tests/test_research_autopilot.py"
+      - "tests/test_research_experiment_b.py"
       - "tests/test_research_robustness.py"
       - "tests/test_research_regime_stability.py"
       - "tests/test_research_statistical_diagnostics.py"
@@ -45,17 +48,20 @@ jobs:
         run: |
           python -m py_compile \
             src/autotrade/research/autopilot.py \
+            src/autotrade/research/experiment_b.py \
             src/autotrade/research/robustness.py \
             src/autotrade/research/regime_stability.py \
             src/autotrade/research/statistical_diagnostics.py \
             src/autotrade/research/strategy_catalog.py \
             src/autotrade/research/strategy_library.py \
-            src/autotrade/research/strategy_space.py
+            src/autotrade/research/strategy_space.py \
+            scripts/run_r7_experiment_b.py
 
       - name: R7 focused tests
         run: |
           pytest -q \
             tests/test_research_autopilot.py \
+            tests/test_research_experiment_b.py \
             tests/test_research_robustness.py \
             tests/test_research_regime_stability.py \
             tests/test_research_statistical_diagnostics.py \
