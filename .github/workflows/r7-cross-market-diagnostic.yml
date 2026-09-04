@@ -1,0 +1,91 @@
+name: R7 Cross-Market Diagnostic
+
+on:
+  push:
+    branches: ["feature/r7-strategy-foundation"]
+    paths:
+      - ".github/workflows/r7-cross-market-diagnostic.yml"
+      - "scripts/summarize_r7_cross_market.py"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  transferability:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Download frozen Experiment A artifacts
+        uses: actions/download-artifact@v5
+        with:
+          pattern: r7-*
+          path: artifacts/cross-market/a
+          merge-multiple: true
+          github-token: ${{ github.token }}
+          repository: arendon7/AUTO-TRADE
+          run-id: 33838389593
+
+      - name: Download frozen Experiment B artifacts
+        uses: actions/download-artifact@v5
+        with:
+          pattern: r7-b-*
+          path: artifacts/cross-market/b
+          merge-multiple: true
+          github-token: ${{ github.token }}
+          repository: arendon7/AUTO-TRADE
+          run-id: 33839573105
+
+      - name: Build cross-market diagnostic
+        run: |
+          python scripts/summarize_r7_cross_market.py \
+            --experiment-a artifacts/cross-market/a \
+            --experiment-b artifacts/cross-market/b \
+            --output artifacts/r7-cross-market-summary.json
+
+      - name: Validate diagnostic-only boundary
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          payload = json.loads(
+              Path("artifacts/r7-cross-market-summary.json").read_text(encoding="utf-8")
+          )
+          assert payload["diagnostic_only"] is True
+          assert payload["promotion_authority"] is False
+          assert payload["all_holdouts_untouched"] is True
+          assert payload["experiment_a"]["campaign_count"] == 6
+          assert payload["experiment_b"]["campaign_count"] == 6
+          assert payload["experiment_a"]["normalized_hypothesis_count"] == 36
+          assert payload["experiment_b"]["normalized_hypothesis_count"] == 30
+          for label in ("experiment_a", "experiment_b"):
+              top = payload[label]["top_hypotheses"][:3]
+              print(label)
+              for item in top:
+                  print(
+                      item["family"],
+                      "robust_ratio=", item["robust_ratio"],
+                      "eligible_ratio=", item["eligible_ratio"],
+                      "positive_return_ratio=", item["positive_return_ratio"],
+                      "median_sharpe=", item["median_sharpe"],
+                      "worst_return=", item["worst_net_return"],
+                  )
+          PY
+
+      - name: Upload cross-market diagnostic
+        uses: actions/upload-artifact@v4
+        with:
+          name: r7-cross-market-summary
+          path: artifacts/r7-cross-market-summary.json
+          if-no-files-found: error
+          retention-days: 30
