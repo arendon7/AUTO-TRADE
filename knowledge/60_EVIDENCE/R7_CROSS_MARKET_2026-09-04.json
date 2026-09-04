@@ -1,0 +1,95 @@
+{
+  "evidence_id": "R7_CROSS_MARKET_2026-09-04",
+  "scope": "DEVELOPMENT_ONLY_DIAGNOSTIC",
+  "workflow": {
+    "name": "R7 Cross-Market Diagnostic",
+    "run_id": 33839788056,
+    "head_sha": "156bbe18ddcf31c176b24647a84fc256f8d775d4",
+    "artifact_id": 9924503526,
+    "artifact_digest": "sha256:f940a1a36fa0473dcd27ce4516803d97e1091700768f03da37d6a688e831f9e1"
+  },
+  "authority": {
+    "diagnostic_only": true,
+    "promotion_authority": false,
+    "all_holdouts_untouched": true
+  },
+  "normalization": {
+    "removed_only_position_size_parameters": ["base_quantity", "order_quantity"],
+    "market_matrix": [
+      "BTCUSDT:1h",
+      "BTCUSDT:4h",
+      "ETHUSDT:1h",
+      "ETHUSDT:4h",
+      "SOLUSDT:1h",
+      "SOLUSDT:4h"
+    ],
+    "experiment_a_hypotheses": 36,
+    "experiment_b_hypotheses": 30
+  },
+  "experiment_a_top_observations": [
+    {
+      "family": "mean_reversion_zscore",
+      "robust_ratio": 0.16666666666666666,
+      "eligible_ratio": 0.16666666666666666,
+      "positive_return_ratio": 0.16666666666666666,
+      "median_sharpe": -1.5403995845759813,
+      "worst_net_return": -0.022638098363932935
+    },
+    {
+      "family": "volatility_managed_momentum",
+      "robust_ratio": 0.0,
+      "eligible_ratio": 0.16666666666666666,
+      "positive_return_ratio": 0.16666666666666666,
+      "median_sharpe": -2.0450188673297776,
+      "worst_net_return": -0.05193421597552528
+    },
+    {
+      "family": "time_series_momentum",
+      "robust_ratio": 0.0,
+      "eligible_ratio": 0.0,
+      "positive_return_ratio": 0.16666666666666666,
+      "median_sharpe": -1.964416852423427,
+      "worst_net_return": -0.010626250074500021
+    }
+  ],
+  "experiment_b_top_observations": [
+    {
+      "family": "trend_pullback",
+      "robust_ratio": 0.16666666666666666,
+      "eligible_ratio": 0.16666666666666666,
+      "positive_return_ratio": 0.16666666666666666,
+      "median_sharpe": -0.9529686948065418,
+      "worst_net_return": -0.0065444735107600405
+    },
+    {
+      "family": "atr_impulse_breakout",
+      "robust_ratio": 0.16666666666666666,
+      "eligible_ratio": 0.16666666666666666,
+      "positive_return_ratio": 0.16666666666666666,
+      "median_sharpe": -3.2858560132964483,
+      "worst_net_return": -0.02545871287099999
+    },
+    {
+      "family": "trend_pullback",
+      "robust_ratio": 0.0,
+      "eligible_ratio": 0.3333333333333333,
+      "positive_return_ratio": 0.5,
+      "median_sharpe": -0.3699598772834719,
+      "worst_net_return": -0.005021799750560052
+    }
+  ],
+  "interpretation": {
+    "result": "NO_TRANSFERABLE_HYPOTHESIS_DEMONSTRATED",
+    "experiment_a": "The strongest Experiment A normalized hypothesis was robust in only one of six markets and had negative median Sharpe across the matrix.",
+    "experiment_b": "Experiment B improved breadth for some pullback hypotheses, but its two robustness-selected configurations remained robust in only one of six markets and had negative median Sharpe across all six markets.",
+    "structural_lesson": "Observed DEVELOPMENT winners are market-specific rather than demonstrated transferable edges. Future experiments should preregister breadth/generalization requirements before observing results.",
+    "next_action": "Define a prospective cross-market breadth policy for Experiment C before constructing or evaluating its candidate universe."
+  },
+  "explicit_non_claims": [
+    "This diagnostic does not establish profitability.",
+    "This diagnostic is not a retroactive promotion gate for Experiment A or B.",
+    "This diagnostic cannot authorize FINAL_HOLDOUT, PAPER or LIVE execution.",
+    "No protected HOLDOUT was checked out.",
+    "Cross-market findings must not be used to relabel post-hoc tuned A/B parameters as preregistered hypotheses."
+  ]
+}
