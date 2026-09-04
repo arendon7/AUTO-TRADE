@@ -23,6 +23,11 @@ from autotrade.research.external_data import (
     UrllibReadOnlyTransport,
 )
 from autotrade.research.market import InstrumentMetadata
+from autotrade.research.robustness import (
+    RobustnessPolicy,
+    WalkForwardConfig,
+    default_stress_scenarios,
+)
 from autotrade.research.splits import create_temporal_split
 from autotrade.research.strategy_space import StrategyProgram, StrategySearchSpace
 from autotrade.research.trials import SQLiteTrialLedger
@@ -52,6 +57,10 @@ def _json_number(value: float) -> float | str:
     if isfinite(value):
         return value
     return "Infinity" if value > 0 else "-Infinity"
+
+
+def _optional_json_number(value: float | None) -> float | str | None:
+    return None if value is None else _json_number(value)
 
 
 def _build_program(*, quantity: Decimal, target_bar_volatility: Decimal) -> StrategyProgram:
@@ -149,6 +158,22 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--min-profit-factor", type=float, default=1.0)
     parser.add_argument("--min-fills", type=int, default=10)
     parser.add_argument("--pbo-partitions", type=int, default=8)
+    parser.add_argument("--walk-forward-train-bars", type=int, default=600)
+    parser.add_argument("--walk-forward-evaluation-bars", type=int, default=300)
+    parser.add_argument("--walk-forward-step-bars", type=int, default=300)
+    parser.add_argument("--walk-forward-min-folds", type=int, default=3)
+    parser.add_argument("--min-positive-fold-ratio", type=float, default=0.50)
+    parser.add_argument("--min-median-fold-sharpe", type=float, default=0.0)
+    parser.add_argument("--min-worst-fold-net-return", type=float, default=-0.10)
+    parser.add_argument("--max-worst-fold-drawdown", type=float, default=0.30)
+    parser.add_argument("--min-stress-pass-ratio", type=float, default=2 / 3)
+    parser.add_argument("--min-worst-stress-net-return", type=float, default=-0.10)
+    parser.add_argument("--max-worst-stress-drawdown", type=float, default=0.35)
+    parser.add_argument(
+        "--disable-robustness",
+        action="store_true",
+        help="Disable walk-forward/stress selection. Intended only for diagnostics.",
+    )
     parser.add_argument("--campaign-id", required=True)
     parser.add_argument(
         "--code-version",
@@ -233,6 +258,27 @@ def main() -> int:
         target_bar_volatility=args.target_bar_volatility,
     )
 
+    robustness_policy = None
+    walk_forward_config = None
+    stress_scenarios = ()
+    if not args.disable_robustness:
+        robustness_policy = RobustnessPolicy(
+            min_positive_fold_ratio=args.min_positive_fold_ratio,
+            min_median_fold_sharpe=args.min_median_fold_sharpe,
+            min_worst_fold_net_return=args.min_worst_fold_net_return,
+            max_worst_fold_drawdown=args.max_worst_fold_drawdown,
+            min_stress_pass_ratio=args.min_stress_pass_ratio,
+            min_worst_stress_net_return=args.min_worst_stress_net_return,
+            max_worst_stress_drawdown=args.max_worst_stress_drawdown,
+        )
+        walk_forward_config = WalkForwardConfig(
+            train_bars=args.walk_forward_train_bars,
+            evaluation_bars=args.walk_forward_evaluation_bars,
+            step_bars=args.walk_forward_step_bars,
+            min_folds=args.walk_forward_min_folds,
+        )
+        stress_scenarios = default_stress_scenarios()
+
     args.output_dir.mkdir(parents=True, exist_ok=True)
     dataset_path = args.output_dir / f"{args.campaign_id}-dataset.json"
     artifact.write(dataset_path)
@@ -246,6 +292,9 @@ def main() -> int:
         code_version=args.code_version,
         started_at=datetime.now(timezone.utc),
         pbo_partitions=args.pbo_partitions,
+        robustness_policy=robustness_policy,
+        walk_forward_config=walk_forward_config,
+        stress_scenarios=stress_scenarios,
     )
 
     report = {
@@ -265,8 +314,60 @@ def main() -> int:
         "backtest_config_hash": backtest_config.config_hash,
         "candidate_count": program.candidate_count,
         "policy_eligible_trial_ids": list(result.policy_eligible_trial_ids),
+        "tournament_selected_trial_id": result.tournament_selected_trial_id,
+        "robustness_eligible_trial_ids": list(result.robustness_eligible_trial_ids),
         "selected_trial_id": result.selected_trial_id,
         "tournament": result.tournament.to_payload(),
+        "robustness": [
+            {
+                "strategy_id": item.strategy_id,
+                "strategy_version": item.strategy_version,
+                "fingerprint": item.fingerprint,
+                "passed": item.passed,
+                "positive_fold_ratio": item.positive_fold_ratio,
+                "median_fold_sharpe": _optional_json_number(item.median_fold_sharpe),
+                "worst_fold_net_return": _optional_json_number(
+                    item.worst_fold_net_return
+                ),
+                "worst_fold_drawdown": _optional_json_number(item.worst_fold_drawdown),
+                "stress_pass_ratio": item.stress_pass_ratio,
+                "worst_stress_net_return": _optional_json_number(
+                    item.worst_stress_net_return
+                ),
+                "worst_stress_drawdown": _optional_json_number(
+                    item.worst_stress_drawdown
+                ),
+                "walk_forward": [
+                    {
+                        "fold_index": fold.fold_index,
+                        "dataset_hash": fold.dataset_hash,
+                        "net_return": _optional_json_number(fold.net_return),
+                        "sharpe": _optional_json_number(fold.sharpe),
+                        "max_drawdown": _optional_json_number(fold.max_drawdown),
+                        "fills": fold.fills,
+                        "result_hash": fold.result_hash,
+                        "failure_code": fold.failure_code,
+                    }
+                    for fold in item.walk_forward
+                ],
+                "stress": [
+                    {
+                        "scenario_id": stress.scenario_id,
+                        "scenario_fingerprint": stress.scenario_fingerprint,
+                        "config_hash": stress.config_hash,
+                        "net_return": _optional_json_number(stress.net_return),
+                        "sharpe": _optional_json_number(stress.sharpe),
+                        "max_drawdown": _optional_json_number(stress.max_drawdown),
+                        "fills": stress.fills,
+                        "result_hash": stress.result_hash,
+                        "failure_code": stress.failure_code,
+                        "passed": stress.passed,
+                    }
+                    for stress in item.stress
+                ],
+            }
+            for item in result.robustness_evidence
+        ],
         "pbo": (
             {
                 "pbo": result.pbo_evidence.pbo,
