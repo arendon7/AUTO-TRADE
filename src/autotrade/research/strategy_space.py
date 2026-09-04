@@ -24,6 +24,15 @@ def _canonical_value(value: Primitive) -> str:
         raise StrategySpaceError("search-space values must be finite JSON primitives") from exc
 
 
+def _ordered_dimensions(
+    dimensions: Mapping[str, Sequence[Primitive]],
+) -> dict[str, list[Primitive]]:
+    return {
+        name: sorted(dimensions[name], key=_canonical_value)
+        for name in sorted(dimensions)
+    }
+
+
 @dataclass(frozen=True, slots=True)
 class StrategySearchSpace:
     """Finite, deterministic parameter search space for one audited strategy kind.
@@ -79,9 +88,7 @@ class StrategySearchSpace:
             "family_id": self.family_id,
             "strategy_version": self.strategy_version,
             "kind": self.kind,
-            "dimensions": {
-                name: list(self.dimensions[name]) for name in sorted(self.dimensions)
-            },
+            "dimensions": _ordered_dimensions(self.dimensions),
             "max_candidates": self.max_candidates,
         }
         raw = json.dumps(
@@ -93,22 +100,27 @@ class StrategySearchSpace:
         return sha256(raw).hexdigest()
 
     def candidates(self) -> tuple[LibraryStrategySpec, ...]:
-        names = tuple(sorted(self.dimensions))
-        ordered_values = tuple(
-            tuple(sorted(self.dimensions[name], key=_canonical_value)) for name in names
-        )
+        ordered = _ordered_dimensions(self.dimensions)
+        names = tuple(ordered)
+        ordered_values = tuple(tuple(ordered[name]) for name in names)
         result: list[LibraryStrategySpec] = []
         for values in product(*ordered_values):
             parameters = dict(zip(names, values, strict=True))
-            parameter_hash = sha256(
+            identity_payload = {
+                "family_id": self.family_id,
+                "strategy_version": self.strategy_version,
+                "kind": self.kind,
+                "parameters": parameters,
+            }
+            identity_hash = sha256(
                 json.dumps(
-                    parameters,
+                    identity_payload,
                     sort_keys=True,
                     separators=(",", ":"),
                     allow_nan=False,
                 ).encode("utf-8")
             ).hexdigest()[:16]
-            strategy_id = f"{self.family_id}-{parameter_hash}"
+            strategy_id = f"{self.family_id}-{identity_hash}"
             try:
                 candidate = LibraryStrategySpec(
                     strategy_id=strategy_id,
