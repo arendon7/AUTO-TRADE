@@ -2,7 +2,11 @@ from __future__ import annotations
 
 import pytest
 
-from autotrade.research.strategy_space import StrategySearchSpace, StrategySpaceError
+from autotrade.research.strategy_space import (
+    StrategyProgram,
+    StrategySearchSpace,
+    StrategySpaceError,
+)
 
 
 def _momentum_space(**overrides: object) -> StrategySearchSpace:
@@ -22,6 +26,20 @@ def _momentum_space(**overrides: object) -> StrategySearchSpace:
     return StrategySearchSpace(**payload)  # type: ignore[arg-type]
 
 
+def _breakout_space() -> StrategySearchSpace:
+    return StrategySearchSpace(
+        family_id="donchian-hourly",
+        strategy_version="1.0.0",
+        kind="donchian_breakout",
+        dimensions={
+            "lookback_bars": (24, 48),
+            "order_quantity": ("1",),
+            "position_mode": ("long_short",),
+        },
+        max_candidates=4,
+    )
+
+
 def test_space_generates_complete_deterministic_family() -> None:
     first = _momentum_space()
     second = _momentum_space(
@@ -38,6 +56,7 @@ def test_space_generates_complete_deterministic_family() -> None:
 
     assert first.candidate_count == 4
     assert len(first_candidates) == 4
+    assert first.canonical_hash == second.canonical_hash
     assert [item.strategy_id for item in first_candidates] == [
         item.strategy_id for item in second_candidates
     ]
@@ -124,3 +143,48 @@ def test_space_hash_captures_search_governance() -> None:
     changed_limit = _momentum_space(max_candidates=16)
 
     assert base.canonical_hash != changed_limit.canonical_hash
+
+
+def test_program_freezes_multiple_families_and_trial_ids() -> None:
+    first = StrategyProgram(
+        program_id="r7-core",
+        spaces=(_momentum_space(), _breakout_space()),
+        max_total_candidates=16,
+    )
+    second = StrategyProgram(
+        program_id="r7-core",
+        spaces=(_breakout_space(), _momentum_space()),
+        max_total_candidates=16,
+    )
+
+    assert first.candidate_count == 6
+    assert len(first.expected_trial_ids) == 6
+    assert first.canonical_hash == second.canonical_hash
+    assert first.expected_trial_ids == second.expected_trial_ids
+    assert len(set(first.expected_trial_ids)) == 6
+
+
+def test_program_rejects_duplicate_families_and_grid_explosion() -> None:
+    with pytest.raises(StrategySpaceError, match="family_id values must be unique"):
+        StrategyProgram(
+            program_id="bad",
+            spaces=(_momentum_space(), _momentum_space()),
+        )
+
+    with pytest.raises(StrategySpaceError, match="exceeds max_total_candidates"):
+        StrategyProgram(
+            program_id="too-large",
+            spaces=(_momentum_space(), _breakout_space()),
+            max_total_candidates=5,
+        )
+
+
+def test_program_rejects_candidate_outside_frozen_universe() -> None:
+    program = StrategyProgram(
+        program_id="r7-core",
+        spaces=(_momentum_space(),),
+    )
+    outsider = _breakout_space().candidates()[0]
+
+    with pytest.raises(StrategySpaceError, match="outside frozen"):
+        program.trial_id_for(outsider)
