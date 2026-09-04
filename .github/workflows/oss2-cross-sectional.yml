@@ -11,6 +11,7 @@ on:
       - "tests/test_research_oss2_cross_sectional.py"
       - "tests/test_research_oss2_backtest.py"
       - "tests/test_research_oss2_campaign.py"
+      - "tests/test_research_oss2_campaign_adversarial.py"
       - "knowledge/20_RESEARCH/OSS2_IMPLEMENTATION.md"
       - ".github/workflows/oss2-cross-sectional.yml"
   workflow_dispatch:
@@ -46,7 +47,8 @@ jobs:
           pytest -q \
             tests/test_research_oss2_cross_sectional.py \
             tests/test_research_oss2_backtest.py \
-            tests/test_research_oss2_campaign.py
+            tests/test_research_oss2_campaign.py \
+            tests/test_research_oss2_campaign_adversarial.py
 
       - name: OSS-1 regression tests
         run: |
