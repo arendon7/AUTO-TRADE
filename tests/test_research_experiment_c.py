@@ -94,7 +94,7 @@ def test_efficiency_ratio_trend_enters_persistent_uptrend() -> None:
 
 
 def test_efficiency_ratio_trend_exits_on_direction_reversal() -> None:
-    closes = [str(100 + index) for index in range(48)] + ["140"]
+    closes = [str(150 - index) for index in range(49)]
     strategy = EfficiencyRatioTrendStrategy(
         lookback_bars=48,
         entry_efficiency=Decimal("0.2"),
