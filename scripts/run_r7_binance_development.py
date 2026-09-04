@@ -10,6 +10,7 @@ from pathlib import Path
 from autotrade.research.autopilot import (
     DevelopmentResearchAutopilot,
     DevelopmentSelectionPolicy,
+    StatisticalSelectionPolicy,
 )
 from autotrade.research.backtest import BacktestConfig
 from autotrade.research.costs import ExecutionCostModel
@@ -170,6 +171,23 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--min-worst-stress-net-return", type=float, default=-0.10)
     parser.add_argument("--max-worst-stress-drawdown", type=float, default=0.35)
     parser.add_argument(
+        "--min-deflated-sharpe-probability", type=float, default=0.95
+    )
+    parser.add_argument("--max-pbo", type=float, default=0.50)
+    parser.add_argument(
+        "--allow-unavailable-pbo",
+        action="store_true",
+        help="Diagnostic override only: do not require PBO evidence for promotion readiness.",
+    )
+    parser.add_argument(
+        "--allow-unavailable-deflated-sharpe",
+        action="store_true",
+        help=(
+            "Diagnostic override only: do not require Deflated Sharpe evidence for "
+            "promotion readiness."
+        ),
+    )
+    parser.add_argument(
         "--disable-robustness",
         action="store_true",
         help="Disable walk-forward/stress selection. Intended only for diagnostics.",
@@ -253,6 +271,12 @@ def main() -> int:
         min_profit_factor=args.min_profit_factor,
         min_fills=args.min_fills,
     )
+    statistical_policy = StatisticalSelectionPolicy(
+        min_deflated_sharpe_probability=args.min_deflated_sharpe_probability,
+        max_pbo=args.max_pbo,
+        require_pbo=not args.allow_unavailable_pbo,
+        require_deflated_sharpe=not args.allow_unavailable_deflated_sharpe,
+    )
     program = _build_program(
         quantity=args.research_quantity,
         target_bar_volatility=args.target_bar_volatility,
@@ -295,11 +319,16 @@ def main() -> int:
         robustness_policy=robustness_policy,
         walk_forward_config=walk_forward_config,
         stress_scenarios=stress_scenarios,
+        statistical_policy=statistical_policy,
     )
 
     report = {
         "campaign_id": result.campaign_id,
         "code_version": args.code_version,
+        "symbol": args.symbol,
+        "interval": args.interval,
+        "requested_start": args.start.isoformat(),
+        "requested_end": args.end.isoformat(),
         "program_hash": result.program_hash,
         "source_dataset_hash": artifact.dataset.dataset_hash,
         "development_dataset_hash": result.dataset_hash,
@@ -317,6 +346,19 @@ def main() -> int:
         "tournament_selected_trial_id": result.tournament_selected_trial_id,
         "robustness_eligible_trial_ids": list(result.robustness_eligible_trial_ids),
         "selected_trial_id": result.selected_trial_id,
+        "promotion_ready_trial_id": result.promotion_ready_trial_id,
+        "statistical_gate": {
+            "passed": result.statistical_gate_passed,
+            "reasons": list(result.statistical_gate_reasons),
+            "policy": {
+                "min_deflated_sharpe_probability": (
+                    statistical_policy.min_deflated_sharpe_probability
+                ),
+                "max_pbo": statistical_policy.max_pbo,
+                "require_pbo": statistical_policy.require_pbo,
+                "require_deflated_sharpe": statistical_policy.require_deflated_sharpe,
+            },
+        },
         "tournament": result.tournament.to_payload(),
         "robustness": [
             {
@@ -326,9 +368,7 @@ def main() -> int:
                 "passed": item.passed,
                 "positive_fold_ratio": item.positive_fold_ratio,
                 "median_fold_sharpe": _optional_json_number(item.median_fold_sharpe),
-                "worst_fold_net_return": _optional_json_number(
-                    item.worst_fold_net_return
-                ),
+                "worst_fold_net_return": _optional_json_number(item.worst_fold_net_return),
                 "worst_fold_drawdown": _optional_json_number(item.worst_fold_drawdown),
                 "stress_pass_ratio": item.stress_pass_ratio,
                 "worst_stress_net_return": _optional_json_number(
@@ -393,6 +433,7 @@ def main() -> int:
                 "trial_id": item.trial_id,
                 "strategy_id": item.strategy_id,
                 "strategy_version": item.strategy_version,
+                "parameters": item.backtest_result.strategy_parameters,
                 "eligible": item.eligible,
                 "result_hash": item.backtest_result.result_hash,
                 "metrics": {
