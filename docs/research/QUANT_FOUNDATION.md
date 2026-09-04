@@ -6,6 +6,8 @@ R7 expands the existing audited AUTO-TRADE research layer without weakening the 
 
 No strategy in this document is assumed profitable. Every candidate must earn promotion through the existing DEVELOPMENT -> HOLDOUT -> PAPER evidence chain after costs, slippage and risk constraints.
 
+**Integration baseline:** this R7 track was created from R6 head `f59df20f3f1d28877121a36d03094012ae37e50c`. It must be rebased/retargeted onto the eventual merged R6 commit before R7 can be merged to `main`.
+
 ## Architecture decision
 
 ```text
