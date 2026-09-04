@@ -1,0 +1,73 @@
+{
+  "evidence_id": "R7_REGIME_MATRIX_2026-09-04",
+  "scope": "DEVELOPMENT_ONLY",
+  "workflow": {
+    "name": "R7 Public Regime Research Matrix",
+    "run_id": 33839111848,
+    "head_sha": "78efbdeb8f6f08cd983a8156836ce4a7e02e9ed7",
+    "summary_artifact_id": 9924300257,
+    "summary_artifact_digest": "sha256:40213d40a6f788fc72ab4379675fbb05ccab433fd7c9ea8cfb5fda69dcf98eea"
+  },
+  "fixed_request_window": {
+    "start": "2025-09-01T00:00:00Z",
+    "end": "2026-06-01T00:00:00Z"
+  },
+  "universe": {
+    "assets": ["BTCUSDT", "ETHUSDT", "SOLUSDT"],
+    "intervals": ["1h", "4h"],
+    "candidate_count_per_campaign": 36
+  },
+  "regime_method": {
+    "feature": "trailing-realized-volatility",
+    "volatility_window_bars": 24,
+    "calibration_phase": "TRAIN",
+    "evaluation_phase": "DEVELOPMENT",
+    "low_quantile": "0.33",
+    "high_quantile": "0.67",
+    "min_calibration_observations": 30,
+    "policy": {
+      "min_observed_states": 2,
+      "min_observations_per_state": 10,
+      "min_worst_state_compounded_return": -0.10,
+      "min_worst_state_sharpe": -1.0
+    }
+  },
+  "aggregate": {
+    "campaign_count": 6,
+    "campaigns_with_robust_selection": 1,
+    "campaigns_statistically_promotion_ready": 0,
+    "campaigns_selected_regime_pass": 0,
+    "campaigns_holdout_ready": 0,
+    "all_holdouts_untouched": true
+  },
+  "selected_candidate_observation": {
+    "symbol": "SOLUSDT",
+    "interval": "4h",
+    "strategy_id": "meanrev-bf148de539597391",
+    "trial_id": "r7-binance-core-7def1b30c3981f3d9ac0",
+    "parameters": {
+      "lookback_bars": 24,
+      "entry_z": "2",
+      "exit_z": "0.5",
+      "order_quantity": "50",
+      "position_mode": "long_flat"
+    },
+    "robust_selection": true,
+    "statistical_promotion_ready": false,
+    "regime_stability_pass": false,
+    "holdout_ready": false
+  },
+  "interpretation": {
+    "result": "NO_CANDIDATE_AUTHORIZED_FOR_HOLDOUT_PROMOTION",
+    "reason": "The only robustness-selected candidate failed both the statistical promotion path and the TRAIN-calibrated volatility-regime stability requirement.",
+    "next_action": "Freeze Experiment A, preregister a genuinely different candidate family and repeat DEVELOPMENT-only evidence without opening HOLDOUT."
+  },
+  "explicit_non_claims": [
+    "This evidence does not establish a profitable trading strategy.",
+    "This evidence does not authorize FINAL_HOLDOUT access.",
+    "This evidence does not authorize PAPER execution.",
+    "This evidence does not authorize LIVE execution.",
+    "No protected HOLDOUT dataset was checked out during this matrix.",
+    "The regime layer was not calibrated on DEVELOPMENT or HOLDOUT data."
+  ]
+}
