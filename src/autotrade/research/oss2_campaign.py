@@ -346,16 +346,20 @@ def evaluate_oss2_common_window(
     start_bar_index = _int_param(dict(trial.parameters), "common_window_start_bar_index")
     if start_bar_index >= universe.bar_count:
         raise ValueError("common window starts outside universe")
-    start_at = universe.datasets[0].bars[start_bar_index].ended_at
+    expected_timestamps = tuple(
+        universe.datasets[0].bars[index].ended_at
+        for index in range(start_bar_index, universe.bar_count)
+    )
     selected = tuple(
         (occurred_at, value)
         for occurred_at, value in result.period_returns
-        if occurred_at >= start_at
+        if occurred_at >= expected_timestamps[0]
     )
     if len(selected) < 2:
         raise ValueError("insufficient observations in common evaluation window")
-    if selected[0][0] != start_at:
-        raise ValueError("backtest does not cover exact common-window start")
+    actual_timestamps = tuple(occurred_at for occurred_at, _ in selected)
+    if actual_timestamps != expected_timestamps:
+        raise ValueError("backtest does not cover exact common evaluation window")
 
     returns = [float(value) for _, value in selected]
     annualization = float(config.annualization_factor)
@@ -385,8 +389,8 @@ def evaluate_oss2_common_window(
         source_result_hash=result.result_hash,
         universe_hash=universe.universe_hash,
         start_bar_index=start_bar_index,
-        start_at=start_at,
-        end_at=selected[-1][0],
+        start_at=expected_timestamps[0],
+        end_at=expected_timestamps[-1],
         observation_count=len(selected),
         net_return=net_return,
         annualized_volatility=annualized_volatility,
