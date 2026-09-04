@@ -4,6 +4,7 @@ import argparse
 from datetime import datetime, timezone
 from decimal import Decimal
 import json
+from math import isfinite
 from pathlib import Path
 
 from autotrade.research.autopilot import (
@@ -45,6 +46,12 @@ def _aware_iso(value: str) -> datetime:
     if parsed.tzinfo is None or parsed.utcoffset() is None:
         raise argparse.ArgumentTypeError("timestamp must include a timezone")
     return parsed.astimezone(timezone.utc)
+
+
+def _json_number(value: float) -> float | str:
+    if isfinite(value):
+        return value
+    return "Infinity" if value > 0 else "-Infinity"
 
 
 def _build_program(*, quantity: Decimal, target_bar_volatility: Decimal) -> StrategyProgram:
@@ -288,14 +295,14 @@ def main() -> int:
                 "eligible": item.eligible,
                 "result_hash": item.backtest_result.result_hash,
                 "metrics": {
-                    "net_return": item.backtest_result.metrics.net_return,
-                    "sharpe": item.backtest_result.metrics.sharpe,
-                    "sortino": item.backtest_result.metrics.sortino,
-                    "max_drawdown": item.backtest_result.metrics.max_drawdown,
-                    "profit_factor": item.backtest_result.metrics.profit_factor,
-                    "turnover": item.backtest_result.metrics.turnover,
+                    "net_return": _json_number(item.backtest_result.metrics.net_return),
+                    "sharpe": _json_number(item.backtest_result.metrics.sharpe),
+                    "sortino": _json_number(item.backtest_result.metrics.sortino),
+                    "max_drawdown": _json_number(item.backtest_result.metrics.max_drawdown),
+                    "profit_factor": _json_number(item.backtest_result.metrics.profit_factor),
+                    "turnover": _json_number(item.backtest_result.metrics.turnover),
                     "fills": item.backtest_result.metrics.fills,
-                    "total_fees": item.backtest_result.metrics.total_fees,
+                    "total_fees": _json_number(item.backtest_result.metrics.total_fees),
                 },
             }
             for item in result.candidates
