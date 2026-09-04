@@ -22,6 +22,10 @@ from .robustness import (
     WalkForwardConfig,
     robust_rank_key,
 )
+from .statistical_diagnostics import (
+    PBOReadinessDiagnostics,
+    diagnose_pbo_readiness,
+)
 from .strategy_catalog import LibraryStrategySpec
 from .strategy_space import StrategyProgram
 from .tournament import (
@@ -119,9 +123,6 @@ class StatisticalSelectionPolicy:
         if not selected_trial_id:
             reasons.append("NO_ROBUST_SELECTION")
         elif selected_trial_id != tournament_winner_trial_id:
-            # Current Deflated Sharpe implementation is intentionally bound to
-            # the maximum-Sharpe frozen-family winner. A different robustness
-            # winner therefore cannot inherit that evidence.
             reasons.append("ROBUST_WINNER_NOT_SHARPE_WINNER")
 
         if pbo_evidence is None:
@@ -170,6 +171,7 @@ class DevelopmentProgramResult:
     robustness_evidence: tuple[CandidateRobustnessEvidence, ...]
     robustness_eligible_trial_ids: tuple[str, ...]
     selected_trial_id: str
+    pbo_diagnostics: PBOReadinessDiagnostics | None
     pbo_evidence: PBOEvidence | None
     pbo_unavailable_reason: str
     deflated_sharpe_evidence: DeflatedSharpeEvidence | None
@@ -180,14 +182,7 @@ class DevelopmentProgramResult:
 
 
 class DevelopmentResearchAutopilot:
-    """Run a frozen DEVELOPMENT program without any HOLDOUT/PAPER/LIVE authority.
-
-    This coordinator accepts only an already-designated DEVELOPMENT dataset. It
-    cannot fetch market data, consume HOLDOUT permits, submit orders or interact
-    with brokers. Every candidate is preregistered before its backtest result is
-    written to the trial ledger. Optional robustness evaluation remains entirely
-    inside the DEVELOPMENT dataset and therefore cannot contaminate HOLDOUT.
-    """
+    """Run a frozen DEVELOPMENT program without any HOLDOUT/PAPER/LIVE authority."""
 
     def __init__(self, *, ledger: SQLiteTrialLedger) -> None:
         self._ledger = ledger
@@ -244,7 +239,6 @@ class DevelopmentResearchAutopilot:
         if tuple(sorted(by_trial)) != trial_ids:
             raise DevelopmentAutopilotError("frozen program trial universe mismatch")
 
-        # Freeze every trial identity before observing any result.
         for index, trial_id in enumerate(trial_ids):
             candidate = by_trial[trial_id]
             self._ledger.preregister(
@@ -362,7 +356,7 @@ class DevelopmentResearchAutopilot:
             else:
                 selected_trial_id = ""
 
-        pbo, pbo_reason = self._pbo(
+        pbo, pbo_reason, pbo_diagnostics = self._pbo(
             campaign_id=campaign_id,
             completed=tuple(completed),
             failed_trial_ids=accounting.failed_trial_ids,
@@ -379,17 +373,13 @@ class DevelopmentResearchAutopilot:
             statistical_gate_passed = False
             statistical_gate_reasons = ("STATISTICAL_GATE_NOT_CONFIGURED",)
         else:
-            statistical_gate_passed, statistical_gate_reasons = (
-                statistical_policy.evaluate(
-                    selected_trial_id=selected_trial_id,
-                    tournament_winner_trial_id=tournament.winner_trial_id,
-                    pbo_evidence=pbo,
-                    deflated_sharpe_evidence=dsr,
-                )
+            statistical_gate_passed, statistical_gate_reasons = statistical_policy.evaluate(
+                selected_trial_id=selected_trial_id,
+                tournament_winner_trial_id=tournament.winner_trial_id,
+                pbo_evidence=pbo,
+                deflated_sharpe_evidence=dsr,
             )
-        promotion_ready_trial_id = (
-            selected_trial_id if statistical_gate_passed else ""
-        )
+        promotion_ready_trial_id = selected_trial_id if statistical_gate_passed else ""
 
         return DevelopmentProgramResult(
             campaign_id=campaign_id,
@@ -402,6 +392,7 @@ class DevelopmentResearchAutopilot:
             robustness_evidence=robustness_evidence,
             robustness_eligible_trial_ids=robustness_eligible_trial_ids,
             selected_trial_id=selected_trial_id,
+            pbo_diagnostics=pbo_diagnostics,
             pbo_evidence=pbo,
             pbo_unavailable_reason=pbo_reason,
             deflated_sharpe_evidence=dsr,
@@ -418,10 +409,21 @@ class DevelopmentResearchAutopilot:
         completed: tuple[CandidateDevelopmentResult, ...],
         failed_trial_ids: tuple[str, ...],
         partitions: int,
-    ) -> tuple[PBOEvidence | None, str]:
+    ) -> tuple[PBOEvidence | None, str, PBOReadinessDiagnostics | None]:
         if failed_trial_ids:
-            return None, "PBO unavailable because at least one frozen trial failed"
+            return (
+                None,
+                "PBO unavailable because at least one frozen trial failed",
+                None,
+            )
         return_series = {item.trial_id: item.period_returns for item in completed}
+        try:
+            diagnostics = diagnose_pbo_readiness(
+                return_series,
+                partitions=partitions,
+            )
+        except ValueError as exc:
+            return None, str(exc), None
         try:
             evidence = campaign_pbo(
                 self._ledger,
@@ -430,8 +432,8 @@ class DevelopmentResearchAutopilot:
                 partitions=partitions,
             )
         except (TrialGovernanceError, ValueError) as exc:
-            return None, str(exc)
-        return evidence, ""
+            return None, str(exc), diagnostics
+        return evidence, "", diagnostics
 
     def _deflated_sharpe(
         self,
