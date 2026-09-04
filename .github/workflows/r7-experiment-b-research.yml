@@ -1,0 +1,276 @@
+name: R7 Experiment B Research Matrix
+
+on:
+  push:
+    branches: ["feature/r7-strategy-foundation"]
+    paths:
+      - ".github/workflows/r7-experiment-b-research.yml"
+      - "scripts/run_r7_experiment_b.py"
+      - "scripts/append_r7_experiment_b_regime_evidence.py"
+      - "scripts/append_r7_regime_evidence.py"
+      - "scripts/summarize_r7_regime_reports.py"
+      - "src/autotrade/research/experiment_b.py"
+      - "src/autotrade/research/autopilot.py"
+      - "src/autotrade/research/robustness.py"
+      - "src/autotrade/research/regime_stability.py"
+      - "src/autotrade/research/statistical_diagnostics.py"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  research:
+    name: B-${{ matrix.symbol }}-${{ matrix.interval }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - symbol: BTCUSDT
+            interval: 1h
+            price_tick: "0.01"
+            quantity_step: "0.00001"
+            research_quantity: "0.10"
+            train_bars: 1800
+            development_bars: 2401
+            wf_train: 600
+            wf_eval: 300
+            wf_step: 300
+          - symbol: ETHUSDT
+            interval: 1h
+            price_tick: "0.01"
+            quantity_step: "0.0001"
+            research_quantity: "2"
+            train_bars: 1800
+            development_bars: 2401
+            wf_train: 600
+            wf_eval: 300
+            wf_step: 300
+          - symbol: SOLUSDT
+            interval: 1h
+            price_tick: "0.01"
+            quantity_step: "0.001"
+            research_quantity: "50"
+            train_bars: 1800
+            development_bars: 2401
+            wf_train: 600
+            wf_eval: 300
+            wf_step: 300
+          - symbol: BTCUSDT
+            interval: 4h
+            price_tick: "0.01"
+            quantity_step: "0.00001"
+            research_quantity: "0.10"
+            train_bars: 500
+            development_bars: 801
+            wf_train: 300
+            wf_eval: 100
+            wf_step: 100
+          - symbol: ETHUSDT
+            interval: 4h
+            price_tick: "0.01"
+            quantity_step: "0.0001"
+            research_quantity: "2"
+            train_bars: 500
+            development_bars: 801
+            wf_train: 300
+            wf_eval: 100
+            wf_step: 100
+          - symbol: SOLUSDT
+            interval: 4h
+            price_tick: "0.01"
+            quantity_step: "0.001"
+            research_quantity: "50"
+            train_bars: 500
+            development_bars: 801
+            wf_train: 300
+            wf_eval: 100
+            wf_step: 100
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install
+        run: python -m pip install -e '.[dev]'
+
+      - name: Compile Experiment B surfaces
+        run: |
+          python -m py_compile \
+            src/autotrade/research/experiment_b.py \
+            scripts/run_r7_experiment_b.py \
+            scripts/append_r7_experiment_b_regime_evidence.py
+
+      - name: Run preregistered Experiment B DEVELOPMENT campaign
+        env:
+          CAMPAIGN_ID: B-${{ matrix.symbol }}-${{ matrix.interval }}-20250901-20260601
+        run: |
+          python scripts/run_r7_experiment_b.py \
+            --symbol "${{ matrix.symbol }}" \
+            --interval "${{ matrix.interval }}" \
+            --start "2025-09-01T00:00:00Z" \
+            --end "2026-06-01T00:00:00Z" \
+            --train-bars "${{ matrix.train_bars }}" \
+            --development-bars "${{ matrix.development_bars }}" \
+            --price-tick "${{ matrix.price_tick }}" \
+            --quantity-step "${{ matrix.quantity_step }}" \
+            --research-quantity "${{ matrix.research_quantity }}" \
+            --initial-cash "100000" \
+            --fee-bps "10" \
+            --half-spread-bps "2" \
+            --slippage-bps "5" \
+            --max-leverage "1" \
+            --max-volume-participation "0.01" \
+            --min-net-return "-0.05" \
+            --min-sharpe "0.25" \
+            --max-drawdown "0.25" \
+            --min-profit-factor "1.0" \
+            --min-fills "5" \
+            --pbo-partitions "8" \
+            --walk-forward-train-bars "${{ matrix.wf_train }}" \
+            --walk-forward-evaluation-bars "${{ matrix.wf_eval }}" \
+            --walk-forward-step-bars "${{ matrix.wf_step }}" \
+            --walk-forward-min-folds "3" \
+            --min-positive-fold-ratio "0.50" \
+            --min-median-fold-sharpe "0.0" \
+            --min-worst-fold-net-return "-0.10" \
+            --max-worst-fold-drawdown "0.30" \
+            --min-stress-pass-ratio "0.6666666667" \
+            --min-worst-stress-net-return "-0.10" \
+            --max-worst-stress-drawdown "0.35" \
+            --min-deflated-sharpe-probability "0.95" \
+            --max-pbo "0.50" \
+            --campaign-id "${CAMPAIGN_ID}" \
+            --code-version "${GITHUB_SHA}" \
+            --output-dir "artifacts/r7-b/${CAMPAIGN_ID}" \
+            --enable-public-data
+
+      - name: Append TRAIN-calibrated regime evidence
+        env:
+          CAMPAIGN_ID: B-${{ matrix.symbol }}-${{ matrix.interval }}-20250901-20260601
+        run: |
+          python scripts/append_r7_experiment_b_regime_evidence.py \
+            --report "artifacts/r7-b/${CAMPAIGN_ID}/${CAMPAIGN_ID}-report.json" \
+            --dataset "artifacts/r7-b/${CAMPAIGN_ID}/${CAMPAIGN_ID}-dataset.json" \
+            --initial-cash "100000" \
+            --max-leverage "1" \
+            --max-volume-participation "0.01" \
+            --volatility-window-bars "24" \
+            --low-quantile "0.33" \
+            --high-quantile "0.67" \
+            --min-calibration-observations "30" \
+            --min-observed-states "2" \
+            --min-observations-per-state "10" \
+            --min-worst-state-return "-0.10" \
+            --min-worst-state-sharpe "-1.0"
+
+      - name: Prove Experiment B and HOLDOUT boundaries
+        env:
+          CAMPAIGN_ID: B-${{ matrix.symbol }}-${{ matrix.interval }}-20250901-20260601
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          campaign = os.environ["CAMPAIGN_ID"]
+          path = Path("artifacts/r7-b") / campaign / f"{campaign}-report.json"
+          payload = json.loads(path.read_text(encoding="utf-8"))
+          assert payload["experiment"] == "B"
+          assert payload["program_id"] == "r7-experiment-b"
+          assert payload["candidate_count"] == 30
+          assert payload["protected_holdout"]["checked_out"] is False
+          assert payload["protected_holdout"]["bar_count"] > 0
+          assert payload["regime_stability_gate"]["calibration_phase"] == "TRAIN"
+          assert payload["regime_stability_gate"]["evaluation_phase"] == "DEVELOPMENT"
+          assert set(payload["regime_stability_gate"]["evaluated_trial_ids"]) == set(
+              payload["robustness_eligible_trial_ids"]
+          )
+
+          final = payload["holdout_ready_trial_id"]
+          if final:
+              assert final == payload["selected_trial_id"]
+              assert final == payload["promotion_ready_trial_id"]
+              assert payload["statistical_gate"]["passed"] is True
+              assert payload["regime_stability_gate"]["selected_passed"] is True
+          print(
+              f"Experiment B {payload['symbol']} {payload['interval']} "
+              f"robust={bool(payload['selected_trial_id'])} "
+              f"statistical={bool(payload['promotion_ready_trial_id'])} "
+              f"regime={payload['regime_stability_gate']['selected_passed']} "
+              f"holdout_ready={bool(final)}"
+          )
+          PY
+
+      - name: Upload Experiment B evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: r7-b-${{ matrix.symbol }}-${{ matrix.interval }}
+          path: artifacts/r7-b/B-${{ matrix.symbol }}-${{ matrix.interval }}-20250901-20260601/
+          if-no-files-found: error
+          retention-days: 30
+
+  summary:
+    name: Aggregate Experiment B evidence
+    needs: research
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Download Experiment B artifacts
+        uses: actions/download-artifact@v5
+        with:
+          pattern: r7-b-*
+          path: artifacts/r7-b-matrix
+          merge-multiple: true
+
+      - name: Aggregate Experiment B matrix
+        run: |
+          python scripts/summarize_r7_regime_reports.py \
+            artifacts/r7-b-matrix \
+            artifacts/r7-b-matrix-summary.json
+
+      - name: Validate Experiment B aggregate
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          payload = json.loads(
+              Path("artifacts/r7-b-matrix-summary.json").read_text(encoding="utf-8")
+          )
+          assert payload["campaign_count"] == 6
+          assert payload["all_holdouts_untouched"] is True
+          assert payload["campaigns_holdout_ready"] <= payload["campaigns_statistically_promotion_ready"]
+          assert payload["campaigns_holdout_ready"] <= payload["campaigns_selected_regime_pass"]
+          print(
+              "experiment=B campaigns=6 "
+              f"robust={payload['campaigns_with_robust_selection']} "
+              f"statistical={payload['campaigns_statistically_promotion_ready']} "
+              f"regime={payload['campaigns_selected_regime_pass']} "
+              f"holdout_ready={payload['campaigns_holdout_ready']}"
+          )
+          PY
+
+      - name: Upload Experiment B summary
+        uses: actions/upload-artifact@v4
+        with:
+          name: r7-b-matrix-summary
+          path: artifacts/r7-b-matrix-summary.json
+          if-no-files-found: error
+          retention-days: 30
