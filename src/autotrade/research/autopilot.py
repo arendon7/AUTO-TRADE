@@ -14,6 +14,14 @@ from .multiple_testing import (
     campaign_deflated_sharpe,
     campaign_pbo,
 )
+from .robustness import (
+    CandidateRobustnessEvidence,
+    RobustnessEvaluator,
+    RobustnessPolicy,
+    StressScenario,
+    WalkForwardConfig,
+    robust_rank_key,
+)
 from .strategy_catalog import LibraryStrategySpec
 from .strategy_space import StrategyProgram
 from .tournament import (
@@ -93,6 +101,9 @@ class DevelopmentProgramResult:
     candidates: tuple[CandidateDevelopmentResult, ...]
     tournament: TournamentEvidence
     policy_eligible_trial_ids: tuple[str, ...]
+    tournament_selected_trial_id: str
+    robustness_evidence: tuple[CandidateRobustnessEvidence, ...]
+    robustness_eligible_trial_ids: tuple[str, ...]
     selected_trial_id: str
     pbo_evidence: PBOEvidence | None
     pbo_unavailable_reason: str
@@ -106,7 +117,8 @@ class DevelopmentResearchAutopilot:
     This coordinator accepts only an already-designated DEVELOPMENT dataset. It
     cannot fetch market data, consume HOLDOUT permits, submit orders or interact
     with brokers. Every candidate is preregistered before its backtest result is
-    written to the trial ledger.
+    written to the trial ledger. Optional robustness evaluation remains entirely
+    inside the DEVELOPMENT dataset and therefore cannot contaminate HOLDOUT.
     """
 
     def __init__(self, *, ledger: SQLiteTrialLedger) -> None:
@@ -124,6 +136,9 @@ class DevelopmentResearchAutopilot:
         code_version: str,
         started_at: datetime,
         pbo_partitions: int = 8,
+        robustness_policy: RobustnessPolicy | None = None,
+        walk_forward_config: WalkForwardConfig | None = None,
+        stress_scenarios: tuple[StressScenario, ...] = (),
     ) -> DevelopmentProgramResult:
         if not campaign_id.strip():
             raise ValueError("campaign_id is required")
@@ -133,6 +148,12 @@ class DevelopmentResearchAutopilot:
             raise ValueError("started_at must be timezone-aware")
         if pbo_partitions < 4 or pbo_partitions % 2:
             raise ValueError("pbo_partitions must be an even integer >= 4")
+        if (robustness_policy is None) != (walk_forward_config is None):
+            raise ValueError(
+                "robustness_policy and walk_forward_config must be provided together"
+            )
+        if robustness_policy is None and stress_scenarios:
+            raise ValueError("stress_scenarios require robustness_policy")
 
         candidates = program.candidates()
         trial_ids = program.expected_trial_ids
@@ -226,7 +247,7 @@ class DevelopmentResearchAutopilot:
 
         eligible = tuple(sorted(item.trial_id for item in completed if item.eligible))
         eligible_set = set(eligible)
-        selected_trial_id = next(
+        tournament_selected_trial_id = next(
             (
                 entry.trial_id
                 for entry in tournament.entries
@@ -234,6 +255,45 @@ class DevelopmentResearchAutopilot:
             ),
             "",
         )
+
+        robustness_evidence: tuple[CandidateRobustnessEvidence, ...] = ()
+        robustness_eligible_trial_ids: tuple[str, ...] = ()
+        selected_trial_id = tournament_selected_trial_id
+        if robustness_policy is not None and walk_forward_config is not None:
+            evaluator = RobustnessEvaluator()
+            evidence_items: list[CandidateRobustnessEvidence] = []
+            strategy_to_trial: dict[str, str] = {}
+            for trial_id in eligible:
+                candidate = by_trial[trial_id]
+                strategy_to_trial[candidate.strategy_id] = trial_id
+                evidence_items.append(
+                    evaluator.evaluate(
+                        candidate=candidate,
+                        development_dataset=development_dataset,
+                        base_config=backtest_config,
+                        walk_forward_config=walk_forward_config,
+                        stress_scenarios=stress_scenarios,
+                        policy=robustness_policy,
+                    )
+                )
+            robustness_evidence = tuple(
+                sorted(evidence_items, key=lambda item: item.strategy_id)
+            )
+            robustness_eligible_trial_ids = tuple(
+                sorted(
+                    strategy_to_trial[item.strategy_id]
+                    for item in robustness_evidence
+                    if item.passed
+                )
+            )
+            passed_evidence = tuple(
+                item for item in robustness_evidence if item.passed
+            )
+            if passed_evidence:
+                robust_winner = sorted(passed_evidence, key=robust_rank_key)[0]
+                selected_trial_id = strategy_to_trial[robust_winner.strategy_id]
+            else:
+                selected_trial_id = ""
 
         pbo, pbo_reason = self._pbo(
             campaign_id=campaign_id,
@@ -255,6 +315,9 @@ class DevelopmentResearchAutopilot:
             candidates=tuple(sorted(completed, key=lambda item: item.trial_id)),
             tournament=tournament,
             policy_eligible_trial_ids=eligible,
+            tournament_selected_trial_id=tournament_selected_trial_id,
+            robustness_evidence=robustness_evidence,
+            robustness_eligible_trial_ids=robustness_eligible_trial_ids,
             selected_trial_id=selected_trial_id,
             pbo_evidence=pbo,
             pbo_unavailable_reason=pbo_reason,
