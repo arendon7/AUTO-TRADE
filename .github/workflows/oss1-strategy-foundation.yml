@@ -1,0 +1,56 @@
+name: OSS-1 Strategy Foundation
+
+on:
+  pull_request:
+    paths:
+      - "src/autotrade/research/dsl.py"
+      - "src/autotrade/research/strategy_catalog.py"
+      - "src/autotrade/research/oss_campaign.py"
+      - "src/autotrade/research/__init__.py"
+      - "tests/test_research_oss_strategy_dsl.py"
+      - "tests/test_research_oss_campaign.py"
+      - "tests/test_strategy_catalog.py"
+      - "knowledge/20_RESEARCH/OSS_STRATEGY_FOUNDATION.md"
+      - "knowledge/20_RESEARCH/OSS1_IMPLEMENTATION.md"
+      - ".github/workflows/oss1-strategy-foundation.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  oss1:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install
+        run: python -m pip install -e ".[dev]"
+
+      - name: Compile research surface
+        run: |
+          python -m py_compile \
+            src/autotrade/research/dsl.py \
+            src/autotrade/research/strategy_catalog.py \
+            src/autotrade/research/oss_campaign.py
+
+      - name: OSS-1 strategy and campaign tests
+        run: |
+          pytest -q \
+            tests/test_research_oss_strategy_dsl.py \
+            tests/test_research_oss_campaign.py \
+            tests/test_strategy_catalog.py \
+            tests/test_research_r1_equivalence.py \
+            tests/test_research_r1_boundaries.py
+
+      - name: Research authority boundary
+        run: python scripts/check_research_authority.py
+
+      - name: W83 strategy-version boundary re-proof
+        run: python scripts/check_w83_strategy_version_binding_boundary.py
