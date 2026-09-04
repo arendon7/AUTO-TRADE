@@ -12,6 +12,7 @@ from autotrade.research.autopilot import (
 from autotrade.research.backtest import BacktestConfig
 from autotrade.research.costs import ExecutionCostModel
 from autotrade.research.market import Bar, InstrumentMetadata, MarketDataset
+from autotrade.research.robustness import RobustnessPolicy, WalkForwardConfig
 from autotrade.research.strategy_space import StrategyProgram, StrategySearchSpace
 from autotrade.research.trials import SQLiteTrialLedger, TrialStatus
 
@@ -98,6 +99,25 @@ def _program() -> StrategyProgram:
     )
 
 
+def _loose_development_policy() -> DevelopmentSelectionPolicy:
+    return DevelopmentSelectionPolicy(
+        min_net_return=-1.0,
+        min_sharpe=-1000.0,
+        max_drawdown=1.0,
+        min_profit_factor=0.0,
+        min_fills=0,
+    )
+
+
+def _walk_forward() -> WalkForwardConfig:
+    return WalkForwardConfig(
+        train_bars=10,
+        evaluation_bars=6,
+        step_bars=6,
+        min_folds=3,
+    )
+
+
 def test_autopilot_preregisters_complete_program_and_ranks_development(tmp_path, now) -> None:
     ledger = SQLiteTrialLedger(tmp_path / "autopilot.db")
     program = _program()
@@ -107,13 +127,7 @@ def test_autopilot_preregisters_complete_program_and_ranks_development(tmp_path,
         program=program,
         development_dataset=_dataset(now),
         backtest_config=_config(),
-        selection_policy=DevelopmentSelectionPolicy(
-            min_net_return=-1.0,
-            min_sharpe=-1000.0,
-            max_drawdown=1.0,
-            min_profit_factor=0.0,
-            min_fills=0,
-        ),
+        selection_policy=_loose_development_policy(),
         code_version="test-code-version",
         started_at=now,
         pbo_partitions=4,
@@ -128,12 +142,71 @@ def test_autopilot_preregisters_complete_program_and_ranks_development(tmp_path,
     assert result.program_hash == program.canonical_hash
     assert result.tournament.campaign_id == "campaign-r7"
     assert result.tournament.winner_trial_id
+    assert result.tournament_selected_trial_id == result.tournament.winner_trial_id
     assert result.selected_trial_id == result.tournament.winner_trial_id
+    assert result.robustness_evidence == ()
+    assert result.robustness_eligible_trial_ids == ()
     assert set(result.policy_eligible_trial_ids) == set(program.expected_trial_ids)
     assert all(
         ledger.get_trial(trial_id).status is TrialStatus.COMPLETED  # type: ignore[union-attr]
         for trial_id in program.expected_trial_ids
     )
+
+
+def test_autopilot_robustness_gate_can_reorder_selection_without_holdout(tmp_path, now) -> None:
+    ledger = SQLiteTrialLedger(tmp_path / "robust.db")
+    result = DevelopmentResearchAutopilot(ledger=ledger).run(
+        campaign_id="campaign-robust",
+        program=_program(),
+        development_dataset=_dataset(now),
+        backtest_config=_config(),
+        selection_policy=_loose_development_policy(),
+        code_version="test-code-version",
+        started_at=now,
+        pbo_partitions=4,
+        robustness_policy=RobustnessPolicy(
+            min_positive_fold_ratio=0.0,
+            min_median_fold_sharpe=-1_000_000,
+            min_worst_fold_net_return=-1.0,
+            max_worst_fold_drawdown=1.0,
+            min_stress_pass_ratio=0.0,
+            min_worst_stress_net_return=-1.0,
+            max_worst_stress_drawdown=1.0,
+        ),
+        walk_forward_config=_walk_forward(),
+    )
+
+    assert result.robustness_evidence
+    assert result.robustness_eligible_trial_ids
+    assert result.selected_trial_id in result.robustness_eligible_trial_ids
+    assert result.tournament_selected_trial_id
+    assert ledger.require_complete_campaign("campaign-robust").complete
+
+
+def test_autopilot_robustness_gate_can_veto_all_candidates(tmp_path, now) -> None:
+    result = DevelopmentResearchAutopilot(
+        ledger=SQLiteTrialLedger(tmp_path / "robust-veto.db")
+    ).run(
+        campaign_id="campaign-robust-veto",
+        program=_program(),
+        development_dataset=_dataset(now),
+        backtest_config=_config(),
+        selection_policy=_loose_development_policy(),
+        code_version="test-code-version",
+        started_at=now,
+        pbo_partitions=4,
+        robustness_policy=RobustnessPolicy(
+            min_positive_fold_ratio=1.0,
+            min_median_fold_sharpe=1_000_000,
+            min_worst_fold_net_return=0.5,
+            max_worst_fold_drawdown=0.0,
+        ),
+        walk_forward_config=_walk_forward(),
+    )
+
+    assert result.tournament_selected_trial_id
+    assert result.robustness_eligible_trial_ids == ()
+    assert result.selected_trial_id == ""
 
 
 def test_autopilot_records_no_synthetic_p_values(tmp_path, now) -> None:
@@ -222,6 +295,19 @@ def test_autopilot_rejects_invalid_governance_inputs(tmp_path, now) -> None:
             code_version="code",
             started_at=now.replace(tzinfo=None),
             pbo_partitions=4,
+        )
+
+    with pytest.raises(ValueError, match="provided together"):
+        autopilot.run(
+            campaign_id="bad-robustness",
+            program=_program(),
+            development_dataset=_dataset(now),
+            backtest_config=_config(),
+            selection_policy=DevelopmentSelectionPolicy(),
+            code_version="code",
+            started_at=now,
+            pbo_partitions=4,
+            robustness_policy=RobustnessPolicy(),
         )
 
 
