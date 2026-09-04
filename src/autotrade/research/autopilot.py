@@ -84,6 +84,71 @@ class DevelopmentSelectionPolicy:
 
 
 @dataclass(frozen=True, slots=True)
+class StatisticalSelectionPolicy:
+    """Fail-closed DEVELOPMENT evidence required before a HOLDOUT candidate exists.
+
+    This policy never opens or authorizes HOLDOUT. It only determines whether the
+    frozen DEVELOPMENT evidence is strong enough to name a candidate that *may*
+    later be bound to the existing one-use HOLDOUT authorization workflow.
+    """
+
+    min_deflated_sharpe_probability: float = 0.95
+    max_pbo: float = 0.50
+    require_pbo: bool = True
+    require_deflated_sharpe: bool = True
+
+    def __post_init__(self) -> None:
+        if (
+            not isfinite(self.min_deflated_sharpe_probability)
+            or self.min_deflated_sharpe_probability < 0
+            or self.min_deflated_sharpe_probability > 1
+        ):
+            raise ValueError("min_deflated_sharpe_probability must be in [0,1]")
+        if not isfinite(self.max_pbo) or self.max_pbo < 0 or self.max_pbo > 1:
+            raise ValueError("max_pbo must be in [0,1]")
+
+    def evaluate(
+        self,
+        *,
+        selected_trial_id: str,
+        tournament_winner_trial_id: str,
+        pbo_evidence: PBOEvidence | None,
+        deflated_sharpe_evidence: DeflatedSharpeEvidence | None,
+    ) -> tuple[bool, tuple[str, ...]]:
+        reasons: list[str] = []
+        if not selected_trial_id:
+            reasons.append("NO_ROBUST_SELECTION")
+        elif selected_trial_id != tournament_winner_trial_id:
+            # Current Deflated Sharpe implementation is intentionally bound to
+            # the maximum-Sharpe frozen-family winner. A different robustness
+            # winner therefore cannot inherit that evidence.
+            reasons.append("ROBUST_WINNER_NOT_SHARPE_WINNER")
+
+        if pbo_evidence is None:
+            if self.require_pbo:
+                reasons.append("PBO_UNAVAILABLE")
+        elif pbo_evidence.pbo > self.max_pbo:
+            reasons.append("PBO_ABOVE_LIMIT")
+
+        if deflated_sharpe_evidence is None:
+            if self.require_deflated_sharpe:
+                reasons.append("DEFLATED_SHARPE_UNAVAILABLE")
+        else:
+            if (
+                selected_trial_id
+                and deflated_sharpe_evidence.selected_trial_id != selected_trial_id
+            ):
+                reasons.append("DEFLATED_SHARPE_NOT_BOUND_TO_SELECTION")
+            if (
+                deflated_sharpe_evidence.deflated_sharpe_probability
+                < self.min_deflated_sharpe_probability
+            ):
+                reasons.append("DEFLATED_SHARPE_BELOW_MINIMUM")
+
+        return not reasons, tuple(reasons)
+
+
+@dataclass(frozen=True, slots=True)
 class CandidateDevelopmentResult:
     trial_id: str
     strategy_id: str
@@ -109,6 +174,9 @@ class DevelopmentProgramResult:
     pbo_unavailable_reason: str
     deflated_sharpe_evidence: DeflatedSharpeEvidence | None
     deflated_sharpe_unavailable_reason: str
+    statistical_gate_passed: bool
+    statistical_gate_reasons: tuple[str, ...]
+    promotion_ready_trial_id: str
 
 
 class DevelopmentResearchAutopilot:
@@ -139,6 +207,7 @@ class DevelopmentResearchAutopilot:
         robustness_policy: RobustnessPolicy | None = None,
         walk_forward_config: WalkForwardConfig | None = None,
         stress_scenarios: tuple[StressScenario, ...] = (),
+        statistical_policy: StatisticalSelectionPolicy | None = None,
     ) -> DevelopmentProgramResult:
         if not campaign_id.strip():
             raise ValueError("campaign_id is required")
@@ -286,9 +355,7 @@ class DevelopmentResearchAutopilot:
                     if item.passed
                 )
             )
-            passed_evidence = tuple(
-                item for item in robustness_evidence if item.passed
-            )
+            passed_evidence = tuple(item for item in robustness_evidence if item.passed)
             if passed_evidence:
                 robust_winner = sorted(passed_evidence, key=robust_rank_key)[0]
                 selected_trial_id = strategy_to_trial[robust_winner.strategy_id]
@@ -308,6 +375,22 @@ class DevelopmentResearchAutopilot:
             failed_trial_ids=accounting.failed_trial_ids,
         )
 
+        if statistical_policy is None:
+            statistical_gate_passed = False
+            statistical_gate_reasons = ("STATISTICAL_GATE_NOT_CONFIGURED",)
+        else:
+            statistical_gate_passed, statistical_gate_reasons = (
+                statistical_policy.evaluate(
+                    selected_trial_id=selected_trial_id,
+                    tournament_winner_trial_id=tournament.winner_trial_id,
+                    pbo_evidence=pbo,
+                    deflated_sharpe_evidence=dsr,
+                )
+            )
+        promotion_ready_trial_id = (
+            selected_trial_id if statistical_gate_passed else ""
+        )
+
         return DevelopmentProgramResult(
             campaign_id=campaign_id,
             program_hash=program.canonical_hash,
@@ -323,6 +406,9 @@ class DevelopmentResearchAutopilot:
             pbo_unavailable_reason=pbo_reason,
             deflated_sharpe_evidence=dsr,
             deflated_sharpe_unavailable_reason=dsr_reason,
+            statistical_gate_passed=statistical_gate_passed,
+            statistical_gate_reasons=statistical_gate_reasons,
+            promotion_ready_trial_id=promotion_ready_trial_id,
         )
 
     def _pbo(
@@ -402,8 +488,6 @@ def _trial_metrics(result: BacktestResult) -> Mapping[str, str | int | float]:
         "rejected_signals": metrics.rejected_signals,
         "backtest_result_hash": result.result_hash,
     }
-    # The ledger JSON is strict. Preserve non-finite diagnostics as strings rather
-    # than serializing non-standard JSON numbers. Ranking metrics remain numeric.
     normalized: dict[str, str | int | float] = {}
     for name, value in raw.items():
         if isinstance(value, float) and not isfinite(value):
@@ -455,4 +539,5 @@ __all__ = [
     "DevelopmentProgramResult",
     "DevelopmentResearchAutopilot",
     "DevelopmentSelectionPolicy",
+    "StatisticalSelectionPolicy",
 ]
