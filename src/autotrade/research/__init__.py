@@ -38,6 +38,14 @@ from .gates import (
 )
 from .market import Bar, InstrumentMetadata, MarketDataset
 from .oss_campaign import OSSCampaignPlan, build_oss1_development_campaign, oss1_candidate_count
+from .oss2_campaign import (
+    CommonWindowMetricsEvidence,
+    OSS2CampaignPlan,
+    backtest_config_from_oss2_trial,
+    build_oss2_development_campaign,
+    evaluate_oss2_common_window,
+    oss2_candidate_count,
+)
 from .strategy import ResearchSignal, ResearchStrategy
 from .universe import AlignedMarketUniverse, InvalidAlignedUniverse
 from .validation import SQLiteValidationRegistry, ValidationEvidence, ValidationEvidenceSpec
@@ -49,6 +57,7 @@ __all__ = [
     "BacktestEngine",
     "BacktestResult",
     "Bar",
+    "CommonWindowMetricsEvidence",
     "CrossSectionalBacktestConfig",
     "CrossSectionalBacktestEngine",
     "CrossSectionalBacktestMetrics",
@@ -67,6 +76,7 @@ __all__ = [
     "MovingAverageCrossStrategy",
     "MovingBlockBootstrapConfig",
     "MovingBlockBootstrapResult",
+    "OSS2CampaignPlan",
     "OSSCampaignPlan",
     "ResearchSignal",
     "ResearchStrategy",
@@ -79,10 +89,14 @@ __all__ = [
     "StrategySpec",
     "ValidationEvidence",
     "ValidationEvidenceSpec",
+    "backtest_config_from_oss2_trial",
     "build_oss1_development_campaign",
+    "build_oss2_development_campaign",
+    "evaluate_oss2_common_window",
     "evaluate_sample_adequacy",
     "evaluate_walk_forward_robustness",
     "moving_block_bootstrap",
     "oss1_candidate_count",
+    "oss2_candidate_count",
     "rank_cross_sectional_momentum",
 ]
