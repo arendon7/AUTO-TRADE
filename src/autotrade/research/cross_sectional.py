@@ -220,8 +220,9 @@ def rank_cross_sectional_momentum(
             "as_of_bar_index must leave a complete historical lookback inside universe"
         )
 
+    historical_universe = universe.prefix(as_of_bar_index + 1)
     raw: list[tuple[str, Decimal, Decimal, bool, str]] = []
-    for dataset in universe.datasets:
+    for dataset in historical_universe.datasets:
         current = dataset.bars[as_of_bar_index]
         past = dataset.bars[as_of_bar_index - config.lookback_bars]
         momentum = current.close / past.close - _ONE
@@ -269,16 +270,16 @@ def rank_cross_sectional_momentum(
         sorted(
             (
                 (symbol, selected_weight if symbol in selected_set else _ZERO)
-                for symbol in universe.symbols
+                for symbol in historical_universe.symbols
             ),
             key=lambda item: item[0],
         )
     )
     return CrossSectionalRankingEvidence(
-        universe_hash=universe.universe_hash,
+        universe_hash=historical_universe.universe_hash,
         config_fingerprint=config.fingerprint,
         as_of_bar_index=as_of_bar_index,
-        as_of=universe.datasets[0].bars[as_of_bar_index].ended_at,
+        as_of=historical_universe.datasets[0].bars[as_of_bar_index].ended_at,
         rankings=rankings,
         target_weights=weights,
     )
