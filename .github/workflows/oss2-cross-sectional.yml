@@ -54,8 +54,11 @@ jobs:
       - name: Existing dependence/allocation regression
         run: |
           pytest -q \
-            tests/test_research_portfolio_dependence.py \
-            tests/test_research_allocation_robustness.py
+            tests/test_r4_portfolio_dependence.py \
+            tests/test_r4_dependence_integrity.py \
+            tests/test_r4_dependence_universe_integrity.py \
+            tests/test_r4_allocation_robustness.py \
+            tests/test_r4_allocation_exact_normalization.py
 
       - name: Research authority boundary
         run: python scripts/check_research_authority.py
