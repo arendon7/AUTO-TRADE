@@ -16,6 +16,9 @@ on:
       - "src/autotrade/research/strategy_library.py"
       - "src/autotrade/research/strategy_space.py"
       - "scripts/run_r7_experiment_b.py"
+      - "scripts/run_r7_experiment_c.py"
+      - "scripts/append_r7_experiment_c_regime_evidence.py"
+      - "scripts/summarize_r7_experiment_c_breadth.py"
       - "tests/test_research_autopilot.py"
       - "tests/test_research_cross_market_policy.py"
       - "tests/test_research_experiment_b.py"
@@ -48,7 +51,7 @@ jobs:
       - name: Install
         run: python -m pip install -e '.[dev]'
 
-      - name: Compile R7 research modules
+      - name: Compile R7 research modules and Experiment C surfaces
         run: |
           python -m py_compile \
             src/autotrade/research/autopilot.py \
@@ -61,7 +64,10 @@ jobs:
             src/autotrade/research/strategy_catalog.py \
             src/autotrade/research/strategy_library.py \
             src/autotrade/research/strategy_space.py \
-            scripts/run_r7_experiment_b.py
+            scripts/run_r7_experiment_b.py \
+            scripts/run_r7_experiment_c.py \
+            scripts/append_r7_experiment_c_regime_evidence.py \
+            scripts/summarize_r7_experiment_c_breadth.py
 
       - name: R7 focused tests
         run: |
