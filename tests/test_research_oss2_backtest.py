@@ -31,7 +31,7 @@ def dataset(now, *, symbol, closes, volume=100000):
             timeframe_seconds=60,
             open=Decimal(str(close)),
             high=Decimal(str(close)) + Decimal("1"),
-            low=Decimal(str(close)) - Decimal("1"),
+            low=max(Decimal(str(close)) - Decimal("1"), Decimal("0.01")),
             close=Decimal(str(close)),
             volume=Decimal(str(volume)),
         )
