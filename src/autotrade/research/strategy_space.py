@@ -33,6 +33,16 @@ def _ordered_dimensions(
     }
 
 
+def _hash_payload(payload: object) -> str:
+    raw = json.dumps(
+        payload,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
+    return sha256(raw).hexdigest()
+
+
 @dataclass(frozen=True, slots=True)
 class StrategySearchSpace:
     """Finite, deterministic parameter search space for one audited strategy kind.
@@ -84,20 +94,15 @@ class StrategySearchSpace:
 
     @property
     def canonical_hash(self) -> str:
-        payload = {
-            "family_id": self.family_id,
-            "strategy_version": self.strategy_version,
-            "kind": self.kind,
-            "dimensions": _ordered_dimensions(self.dimensions),
-            "max_candidates": self.max_candidates,
-        }
-        raw = json.dumps(
-            payload,
-            sort_keys=True,
-            separators=(",", ":"),
-            allow_nan=False,
-        ).encode("utf-8")
-        return sha256(raw).hexdigest()
+        return _hash_payload(
+            {
+                "family_id": self.family_id,
+                "strategy_version": self.strategy_version,
+                "kind": self.kind,
+                "dimensions": _ordered_dimensions(self.dimensions),
+                "max_candidates": self.max_candidates,
+            }
+        )
 
     def candidates(self) -> tuple[LibraryStrategySpec, ...]:
         ordered = _ordered_dimensions(self.dimensions)
@@ -106,20 +111,14 @@ class StrategySearchSpace:
         result: list[LibraryStrategySpec] = []
         for values in product(*ordered_values):
             parameters = dict(zip(names, values, strict=True))
-            identity_payload = {
-                "family_id": self.family_id,
-                "strategy_version": self.strategy_version,
-                "kind": self.kind,
-                "parameters": parameters,
-            }
-            identity_hash = sha256(
-                json.dumps(
-                    identity_payload,
-                    sort_keys=True,
-                    separators=(",", ":"),
-                    allow_nan=False,
-                ).encode("utf-8")
-            ).hexdigest()[:16]
+            identity_hash = _hash_payload(
+                {
+                    "family_id": self.family_id,
+                    "strategy_version": self.strategy_version,
+                    "kind": self.kind,
+                    "parameters": parameters,
+                }
+            )[:16]
             strategy_id = f"{self.family_id}-{identity_hash}"
             try:
                 candidate = LibraryStrategySpec(
@@ -142,4 +141,78 @@ class StrategySearchSpace:
         return tuple(result)
 
 
-__all__ = ["StrategySearchSpace", "StrategySpaceError"]
+@dataclass(frozen=True, slots=True)
+class StrategyProgram:
+    """Frozen multi-family DEVELOPMENT universe.
+
+    A program is the unit that should be preregistered when automatic research
+    compares several strategy families. Its candidate universe is complete,
+    deterministic and bounded before any result is observed.
+    """
+
+    program_id: str
+    spaces: tuple[StrategySearchSpace, ...]
+    max_total_candidates: int = 512
+
+    def __post_init__(self) -> None:
+        if not self.program_id.strip():
+            raise StrategySpaceError("program_id is required")
+        if not self.spaces:
+            raise StrategySpaceError("spaces cannot be empty")
+        if self.max_total_candidates <= 0:
+            raise StrategySpaceError("max_total_candidates must be > 0")
+        family_ids = tuple(space.family_id for space in self.spaces)
+        if len(family_ids) != len(set(family_ids)):
+            raise StrategySpaceError("program family_id values must be unique")
+        if self.candidate_count > self.max_total_candidates:
+            raise StrategySpaceError(
+                f"program candidate count {self.candidate_count} exceeds "
+                f"max_total_candidates {self.max_total_candidates}"
+            )
+        candidates = self.candidates()
+        if len({item.strategy_id for item in candidates}) != len(candidates):
+            raise StrategySpaceError("program candidate strategy identifiers are not unique")
+
+    @property
+    def candidate_count(self) -> int:
+        return sum(space.candidate_count for space in self.spaces)
+
+    @property
+    def canonical_hash(self) -> str:
+        return _hash_payload(
+            {
+                "program_id": self.program_id,
+                "space_hashes": sorted(space.canonical_hash for space in self.spaces),
+                "max_total_candidates": self.max_total_candidates,
+            }
+        )
+
+    def candidates(self) -> tuple[LibraryStrategySpec, ...]:
+        flattened = [candidate for space in self.spaces for candidate in space.candidates()]
+        flattened.sort(key=lambda item: item.strategy_id)
+        if len(flattened) != self.candidate_count:
+            raise StrategySpaceError("program candidate accounting mismatch")
+        return tuple(flattened)
+
+    def trial_id_for(self, candidate: LibraryStrategySpec) -> str:
+        known = {item.canonical_hash for item in self.candidates()}
+        if candidate.canonical_hash not in known:
+            raise StrategySpaceError("candidate is outside frozen strategy program")
+        suffix = _hash_payload(
+            {
+                "program_hash": self.canonical_hash,
+                "candidate_hash": candidate.canonical_hash,
+            }
+        )[:20]
+        return f"{self.program_id}-{suffix}"
+
+    @property
+    def expected_trial_ids(self) -> tuple[str, ...]:
+        return tuple(sorted(self.trial_id_for(item) for item in self.candidates()))
+
+
+__all__ = [
+    "StrategyProgram",
+    "StrategySearchSpace",
+    "StrategySpaceError",
+]
