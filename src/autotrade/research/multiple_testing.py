@@ -166,11 +166,20 @@ def campaign_deflated_sharpe(
     sample_size: int,
     skewness: float,
     kurtosis: float,
+    metric_name: str = "sharpe",
 ) -> DeflatedSharpeEvidence:
+    """Compute Deflated Sharpe against a frozen campaign metric family.
+
+    `metric_name="sharpe"` preserves the historical contract. Research layers
+    that preregister a different Sharpe field (for example a common-window
+    Sharpe) may bind that exact field without copying the DSR implementation.
+    """
+    if not metric_name.strip():
+        raise ValueError("metric_name is required")
     accounting = ledger.require_complete_campaign(campaign_id)
     if accounting.failed_trial_ids:
         raise TrialGovernanceError(
-            "Deflated Sharpe requires Sharpe evidence for every trial"
+            "Deflated Sharpe requires metric evidence for every trial"
         )
     if selected_trial_id not in accounting.expected_trial_ids:
         raise TrialGovernanceError("selected trial is outside frozen campaign")
@@ -182,14 +191,16 @@ def campaign_deflated_sharpe(
     records = {record.spec.trial_id: record for record in ledger.list_trials(campaign_id)}
     sharpes: dict[str, float] = {}
     for trial_id in accounting.expected_trial_ids:
-        raw = records[trial_id].metrics.get("sharpe")
+        raw = records[trial_id].metrics.get(metric_name)
         if isinstance(raw, bool) or not isinstance(raw, (int, float)):
             raise TrialGovernanceError(
-                f"trial {trial_id} has no numeric sharpe metric for Deflated Sharpe"
+                f"trial {trial_id} has no numeric {metric_name} metric for Deflated Sharpe"
             )
         value = float(raw)
         if not isfinite(value):
-            raise TrialGovernanceError(f"trial {trial_id} sharpe is not finite")
+            raise TrialGovernanceError(
+                f"trial {trial_id} {metric_name} is not finite"
+            )
         sharpes[trial_id] = value
     if len(sharpes) < 2:
         raise TrialGovernanceError("Deflated Sharpe requires at least two trials")
@@ -205,7 +216,7 @@ def campaign_deflated_sharpe(
     selected_best = max(sharpes.values())
     if sharpes[selected_trial_id] != selected_best:
         raise TrialGovernanceError(
-            "Deflated Sharpe selected_trial_id must be a maximum-Sharpe trial"
+            "Deflated Sharpe selected_trial_id must maximize the bound metric"
         )
     expected_max = sqrt(sharpe_variance) * (
         (1.0 - gamma) * normal.inv_cdf(1.0 - 1.0 / n)
