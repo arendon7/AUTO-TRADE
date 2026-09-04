@@ -138,7 +138,7 @@ def test_oss_dsl_kinds_are_canonical_research_only(kind, parameters):
                 **standard_position_params(),
             },
             ("slow_span", 2),
-            "fast_span must be < slow_span",
+            "slow_span must be an integer >= 3",
         ),
         (
             "time_series_momentum",
