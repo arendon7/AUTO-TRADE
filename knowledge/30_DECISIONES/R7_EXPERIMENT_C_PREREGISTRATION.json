@@ -1,0 +1,62 @@
+{
+  "decision_id": "R7_EXPERIMENT_C_PREREGISTRATION_2026-09-04",
+  "status": "FROZEN_BEFORE_EXPERIMENT_C_RESULTS",
+  "scope": "DEVELOPMENT_ONLY",
+  "purpose": "Prevent market-specific DEVELOPMENT winners from advancing as if they were generalizable edges.",
+  "inputs_that_motivated_but_do_not_define_a_retroactive_gate": [
+    "knowledge/60_EVIDENCE/R7_PUBLIC_MATRIX_2026-09-04.json",
+    "knowledge/60_EVIDENCE/R7_REGIME_MATRIX_2026-09-04.json",
+    "knowledge/60_EVIDENCE/R7_EXPERIMENT_B_2026-09-04.json",
+    "knowledge/60_EVIDENCE/R7_CROSS_MARKET_2026-09-04.json"
+  ],
+  "frozen_market_matrix": [
+    "BTCUSDT:1h",
+    "BTCUSDT:4h",
+    "ETHUSDT:1h",
+    "ETHUSDT:4h",
+    "SOLUSDT:1h",
+    "SOLUSDT:4h"
+  ],
+  "cross_market_breadth_policy": {
+    "min_positive_return_markets": 4,
+    "min_positive_sharpe_markets": 4,
+    "min_policy_eligible_markets": 3,
+    "min_robust_markets": 2,
+    "min_distinct_robust_symbols": 2,
+    "min_median_sharpe": 0.25,
+    "min_worst_net_return": -0.05,
+    "max_drawdown_across_markets": 0.25,
+    "fingerprint": "f5fdb8a777cf133d49e13edb67da78939d151caca7d2f82d9130cb836b3a6f8d"
+  },
+  "interpretation": {
+    "positive_return_markets": "At least four of six market/timeframe observations must have net return above zero after modeled costs.",
+    "positive_sharpe_markets": "At least four of six observations must have Sharpe above zero.",
+    "policy_eligible_markets": "At least three observations must independently satisfy the existing DEVELOPMENT selection policy.",
+    "robust_markets": "At least two observations must independently pass existing walk-forward and stress robustness.",
+    "distinct_robust_symbols": "Robust passes must span at least two underlying assets; two timeframes of BTC alone are insufficient.",
+    "median_sharpe": "The median Sharpe across all six observations must be at least 0.25.",
+    "worst_net_return": "No single market/timeframe observation may lose more than 5% over the frozen DEVELOPMENT window.",
+    "drawdown": "Maximum observed DEVELOPMENT drawdown across the six markets may not exceed 25%."
+  },
+  "promotion_semantics": {
+    "breadth_gate_is_necessary_for_experiment_c": true,
+    "breadth_gate_is_sufficient_for_holdout": false,
+    "concrete_market_candidate_must_also_pass": [
+      "DEVELOPMENT_SELECTION_POLICY",
+      "WALK_FORWARD_AND_STRESS_ROBUSTNESS",
+      "PBO_AND_DEFLATED_SHARPE_STATISTICAL_GATE",
+      "TRAIN_CALIBRATED_REGIME_STABILITY"
+    ],
+    "final_holdout_access_requires_existing_permit_governance": true,
+    "paper_authority": false,
+    "live_authority": false
+  },
+  "anti_data_snooping_rules": [
+    "These breadth thresholds may not be weakened after Experiment C results are observed and then represented as preregistered.",
+    "Experiment A and B are not retroactively rejected or accepted by this policy; their evidence remains frozen under the rules that existed when they ran.",
+    "Any material change to these thresholds creates a new named experiment version with a new policy fingerprint and a fresh candidate universe.",
+    "Experiment C candidate families and dimensions must be frozen before any Experiment C DEVELOPMENT campaign is executed.",
+    "Protected HOLDOUT remains inaccessible during Experiment C DEVELOPMENT research."
+  ],
+  "next_required_step": "Define and freeze the Experiment C candidate-family universe under this policy before running any Experiment C market data campaign."
+}
