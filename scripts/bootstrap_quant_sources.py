@@ -47,6 +47,15 @@ SOURCES: tuple[QuantSource, ...] = (
         purpose="Crypto connector, market-making and execution lifecycle architecture reference.",
     ),
     QuantSource(
+        name="ccxt",
+        repository="https://github.com/ccxt/ccxt.git",
+        commit="420f367bcfbbe8a125b006b0025dce43301cc0dc",
+        license_id="MIT",
+        integration_mode="crypto_market_data_connector_reference",
+        clone_by_default=True,
+        purpose="Broad crypto exchange API normalization for research/data connector design.",
+    ),
+    QuantSource(
         name="zipline-reloaded",
         repository="https://github.com/stefan-jansen/zipline-reloaded.git",
         commit="943010b9da848e317fc520de87edade2b884d329",
@@ -63,6 +72,15 @@ SOURCES: tuple[QuantSource, ...] = (
         integration_mode="analytics_reference",
         clone_by_default=True,
         purpose="Risk, statistics and quantitative analytics reference.",
+    ),
+    QuantSource(
+        name="pyportfolioopt",
+        repository="https://github.com/PyPortfolio/PyPortfolioOpt.git",
+        commit="a6638d2e06dae6f444fd022cfd4b3c528902a85b",
+        license_id="MIT",
+        integration_mode="portfolio_allocation_reference",
+        clone_by_default=True,
+        purpose="Portfolio optimization, covariance estimation and risk-aware allocation reference.",
     ),
     QuantSource(
         name="numerapi",
