@@ -56,11 +56,12 @@ def make_universe(now, count=130):
     b = [100 + index // 2 for index in range(count)]
     c = [160 - index // 4 for index in range(count)]
     return AlignedMarketUniverse.from_datasets(
+        universe_name="OSS2C-TEST",
         datasets=(
             make_dataset(now, symbol="AAA-USD", closes=a),
             make_dataset(now, symbol="BBB-USD", closes=b),
             make_dataset(now, symbol="CCC-USD", closes=c),
-        )
+        ),
     )
 
 
