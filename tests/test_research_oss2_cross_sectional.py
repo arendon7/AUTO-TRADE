@@ -45,7 +45,7 @@ def make_dataset(
                 timeframe_seconds=timeframe_seconds,
                 open=close,
                 high=close + Decimal("1"),
-                low=close - Decimal("1"),
+                low=max(close - Decimal("1"), Decimal("0.01")),
                 close=close,
                 volume=Decimal(str(raw_volume)),
             )
