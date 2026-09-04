@@ -114,7 +114,10 @@ def test_backtest_executes_every_ranking_only_on_next_bar(now):
         ranking = ranking_by_fingerprint[fill.ranking_fingerprint]
         assert fill.signal_bar_index == ranking.as_of_bar_index
         assert fill.execution_bar_index == fill.signal_bar_index + 1
-        assert fill.occurred_at > ranking.as_of
+        # In contiguous bars, close(t) and open(t+1) share one boundary timestamp.
+        # Future-bar isolation is established by the index transition, not by
+        # requiring an artificial time gap between adjacent bars.
+        assert fill.occurred_at == ranking.as_of
     assert result.metrics.rebalances == len(result.ranking_evidence)
 
 
