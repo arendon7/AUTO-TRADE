@@ -64,6 +64,44 @@ def _optional_json_number(value: float | None) -> float | str | None:
     return None if value is None else _json_number(value)
 
 
+def _pbo_payload(result) -> dict[str, object]:
+    if result.pbo_evidence is not None:
+        payload: dict[str, object] = {
+            "pbo": result.pbo_evidence.pbo,
+            "partitions": result.pbo_evidence.partitions,
+            "combinations_evaluated": result.pbo_evidence.combinations_evaluated,
+        }
+    else:
+        payload = {"unavailable_reason": result.pbo_unavailable_reason}
+
+    diagnostics = result.pbo_diagnostics
+    if diagnostics is not None:
+        payload["diagnostics"] = {
+            "ready": diagnostics.ready,
+            "partitions": diagnostics.partitions,
+            "observations": diagnostics.observations,
+            "combinations_evaluated": diagnostics.combinations_evaluated,
+            "trial_count": diagnostics.trial_count,
+            "blocking_trial_ids": list(diagnostics.blocking_trial_ids),
+            "no_activity_trial_ids": list(diagnostics.no_activity_trial_ids),
+            "trials": [
+                {
+                    "trial_id": item.trial_id,
+                    "observations": item.observations,
+                    "nonzero_observations": item.nonzero_observations,
+                    "zero_variance_full_series": item.zero_variance_full_series,
+                    "zero_variance_train_segments": item.zero_variance_train_segments,
+                    "zero_variance_test_segments": item.zero_variance_test_segments,
+                    "blocks_pbo": item.blocks_pbo,
+                }
+                for item in diagnostics.trials
+            ],
+        }
+    else:
+        payload["diagnostics"] = None
+    return payload
+
+
 def _build_program(*, quantity: Decimal, target_bar_volatility: Decimal) -> StrategyProgram:
     quantity_text = str(quantity)
     target_vol_text = str(target_bar_volatility)
@@ -408,15 +446,7 @@ def main() -> int:
             }
             for item in result.robustness_evidence
         ],
-        "pbo": (
-            {
-                "pbo": result.pbo_evidence.pbo,
-                "partitions": result.pbo_evidence.partitions,
-                "combinations_evaluated": result.pbo_evidence.combinations_evaluated,
-            }
-            if result.pbo_evidence is not None
-            else {"unavailable_reason": result.pbo_unavailable_reason}
-        ),
+        "pbo": _pbo_payload(result),
         "deflated_sharpe": (
             {
                 "selected_trial_id": result.deflated_sharpe_evidence.selected_trial_id,
