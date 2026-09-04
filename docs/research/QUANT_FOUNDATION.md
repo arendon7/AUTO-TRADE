@@ -2,41 +2,51 @@
 
 ## Purpose
 
-R7 expands the existing audited AUTO-TRADE research layer without weakening the R6 PAPER/LIVE governance boundary. The objective is not to import a large third-party trading bot into the product. The objective is to keep AUTO-TRADE as the control plane and use selected external projects as pinned research, validation, analytics or connector references.
+R7 expands the audited AUTO-TRADE research layer without weakening the R6 PAPER/LIVE governance boundary. AUTO-TRADE remains the control plane; selected external projects are pinned research, validation, analytics or connector references rather than a replacement trading bot.
 
-No strategy in this document is assumed profitable. Every candidate must earn promotion through the existing DEVELOPMENT -> HOLDOUT -> PAPER evidence chain after costs, slippage and risk constraints.
+No strategy is assumed profitable. Every candidate must earn promotion through DEVELOPMENT -> protected HOLDOUT -> PAPER evidence after costs, slippage, robustness and risk constraints.
 
 **Integration baseline:** this R7 track was created from R6 head `f59df20f3f1d28877121a36d03094012ae37e50c`. It must be rebased/retargeted onto the eventual merged R6 commit before R7 can be merged to `main`.
 
-## Architecture decision
+## Architecture
 
 ```text
-External research sources (pinned, non-versioned)
+Pinned external research sources (.external/quant, not vendored)
         |
         +-- LEAN ---------------- independent engine validation
-        +-- Qlib ---------------- ML / research workflow reference
-        +-- Hummingbot ----------- crypto connector/execution reference
+        +-- Qlib ---------------- ML/research reference
+        +-- Hummingbot ----------- crypto execution/connector reference
+        +-- CCXT ----------------- exchange/data normalization reference
         +-- Zipline Reloaded ----- independent backtest reference
         +-- gs-quant ------------- risk/statistics reference
+        +-- PyPortfolioOpt ------- portfolio/risk allocation reference
         +-- NumerAPI ------------- optional external model/data source
         |
         v
-AUTO-TRADE research strategy library
+LibraryStrategySpec (strict finite catalog)
         |
         v
-BacktestEngine -> DEVELOPMENT trials -> Strategy Tournament
+StrategySearchSpace -> StrategyProgram (frozen bounded universe)
         |
         v
-Frozen HOLDOUT -> robustness/stress evidence
+DevelopmentResearchAutopilot
+        |
+        +-- BacktestEngine / explicit costs / next-bar execution
+        +-- SQLiteTrialLedger preregistration
+        +-- Strategy Tournament
+        +-- PBO / CSCV
+        +-- Deflated Sharpe
+        +-- minimum risk/quality policy
         |
         v
-R6 PAPER gateway and reconciliation
+Protected HOLDOUT (separate permit-gated path; not accessible to autopilot)
         |
         v
-LIVE remains blocked by the existing human/risk governance gates
+R6 PAPER gateway / reconciliation / shadow controls
+        |
+        v
+LIVE remains governed by existing human/risk authorization gates
 ```
-
-The external repositories are cloned under `.external/quant/` by `scripts/bootstrap_quant_sources.py`. That directory is intentionally ignored by Git. Third-party source is therefore not silently vendored into AUTO-TRADE.
 
 ## Audited source registry — 2026-09-03
 
@@ -45,115 +55,120 @@ The external repositories are cloned under `.external/quant/` by `scripts/bootst
 | QuantConnect/Lean | `cfc7e8ac451e384b08b697465e33016ab26c1263` | Apache-2.0 | Clone; independent engine/architecture validation |
 | microsoft/qlib | `79633dd9506ea689e5400dea0197717b5b3d74b7` | MIT | Clone; isolated ML/research reference |
 | hummingbot/hummingbot | `2bfaccc48dd49e71a5b6d9b3011808e127dd00cd` | Apache-2.0 | Clone; connector/execution reference |
+| ccxt/ccxt | `420f367bcfbbe8a125b006b0025dce43301cc0dc` | MIT | Clone; exchange/data normalization reference |
 | stefan-jansen/zipline-reloaded | `943010b9da848e317fc520de87edade2b884d329` | Apache-2.0 | Clone; independent backtest reference |
 | goldmansachs/gs-quant | `ccbd4ae780f51be4e01ecbf834c7b93583fec57f` | Apache-2.0 | Clone; quantitative analytics reference |
+| PyPortfolio/PyPortfolioOpt | `a6638d2e06dae6f444fd022cfd4b3c528902a85b` | MIT | Clone; allocation/covariance/risk reference |
 | numerai/numerapi | `ab54eef18f54d0244199cb8bffd4da647621191f` | MIT | Clone; optional Numerai integration |
 | freqtrade/freqtrade | not vendored | GPL-3.0 | Ideas/reference only; no source copied into core |
 | polakowo/vectorbt | not vendored | Apache-2.0 + Commons Clause | Reference only for commercial core |
 | StockSharp/StockSharp | not vendored | StockSharp custom/EULA | Metadata/reference only |
-| wilsonfreitas/awesome-quant | not vendored | curated index | Discovery only; audit each downstream license separately |
+| wilsonfreitas/awesome-quant | not vendored | curated index | Discovery only; audit every downstream license |
 
-### Source-governance rules
+### Source governance
 
-1. Every external source used by automated research must have an immutable commit pin.
+1. External research sources use immutable commit pins.
 2. License review precedes code reuse.
 3. GPL, Commons-Clause and custom-license code is not copied into AUTO-TRADE core by this track.
 4. External engines cannot bypass AUTO-TRADE risk, approval, reconciliation, shadow or kill-switch layers.
-5. No external repository receives broker secrets from the bootstrap process.
-6. A source upgrade is a reviewed change: update the pin, review upstream changes and rerun the relevant validation suite.
+5. Bootstrap never receives broker secrets.
+6. Source upgrades require a pin change, upstream review and validation rerun.
+7. `.external/quant/` is Git-ignored; third-party histories are not silently incorporated into AUTO-TRADE.
 
 ## Strategy library v1
 
-`src/autotrade/research/strategy_library.py` initially contains four independent, deterministic implementations. They use only the Python standard library and AUTO-TRADE research interfaces.
+`src/autotrade/research/strategy_library.py` contains four original deterministic implementations using only the standard library and AUTO-TRADE research interfaces.
 
-### 1. Time-series momentum
+### Time-series momentum
 
-Signal: compare the most recent fully closed price with the close `N` bars ago. Positive momentum targets long exposure; negative momentum targets short or flat according to `position_mode`.
+Compares the latest fully closed price with the close `N` bars earlier. Positive momentum targets long exposure; negative momentum targets short or flat according to `position_mode`.
 
-Rationale: time-series momentum/trend is one of the most extensively documented systematic effects across equity-index, currency, commodity and bond futures. Moskowitz, Ooi and Pedersen (Journal of Financial Economics, 2012) document return persistence over horizons up to roughly 12 months across 58 liquid instruments.
+Research basis: Moskowitz, Ooi and Pedersen, *Time Series Momentum*, Journal of Financial Economics (2012). DOI: `10.1016/j.jfineco.2011.11.003`.
 
-Reference: `https://doi.org/10.1016/j.jfineco.2011.11.003`
+### Donchian breakout
 
-### 2. Donchian breakout
+The current fully closed bar must close outside a high/low channel formed only by prior bars. Actual execution remains next-bar under the existing backtester.
 
-Signal: the current fully closed bar must close outside the high/low channel formed only by prior bars. This makes the information boundary explicit and leaves actual execution to the next-bar execution semantics of the existing backtester.
+### Mean-reversion z-score
 
-Purpose: provide a structurally different trend representation from moving-average crossover and time-series return momentum.
+Uses a prior-bar reference window. Extreme deviations can target contrarian exposure and return to flat near the estimated mean. It is included as a diversifier, not presumed superior.
 
-### 3. Mean-reversion z-score
+### Volatility-managed momentum
 
-Signal: compare the current close with a mean and volatility estimate computed from the prior reference window. Extreme negative deviations target long exposure; extreme positive deviations target short/flat exposure; positions can return to flat near the estimated mean.
+Momentum supplies direction while bounded inverse-volatility scaling reduces exposure as realized volatility rises.
 
-Purpose: diversify the candidate universe. It is not presumed to outperform trend strategies and must be rejected when transaction costs, regimes or holdout evidence do not support it.
+Research basis: Barroso and Santa-Clara, *Momentum Has Its Moments*, Journal of Financial Economics (2015). DOI: `10.1016/j.jfineco.2014.11.010`.
 
-### 4. Volatility-managed momentum
+## Safe automatic search
 
-Signal direction comes from time-series momentum. Position quantity is multiplied by a bounded ratio of target per-bar volatility to observed return volatility.
+### `LibraryStrategySpec`
 
-Rationale: momentum can exhibit severe crash risk. Barroso and Santa-Clara (Journal of Financial Economics, 2015) show that momentum risk varies materially through time and that volatility-based risk management can strongly improve its risk-adjusted behavior in their sample.
+The declarative catalog can instantiate only the four audited strategy classes. Unknown fields, arbitrary callables, module imports, commands, URLs, broker fields and OMS fields fail closed.
 
-Reference: `https://doi.org/10.1016/j.jfineco.2014.11.010`
+### `StrategySearchSpace`
+
+Each family is a finite deterministic grid. Candidate cardinality is known before execution and bounded by `max_candidates`; duplicate parameter values and invalid dimensions are rejected before a campaign exists.
+
+### `StrategyProgram`
+
+Combines multiple families into one frozen candidate universe with a global `max_total_candidates`. Program hashes and trial IDs bind strategy family, version and parameters. This makes the full multiple-testing universe explicit before results are observed.
+
+### `DevelopmentResearchAutopilot`
+
+The autopilot accepts an already-designated DEVELOPMENT dataset and:
+
+1. creates the frozen campaign;
+2. preregisters **every** candidate before any result is recorded;
+3. runs the existing event-driven backtester with explicit costs and next-bar execution;
+4. retains successful and failed trials in durable accounting;
+5. ranks the complete DEVELOPMENT universe with Strategy Tournament;
+6. applies a separate minimum risk/quality policy without deleting weak trials;
+7. computes PBO/CSCV and Deflated Sharpe when their statistical preconditions hold;
+8. records no synthetic p-values.
+
+The autopilot imports no broker, OMS, PAPER, LIVE, safety-control or network execution surface. It cannot consume a protected HOLDOUT permit.
+
+## Existing market-data foundation
+
+AUTO-TRADE already contains a bounded `BinanceSpotHistoricalProvider` for public klines. It is disabled by default, HTTPS/GET-only, host/path allowlisted, range-bounded, exact-coverage checked and produces immutable hashes/provenance artifacts. Therefore CCXT is not required for the first Binance research campaign; it remains useful for later multi-exchange normalization.
 
 ## Validation doctrine
 
-A candidate is not selected because it has the highest raw backtest return. The research process should progressively require:
+A candidate is never selected merely because it has the highest raw return.
 
-1. **Information-boundary correctness** — closed-bar signals, next-bar execution, no look-ahead.
-2. **Realistic costs** — spread, fees, slippage, volume participation and market-impact assumptions.
-3. **DEVELOPMENT evidence** — deterministic trial ledger and complete frozen candidate universe.
-4. **Multiple-testing control** — record every tried configuration; do not hide failed trials.
-5. **Cross-validation / walk-forward robustness** — sensitivity across periods and regimes.
-6. **Frozen HOLDOUT** — used only after development selection is frozen.
-7. **Stress tests** — higher fees/slippage, latency, gaps, adverse volatility and liquidity.
-8. **Independent-engine comparison** — selected candidates can be reproduced in LEAN and/or Zipline where practical.
-9. **PAPER forward evidence** — use R6 reconciliation, anomalies, SLOs and shadow controls.
-10. **LIVE governance** — unchanged; no research module can authorize capital-bearing execution.
+1. Closed-bar information boundary and next-bar execution.
+2. Explicit fees, spread, slippage, leverage and volume participation.
+3. Complete frozen DEVELOPMENT trial universe.
+4. Multiple-testing controls; failed/weak trials remain visible.
+5. Walk-forward and regime robustness.
+6. Protected HOLDOUT only after development selection is frozen.
+7. Adverse cost, latency, gap, volatility and liquidity stress.
+8. Independent-engine parity in LEAN/Zipline where practical.
+9. PAPER forward evidence under R6 reconciliation/shadow controls.
+10. LIVE authorization semantics remain unchanged.
 
-## Ranking objectives
+## Core evaluation metrics
 
-The tournament should treat raw return as only one dimension. Candidate reports should include at least:
+The existing backtester already records net return, annualized volatility, Sharpe, Sortino, maximum drawdown, turnover, hit rate, profit factor, gross exposure, volume participation, fees, fills and rejected signals. Existing R3 statistics include Holm correction, PBO/CSCV and Deflated Sharpe.
 
-- net return after costs;
-- maximum drawdown;
-- Sharpe/Sortino or existing risk-adjusted metrics;
-- profit factor and expectancy where supported by the trade ledger;
-- turnover and total modeled costs;
-- parameter sensitivity;
-- regime stability;
-- holdout degradation versus development;
-- tail/stress behavior;
-- statistical evidence adjusted for repeated trials where available.
+A fixed target such as **5% every day is not an acceptance criterion**. Optimizing toward a fixed extreme daily return would reward leverage, overfitting and hidden tail risk. The objective is robust risk-adjusted compounding under explicit drawdown and evidence constraints.
 
-A target such as a fixed 5% return every day is explicitly **not** an acceptance criterion. Optimization against an extreme fixed daily return target would strongly incentivize leverage, overfitting and hidden tail risk.
-
-## Bootstrap
-
-List the approved source catalog:
+## Bootstrap external sources
 
 ```bash
 python scripts/bootstrap_quant_sources.py --list
-```
-
-Clone all permissive pinned sources:
-
-```bash
 python scripts/bootstrap_quant_sources.py
-```
-
-Clone only selected sources:
-
-```bash
 python scripts/bootstrap_quant_sources.py --source lean --source qlib
 ```
 
-The bootstrap script does not install or import these projects into AUTO-TRADE. Integration is deliberate and adapter-based.
+The bootstrap clones exact commits into `.external/quant/`; it does not install those projects into AUTO-TRADE or grant them execution authority.
 
 ## Next R7 increments
 
-1. Add a safe declarative catalog/factory for the four strategy kinds without dynamic imports or arbitrary callables.
-2. Run DEVELOPMENT campaigns over multiple liquid instruments and timeframes using the existing trial ledger.
-3. Add ensemble/portfolio allocation only after individual strategy evidence exists.
-4. Add independent LEAN parity fixtures for selected strategies.
-5. Add market-regime conditioning and volatility/correlation-aware portfolio sizing.
-6. Add a data-provider abstraction for crypto and equities while keeping research datasets immutable and hashed.
-7. Promote only validated candidates into R6 PAPER; do not modify R6 LIVE authorization semantics.
+1. Run bounded Binance DEVELOPMENT campaigns on immutable public datasets across several liquid symbols/timeframes.
+2. Add walk-forward aggregation to automatic candidate ranking.
+3. Add independent LEAN parity fixtures for finalists.
+4. Add regime-conditioned evaluation and stress matrices.
+5. Add portfolio/ensemble allocation only after individual strategy evidence exists.
+6. Extend immutable data adapters to additional venues/assets.
+7. Promote only validated finalists into the protected HOLDOUT path and later R6 PAPER; never directly to LIVE.
