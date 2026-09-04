@@ -19,12 +19,16 @@ def _load_report(path: Path) -> dict[str, Any]:
         raise SummaryError(f"report root must be an object: {path}")
     required = {
         "campaign_id",
+        "symbol",
+        "interval",
         "program_hash",
         "source_dataset_hash",
         "development_dataset_hash",
         "protected_holdout",
         "candidate_count",
         "selected_trial_id",
+        "promotion_ready_trial_id",
+        "statistical_gate",
         "tournament_selected_trial_id",
         "robustness_eligible_trial_ids",
         "robustness",
@@ -38,18 +42,28 @@ def _load_report(path: Path) -> dict[str, Any]:
     holdout = payload["protected_holdout"]
     if not isinstance(holdout, dict) or holdout.get("checked_out") is not False:
         raise SummaryError(f"report does not prove untouched HOLDOUT: {path}")
+    statistical_gate = payload["statistical_gate"]
+    if not isinstance(statistical_gate, dict) or not isinstance(
+        statistical_gate.get("passed"), bool
+    ):
+        raise SummaryError(f"report has invalid statistical gate: {path}")
+    if bool(payload["promotion_ready_trial_id"]) != statistical_gate["passed"]:
+        raise SummaryError(
+            f"promotion readiness/statistical gate mismatch: {path}"
+        )
     return payload
 
 
-def _selected_candidate(report: dict[str, Any]) -> dict[str, Any] | None:
-    selected = report.get("selected_trial_id")
-    if not selected:
+def _candidate_for_trial(
+    report: dict[str, Any], trial_id: str
+) -> dict[str, Any] | None:
+    if not trial_id:
         return None
     for candidate in report.get("candidates", []):
-        if isinstance(candidate, dict) and candidate.get("trial_id") == selected:
+        if isinstance(candidate, dict) and candidate.get("trial_id") == trial_id:
             return candidate
     raise SummaryError(
-        f"selected trial is absent from candidate ledger: {report.get('campaign_id')}"
+        f"trial is absent from candidate ledger: {report.get('campaign_id')}:{trial_id}"
     )
 
 
@@ -75,14 +89,22 @@ def summarize(report_paths: list[Path]) -> dict[str, Any]:
 
     entries: list[dict[str, Any]] = []
     for report in reports:
-        selected_candidate = _selected_candidate(report)
+        selected_candidate = _candidate_for_trial(report, report["selected_trial_id"])
+        promotion_candidate = _candidate_for_trial(
+            report, report["promotion_ready_trial_id"]
+        )
         robustness = _robustness_for_selected(report, selected_candidate)
         metrics = selected_candidate.get("metrics", {}) if selected_candidate else {}
+        parameters = (
+            selected_candidate.get("parameters", {}) if selected_candidate else {}
+        )
         pbo = report.get("pbo", {})
         dsr = report.get("deflated_sharpe", {})
         entries.append(
             {
                 "campaign_id": report["campaign_id"],
+                "symbol": report["symbol"],
+                "interval": report["interval"],
                 "program_hash": report["program_hash"],
                 "source_dataset_hash": report["source_dataset_hash"],
                 "development_dataset_hash": report["development_dataset_hash"],
@@ -98,6 +120,7 @@ def summarize(report_paths: list[Path]) -> dict[str, Any]:
                 "selected_strategy_id": (
                     selected_candidate.get("strategy_id") if selected_candidate else ""
                 ),
+                "selected_parameters": parameters,
                 "selected_metrics": metrics,
                 "selected_robustness": (
                     {
@@ -117,17 +140,27 @@ def summarize(report_paths: list[Path]) -> dict[str, Any]:
                     if robustness
                     else None
                 ),
+                "statistical_gate": report["statistical_gate"],
+                "promotion_ready_trial_id": report["promotion_ready_trial_id"],
+                "promotion_ready_strategy_id": (
+                    promotion_candidate.get("strategy_id") if promotion_candidate else ""
+                ),
                 "pbo": pbo,
                 "deflated_sharpe": dsr,
             }
         )
 
     selected_count = sum(1 for item in entries if item["selected_trial_id"])
+    promotion_count = sum(
+        1 for item in entries if item["promotion_ready_trial_id"]
+    )
     return {
-        "summary_version": 1,
+        "summary_version": 2,
         "campaign_count": len(entries),
         "campaigns_with_robust_selection": selected_count,
-        "campaigns_without_selection": len(entries) - selected_count,
+        "campaigns_without_robust_selection": len(entries) - selected_count,
+        "campaigns_promotion_ready": promotion_count,
+        "campaigns_not_promotion_ready": len(entries) - promotion_count,
         "all_holdouts_untouched": all(
             item["holdout_checked_out"] is False for item in entries
         ),
