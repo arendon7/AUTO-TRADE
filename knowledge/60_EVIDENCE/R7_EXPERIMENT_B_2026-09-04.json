@@ -1,0 +1,150 @@
+{
+  "evidence_id": "R7_EXPERIMENT_B_2026-09-04",
+  "scope": "DEVELOPMENT_ONLY",
+  "workflow": {
+    "name": "R7 Experiment B Research Matrix",
+    "run_id": 33839573105,
+    "head_sha": "95e971aa208c967c9c7f86383872da12932dec2c",
+    "summary_artifact_id": 9924445067,
+    "summary_artifact_digest": "sha256:061ab13a76deb54f21b51c8379042e8b79ad5ae7a12689ff2e80b725e4ddcc7f"
+  },
+  "experiment_design": {
+    "experiment": "B",
+    "program_id": "r7-experiment-b",
+    "candidate_count_per_campaign": 30,
+    "families": [
+      "dual_moving_average_trend",
+      "atr_impulse_breakout",
+      "trend_pullback"
+    ],
+    "assets": ["BTCUSDT", "ETHUSDT", "SOLUSDT"],
+    "intervals": ["1h", "4h"],
+    "request_window": {
+      "start": "2025-09-01T00:00:00Z",
+      "end": "2026-06-01T00:00:00Z"
+    },
+    "relationship_to_experiment_a": "Independent preregistered family/parameter universe; Experiment A parameters were not tuned or reused to construct B."
+  },
+  "aggregate": {
+    "campaign_count": 6,
+    "campaigns_with_robust_selection": 2,
+    "campaigns_statistically_promotion_ready": 0,
+    "campaigns_selected_regime_pass": 0,
+    "campaigns_holdout_ready": 0,
+    "all_holdouts_untouched": true
+  },
+  "robust_candidates": [
+    {
+      "symbol": "BTCUSDT",
+      "interval": "1h",
+      "strategy_id": "b-pullback-8226efbd8df9dcc4",
+      "trial_id": "r7-experiment-b-97457cd227e27c506dde",
+      "parameters": {
+        "entry_z": "1.5",
+        "exit_z": "0.25",
+        "lookback_bars": 72,
+        "min_trend_return": "0.03",
+        "order_quantity": "0.10",
+        "position_mode": "long_flat",
+        "pullback_bars": 12
+      },
+      "development_metrics": {
+        "net_return": 0.0020330621803259508,
+        "sharpe": 0.961748846828157,
+        "sortino": 1.5015760206642972,
+        "max_drawdown": 0.002751731691046175,
+        "profit_factor": 1.6317059644330276,
+        "fills": 42,
+        "total_fees": 370.1831611674
+      },
+      "robustness": {
+        "positive_fold_ratio": 0.5,
+        "median_fold_sharpe": 0.29893271757001294,
+        "worst_fold_net_return": -0.00014463773223294396,
+        "worst_fold_drawdown": 0.0015175852788466653,
+        "stress_pass_ratio": 1.0,
+        "worst_stress_net_return": -0.019934167899549937,
+        "worst_stress_drawdown": 0.020685470556393908
+      },
+      "statistics": {
+        "pbo": null,
+        "pbo_unavailable_reason": "Sharpe is undefined for a zero-variance return segment",
+        "pbo_blocking_trials": 3,
+        "deflated_sharpe_probability": 0.0,
+        "selected_sharpe": 0.961748846828157,
+        "expected_max_sharpe": 3.238074198661378,
+        "family_size": 30
+      },
+      "regime_stability": {
+        "passed": false,
+        "reason": "WORST_REGIME_SHARPE_BELOW_MINIMUM",
+        "worst_state": "NORMAL",
+        "worst_state_compounded_return": -0.001571643910678322,
+        "worst_state_sharpe": -3.041613283816453
+      },
+      "holdout_ready": false
+    },
+    {
+      "symbol": "BTCUSDT",
+      "interval": "4h",
+      "strategy_id": "b-atr-1701fd6a83d69117",
+      "trial_id": "r7-experiment-b-fcae345b730cb5a908d8",
+      "parameters": {
+        "atr_multiplier": "1",
+        "exit_atr_multiplier": "0.25",
+        "lookback_bars": 72,
+        "order_quantity": "0.10",
+        "position_mode": "long_flat"
+      },
+      "development_metrics": {
+        "net_return": 0.0032667170758229336,
+        "sharpe": 0.7356151042579185,
+        "sortino": 1.210680255019356,
+        "max_drawdown": 0.007126113516921649,
+        "profit_factor": 1.2686382546640789,
+        "fills": 52,
+        "total_fees": 427.0686921177
+      },
+      "robustness": {
+        "positive_fold_ratio": 1.0,
+        "median_fold_sharpe": 1.2983203852475236,
+        "worst_fold_net_return": 0.00006874639646703429,
+        "worst_fold_drawdown": 0.0025854941070481176,
+        "stress_pass_ratio": 1.0,
+        "worst_stress_net_return": -0.019863701198044037,
+        "worst_stress_drawdown": 0.021044508398305347
+      },
+      "statistics": {
+        "pbo": null,
+        "pbo_unavailable_reason": "Sharpe is undefined for a zero-variance return segment",
+        "pbo_blocking_trials": 13,
+        "deflated_sharpe_probability": 0.0,
+        "selected_sharpe": 0.7356151042579185,
+        "expected_max_sharpe": 2.4236615981236675,
+        "family_size": 30
+      },
+      "regime_stability": {
+        "passed": false,
+        "reason": "WORST_REGIME_SHARPE_BELOW_MINIMUM",
+        "worst_state": "NORMAL",
+        "worst_state_compounded_return": -0.007130179541798842,
+        "worst_state_sharpe": -3.8052552505848665
+      },
+      "holdout_ready": false
+    }
+  ],
+  "interpretation": {
+    "result": "NO_CANDIDATE_AUTHORIZED_FOR_HOLDOUT_PROMOTION",
+    "comparison_to_a": "Experiment B increased robustness-selected campaigns from 1/6 to 2/6, but none generalized through the statistical or TRAIN-calibrated regime gates.",
+    "market_pattern": "Both robustness-selected candidates occurred on BTCUSDT; ETHUSDT and SOLUSDT produced no robust selection in Experiment B.",
+    "next_action": "Measure cross-market transferability of parameterized hypotheses before preregistering the next experiment. Do not tune B on observed failures."
+  },
+  "explicit_non_claims": [
+    "Experiment B does not establish a profitable strategy.",
+    "No Experiment B candidate is authorized for FINAL_HOLDOUT.",
+    "No Experiment B candidate is authorized for PAPER execution.",
+    "No Experiment B candidate is authorized for LIVE execution.",
+    "No protected HOLDOUT dataset was checked out.",
+    "Experiment B parameters must not be retroactively tuned against these observed outcomes and then represented as preregistered."
+  ]
+}
