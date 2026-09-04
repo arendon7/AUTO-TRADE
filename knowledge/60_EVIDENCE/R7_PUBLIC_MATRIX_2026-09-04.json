@@ -1,0 +1,143 @@
+{
+  "evidence_id": "R7_PUBLIC_MATRIX_2026-09-04",
+  "scope": "DEVELOPMENT_ONLY",
+  "workflow": {
+    "name": "R7 Public Research Matrix",
+    "run_id": 33838389593,
+    "head_sha": "6dcfc49693199d77d932a872cc94b13679755712",
+    "matrix_summary_artifact_id": 9924064185,
+    "matrix_summary_artifact_digest": "sha256:a6d4220bf59ab28dde954a7b25e2463817bb6c59664af41eb0744741dd2675dd"
+  },
+  "fixed_request_window": {
+    "start": "2025-09-01T00:00:00Z",
+    "end": "2026-06-01T00:00:00Z"
+  },
+  "program": {
+    "candidate_count_per_campaign": 36,
+    "families": [
+      "time_series_momentum",
+      "donchian_breakout",
+      "mean_reversion_zscore",
+      "volatility_managed_momentum"
+    ],
+    "assets": ["BTCUSDT", "ETHUSDT", "SOLUSDT"],
+    "intervals": ["1h", "4h"]
+  },
+  "aggregate": {
+    "campaign_count": 6,
+    "campaigns_with_robust_selection": 1,
+    "campaigns_without_robust_selection": 5,
+    "campaigns_promotion_ready": 0,
+    "campaigns_not_promotion_ready": 6,
+    "all_holdouts_untouched": true
+  },
+  "campaigns": [
+    {
+      "symbol": "BTCUSDT",
+      "interval": "1h",
+      "robust_selection": false,
+      "promotion_ready": false,
+      "pbo_ready": false,
+      "pbo_blocking_trials": 4,
+      "pbo_no_activity_trials": 0,
+      "deflated_sharpe_probability": 0.0
+    },
+    {
+      "symbol": "BTCUSDT",
+      "interval": "4h",
+      "robust_selection": false,
+      "promotion_ready": false,
+      "pbo_ready": false,
+      "pbo_blocking_trials": 9,
+      "pbo_no_activity_trials": 1,
+      "deflated_sharpe_probability": null,
+      "deflated_sharpe_unavailable_reason": "zero-variance return series"
+    },
+    {
+      "symbol": "ETHUSDT",
+      "interval": "1h",
+      "robust_selection": false,
+      "promotion_ready": false,
+      "pbo_ready": false,
+      "pbo_blocking_trials": 2,
+      "pbo_no_activity_trials": 0,
+      "deflated_sharpe_probability": 0.0
+    },
+    {
+      "symbol": "ETHUSDT",
+      "interval": "4h",
+      "robust_selection": false,
+      "promotion_ready": false,
+      "pbo_ready": false,
+      "pbo_blocking_trials": 8,
+      "pbo_no_activity_trials": 1,
+      "deflated_sharpe_probability": 0.0
+    },
+    {
+      "symbol": "SOLUSDT",
+      "interval": "1h",
+      "robust_selection": false,
+      "promotion_ready": false,
+      "pbo_ready": true,
+      "pbo": 0.4857142857142857,
+      "pbo_blocking_trials": 0,
+      "pbo_no_activity_trials": 0,
+      "deflated_sharpe_probability": 0.0
+    },
+    {
+      "symbol": "SOLUSDT",
+      "interval": "4h",
+      "robust_selection": true,
+      "selected_strategy": {
+        "strategy_id": "meanrev-bf148de539597391",
+        "trial_id": "r7-binance-core-7def1b30c3981f3d9ac0",
+        "parameters": {
+          "lookback_bars": 24,
+          "entry_z": "2",
+          "exit_z": "0.5",
+          "order_quantity": "50",
+          "position_mode": "long_flat"
+        },
+        "development_metrics": {
+          "net_return": 0.0019858976680000584,
+          "sharpe": 0.25649082783219473,
+          "sortino": 0.3529270950481574,
+          "max_drawdown": 0.020920768079796103,
+          "profit_factor": 1.0983636379385173,
+          "fills": 36,
+          "total_fees": 191.4176332
+        },
+        "robustness": {
+          "positive_fold_ratio": 0.6,
+          "median_fold_sharpe": 1.3230415163374698,
+          "worst_fold_net_return": -0.015056261318000086,
+          "worst_fold_drawdown": 0.020834792920456202,
+          "stress_pass_ratio": 1.0,
+          "worst_stress_net_return": -0.02935120311399997,
+          "worst_stress_drawdown": 0.03137857116026217
+        }
+      },
+      "promotion_ready": false,
+      "statistical_gate_reasons": [
+        "PBO_UNAVAILABLE",
+        "DEFLATED_SHARPE_BELOW_MINIMUM"
+      ],
+      "pbo_ready": false,
+      "pbo_blocking_trials": 7,
+      "pbo_no_activity_trials": 1,
+      "deflated_sharpe_probability": 0.0
+    }
+  ],
+  "interpretation": {
+    "result": "NO_CANDIDATE_AUTHORIZED_FOR_HOLDOUT_PROMOTION",
+    "reason": "No campaign satisfied the complete DEVELOPMENT robustness and statistical promotion policy.",
+    "next_action": "Improve candidate-family statistical quality and repeat DEVELOPMENT evidence without opening HOLDOUT."
+  },
+  "explicit_non_claims": [
+    "This evidence does not establish a profitable trading strategy.",
+    "This evidence does not authorize FINAL_HOLDOUT access.",
+    "This evidence does not authorize PAPER execution.",
+    "This evidence does not authorize LIVE execution.",
+    "No protected HOLDOUT dataset was checked out during this matrix."
+  ]
+}
