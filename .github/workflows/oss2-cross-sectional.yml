@@ -6,9 +6,11 @@ on:
       - "src/autotrade/research/universe.py"
       - "src/autotrade/research/cross_sectional.py"
       - "src/autotrade/research/cross_sectional_backtest.py"
+      - "src/autotrade/research/oss2_campaign.py"
       - "src/autotrade/research/__init__.py"
       - "tests/test_research_oss2_cross_sectional.py"
       - "tests/test_research_oss2_backtest.py"
+      - "tests/test_research_oss2_campaign.py"
       - "knowledge/20_RESEARCH/OSS2_IMPLEMENTATION.md"
       - ".github/workflows/oss2-cross-sectional.yml"
   workflow_dispatch:
@@ -36,13 +38,15 @@ jobs:
           python -m py_compile \
             src/autotrade/research/universe.py \
             src/autotrade/research/cross_sectional.py \
-            src/autotrade/research/cross_sectional_backtest.py
+            src/autotrade/research/cross_sectional_backtest.py \
+            src/autotrade/research/oss2_campaign.py
 
       - name: OSS-2 tests
         run: |
           pytest -q \
             tests/test_research_oss2_cross_sectional.py \
-            tests/test_research_oss2_backtest.py
+            tests/test_research_oss2_backtest.py \
+            tests/test_research_oss2_campaign.py
 
       - name: OSS-1 regression tests
         run: |
