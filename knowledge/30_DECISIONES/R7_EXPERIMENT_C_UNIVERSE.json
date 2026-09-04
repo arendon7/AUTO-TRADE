@@ -1,0 +1,83 @@
+{
+  "decision_id": "R7_EXPERIMENT_C_UNIVERSE_2026-09-04",
+  "status": "FROZEN_BEFORE_MARKET_RESULTS",
+  "scope": "DEVELOPMENT_ONLY",
+  "program_id": "r7-experiment-c",
+  "candidate_count_per_campaign": 12,
+  "design_principles": [
+    "Reduce multiple-testing burden relative to Experiments A and B.",
+    "Use scale-normalized signals intended to be comparable across BTC, ETH and SOL.",
+    "Freeze all candidate families and dimensions before any Experiment C market campaign.",
+    "Require prospective cross-market breadth in addition to existing per-campaign gates.",
+    "Do not open protected HOLDOUT during Experiment C DEVELOPMENT research."
+  ],
+  "families": [
+    {
+      "kind": "normalized_ewmac",
+      "candidate_count": 6,
+      "fixed_pairs": [
+        {"fast_bars": 16, "slow_bars": 64},
+        {"fast_bars": 32, "slow_bars": 128},
+        {"fast_bars": 64, "slow_bars": 256}
+      ],
+      "shared_dimensions": {
+        "volatility_window_bars": 48,
+        "entry_score": ["0.5", "1.0"],
+        "exit_score": "0.10",
+        "position_mode": "long_flat"
+      },
+      "normalization": "EMA spread divided by current price and trailing realized return volatility."
+    },
+    {
+      "kind": "efficiency_ratio_trend",
+      "candidate_count": 6,
+      "dimensions": {
+        "lookback_bars": [48, 168, 336],
+        "entry_efficiency": ["0.20", "0.40"],
+        "exit_efficiency": "0.10",
+        "position_mode": "long_flat"
+      },
+      "normalization": "Absolute net price displacement divided by total absolute path length."
+    }
+  ],
+  "research_quantity_by_symbol": {
+    "BTCUSDT": "0.10",
+    "ETHUSDT": "2",
+    "SOLUSDT": "50"
+  },
+  "program_hash_by_research_quantity": {
+    "0.10": "a50866f78df1668f2652ce9aacead6a84a456fbcdb4932df3fa587fe31015b6d",
+    "2": "d3e1049c3cf9ab8d6c0167bf096e479b1630bfbf36a505f6a37e3ca16329e990",
+    "50": "49932163e04222ff7836c941b8d185e688e1dc9a980ba2e7701c2e73c64e7b57"
+  },
+  "cross_market_breadth_policy_fingerprint": "f5fdb8a777cf133d49e13edb67da78939d151caca7d2f82d9130cb836b3a6f8d",
+  "cross_market_breadth_policy_source": "knowledge/30_DECISIONES/R7_EXPERIMENT_C_PREREGISTRATION.json",
+  "frozen_market_matrix": [
+    "BTCUSDT:1h",
+    "BTCUSDT:4h",
+    "ETHUSDT:1h",
+    "ETHUSDT:4h",
+    "SOLUSDT:1h",
+    "SOLUSDT:4h"
+  ],
+  "frozen_request_window": {
+    "start": "2025-09-01T00:00:00Z",
+    "end": "2026-06-01T00:00:00Z"
+  },
+  "per_campaign_gates_unchanged": [
+    "DEVELOPMENT_SELECTION_POLICY",
+    "WALK_FORWARD_AND_STRESS_ROBUSTNESS",
+    "PBO_AND_DEFLATED_SHARPE_STATISTICAL_GATE",
+    "TRAIN_CALIBRATED_REGIME_STABILITY"
+  ],
+  "anti_snooping": {
+    "candidate_universe_may_change_after_results": false,
+    "breadth_thresholds_may_change_after_results": false,
+    "material_change_semantics": "Any material change creates a new named experiment/version with new hashes before new market results are observed."
+  },
+  "authority": {
+    "final_holdout_authority": false,
+    "paper_authority": false,
+    "live_authority": false
+  }
+}
