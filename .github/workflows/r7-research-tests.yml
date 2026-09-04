@@ -6,6 +6,7 @@ on:
     paths:
       - ".github/workflows/r7-research-tests.yml"
       - "src/autotrade/research/autopilot.py"
+      - "src/autotrade/research/cross_market_policy.py"
       - "src/autotrade/research/experiment_b.py"
       - "src/autotrade/research/robustness.py"
       - "src/autotrade/research/regime_stability.py"
@@ -15,6 +16,7 @@ on:
       - "src/autotrade/research/strategy_space.py"
       - "scripts/run_r7_experiment_b.py"
       - "tests/test_research_autopilot.py"
+      - "tests/test_research_cross_market_policy.py"
       - "tests/test_research_experiment_b.py"
       - "tests/test_research_robustness.py"
       - "tests/test_research_regime_stability.py"
@@ -48,6 +50,7 @@ jobs:
         run: |
           python -m py_compile \
             src/autotrade/research/autopilot.py \
+            src/autotrade/research/cross_market_policy.py \
             src/autotrade/research/experiment_b.py \
             src/autotrade/research/robustness.py \
             src/autotrade/research/regime_stability.py \
@@ -61,6 +64,7 @@ jobs:
         run: |
           pytest -q \
             tests/test_research_autopilot.py \
+            tests/test_research_cross_market_policy.py \
             tests/test_research_experiment_b.py \
             tests/test_research_robustness.py \
             tests/test_research_regime_stability.py \
