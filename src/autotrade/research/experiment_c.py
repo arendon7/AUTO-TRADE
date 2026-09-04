@@ -495,25 +495,52 @@ class ExperimentCProgram:
         return tuple(sorted(self.trial_id_for(item) for item in self.candidates()))
 
 
+def _ewmac_space(
+    *,
+    family_id: str,
+    fast_bars: int,
+    slow_bars: int,
+    quantity_text: str,
+) -> ExperimentCSearchSpace:
+    return ExperimentCSearchSpace(
+        family_id=family_id,
+        strategy_version="1.0.0",
+        kind="normalized_ewmac",
+        dimensions={
+            "fast_bars": (fast_bars,),
+            "slow_bars": (slow_bars,),
+            "volatility_window_bars": (48,),
+            "entry_score": ("0.5", "1.0"),
+            "exit_score": ("0.10",),
+            "order_quantity": (quantity_text,),
+            "position_mode": ("long_flat",),
+        },
+        max_candidates=2,
+    )
+
+
 def build_experiment_c_program(*, quantity: Decimal) -> ExperimentCProgram:
     quantity_text = str(quantity)
     return ExperimentCProgram(
         program_id="r7-experiment-c",
         spaces=(
-            ExperimentCSearchSpace(
-                family_id="c-ewmac",
-                strategy_version="1.0.0",
-                kind="normalized_ewmac",
-                dimensions={
-                    "fast_bars": (16, 32, 64),
-                    "slow_bars": (64, 128, 256),
-                    "volatility_window_bars": (48,),
-                    "entry_score": ("0.5", "1.0"),
-                    "exit_score": ("0.10",),
-                    "order_quantity": (quantity_text,),
-                    "position_mode": ("long_flat",),
-                },
-                max_candidates=6,
+            _ewmac_space(
+                family_id="c-ewmac-16-64",
+                fast_bars=16,
+                slow_bars=64,
+                quantity_text=quantity_text,
+            ),
+            _ewmac_space(
+                family_id="c-ewmac-32-128",
+                fast_bars=32,
+                slow_bars=128,
+                quantity_text=quantity_text,
+            ),
+            _ewmac_space(
+                family_id="c-ewmac-64-256",
+                fast_bars=64,
+                slow_bars=256,
+                quantity_text=quantity_text,
             ),
             ExperimentCSearchSpace(
                 family_id="c-efficiency",
