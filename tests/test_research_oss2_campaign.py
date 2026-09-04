@@ -1,3 +1,4 @@
+from dataclasses import replace
 from datetime import timedelta
 from decimal import Decimal
 
@@ -188,6 +189,24 @@ def test_common_window_rejects_result_from_different_trial_config(now):
             result=result,
             universe=market,
             trial=second,
+        )
+
+
+def test_common_window_rejects_truncated_result(now):
+    market = make_universe(now)
+    plan = build_plan(market)
+    trial = plan.trials[0]
+    result = CrossSectionalBacktestEngine().run(
+        universe=market,
+        config=backtest_config_from_oss2_trial(trial),
+    )
+    truncated = replace(result, period_returns=result.period_returns[:-1])
+
+    with pytest.raises(ValueError, match="exact common evaluation window"):
+        evaluate_oss2_common_window(
+            result=truncated,
+            universe=market,
+            trial=trial,
         )
 
 
