@@ -14,6 +14,9 @@ coverage.json
 !.env.example
 secrets/
 
+# External research sources (cloned by scripts/bootstrap_quant_sources.py)
+.external/
+
 # OS/editor
 .DS_Store
 .vscode/
