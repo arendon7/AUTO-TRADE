@@ -5,6 +5,13 @@ on:
     branches: ["feature/r7-strategy-foundation"]
     paths:
       - ".github/workflows/r7-public-research.yml"
+      - "src/autotrade/research/autopilot.py"
+      - "src/autotrade/research/robustness.py"
+      - "src/autotrade/research/strategy_catalog.py"
+      - "src/autotrade/research/strategy_library.py"
+      - "src/autotrade/research/strategy_space.py"
+      - "scripts/run_r7_binance_development.py"
+      - "scripts/summarize_r7_reports.py"
   workflow_dispatch:
 
 permissions:
@@ -129,12 +136,14 @@ jobs:
             --min-stress-pass-ratio "0.6666666667" \
             --min-worst-stress-net-return "-0.10" \
             --max-worst-stress-drawdown "0.35" \
+            --min-deflated-sharpe-probability "0.95" \
+            --max-pbo "0.50" \
             --campaign-id "${CAMPAIGN_ID}" \
             --code-version "${GITHUB_SHA}" \
             --output-dir "artifacts/r7/${CAMPAIGN_ID}" \
             --enable-public-data
 
-      - name: Prove HOLDOUT was not checked out
+      - name: Prove HOLDOUT and promotion boundaries
         env:
           CAMPAIGN_ID: ${{ matrix.symbol }}-${{ matrix.interval }}-fixed-20250901-20260601
         run: |
@@ -150,7 +159,15 @@ jobs:
           assert holdout["checked_out"] is False
           assert holdout["bar_count"] > 0
           assert len(holdout["dataset_hash"]) == 64
-          print(f"HOLDOUT protected: {holdout['bar_count']} bars {holdout['dataset_hash'][:12]}")
+          gate = payload["statistical_gate"]
+          promotion = payload["promotion_ready_trial_id"]
+          assert bool(promotion) == gate["passed"]
+          if promotion:
+              assert promotion == payload["selected_trial_id"]
+          print(
+              f"HOLDOUT protected: {holdout['bar_count']} bars "
+              f"{holdout['dataset_hash'][:12]} promotion_ready={bool(promotion)}"
+          )
           PY
 
       - name: Upload campaign evidence
