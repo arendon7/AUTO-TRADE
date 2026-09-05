@@ -50,7 +50,28 @@ partition_start <= as_of < partition_end
 
 El verificador no infiere disponibilidad a partir del timestamp de una barra. La disponibilidad es un dato explícito y hash-bound que deberá ser producido por el adapter upstream correspondiente.
 
-## 3. Protección del FINAL_HOLDOUT
+## 3. Campaign + frozen split binding
+
+Declarar una ventana como `TRAIN` o `DEVELOPMENT` no es suficiente: sin identidad de campaña/split un productor podría cambiar silenciosamente las fechas y seguir usando el mismo nombre de partición.
+
+OSS-3B exige por eso dos identidades adicionales:
+
+- `campaign_id`: identifica la campaña científica a la que pertenece el dataset;
+- `research_split_hash`: SHA-256 del split temporal/universo preregistrado y congelado por la campaña.
+
+Ambos campos forman parte del manifest, del hash del artefacto y de `FactorMatrixEvidence`.
+
+Consecuencias:
+
+- el productor no puede omitir `campaign_id` o `research_split_hash` al construir el artifact;
+- cambiar campaña o split cambia `artifact_hash` aunque rows/features sean idénticos;
+- un artifact manipulado con otro campaign/split falla al recalcular identidad;
+- downstream debe conservar ambas identidades junto con `training_dataset_hash`;
+- el split hash no se deriva de la matriz exportada: debe provenir del estado científico previamente congelado.
+
+OSS-3B verifica **binding e integridad**. La creación/autorización del split preregistrado sigue perteneciendo al gobierno de investigación upstream; esta frontera no puede autoaprobar un split nuevo.
+
+## 4. Protección del FINAL_HOLDOUT
 
 OSS-3B V1 sólo admite:
 
@@ -63,7 +84,7 @@ Esto evita que el laboratorio Qlib genérico reciba accidentalmente el holdout p
 
 Si en el futuro un modelo congelado necesita ser evaluado sobre FINAL_HOLDOUT, deberá existir una frontera distinta, one-shot y permit-aware, compatible con OSS-2G/OSS-2H. No se reutilizará OSS-3B como bypass.
 
-## 4. Separación features vs labels
+## 5. Separación features vs labels
 
 OSS-3B V1 es **feature-only**.
 
@@ -80,7 +101,7 @@ No existe campo `label`, `target`, `future_return`, `outcome` ni equivalente en 
 
 Esto es deliberado: los labels supervisados tienen otra semántica temporal —incluido un horizonte futuro y una fecha de disponibilidad propia— y merecen un contrato separado para evitar que se mezclen inadvertidamente con features point-in-time.
 
-## 5. Feature schema
+## 6. Feature schema
 
 Cada feature queda ligada a:
 
@@ -94,12 +115,14 @@ Cada feature queda ligada a:
 
 El orden completo del arreglo de features forma parte de `feature_schema_hash`. Los vectores `values[]` usan exactamente ese orden y deben tener la misma anchura.
 
-## 6. Dataset provenance
+## 7. Dataset provenance
 
 El manifest liga:
 
 - producer exacto OSS-3B;
 - `producer_code_hash`;
+- `campaign_id`;
+- `research_split_hash`;
 - `source_dataset_hash`;
 - `source_universe_hash`;
 - partition y ventana temporal;
@@ -110,9 +133,9 @@ El manifest liga:
 - feature schema hash;
 - row payload hash.
 
-El artifact completo tiene su propio SHA-256 canónico. Para OSS-3C, ese `artifact_hash` será el `training_dataset_hash` que deba aparecer posteriormente en el artifact OSS-3A.
+El artifact completo tiene su propio SHA-256 canónico. Para el futuro lab runner, ese `artifact_hash` será el `training_dataset_hash` que deba quedar retenido en el lineage del modelo/predicciones junto con campaign y split identity.
 
-## 7. Missing values
+## 8. Missing values
 
 V1 usa una política deliberadamente restrictiva:
 
@@ -131,7 +154,7 @@ Sólo se aceptan números finitos. Se rechazan:
 
 Si un modelo futuro necesita imputación, la imputación deberá convertirse en una transformación explícita y hash-bound en una versión posterior; no se permitirá semántica implícita de missing values.
 
-## 8. Canonicalización
+## 9. Canonicalización
 
 - JSON UTF-8 solamente;
 - claves duplicadas rechazadas;
@@ -145,7 +168,7 @@ Si un modelo futuro necesita imputación, la imputación deberá convertirse en 
 - máximo 50 MB por artifact V1;
 - hashes recalculados durante ingestion.
 
-## 9. Qué no prueba `available_at`
+## 10. Qué no prueba `available_at`
 
 El contrato detecta contradicciones internas y hace auditable la afirmación temporal del productor, pero **no puede por sí solo demostrar que el productor calculó correctamente `available_at`**.
 
@@ -154,10 +177,11 @@ Por tanto, el siguiente adapter desde datos de mercado debe:
 1. usar sólo datos cerrados/observables;
 2. derivar disponibilidad desde el contrato real de cada fuente;
 3. conservar provenance de source dataset/universe;
-4. ser probado contra lookahead explícito;
-5. no reinterpretar `started_at` de una barra como disponibilidad salvo que el timeframe/fuente demuestre esa equivalencia.
+4. retener campaign + frozen split identity;
+5. ser probado contra lookahead explícito;
+6. no reinterpretar `started_at` de una barra como disponibilidad salvo que el timeframe/fuente demuestre esa equivalencia.
 
-## 10. Authority boundary
+## 11. Authority boundary
 
 OSS-3B fija:
 
@@ -176,9 +200,9 @@ FINAL_HOLDOUT export: FALSE
 labels included: FALSE
 ```
 
-El boundary estático prohíbe imports de Qlib/MLflow/Redis, networking, subprocess, serialización ejecutable y superficies operativas AUTO-TRADE.
+El boundary estático prohíbe imports de Qlib/MLflow/Redis, networking, subprocess, serialización ejecutable y superficies operativas AUTO-TRADE. El runtime probe exige además que `campaign_id` y `research_split_hash` sobrevivan intactos al artifact -> evidence.
 
-## 11. Siguientes waves
+## 12. Siguientes waves
 
 ### OSS-3C — Supervised Label Artifact
 
@@ -189,8 +213,10 @@ Contrato separado para labels con:
 - `available_at`;
 - formula hash;
 - source provenance;
-- partition identity;
-- prohibición explícita de usar un label antes de `available_at`.
+- campaign identity;
+- frozen research split hash;
+- prohibición explícita de usar un label antes de `available_at`;
+- TRAIN/DEVELOPMENT solamente en el canal genérico.
 
 ### OSS-3D — Isolated Qlib Lab Runner
 
@@ -200,6 +226,8 @@ El runner externo deberá aceptar sólo artifacts OSS-3B/3C verificados y produc
 
 Las predicciones OSS-3A entrarán a un backtest research-only y deberán pasar nuevamente costos, multiple-testing, DEVELOPMENT/HOLDOUT, execution sensitivity y Shadow/Forward antes de cualquier ruta de promoción.
 
-## 12. Estado operacional
+## 13. Estado operacional
 
 OSS-3B no es una estrategia ni una autorización de trading. Es una frontera de integridad de datos para investigación reproducible.
+
+La certificación válida deberá ejecutarse sobre el merge ref efectivo del head final y demostrar Dedicated + Core Safety; resultados de heads anteriores no certifican esta revisión.
