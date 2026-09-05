@@ -1,0 +1,78 @@
+name: OSS-2E Holdout Eligibility Research
+
+on:
+  pull_request:
+    paths:
+      - "src/autotrade/research/oss2_holdout_eligibility.py"
+      - "src/autotrade/research/oss2_robustness.py"
+      - "src/autotrade/research/multiple_testing.py"
+      - "src/autotrade/research/oss2_campaign.py"
+      - "src/autotrade/research/__init__.py"
+      - "tests/test_research_oss2_holdout_eligibility.py"
+      - "tests/test_research_oss2_robustness.py"
+      - "tests/test_research_oss2_robustness_adversarial.py"
+      - "scripts/check_oss2e_holdout_eligibility_boundary.py"
+      - ".github/workflows/oss2e-holdout-eligibility.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  oss2e:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install
+        run: python -m pip install -e ".[dev]"
+
+      - name: Compile OSS-2D and OSS-2E research surfaces
+        run: |
+          python -m py_compile \
+            src/autotrade/research/multiple_testing.py \
+            src/autotrade/research/oss2_campaign.py \
+            src/autotrade/research/oss2_robustness.py \
+            src/autotrade/research/oss2_holdout_eligibility.py \
+            scripts/check_oss2e_holdout_eligibility_boundary.py
+
+      - name: OSS-2E eligibility tests
+        run: pytest -q tests/test_research_oss2_holdout_eligibility.py
+
+      - name: OSS-2E authority boundary
+        run: python scripts/check_oss2e_holdout_eligibility_boundary.py
+
+      - name: OSS-2D regression tests
+        run: |
+          pytest -q \
+            tests/test_r3_multiple_testing.py \
+            tests/test_research_dsr_metric_scaling.py \
+            tests/test_research_oss2_robustness.py \
+            tests/test_research_oss2_robustness_adversarial.py
+
+      - name: OSS-2 regression tests
+        run: |
+          pytest -q \
+            tests/test_research_oss2_cross_sectional.py \
+            tests/test_research_oss2_backtest.py \
+            tests/test_research_oss2_campaign.py \
+            tests/test_research_oss2_campaign_adversarial.py
+
+      - name: OSS-1 regression tests
+        run: |
+          pytest -q \
+            tests/test_research_oss_strategy_dsl.py \
+            tests/test_research_oss_campaign.py \
+            tests/test_strategy_catalog.py
+
+      - name: Research authority boundary
+        run: python scripts/check_research_authority.py
+
+      - name: W83 strategy-version boundary re-proof
+        run: python scripts/check_w83_strategy_version_binding_boundary.py
