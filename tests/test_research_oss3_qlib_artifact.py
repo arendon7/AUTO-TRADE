@@ -16,8 +16,6 @@ from autotrade.research.oss3_qlib_artifact import (
     QlibArtifactGovernanceError,
     QlibArtifactIntegrityError,
     QlibPredictionArtifact,
-    QlibPredictionEvidence,
-    QlibPredictionManifest,
     QlibPredictionRow,
 )
 
@@ -112,7 +110,7 @@ def test_prediction_row_requires_canonical_utc_symbol_and_finite_score():
         QlibPredictionRow("2026-01-01T00:00:00", "BTCUSDT", 1.0)
     with pytest.raises(ValueError, match="canonical UTC"):
         QlibPredictionRow("2026-01-01T01:00:00+01:00", "BTCUSDT", 1.0)
-    with pytest.raises(ValueError, match="canonical \+00:00"):
+    with pytest.raises(ValueError, match=r"canonical \+00:00"):
         QlibPredictionRow("2026-01-01T00:00:00Z", "BTCUSDT", 1.0)
     with pytest.raises(ValueError, match="symbol"):
         QlibPredictionRow(BASE.isoformat(), "bad symbol", 1.0)
@@ -265,6 +263,27 @@ def test_read_rejects_top_level_manifest_and_row_schema_extensions(tmp_path):
         QlibPredictionArtifact.read(path)
 
 
+def test_read_rejects_duplicate_json_object_keys(tmp_path):
+    artifact = _artifact()
+    target = tmp_path / "duplicate-key.json"
+    artifact.write(target)
+    raw = target.read_text(encoding="utf-8")
+    duplicate_prefix = '{"artifact_hash":"' + artifact.artifact_hash + '",'
+    target.write_text(raw.replace("{", duplicate_prefix, 1), encoding="utf-8")
+
+    with pytest.raises(QlibArtifactIntegrityError, match="duplicate JSON object key"):
+        QlibPredictionArtifact.read(target)
+
+
+def test_read_rejects_noncanonical_but_semantically_equivalent_json(tmp_path):
+    artifact = _artifact()
+    target = tmp_path / "pretty.json"
+    target.write_text(json.dumps(artifact.to_dict(), indent=2) + "\n", encoding="utf-8")
+
+    with pytest.raises(QlibArtifactIntegrityError, match="serialization is not canonical"):
+        QlibPredictionArtifact.read(target)
+
+
 def test_read_rejects_tampering_without_recomputed_hashes(tmp_path):
     document = _artifact().to_dict()
 
@@ -326,7 +345,7 @@ def test_evidence_constructor_permanently_denies_execution_capital_and_live():
 
 def test_manifest_canonical_time_fields_reject_noncanonical_representation():
     manifest = _artifact().manifest
-    with pytest.raises(ValueError, match="canonical \+00:00"):
+    with pytest.raises(ValueError, match=r"canonical \+00:00"):
         replace(manifest, train_start="2026-01-01T00:00:00Z")
     with pytest.raises(ValueError, match="timezone-aware"):
         replace(manifest, train_start="2026-01-01T00:00:00")
