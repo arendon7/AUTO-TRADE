@@ -11,10 +11,8 @@ import pytest
 from autotrade.research.oss3_factor_matrix_artifact import (
     FactorDefinition,
     FactorMatrixArtifact,
-    FactorMatrixEvidence,
     FactorMatrixGovernanceError,
     FactorMatrixIntegrityError,
-    FactorMatrixManifest,
     FactorMatrixPartition,
     FactorMatrixRow,
     OSS3B_ARTIFACT_VERSION,
@@ -24,12 +22,14 @@ from autotrade.research.oss3_factor_matrix_artifact import (
 
 
 BASE = datetime(2026, 1, 1, tzinfo=timezone.utc)
+CAMPAIGN_ID = "oss3b-campaign-001"
 H1 = "1" * 64
 H2 = "2" * 64
 H3 = "3" * 64
 H4 = "4" * 64
 H5 = "5" * 64
 H6 = "6" * 64
+H7 = "7" * 64
 
 
 def _features() -> tuple[FactorDefinition, ...]:
@@ -86,8 +86,17 @@ def _rows() -> tuple[FactorMatrixRow, ...]:
     )
 
 
-def _artifact(*, partition=FactorMatrixPartition.TRAIN, features=None, rows=None):
+def _artifact(
+    *,
+    partition=FactorMatrixPartition.TRAIN,
+    campaign_id=CAMPAIGN_ID,
+    research_split_hash=H7,
+    features=None,
+    rows=None,
+):
     return FactorMatrixArtifact.build(
+        campaign_id=campaign_id,
+        research_split_hash=research_split_hash,
         partition=partition,
         partition_start=BASE,
         partition_end=BASE + timedelta(days=10),
@@ -111,6 +120,8 @@ def test_build_round_trip_and_evidence_are_deterministic(tmp_path):
     artifact = _artifact()
     assert artifact.artifact_version == OSS3B_ARTIFACT_VERSION
     assert artifact.manifest.producer_id == OSS3B_PRODUCER_ID
+    assert artifact.manifest.campaign_id == CAMPAIGN_ID
+    assert artifact.manifest.research_split_hash == H7
     assert artifact.manifest.partition == "TRAIN"
     assert artifact.manifest.feature_count == 2
     assert artifact.manifest.row_count == 4
@@ -125,6 +136,8 @@ def test_build_round_trip_and_evidence_are_deterministic(tmp_path):
     assert evidence.evidence_version == OSS3B_EVIDENCE_VERSION
     assert evidence.artifact_hash == artifact.artifact_hash
     assert evidence.qlib_training_dataset_hash == artifact.artifact_hash
+    assert evidence.campaign_id == CAMPAIGN_ID
+    assert evidence.research_split_hash == H7
     assert evidence.feature_schema_hash == artifact.manifest.feature_schema_hash
     assert evidence.labels_included is False
     assert evidence.final_holdout_included is False
@@ -133,6 +146,21 @@ def test_build_round_trip_and_evidence_are_deterministic(tmp_path):
     assert evidence.capital_authority == "NONE"
     assert evidence.live_trading == "BLOCKED"
     assert evidence.fingerprint == restored.to_research_evidence().fingerprint
+
+
+def test_campaign_and_split_identity_are_required_and_hash_bound():
+    baseline = _artifact()
+    changed_campaign = _artifact(campaign_id="oss3b-campaign-002")
+    changed_split = _artifact(research_split_hash="8" * 64)
+    assert changed_campaign.artifact_hash != baseline.artifact_hash
+    assert changed_split.artifact_hash != baseline.artifact_hash
+    assert changed_campaign.to_research_evidence().fingerprint != baseline.to_research_evidence().fingerprint
+    assert changed_split.to_research_evidence().fingerprint != baseline.to_research_evidence().fingerprint
+
+    with pytest.raises(ValueError, match="campaign_id"):
+        _artifact(campaign_id="bad campaign")
+    with pytest.raises(ValueError, match="research_split_hash"):
+        _artifact(research_split_hash="broken")
 
 
 def test_development_partition_is_allowed_but_final_holdout_is_not():
@@ -146,6 +174,8 @@ def test_development_partition_is_allowed_but_final_holdout_is_not():
         replace(manifest, partition="HOLDOUT")
     with pytest.raises(TypeError, match="FactorMatrixPartition"):
         FactorMatrixArtifact.build(
+            campaign_id=CAMPAIGN_ID,
+            research_split_hash=H7,
             partition="TRAIN",
             partition_start=BASE,
             partition_end=BASE + timedelta(days=10),
@@ -177,7 +207,6 @@ def test_row_enforces_point_in_time_availability():
 
 
 def test_rows_must_be_inside_declared_partition_window():
-    features = _features()
     before = FactorMatrixRow(
         as_of=(BASE - timedelta(seconds=1)).isoformat(),
         available_at=(BASE - timedelta(seconds=2)).isoformat(),
@@ -185,7 +214,7 @@ def test_rows_must_be_inside_declared_partition_window():
         values=(0.1, 0.2),
     )
     with pytest.raises(FactorMatrixGovernanceError, match="outside partition"):
-        _artifact(features=features, rows=(before,))
+        _artifact(rows=(before,))
 
     end = FactorMatrixRow(
         as_of=(BASE + timedelta(days=10)).isoformat(),
@@ -194,7 +223,7 @@ def test_rows_must_be_inside_declared_partition_window():
         values=(0.1, 0.2),
     )
     with pytest.raises(FactorMatrixGovernanceError, match="outside partition"):
-        _artifact(features=features, rows=(end,))
+        _artifact(rows=(end,))
 
 
 def test_feature_definition_is_numeric_feature_only_and_hash_bound():
@@ -267,12 +296,15 @@ def test_rows_must_be_unique_and_canonically_sorted():
         _artifact(rows=(rows[0], rows[0]))
 
 
-def test_manifest_enforces_producer_hashes_policies_counts_and_window():
+def test_manifest_enforces_campaign_provenance_hashes_policies_counts_and_window():
     manifest = _artifact().manifest
     with pytest.raises(FactorMatrixGovernanceError, match="producer"):
         replace(manifest, producer_id="other")
+    with pytest.raises(ValueError, match="campaign_id"):
+        replace(manifest, campaign_id="bad campaign")
     for field in (
         "producer_code_hash",
+        "research_split_hash",
         "source_dataset_hash",
         "source_universe_hash",
         "feature_schema_hash",
@@ -286,12 +318,12 @@ def test_manifest_enforces_producer_hashes_policies_counts_and_window():
         replace(manifest, missing_value_policy="ALLOW_NULL")
     with pytest.raises(FactorMatrixGovernanceError, match="point-in-time"):
         replace(manifest, point_in_time_policy="TRUST_CALLER")
-    for field, value in (("feature_count", 0), ("feature_count", True), ("feature_count", 513)):
+    for value in (0, True, 513):
         with pytest.raises(ValueError, match="feature_count"):
-            replace(manifest, **{field: value})
-    for field, value in (("row_count", 0), ("row_count", True), ("row_count", 2_000_001)):
+            replace(manifest, feature_count=value)
+    for value in (0, True, 2_000_001):
         with pytest.raises(ValueError, match="row_count"):
-            replace(manifest, **{field: value})
+            replace(manifest, row_count=value)
 
 
 def test_artifact_constructor_detects_all_identity_drift():
@@ -310,6 +342,10 @@ def test_artifact_constructor_detects_all_identity_drift():
         replace(artifact, manifest=replace(artifact.manifest, feature_schema_hash="f" * 64))
     with pytest.raises(FactorMatrixIntegrityError, match="row payload hash"):
         replace(artifact, manifest=replace(artifact.manifest, row_payload_hash="f" * 64))
+    with pytest.raises(FactorMatrixIntegrityError, match="artifact hash"):
+        replace(artifact, manifest=replace(artifact.manifest, campaign_id="oss3b-campaign-999"))
+    with pytest.raises(FactorMatrixIntegrityError, match="artifact hash"):
+        replace(artifact, manifest=replace(artifact.manifest, research_split_hash="9" * 64))
 
 
 def test_empty_feature_or_row_artifacts_fail_closed():
@@ -353,6 +389,8 @@ def test_timestamp_and_symbol_canonicalization_is_strict():
 def test_build_requires_timezone_aware_partition_bounds():
     with pytest.raises(ValueError, match="timezone-aware"):
         FactorMatrixArtifact.build(
+            campaign_id=CAMPAIGN_ID,
+            research_split_hash=H7,
             partition=FactorMatrixPartition.TRAIN,
             partition_start=datetime(2026, 1, 1),
             partition_end=BASE + timedelta(days=10),
@@ -430,7 +468,7 @@ def test_read_rejects_duplicate_keys_and_noncanonical_serialization(tmp_path):
         FactorMatrixArtifact.read(pretty)
 
 
-def test_read_detects_feature_row_and_manifest_tampering(tmp_path):
+def test_read_detects_feature_row_campaign_split_and_provenance_tampering(tmp_path):
     document = _artifact().to_dict()
 
     feature = deepcopy(document)
@@ -447,12 +485,17 @@ def test_read_detects_feature_row_and_manifest_tampering(tmp_path):
     with pytest.raises(FactorMatrixIntegrityError, match="row payload hash"):
         FactorMatrixArtifact.read(path)
 
-    provenance = deepcopy(document)
-    provenance["manifest"]["source_dataset_hash"] = "f" * 64
-    path = tmp_path / "provenance-tamper.json"
-    _write(path, provenance)
-    with pytest.raises(FactorMatrixIntegrityError, match="artifact hash"):
-        FactorMatrixArtifact.read(path)
+    for field, value in (
+        ("source_dataset_hash", "f" * 64),
+        ("research_split_hash", "e" * 64),
+        ("campaign_id", "oss3b-campaign-tampered"),
+    ):
+        tampered = deepcopy(document)
+        tampered["manifest"][field] = value
+        path = tmp_path / f"{field}-tamper.json"
+        _write(path, tampered)
+        with pytest.raises(FactorMatrixIntegrityError, match="artifact hash"):
+            FactorMatrixArtifact.read(path)
 
 
 def test_read_rejects_wrong_container_and_value_types(tmp_path):
@@ -487,12 +530,22 @@ def test_read_rejects_wrong_container_and_value_types(tmp_path):
         FactorMatrixArtifact.read(path)
 
 
-def test_evidence_constructor_denies_labels_holdout_execution_capital_and_live():
+def test_evidence_constructor_denies_identity_drift_labels_holdout_execution_capital_and_live():
     evidence = _artifact().to_research_evidence()
     with pytest.raises(FactorMatrixIntegrityError, match="evidence version"):
         replace(evidence, evidence_version="WRONG")
+    with pytest.raises(FactorMatrixIntegrityError, match="campaign_id"):
+        replace(evidence, campaign_id="bad campaign")
+    with pytest.raises(ValueError, match="research_split_hash"):
+        replace(evidence, research_split_hash="broken")
     with pytest.raises(FactorMatrixGovernanceError, match="forbidden partition"):
         replace(evidence, partition="FINAL_HOLDOUT")
+    with pytest.raises(FactorMatrixIntegrityError, match="partition window"):
+        replace(evidence, partition_end=evidence.partition_start)
+    with pytest.raises(FactorMatrixIntegrityError, match="counts"):
+        replace(evidence, row_count=0)
+    with pytest.raises(FactorMatrixIntegrityError, match="counts"):
+        replace(evidence, feature_count=0)
     with pytest.raises(FactorMatrixIntegrityError, match="point-in-time"):
         replace(evidence, point_in_time_policy="TRUST_CALLER")
     with pytest.raises(FactorMatrixGovernanceError, match="labels or FINAL_HOLDOUT"):
@@ -509,7 +562,8 @@ def test_evidence_constructor_denies_labels_holdout_execution_capital_and_live()
         replace(evidence, live_trading="ENABLED")
 
 
-def test_evidence_fingerprint_changes_when_dataset_identity_changes():
+def test_evidence_fingerprint_changes_when_dataset_or_split_identity_changes():
     evidence = _artifact().to_research_evidence()
-    changed = replace(evidence, source_dataset_hash="a" * 64)
-    assert changed.fingerprint != evidence.fingerprint
+    assert replace(evidence, source_dataset_hash="a" * 64).fingerprint != evidence.fingerprint
+    assert replace(evidence, research_split_hash="b" * 64).fingerprint != evidence.fingerprint
+    assert replace(evidence, campaign_id="oss3b-campaign-003").fingerprint != evidence.fingerprint
