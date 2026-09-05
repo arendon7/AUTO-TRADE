@@ -205,19 +205,19 @@ def campaign_deflated_sharpe(
     skewness: float,
     kurtosis: float,
     metric_name: str = "sharpe",
-    metric_scale: float = 1.0,
+    metric_scale: float | None = None,
 ) -> DeflatedSharpeEvidence:
     """Compute Deflated Sharpe against a frozen campaign metric family.
 
-    ``metric_name="sharpe", metric_scale=1`` preserves the historical contract.
-    A research layer may bind another preregistered Sharpe field and an explicit
-    positive scale. This is useful when the stored metric is annualized but DSR
-    is evaluated at the return-observation frequency: use
-    ``metric_scale = 1 / sqrt(annualization_factor)``.
+    Legacy ``sharpe`` uses scale 1. For ``common_window_sharpe`` the default
+    scale is inferred from the frozen trial ``annualization_factor`` and converts
+    the stored annualized Sharpe back to the return-observation frequency before
+    applying the finite-sample DSR formula. An explicit positive ``metric_scale``
+    remains available for other preregistered metric families.
     """
     if not metric_name.strip():
         raise ValueError("metric_name is required")
-    if not isfinite(metric_scale) or metric_scale <= 0:
+    if metric_scale is not None and (not isfinite(metric_scale) or metric_scale <= 0):
         raise ValueError("metric_scale must be finite and > 0")
     accounting = ledger.require_complete_campaign(campaign_id)
     if accounting.failed_trial_ids:
@@ -232,6 +232,31 @@ def campaign_deflated_sharpe(
         raise ValueError("skewness/kurtosis preconditions are invalid")
 
     records = {record.spec.trial_id: record for record in ledger.list_trials(campaign_id)}
+    effective_scale = metric_scale
+    if effective_scale is None:
+        if metric_name == "common_window_sharpe":
+            annualization_factors: set[float] = set()
+            for trial_id in accounting.expected_trial_ids:
+                raw_factor = records[trial_id].spec.parameters.get("annualization_factor")
+                try:
+                    factor = float(raw_factor)
+                except (TypeError, ValueError) as exc:
+                    raise TrialGovernanceError(
+                        f"trial {trial_id} has no valid annualization_factor for Deflated Sharpe"
+                    ) from exc
+                if not isfinite(factor) or factor <= 0:
+                    raise TrialGovernanceError(
+                        f"trial {trial_id} has invalid annualization_factor for Deflated Sharpe"
+                    )
+                annualization_factors.add(factor)
+            if len(annualization_factors) != 1:
+                raise TrialGovernanceError(
+                    "Deflated Sharpe requires one frozen annualization_factor across the family"
+                )
+            effective_scale = 1.0 / sqrt(annualization_factors.pop())
+        else:
+            effective_scale = 1.0
+
     sharpes: dict[str, float] = {}
     for trial_id in accounting.expected_trial_ids:
         raw = records[trial_id].metrics.get(metric_name)
@@ -239,7 +264,7 @@ def campaign_deflated_sharpe(
             raise TrialGovernanceError(
                 f"trial {trial_id} has no numeric {metric_name} metric for Deflated Sharpe"
             )
-        value = float(raw) * metric_scale
+        value = float(raw) * effective_scale
         if not isfinite(value):
             raise TrialGovernanceError(
                 f"trial {trial_id} scaled {metric_name} is not finite"
@@ -260,7 +285,7 @@ def campaign_deflated_sharpe(
     if sharpes[selected_trial_id] != selected_best:
         message = (
             "Deflated Sharpe selected_trial_id must be a maximum-Sharpe trial"
-            if metric_name == "sharpe" and metric_scale == 1.0
+            if metric_name == "sharpe" and effective_scale == 1.0
             else "Deflated Sharpe selected_trial_id must maximize the bound metric"
         )
         raise TrialGovernanceError(message)
@@ -287,7 +312,7 @@ def campaign_deflated_sharpe(
         family_size=n,
         sample_size=sample_size,
         metric_name=metric_name,
-        metric_scale=metric_scale,
+        metric_scale=effective_scale,
     )
 
 
