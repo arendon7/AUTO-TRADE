@@ -25,6 +25,8 @@ class PBOEvidence:
     combinations_evaluated: int
     pbo: float
     logits: tuple[float, ...]
+    partition_sizes: tuple[int, ...] = ()
+    balanced_partitions: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -84,7 +86,15 @@ def campaign_pbo(
     returns_by_trial: Mapping[str, Sequence[float]],
     *,
     partitions: int = 8,
+    balanced_partitions: bool = False,
 ) -> PBOEvidence:
+    """Estimate PBO with deterministic contiguous CSCV partitions.
+
+    The historical strict mode requires equal-size partitions. When
+    ``balanced_partitions`` is true, all observations are retained and assigned
+    to contiguous partitions whose sizes differ by at most one row. This avoids
+    silently trimming a valid common window solely to satisfy divisibility.
+    """
     accounting = ledger.require_complete_campaign(campaign_id)
     if accounting.failed_trial_ids:
         raise TrialGovernanceError(
@@ -97,11 +107,15 @@ def campaign_pbo(
         )
     if partitions < 4 or partitions % 2:
         raise ValueError("partitions must be an even integer >= 4")
+    if not isinstance(balanced_partitions, bool):
+        raise TypeError("balanced_partitions must be bool")
     lengths = {len(tuple(values)) for values in returns_by_trial.values()}
     if len(lengths) != 1:
         raise ValueError("all PBO return series must have equal length")
     observations = lengths.pop()
-    if observations < partitions * 2 or observations % partitions:
+    if observations < partitions * 2:
+        raise ValueError("PBO requires at least two observations per partition")
+    if not balanced_partitions and observations % partitions:
         raise ValueError(
             "PBO observations must divide evenly into partitions with >=2 rows each"
         )
@@ -115,10 +129,24 @@ def campaign_pbo(
     }
     if any(not isfinite(value) for values in series.values() for value in values):
         raise ValueError("PBO return values must be finite")
-    block = observations // partitions
-    partition_indices = tuple(
-        tuple(range(index * block, (index + 1) * block)) for index in range(partitions)
+
+    base_size, remainder = divmod(observations, partitions)
+    partition_sizes = tuple(
+        base_size + (1 if index < remainder else 0)
+        for index in range(partitions)
     )
+    if min(partition_sizes) < 2:
+        raise ValueError("PBO requires at least two observations per partition")
+    if not balanced_partitions and len(set(partition_sizes)) != 1:
+        raise ValueError("strict PBO partitions must have equal size")
+    partition_indices: list[tuple[int, ...]] = []
+    cursor = 0
+    for size in partition_sizes:
+        partition_indices.append(tuple(range(cursor, cursor + size)))
+        cursor += size
+    if cursor != observations:
+        raise RuntimeError("PBO partition accounting mismatch")
+
     logits: list[float] = []
     half = partitions // 2
     all_partitions = set(range(partitions))
@@ -155,6 +183,8 @@ def campaign_pbo(
         combinations_evaluated=len(logits),
         pbo=pbo,
         logits=tuple(logits),
+        partition_sizes=partition_sizes,
+        balanced_partitions=balanced_partitions,
     )
 
 
@@ -170,7 +200,7 @@ def campaign_deflated_sharpe(
 ) -> DeflatedSharpeEvidence:
     """Compute Deflated Sharpe against a frozen campaign metric family.
 
-    `metric_name="sharpe"` preserves the historical contract. Research layers
+    ``metric_name="sharpe"`` preserves the historical contract. Research layers
     that preregister a different Sharpe field (for example a common-window
     Sharpe) may bind that exact field without copying the DSR implementation.
     """
