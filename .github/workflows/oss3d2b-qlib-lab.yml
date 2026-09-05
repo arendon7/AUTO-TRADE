@@ -56,7 +56,7 @@ jobs:
           print('OSS-3D2B pyqlib runtime: 0.9.7 PASS')
           PY
       - name: Real Qlib ridge integration tests
-        run: pytest -q labs/oss3_qlib/tests/test_runner.py
+        run: python -m pytest -q labs/oss3_qlib/tests/test_runner.py
       - name: Re-prove isolated lab boundary after external runtime install
         run: python scripts/check_oss3d2b_qlib_lab_boundary.py
       - name: OSS-3D2A regression
