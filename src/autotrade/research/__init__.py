@@ -46,6 +46,15 @@ from .oss2_campaign import (
     evaluate_oss2_common_window,
     oss2_candidate_count,
 )
+from .oss2_holdout_eligibility import (
+    OSS2HoldoutEligibilityDecision,
+    OSS2HoldoutEligibilityEvidence,
+    OSS2HoldoutEligibilityGate,
+    OSS2HoldoutEligibilityGovernanceError,
+    OSS2HoldoutEligibilityPolicy,
+    canonical_oss2e_policy,
+    evaluate_oss2e_holdout_eligibility,
+)
 from .oss2_robustness import (
     OSS2BootstrapEvidence,
     OSS2CostStressEvidence,
@@ -90,6 +99,11 @@ __all__ = [
     "OSS2BootstrapEvidence",
     "OSS2CampaignPlan",
     "OSS2CostStressEvidence",
+    "OSS2HoldoutEligibilityDecision",
+    "OSS2HoldoutEligibilityEvidence",
+    "OSS2HoldoutEligibilityGate",
+    "OSS2HoldoutEligibilityGovernanceError",
+    "OSS2HoldoutEligibilityPolicy",
     "OSS2LocalNeighbor",
     "OSS2LocalSensitivityEvidence",
     "OSS2RobustnessEvidence",
@@ -111,7 +125,9 @@ __all__ = [
     "build_oss1_development_campaign",
     "build_oss2_development_campaign",
     "canonical_oss2d_policy",
+    "canonical_oss2e_policy",
     "evaluate_oss2_common_window",
+    "evaluate_oss2e_holdout_eligibility",
     "evaluate_sample_adequacy",
     "evaluate_walk_forward_robustness",
     "moving_block_bootstrap",
