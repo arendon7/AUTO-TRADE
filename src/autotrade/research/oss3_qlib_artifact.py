@@ -1,9 +1,9 @@
 """OSS-3A isolated Qlib prediction-artifact contract.
 
-The Qlib runtime is intentionally OUTSIDE AUTO-TRADE.  This module accepts
+The Qlib runtime is intentionally OUTSIDE AUTO-TRADE. This module accepts
 only a canonical local JSON artifact produced by an isolated research process.
 It performs deterministic structural/provenance verification and converts the
-artifact into immutable research evidence.  It has no network, broker, OMS,
+artifact into immutable research evidence. It has no network, broker, OMS,
 Safety, OrderIntent, PAPER, capital or LIVE authority.
 
 Security/scientific boundary:
@@ -15,6 +15,8 @@ Security/scientific boundary:
 - every prediction must live inside the declared inference window;
 - rows are unique and canonically sorted by (timestamp, symbol);
 - scores must be finite;
+- duplicate JSON object keys are rejected;
+- artifact bytes must use the canonical serialization;
 - artifact and payload hashes are recomputed on ingestion.
 """
 
@@ -98,7 +100,11 @@ class QlibPredictionRow:
         return _parse_canonical_utc(self.timestamp, "prediction timestamp")
 
     def to_dict(self) -> dict[str, object]:
-        return {"timestamp": self.timestamp, "symbol": self.symbol, "score": float(self.score)}
+        return {
+            "timestamp": self.timestamp,
+            "symbol": self.symbol,
+            "score": float(self.score),
+        }
 
 
 @dataclass(frozen=True, slots=True)
@@ -365,7 +371,10 @@ class QlibPredictionArtifact:
         if target.stat().st_size > MAX_ARTIFACT_BYTES:
             raise QlibArtifactGovernanceError("OSS-3A artifact exceeds size limit")
         try:
-            document = json.loads(target.read_text(encoding="utf-8"))
+            raw = target.read_text(encoding="utf-8")
+            document = json.loads(raw, object_pairs_hook=_reject_duplicate_json_pairs)
+        except QlibArtifactIntegrityError:
+            raise
         except (OSError, UnicodeError, json.JSONDecodeError) as exc:
             raise QlibArtifactIntegrityError("OSS-3A artifact is not valid UTF-8 JSON") from exc
         if not isinstance(document, dict) or frozenset(document) != _TOP_LEVEL_KEYS:
@@ -385,7 +394,7 @@ class QlibPredictionArtifact:
             artifact_version = document["artifact_version"]
             if not isinstance(artifact_version, str):
                 raise TypeError("artifact_version must be a string")
-            return cls(
+            artifact = cls(
                 artifact_version=artifact_version,
                 manifest=manifest,
                 rows=rows,
@@ -395,6 +404,10 @@ class QlibPredictionArtifact:
             raise
         except (KeyError, TypeError, ValueError) as exc:
             raise QlibArtifactIntegrityError("OSS-3A artifact fields are invalid") from exc
+        expected_raw = _canonical_json(artifact.to_dict()) + "\n"
+        if raw != expected_raw:
+            raise QlibArtifactIntegrityError("OSS-3A artifact serialization is not canonical")
+        return artifact
 
 
 def _manifest_from_mapping(data: Mapping[str, object]) -> QlibPredictionManifest:
@@ -499,6 +512,15 @@ def _parse_canonical_utc(value: str, name: str) -> datetime:
     if value != normalized.isoformat():
         raise ValueError(f"{name} must use canonical +00:00 representation")
     return normalized
+
+
+def _reject_duplicate_json_pairs(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    document: dict[str, object] = {}
+    for key, value in pairs:
+        if key in document:
+            raise QlibArtifactIntegrityError(f"duplicate JSON object key: {key}")
+        document[key] = value
+    return document
 
 
 def _string(data: Mapping[str, object], key: str) -> str:
