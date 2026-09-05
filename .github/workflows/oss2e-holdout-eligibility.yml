@@ -11,6 +11,7 @@ on:
       - "tests/test_research_oss2_holdout_eligibility.py"
       - "tests/test_research_oss2_robustness.py"
       - "tests/test_research_oss2_robustness_adversarial.py"
+      - "scripts/check_oss2e_holdout_eligibility_boundary.py"
       - ".github/workflows/oss2e-holdout-eligibility.yml"
   workflow_dispatch:
 
@@ -38,10 +39,14 @@ jobs:
             src/autotrade/research/multiple_testing.py \
             src/autotrade/research/oss2_campaign.py \
             src/autotrade/research/oss2_robustness.py \
-            src/autotrade/research/oss2_holdout_eligibility.py
+            src/autotrade/research/oss2_holdout_eligibility.py \
+            scripts/check_oss2e_holdout_eligibility_boundary.py
 
       - name: OSS-2E eligibility tests
         run: pytest -q tests/test_research_oss2_holdout_eligibility.py
+
+      - name: OSS-2E authority boundary
+        run: python scripts/check_oss2e_holdout_eligibility_boundary.py
 
       - name: OSS-2D regression tests
         run: |
