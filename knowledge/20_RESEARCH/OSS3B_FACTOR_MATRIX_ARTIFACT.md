@@ -3,8 +3,6 @@
 Fecha: 2026-09-05  
 Rama: `research/oss3b-factor-matrix-artifact`  
 Base: OSS-3A certificado (`81651c41b8f6d578494d86fc7d8c2275c4c8e73c`)  
-Head objetivo de certificación: `d08d4605028bfa59585ae34ff06f1b3e3e4fd82f`  
-Merge ref objetivo de certificación: `6f758de12e58582109ab682f29bd51ca7aeef0a7`  
 Estado: RESEARCH ONLY / DRAFT
 
 ## 1. Objetivo
