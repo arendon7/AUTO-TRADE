@@ -118,6 +118,15 @@ def test_evaluator_rejects_nonprotected_holdout_before_consumption(tmp_path, now
     assert count == 0
 
 
+def test_holdout_permit_constructor_rejects_non_final_validation_purpose():
+    with pytest.raises(ValueError, match="restricted to final_validation"):
+        HoldoutPermit(
+            permit_id="authorization-1",
+            issued_by="OSS2H_FINAL_HOLDOUT_EVALUATOR",
+            purpose="other",
+        )
+
+
 def test_protected_checkout_rejects_wrong_permit_identity(tmp_path, now):
     _, protocol, _, _ = _setup(tmp_path, now)
     holdout = ProtectedOSS2FinalHoldout(_universe(now + timedelta(days=1)))
@@ -132,11 +141,6 @@ def test_protected_checkout_rejects_wrong_permit_identity(tmp_path, now):
             permit_id=protocol.holdout_authorization_id,
             issued_by="WRONG_ISSUER",
             purpose="final_validation",
-        ),
-        HoldoutPermit(
-            permit_id=protocol.holdout_authorization_id,
-            issued_by="OSS2H_FINAL_HOLDOUT_EVALUATOR",
-            purpose="other",
         ),
     ):
         with pytest.raises(OSS2FinalHoldoutEvaluationGovernanceError, match="exact consumed"):
