@@ -1,25 +1,17 @@
 """OSS-3D1 training-bundle and model-training receipt contracts.
 
-This module is deliberately core-side and Qlib-runtime-free. It binds already
-verified OSS-3B feature artifacts and OSS-3C label artifacts into one immutable
-TRAIN dataset identity. A future isolated Qlib process may consume the original
-feature/label files plus this bundle manifest and must write OSS-3A predictions
-whose training_dataset_hash equals the bundle artifact hash.
+Core-side, Qlib-runtime-free binding between verified OSS-3B features,
+OSS-3C labels and later OSS-3A prediction artifacts.
 
-V1 is intentionally strict:
-- TRAIN only;
-- exact campaign, frozen split, partition window and universe match;
-- exact (timestamp, symbol) key-set pairing, never positional joins;
-- feature and label source datasets may differ but both hashes are retained;
-- no row data is copied into the bundle artifact;
-- OSS-3A predictions can only be bound when training hash, feature schema and
-  training window exactly match the bundle;
-- no Qlib import, network, process, broker, OMS, Safety or execution authority.
+V1 is deliberately strict: TRAIN only; exact campaign/frozen split/window/
+universe match; exact (timestamp, symbol) pairing; canonical JSON/UTC; both
+source-dataset hashes retained; and no execution authority.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from hashlib import sha256
 import json
 from pathlib import Path
@@ -39,7 +31,6 @@ MAX_ARTIFACT_BYTES = 64_000
 
 _HASH_RE = re.compile(r"^[0-9a-f]{64}$")
 _ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,127}$")
-
 _TOP_LEVEL_KEYS = frozenset({"artifact_version", "manifest", "artifact_hash"})
 _MANIFEST_KEYS = frozenset(
     {
@@ -63,15 +54,15 @@ _MANIFEST_KEYS = frozenset(
 
 
 class TrainingBundleError(RuntimeError):
-    """Base OSS-3D1 failure."""
+    pass
 
 
 class TrainingBundleIntegrityError(TrainingBundleError):
-    """Serialized identity or downstream binding is inconsistent."""
+    pass
 
 
 class TrainingBundleCompatibilityError(TrainingBundleError):
-    """Feature/label artifacts cannot form one supervised TRAIN dataset."""
+    pass
 
 
 @dataclass(frozen=True, slots=True)
@@ -110,9 +101,9 @@ class TrainingBundleManifest:
             _require_hash(value, name)
         if self.partition != "TRAIN":
             raise TrainingBundleCompatibilityError("OSS-3D1 V1 accepts TRAIN only")
-        if not isinstance(self.partition_start, str) or not isinstance(self.partition_end, str):
-            raise ValueError("partition bounds must be canonical timestamp strings")
-        if not self.partition_start < self.partition_end:
+        start = _parse_canonical_utc(self.partition_start, "partition_start")
+        end = _parse_canonical_utc(self.partition_end, "partition_end")
+        if not start < end:
             raise TrainingBundleCompatibilityError("training partition window must be positive")
         if (
             not isinstance(self.sample_count, int)
@@ -194,9 +185,13 @@ class ModelTrainingReceipt:
             raise TrainingBundleIntegrityError("invalid receipt model_family")
         if not isinstance(self.qlib_version, str) or not self.qlib_version:
             raise TrainingBundleIntegrityError("invalid receipt qlib_version")
-        if not self.train_start < self.train_end:
+        train_start = _parse_canonical_utc(self.train_start, "receipt train_start")
+        train_end = _parse_canonical_utc(self.train_end, "receipt train_end")
+        inference_start = _parse_canonical_utc(self.inference_start, "receipt inference_start")
+        inference_end = _parse_canonical_utc(self.inference_end, "receipt inference_end")
+        if not train_start < train_end:
             raise TrainingBundleIntegrityError("receipt training window is invalid")
-        if self.train_end > self.inference_start or not self.inference_start < self.inference_end:
+        if train_end > inference_start or not inference_start < inference_end:
             raise TrainingBundleIntegrityError("receipt inference window is invalid")
         if self.execution_authorized or self.paper_execution_authorized:
             raise TrainingBundleCompatibilityError("OSS-3D1 receipt cannot authorize execution")
@@ -244,13 +239,11 @@ class TrainingBundleArtifact:
         if self.artifact_version != OSS3D1_ARTIFACT_VERSION:
             raise TrainingBundleIntegrityError("unsupported OSS-3D1 artifact version")
         _require_hash(self.artifact_hash, "artifact_hash")
-        expected = _artifact_hash(self.artifact_version, self.manifest)
-        if self.artifact_hash != expected:
+        if self.artifact_hash != _artifact_hash(self.artifact_version, self.manifest):
             raise TrainingBundleIntegrityError("OSS-3D1 artifact hash mismatch")
 
     @property
     def training_dataset_hash(self) -> str:
-        """Canonical hash to place in OSS-3A `training_dataset_hash`."""
         return self.artifact_hash
 
     @classmethod
@@ -280,11 +273,10 @@ class TrainingBundleArtifact:
         if feature_keys != label_keys:
             feature_set = set(feature_keys)
             label_set = set(label_keys)
-            missing_labels = len(feature_set - label_set)
-            missing_features = len(label_set - feature_set)
             raise TrainingBundleCompatibilityError(
                 "feature/label keysets differ "
-                f"(missing_labels={missing_labels}, missing_features={missing_features})"
+                f"(missing_labels={len(feature_set - label_set)}, "
+                f"missing_features={len(label_set - feature_set)})"
             )
         if not feature_keys:
             raise TrainingBundleCompatibilityError("training bundle cannot be empty")
@@ -431,3 +423,21 @@ def _exact_keys(value: Mapping[str, object], expected: frozenset[str], where: st
 def _require_hash(value: str, name: str) -> None:
     if not isinstance(value, str) or not _HASH_RE.fullmatch(value):
         raise ValueError(f"{name} must be lowercase sha256")
+
+
+def _parse_canonical_utc(value: str, name: str) -> datetime:
+    if not isinstance(value, str):
+        raise ValueError(f"{name} must be a timestamp string")
+    if value.endswith("Z"):
+        raise ValueError(f"{name} must use canonical +00:00 UTC offset")
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError as exc:
+        raise ValueError(f"{name} is not valid ISO-8601") from exc
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        raise ValueError(f"{name} must be timezone-aware")
+    if parsed.utcoffset() != timezone.utc.utcoffset(parsed):
+        raise ValueError(f"{name} must be canonical UTC")
+    if parsed.isoformat() != value:
+        raise ValueError(f"{name} must use canonical ISO-8601 representation")
+    return parsed
