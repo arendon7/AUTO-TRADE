@@ -38,6 +38,14 @@ class DeflatedSharpeEvidence:
     deflated_sharpe_probability: float
     family_size: int
     sample_size: int
+    metric_name: str = "sharpe"
+    metric_scale: float = 1.0
+
+    def __post_init__(self) -> None:
+        if not self.metric_name.strip():
+            raise ValueError("Deflated Sharpe metric_name is required")
+        if not isfinite(self.metric_scale) or self.metric_scale <= 0:
+            raise ValueError("Deflated Sharpe metric_scale must be finite and > 0")
 
 
 def holm_adjust(p_values: Mapping[str, float]) -> dict[str, float]:
@@ -197,15 +205,20 @@ def campaign_deflated_sharpe(
     skewness: float,
     kurtosis: float,
     metric_name: str = "sharpe",
+    metric_scale: float = 1.0,
 ) -> DeflatedSharpeEvidence:
     """Compute Deflated Sharpe against a frozen campaign metric family.
 
-    ``metric_name="sharpe"`` preserves the historical contract. Research layers
-    that preregister a different Sharpe field (for example a common-window
-    Sharpe) may bind that exact field without copying the DSR implementation.
+    ``metric_name="sharpe", metric_scale=1`` preserves the historical contract.
+    A research layer may bind another preregistered Sharpe field and an explicit
+    positive scale. This is useful when the stored metric is annualized but DSR
+    is evaluated at the return-observation frequency: use
+    ``metric_scale = 1 / sqrt(annualization_factor)``.
     """
     if not metric_name.strip():
         raise ValueError("metric_name is required")
+    if not isfinite(metric_scale) or metric_scale <= 0:
+        raise ValueError("metric_scale must be finite and > 0")
     accounting = ledger.require_complete_campaign(campaign_id)
     if accounting.failed_trial_ids:
         raise TrialGovernanceError(
@@ -226,10 +239,10 @@ def campaign_deflated_sharpe(
             raise TrialGovernanceError(
                 f"trial {trial_id} has no numeric {metric_name} metric for Deflated Sharpe"
             )
-        value = float(raw)
+        value = float(raw) * metric_scale
         if not isfinite(value):
             raise TrialGovernanceError(
-                f"trial {trial_id} {metric_name} is not finite"
+                f"trial {trial_id} scaled {metric_name} is not finite"
             )
         sharpes[trial_id] = value
     if len(sharpes) < 2:
@@ -247,7 +260,7 @@ def campaign_deflated_sharpe(
     if sharpes[selected_trial_id] != selected_best:
         message = (
             "Deflated Sharpe selected_trial_id must be a maximum-Sharpe trial"
-            if metric_name == "sharpe"
+            if metric_name == "sharpe" and metric_scale == 1.0
             else "Deflated Sharpe selected_trial_id must maximize the bound metric"
         )
         raise TrialGovernanceError(message)
@@ -273,6 +286,8 @@ def campaign_deflated_sharpe(
         deflated_sharpe_probability=probability,
         family_size=n,
         sample_size=sample_size,
+        metric_name=metric_name,
+        metric_scale=metric_scale,
     )
 
 
