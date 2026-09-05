@@ -17,7 +17,6 @@ import re
 import sqlite3
 
 from .oss2_holdout_eligibility import (
-    OSS2HoldoutEligibilityDecision,
     OSS2HoldoutEligibilityEvidence,
     evaluate_oss2e_holdout_eligibility,
 )
@@ -126,6 +125,18 @@ class SQLiteOSS2HoldoutFreezeRegistry:
                     receipt_hash TEXT NOT NULL UNIQUE,
                     receipt_json TEXT NOT NULL
                 );
+
+                CREATE TRIGGER IF NOT EXISTS oss2_holdout_freezes_no_update
+                BEFORE UPDATE ON oss2_holdout_freezes
+                BEGIN
+                    SELECT RAISE(ABORT, 'OSS-2F registry is append-only');
+                END;
+
+                CREATE TRIGGER IF NOT EXISTS oss2_holdout_freezes_no_delete
+                BEFORE DELETE ON oss2_holdout_freezes
+                BEGIN
+                    SELECT RAISE(ABORT, 'OSS-2F registry is append-only');
+                END;
                 """
             )
         finally:
@@ -144,6 +155,15 @@ class SQLiteOSS2HoldoutFreezeRegistry:
         conn = self._connect()
         try:
             conn.execute("BEGIN IMMEDIATE")
+            existing_id_row = conn.execute(
+                "SELECT * FROM oss2_holdout_freezes WHERE receipt_id = ?",
+                (receipt_id,),
+            ).fetchone()
+            if existing_id_row is not None and str(existing_id_row["campaign_id"]) != candidate.campaign_id:
+                raise OSS2HoldoutFreezeConflict(
+                    "OSS-2F receipt_id is already bound to another campaign"
+                )
+
             existing_row = conn.execute(
                 "SELECT * FROM oss2_holdout_freezes WHERE campaign_id = ?",
                 (candidate.campaign_id,),
@@ -152,11 +172,13 @@ class SQLiteOSS2HoldoutFreezeRegistry:
                 existing = _receipt_from_row(existing_row)
                 if (
                     existing.receipt_id != receipt_id
+                    or existing.selected_trial_id != candidate.selected_trial_id
                     or existing.oss2d_evidence_fingerprint != candidate.oss2d_evidence_fingerprint
                     or existing.oss2e_policy_fingerprint != candidate.oss2e_policy_fingerprint
                     or existing.oss2e_evidence_fingerprint != candidate.oss2e_evidence_fingerprint
                     or existing.candidate_freeze_fingerprint != candidate.candidate_freeze_fingerprint
                     or existing.decision is not candidate.decision
+                    or existing.failed_gate_ids != candidate.failed_gate_ids
                 ):
                     raise OSS2HoldoutFreezeConflict(
                         "OSS-2F campaign is already frozen under different evidence"
@@ -280,7 +302,7 @@ def _build_receipt(
 def _receipt_from_row(row: sqlite3.Row) -> OSS2HoldoutFreezeReceipt:
     try:
         payload = json.loads(str(row["receipt_json"]))
-    except (json.JSONDecodeError, KeyError, TypeError) as exc:
+    except (json.JSONDecodeError, IndexError, KeyError, TypeError) as exc:
         raise OSS2HoldoutFreezeIntegrityError("invalid OSS-2F durable receipt JSON") from exc
     if not isinstance(payload, dict):
         raise OSS2HoldoutFreezeIntegrityError("OSS-2F durable receipt must be an object")
@@ -316,7 +338,13 @@ def _receipt_from_row(row: sqlite3.Row) -> OSS2HoldoutFreezeReceipt:
         "receipt_hash": receipt.receipt_hash,
     }
     for key, value in side_columns.items():
-        if str(row[key]) != value:
+        try:
+            stored = str(row[key])
+        except (IndexError, KeyError) as exc:
+            raise OSS2HoldoutFreezeIntegrityError(
+                f"OSS-2F missing side-column: {key}"
+            ) from exc
+        if stored != value:
             raise OSS2HoldoutFreezeIntegrityError(f"OSS-2F side-column mismatch: {key}")
     return receipt
 
