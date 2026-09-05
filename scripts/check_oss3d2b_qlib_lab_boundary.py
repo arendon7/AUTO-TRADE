@@ -23,6 +23,7 @@ FORBIDDEN_IMPORT_PREFIXES = (
     "http.client",
     "ftplib",
     "paramiko",
+    "qlib.workflow",
     "autotrade.brokers",
     "autotrade.oms",
     "autotrade.safety",
@@ -38,6 +39,7 @@ FORBIDDEN_CALL_NAMES = {
     "Popen",
     "urlopen",
     "create_connection",
+    "qrun",
     "submit_order",
     "place_order",
     "send_order",
@@ -48,6 +50,7 @@ FORBIDDEN_AUTHORITY_NAMES = {
     "RiskDecision",
     "CapitalSafetyKernel",
 }
+FORBIDDEN_RUNTIME_NAMES = {"qrun"}
 
 
 def main() -> int:
@@ -132,14 +135,19 @@ def _scan_python(path: Path, *, allow_socket: bool, require_qlib_guard: bool) ->
             for alias in node.names:
                 if alias.name in FORBIDDEN_AUTHORITY_NAMES:
                     errors.append(f"{path.name}:{node.lineno}: forbidden authority symbol {alias.name}")
+                if alias.name in FORBIDDEN_RUNTIME_NAMES:
+                    errors.append(f"{path.name}:{node.lineno}: forbidden runtime symbol {alias.name}")
         elif isinstance(node, ast.Call):
             name = _call_name(node.func)
             if name in FORBIDDEN_CALL_NAMES:
                 errors.append(f"{path.name}:{node.lineno}: forbidden call {name}")
             if _is_qlib_init(node.func):
                 errors.append(f"{path.name}:{node.lineno}: qlib.init() is forbidden")
-        elif isinstance(node, ast.Name) and node.id in FORBIDDEN_AUTHORITY_NAMES:
-            errors.append(f"{path.name}:{node.lineno}: forbidden authority symbol {node.id}")
+        elif isinstance(node, ast.Name):
+            if node.id in FORBIDDEN_AUTHORITY_NAMES:
+                errors.append(f"{path.name}:{node.lineno}: forbidden authority symbol {node.id}")
+            if node.id in FORBIDDEN_RUNTIME_NAMES:
+                errors.append(f"{path.name}:{node.lineno}: forbidden runtime symbol {node.id}")
     return errors
 
 
@@ -193,14 +201,9 @@ def _check_source_contracts() -> list[str]:
     for forbidden in (
         "--development-labels",
         "development_labels_path",
-        "qlib.init(",
-        "qlib.workflow",
-        "qrun",
-        "R.start(",
-        "R.get_recorder",
     ):
         if forbidden in runner:
-            errors.append(f"runner contains forbidden surface: {forbidden}")
+            errors.append(f"runner contains forbidden CLI/label surface: {forbidden}")
     for required in (
         "_reject_broker_credentials()",
         "request.verify_inputs(",
