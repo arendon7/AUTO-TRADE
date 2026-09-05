@@ -26,6 +26,7 @@ FORBIDDEN_IMPORT_PREFIXES = (
     "autotrade.safety",
     "autotrade.engine",
     "autotrade.research.oss3_supervised_label_artifact",
+    "oss3_supervised_label_artifact",
 )
 FORBIDDEN_CALLS = {
     "eval",
@@ -112,19 +113,9 @@ def _scan(source: str) -> list[str]:
 
 def _source_contract(source: str) -> list[str]:
     errors: list[str] = []
-    lower = source.lower()
     for snippet in REQUIRED_SOURCE_SNIPPETS:
         if snippet not in source:
             errors.append(f"required fail-closed contract is missing: {snippet}")
-    for token in (
-        "from .oss3_supervised_label_artifact",
-        "import qlib",
-        "from qlib",
-        "import mlflow",
-        "import redis",
-    ):
-        if token in lower:
-            errors.append(f"forbidden runtime/label dependency present: {token}")
     return errors
 
 
