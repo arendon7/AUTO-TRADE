@@ -13,6 +13,7 @@ on:
       - "src/autotrade/research/__init__.py"
       - "tests/test_research_oss2_final_holdout_evaluation.py"
       - "tests/test_research_oss2_final_holdout_evaluation_adversarial.py"
+      - "tests/test_research_oss2_final_holdout_evaluation_edges.py"
       - "tests/test_research_oss2_final_holdout_protocol.py"
       - "scripts/check_oss2h_final_holdout_evaluation_boundary.py"
       - ".github/workflows/oss2h-final-holdout-evaluation.yml"
@@ -43,13 +44,15 @@ jobs:
             src/autotrade/research/oss2_final_holdout_protocol.py \
             src/autotrade/research/oss2_final_holdout_evaluation.py \
             tests/test_research_oss2_final_holdout_evaluation_adversarial.py \
+            tests/test_research_oss2_final_holdout_evaluation_edges.py \
             scripts/check_oss2h_final_holdout_evaluation_boundary.py
 
-      - name: OSS-2H single-use + adversarial evaluation tests
+      - name: OSS-2H single-use + adversarial + edge evaluation tests
         run: |
           pytest -q \
             tests/test_research_oss2_final_holdout_evaluation.py \
-            tests/test_research_oss2_final_holdout_evaluation_adversarial.py
+            tests/test_research_oss2_final_holdout_evaluation_adversarial.py \
+            tests/test_research_oss2_final_holdout_evaluation_edges.py
 
       - name: OSS-2H authority boundary
         run: python scripts/check_oss2h_final_holdout_evaluation_boundary.py
