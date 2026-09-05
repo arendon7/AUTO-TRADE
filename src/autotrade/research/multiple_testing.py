@@ -25,6 +25,8 @@ class PBOEvidence:
     combinations_evaluated: int
     pbo: float
     logits: tuple[float, ...]
+    partition_sizes: tuple[int, ...] = ()
+    balanced_partitions: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -36,6 +38,14 @@ class DeflatedSharpeEvidence:
     deflated_sharpe_probability: float
     family_size: int
     sample_size: int
+    metric_name: str = "sharpe"
+    metric_scale: float = 1.0
+
+    def __post_init__(self) -> None:
+        if not self.metric_name.strip():
+            raise ValueError("Deflated Sharpe metric_name is required")
+        if not isfinite(self.metric_scale) or self.metric_scale <= 0:
+            raise ValueError("Deflated Sharpe metric_scale must be finite and > 0")
 
 
 def holm_adjust(p_values: Mapping[str, float]) -> dict[str, float]:
@@ -84,7 +94,15 @@ def campaign_pbo(
     returns_by_trial: Mapping[str, Sequence[float]],
     *,
     partitions: int = 8,
+    balanced_partitions: bool = False,
 ) -> PBOEvidence:
+    """Estimate PBO with deterministic contiguous CSCV partitions.
+
+    The historical strict mode requires equal-size partitions. When
+    ``balanced_partitions`` is true, all observations are retained and assigned
+    to contiguous partitions whose sizes differ by at most one row. This avoids
+    silently trimming a valid common window solely to satisfy divisibility.
+    """
     accounting = ledger.require_complete_campaign(campaign_id)
     if accounting.failed_trial_ids:
         raise TrialGovernanceError(
@@ -97,11 +115,15 @@ def campaign_pbo(
         )
     if partitions < 4 or partitions % 2:
         raise ValueError("partitions must be an even integer >= 4")
+    if not isinstance(balanced_partitions, bool):
+        raise TypeError("balanced_partitions must be bool")
     lengths = {len(tuple(values)) for values in returns_by_trial.values()}
     if len(lengths) != 1:
         raise ValueError("all PBO return series must have equal length")
     observations = lengths.pop()
-    if observations < partitions * 2 or observations % partitions:
+    if observations < partitions * 2:
+        raise ValueError("PBO requires at least two observations per partition")
+    if not balanced_partitions and observations % partitions:
         raise ValueError(
             "PBO observations must divide evenly into partitions with >=2 rows each"
         )
@@ -115,10 +137,24 @@ def campaign_pbo(
     }
     if any(not isfinite(value) for values in series.values() for value in values):
         raise ValueError("PBO return values must be finite")
-    block = observations // partitions
-    partition_indices = tuple(
-        tuple(range(index * block, (index + 1) * block)) for index in range(partitions)
+
+    base_size, remainder = divmod(observations, partitions)
+    partition_sizes = tuple(
+        base_size + (1 if index < remainder else 0)
+        for index in range(partitions)
     )
+    if min(partition_sizes) < 2:
+        raise ValueError("PBO requires at least two observations per partition")
+    if not balanced_partitions and len(set(partition_sizes)) != 1:
+        raise ValueError("strict PBO partitions must have equal size")
+    partition_indices: list[tuple[int, ...]] = []
+    cursor = 0
+    for size in partition_sizes:
+        partition_indices.append(tuple(range(cursor, cursor + size)))
+        cursor += size
+    if cursor != observations:
+        raise RuntimeError("PBO partition accounting mismatch")
+
     logits: list[float] = []
     half = partitions // 2
     all_partitions = set(range(partitions))
@@ -155,6 +191,8 @@ def campaign_pbo(
         combinations_evaluated=len(logits),
         pbo=pbo,
         logits=tuple(logits),
+        partition_sizes=partition_sizes,
+        balanced_partitions=balanced_partitions,
     )
 
 
@@ -166,11 +204,25 @@ def campaign_deflated_sharpe(
     sample_size: int,
     skewness: float,
     kurtosis: float,
+    metric_name: str = "sharpe",
+    metric_scale: float | None = None,
 ) -> DeflatedSharpeEvidence:
+    """Compute Deflated Sharpe against a frozen campaign metric family.
+
+    Legacy ``sharpe`` uses scale 1. For ``common_window_sharpe`` the default
+    scale is inferred from the frozen trial ``annualization_factor`` and converts
+    the stored annualized Sharpe back to the return-observation frequency before
+    applying the finite-sample DSR formula. An explicit positive ``metric_scale``
+    remains available for other preregistered metric families.
+    """
+    if not metric_name.strip():
+        raise ValueError("metric_name is required")
+    if metric_scale is not None and (not isfinite(metric_scale) or metric_scale <= 0):
+        raise ValueError("metric_scale must be finite and > 0")
     accounting = ledger.require_complete_campaign(campaign_id)
     if accounting.failed_trial_ids:
         raise TrialGovernanceError(
-            "Deflated Sharpe requires Sharpe evidence for every trial"
+            "Deflated Sharpe requires metric evidence for every trial"
         )
     if selected_trial_id not in accounting.expected_trial_ids:
         raise TrialGovernanceError("selected trial is outside frozen campaign")
@@ -180,16 +232,43 @@ def campaign_deflated_sharpe(
         raise ValueError("skewness/kurtosis preconditions are invalid")
 
     records = {record.spec.trial_id: record for record in ledger.list_trials(campaign_id)}
+    effective_scale = metric_scale
+    if effective_scale is None:
+        if metric_name == "common_window_sharpe":
+            annualization_factors: set[float] = set()
+            for trial_id in accounting.expected_trial_ids:
+                raw_factor = records[trial_id].spec.parameters.get("annualization_factor")
+                try:
+                    factor = float(raw_factor)
+                except (TypeError, ValueError) as exc:
+                    raise TrialGovernanceError(
+                        f"trial {trial_id} has no valid annualization_factor for Deflated Sharpe"
+                    ) from exc
+                if not isfinite(factor) or factor <= 0:
+                    raise TrialGovernanceError(
+                        f"trial {trial_id} has invalid annualization_factor for Deflated Sharpe"
+                    )
+                annualization_factors.add(factor)
+            if len(annualization_factors) != 1:
+                raise TrialGovernanceError(
+                    "Deflated Sharpe requires one frozen annualization_factor across the family"
+                )
+            effective_scale = 1.0 / sqrt(annualization_factors.pop())
+        else:
+            effective_scale = 1.0
+
     sharpes: dict[str, float] = {}
     for trial_id in accounting.expected_trial_ids:
-        raw = records[trial_id].metrics.get("sharpe")
+        raw = records[trial_id].metrics.get(metric_name)
         if isinstance(raw, bool) or not isinstance(raw, (int, float)):
             raise TrialGovernanceError(
-                f"trial {trial_id} has no numeric sharpe metric for Deflated Sharpe"
+                f"trial {trial_id} has no numeric {metric_name} metric for Deflated Sharpe"
             )
-        value = float(raw)
+        value = float(raw) * effective_scale
         if not isfinite(value):
-            raise TrialGovernanceError(f"trial {trial_id} sharpe is not finite")
+            raise TrialGovernanceError(
+                f"trial {trial_id} scaled {metric_name} is not finite"
+            )
         sharpes[trial_id] = value
     if len(sharpes) < 2:
         raise TrialGovernanceError("Deflated Sharpe requires at least two trials")
@@ -204,9 +283,12 @@ def campaign_deflated_sharpe(
     gamma = 0.5772156649015329
     selected_best = max(sharpes.values())
     if sharpes[selected_trial_id] != selected_best:
-        raise TrialGovernanceError(
+        message = (
             "Deflated Sharpe selected_trial_id must be a maximum-Sharpe trial"
+            if metric_name == "sharpe" and effective_scale == 1.0
+            else "Deflated Sharpe selected_trial_id must maximize the bound metric"
         )
+        raise TrialGovernanceError(message)
     expected_max = sqrt(sharpe_variance) * (
         (1.0 - gamma) * normal.inv_cdf(1.0 - 1.0 / n)
         + gamma * normal.inv_cdf(1.0 - 1.0 / (n * e))
@@ -229,6 +311,8 @@ def campaign_deflated_sharpe(
         deflated_sharpe_probability=probability,
         family_size=n,
         sample_size=sample_size,
+        metric_name=metric_name,
+        metric_scale=effective_scale,
     )
 
 

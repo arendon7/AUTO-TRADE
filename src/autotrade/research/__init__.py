@@ -46,6 +46,17 @@ from .oss2_campaign import (
     evaluate_oss2_common_window,
     oss2_candidate_count,
 )
+from .oss2_robustness import (
+    OSS2BootstrapEvidence,
+    OSS2CostStressEvidence,
+    OSS2LocalNeighbor,
+    OSS2LocalSensitivityEvidence,
+    OSS2RobustnessEvidence,
+    OSS2RobustnessGovernanceError,
+    OSS2RobustnessPolicy,
+    canonical_oss2d_policy,
+    run_oss2d_robustness,
+)
 from .strategy import ResearchSignal, ResearchStrategy
 from .universe import AlignedMarketUniverse, InvalidAlignedUniverse
 from .validation import SQLiteValidationRegistry, ValidationEvidence, ValidationEvidenceSpec
@@ -76,7 +87,14 @@ __all__ = [
     "MovingAverageCrossStrategy",
     "MovingBlockBootstrapConfig",
     "MovingBlockBootstrapResult",
+    "OSS2BootstrapEvidence",
     "OSS2CampaignPlan",
+    "OSS2CostStressEvidence",
+    "OSS2LocalNeighbor",
+    "OSS2LocalSensitivityEvidence",
+    "OSS2RobustnessEvidence",
+    "OSS2RobustnessGovernanceError",
+    "OSS2RobustnessPolicy",
     "OSSCampaignPlan",
     "ResearchSignal",
     "ResearchStrategy",
@@ -92,6 +110,7 @@ __all__ = [
     "backtest_config_from_oss2_trial",
     "build_oss1_development_campaign",
     "build_oss2_development_campaign",
+    "canonical_oss2d_policy",
     "evaluate_oss2_common_window",
     "evaluate_sample_adequacy",
     "evaluate_walk_forward_robustness",
@@ -99,4 +118,5 @@ __all__ = [
     "oss1_candidate_count",
     "oss2_candidate_count",
     "rank_cross_sectional_momentum",
+    "run_oss2d_robustness",
 ]
