@@ -144,7 +144,12 @@ def _receipt(**overrides: object) -> OSS2FinalHoldoutEvaluationReceipt:
         "capital_authority": fields["capital_authority"],
         "live_trading": fields["live_trading"],
     }
-    receipt_hash = _hash(payload)
+    try:
+        receipt_hash = _hash(payload)
+    except ValueError:
+        # Deliberately malformed/non-finite payloads still need a syntactically
+        # valid hash to reach the earlier fail-closed constructor branch under test.
+        receipt_hash = H7
     return OSS2FinalHoldoutEvaluationReceipt(
         evaluation_id=str(fields["evaluation_id"]),
         contract_version=str(fields["contract_version"]),
