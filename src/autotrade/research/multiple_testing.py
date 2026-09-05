@@ -245,9 +245,12 @@ def campaign_deflated_sharpe(
     gamma = 0.5772156649015329
     selected_best = max(sharpes.values())
     if sharpes[selected_trial_id] != selected_best:
-        raise TrialGovernanceError(
-            "Deflated Sharpe selected_trial_id must maximize the bound metric"
+        message = (
+            "Deflated Sharpe selected_trial_id must be a maximum-Sharpe trial"
+            if metric_name == "sharpe"
+            else "Deflated Sharpe selected_trial_id must maximize the bound metric"
         )
+        raise TrialGovernanceError(message)
     expected_max = sqrt(sharpe_variance) * (
         (1.0 - gamma) * normal.inv_cdf(1.0 - 1.0 / n)
         + gamma * normal.inv_cdf(1.0 - 1.0 / (n * e))
