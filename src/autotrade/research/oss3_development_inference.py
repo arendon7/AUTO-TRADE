@@ -1,6 +1,6 @@
 """OSS-3D2A DEVELOPMENT inference request and prediction-binding contracts.
 
-This module is core-side and external-runtime-free.  It binds an already
+This module is core-side and external-runtime-free. It binds an already
 verified OSS-3D1 TRAIN bundle to one OSS-3B DEVELOPMENT feature artifact and
 produces an immutable request that a future isolated Qlib laboratory may
 consume.
@@ -12,6 +12,8 @@ Scientific/security boundary:
 - DEVELOPMENT features must match campaign, frozen split, universe and exact
   feature schema of the TRAIN bundle;
 - the complete expected prediction key-set (timestamp, symbol) is hash-bound;
+- dry-run and prediction binding revalidate the concrete TRAIN/DEVELOPMENT
+  artifacts against the request rather than trusting serialized claims alone;
 - a dry run validates the contract only and never fabricates an OSS-3A artifact;
 - a real OSS-3A artifact is accepted only when training, model, runtime,
   inference-window and prediction-key identities all match exactly;
@@ -40,6 +42,7 @@ OSS3D2A_RECEIPT_VERSION = "OSS3D2A_DEVELOPMENT_PREDICTION_RECEIPT_V1"
 OSS3D2A_PRODUCER_ID = "AUTO-TRADE/OSS3D2A_DEVELOPMENT_INFERENCE"
 PREDICTION_KEY_POLICY = "EXACT_TIMESTAMP_SYMBOL_KEYSET_V1"
 LABEL_ACCESS_POLICY = "FORBID_DEVELOPMENT_LABELS_V1"
+DEVELOPMENT_POINT_IN_TIME_POLICY = "AVAILABLE_AT_LE_AS_OF"
 MAX_REQUEST_BYTES = 96_000
 
 _HASH_RE = re.compile(r"^[0-9a-f]{64}$")
@@ -61,9 +64,11 @@ _MANIFEST_KEYS = frozenset(
         "label_definition_hash",
         "train_start",
         "train_end",
+        "development_partition",
         "development_feature_artifact_hash",
         "development_source_dataset_hash",
         "development_row_payload_hash",
+        "development_point_in_time_policy",
         "inference_start",
         "inference_end",
         "inference_row_count",
@@ -108,9 +113,11 @@ class DevelopmentInferenceManifest:
     label_definition_hash: str
     train_start: str
     train_end: str
+    development_partition: str
     development_feature_artifact_hash: str
     development_source_dataset_hash: str
     development_row_payload_hash: str
+    development_point_in_time_policy: str
     inference_start: str
     inference_end: str
     inference_row_count: int
@@ -144,6 +151,14 @@ class DevelopmentInferenceManifest:
             ("expected_runner_code_hash", self.expected_runner_code_hash),
         ):
             _require_hash(value, name)
+        if self.development_partition != "DEVELOPMENT":
+            raise DevelopmentInferenceGovernanceError(
+                "OSS-3D2A accepts DEVELOPMENT feature artifacts only"
+            )
+        if self.development_point_in_time_policy != DEVELOPMENT_POINT_IN_TIME_POLICY:
+            raise DevelopmentInferenceGovernanceError(
+                "noncanonical DEVELOPMENT point-in-time policy"
+            )
         if not _ID_RE.fullmatch(self.model_family):
             raise ValueError("invalid model_family")
         if not _VERSION_RE.fullmatch(self.required_qlib_version):
@@ -193,9 +208,11 @@ class DevelopmentInferenceManifest:
             "label_definition_hash": self.label_definition_hash,
             "train_start": self.train_start,
             "train_end": self.train_end,
+            "development_partition": self.development_partition,
             "development_feature_artifact_hash": self.development_feature_artifact_hash,
             "development_source_dataset_hash": self.development_source_dataset_hash,
             "development_row_payload_hash": self.development_row_payload_hash,
+            "development_point_in_time_policy": self.development_point_in_time_policy,
             "inference_start": self.inference_start,
             "inference_end": self.inference_end,
             "inference_row_count": self.inference_row_count,
@@ -471,7 +488,6 @@ class DevelopmentInferenceRequest:
             raise ValueError("invalid model_family")
         if not _VERSION_RE.fullmatch(required_qlib_version):
             raise ValueError("invalid required_qlib_version")
-        keyset_hash = _factor_keyset_hash(development_features)
         manifest = DevelopmentInferenceManifest(
             producer_id=OSS3D2A_PRODUCER_ID,
             campaign_id=bm.campaign_id,
@@ -485,13 +501,15 @@ class DevelopmentInferenceRequest:
             label_definition_hash=bm.label_definition_hash,
             train_start=bm.partition_start,
             train_end=bm.partition_end,
+            development_partition=dm.partition,
             development_feature_artifact_hash=development_features.artifact_hash,
             development_source_dataset_hash=dm.source_dataset_hash,
             development_row_payload_hash=dm.row_payload_hash,
+            development_point_in_time_policy=dm.point_in_time_policy,
             inference_start=dm.partition_start,
             inference_end=dm.partition_end,
             inference_row_count=dm.row_count,
-            inference_keyset_hash=keyset_hash,
+            inference_keyset_hash=_factor_keyset_hash(development_features),
             model_family=model_family,
             model_config_hash=model_config_hash,
             required_qlib_version=required_qlib_version,
@@ -505,7 +523,77 @@ class DevelopmentInferenceRequest:
             request_hash=_request_hash(OSS3D2A_REQUEST_VERSION, manifest),
         )
 
-    def to_dry_run_evidence(self) -> DevelopmentInferenceDryRunEvidence:
+    def verify_inputs(
+        self,
+        *,
+        training_bundle: TrainingBundleArtifact,
+        development_features: FactorMatrixArtifact,
+    ) -> None:
+        """Rebind a serialized request to the concrete artifacts it references."""
+        if not isinstance(training_bundle, TrainingBundleArtifact):
+            raise TypeError("training_bundle must be TrainingBundleArtifact")
+        if not isinstance(development_features, FactorMatrixArtifact):
+            raise TypeError("development_features must be FactorMatrixArtifact")
+        m = self.manifest
+        bm = training_bundle.manifest
+        dm = development_features.manifest
+        if bm.partition != "TRAIN":
+            raise DevelopmentInferenceCompatibilityError("training bundle must be TRAIN")
+        if dm.partition != "DEVELOPMENT":
+            raise DevelopmentInferenceGovernanceError(
+                "OSS-3D2A accepts DEVELOPMENT feature artifacts only"
+            )
+        for name, expected, actual in (
+            ("training_bundle_hash", m.training_bundle_hash, training_bundle.artifact_hash),
+            ("training_bundle_manifest_hash", m.training_bundle_manifest_hash, bm.fingerprint),
+            ("train_feature_artifact_hash", m.train_feature_artifact_hash, bm.feature_artifact_hash),
+            ("train_label_artifact_hash", m.train_label_artifact_hash, bm.label_artifact_hash),
+            ("campaign_id", m.campaign_id, bm.campaign_id),
+            ("research_split_hash", m.research_split_hash, bm.research_split_hash),
+            ("source_universe_hash", m.source_universe_hash, bm.source_universe_hash),
+            ("feature_schema_hash", m.feature_schema_hash, bm.feature_schema_hash),
+            ("label_definition_hash", m.label_definition_hash, bm.label_definition_hash),
+            ("train_start", m.train_start, bm.partition_start),
+            ("train_end", m.train_end, bm.partition_end),
+            ("development_partition", m.development_partition, dm.partition),
+            (
+                "development_feature_artifact_hash",
+                m.development_feature_artifact_hash,
+                development_features.artifact_hash,
+            ),
+            (
+                "development_source_dataset_hash",
+                m.development_source_dataset_hash,
+                dm.source_dataset_hash,
+            ),
+            ("development_row_payload_hash", m.development_row_payload_hash, dm.row_payload_hash),
+            (
+                "development_point_in_time_policy",
+                m.development_point_in_time_policy,
+                dm.point_in_time_policy,
+            ),
+            ("DEVELOPMENT campaign_id", m.campaign_id, dm.campaign_id),
+            ("DEVELOPMENT research_split_hash", m.research_split_hash, dm.research_split_hash),
+            ("DEVELOPMENT source_universe_hash", m.source_universe_hash, dm.source_universe_hash),
+            ("DEVELOPMENT feature_schema_hash", m.feature_schema_hash, dm.feature_schema_hash),
+            ("inference_start", m.inference_start, dm.partition_start),
+            ("inference_end", m.inference_end, dm.partition_end),
+            ("inference_row_count", m.inference_row_count, dm.row_count),
+            ("inference_keyset_hash", m.inference_keyset_hash, _factor_keyset_hash(development_features)),
+        ):
+            _require_equal(name, expected, actual)
+
+    def dry_run(
+        self,
+        *,
+        training_bundle: TrainingBundleArtifact,
+        development_features: FactorMatrixArtifact,
+    ) -> DevelopmentInferenceDryRunEvidence:
+        """Validate readiness without invoking or impersonating an external runtime."""
+        self.verify_inputs(
+            training_bundle=training_bundle,
+            development_features=development_features,
+        )
         m = self.manifest
         return DevelopmentInferenceDryRunEvidence(
             evidence_version=OSS3D2A_DRY_RUN_VERSION,
@@ -521,8 +609,18 @@ class DevelopmentInferenceRequest:
             label_access_policy=m.label_access_policy,
         )
 
-    def bind_prediction(self, prediction: QlibPredictionArtifact) -> DevelopmentPredictionReceipt:
+    def bind_prediction(
+        self,
+        *,
+        prediction: QlibPredictionArtifact,
+        training_bundle: TrainingBundleArtifact,
+        development_features: FactorMatrixArtifact,
+    ) -> DevelopmentPredictionReceipt:
         """Bind a *real* verified OSS-3A result; this method never runs Qlib."""
+        self.verify_inputs(
+            training_bundle=training_bundle,
+            development_features=development_features,
+        )
         if not isinstance(prediction, QlibPredictionArtifact):
             raise TypeError("prediction must be QlibPredictionArtifact")
         pm = prediction.manifest
@@ -539,8 +637,7 @@ class DevelopmentInferenceRequest:
         _require_equal("prediction inference_end", m.inference_end, pm.inference_end)
         if pm.prediction_count != m.inference_row_count:
             raise DevelopmentInferenceCompatibilityError("prediction_count mismatch")
-        prediction_keyset_hash = _prediction_keyset_hash(prediction.rows)
-        if prediction_keyset_hash != m.inference_keyset_hash:
+        if _prediction_keyset_hash(prediction.rows) != m.inference_keyset_hash:
             raise DevelopmentInferenceCompatibilityError("prediction keyset mismatch")
         return DevelopmentPredictionReceipt(
             receipt_version=OSS3D2A_RECEIPT_VERSION,
@@ -624,13 +721,11 @@ class DevelopmentInferenceRequest:
 
 
 def _factor_keyset_hash(artifact: FactorMatrixArtifact) -> str:
-    payload = tuple((row.as_of, row.symbol) for row in artifact.rows)
-    return _hash_keyset(payload)
+    return _hash_keyset(tuple((row.as_of, row.symbol) for row in artifact.rows))
 
 
 def _prediction_keyset_hash(rows: Sequence[QlibPredictionRow]) -> str:
-    payload = tuple((row.timestamp, row.symbol) for row in rows)
-    return _hash_keyset(payload)
+    return _hash_keyset(tuple((row.timestamp, row.symbol) for row in rows))
 
 
 def _hash_keyset(pairs: Sequence[tuple[str, str]]) -> str:
