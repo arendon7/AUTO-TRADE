@@ -12,6 +12,7 @@ on:
       - "tests/test_research_oss2_campaign.py"
       - "tests/test_research_oss2_campaign_adversarial.py"
       - "tests/test_research_oss2_robustness.py"
+      - "tests/test_research_oss2_robustness_adversarial.py"
       - ".github/workflows/oss2d-robustness.yml"
   workflow_dispatch:
 
@@ -45,7 +46,8 @@ jobs:
         run: |
           pytest -q \
             tests/test_r3_multiple_testing.py \
-            tests/test_research_oss2_robustness.py
+            tests/test_research_oss2_robustness.py \
+            tests/test_research_oss2_robustness_adversarial.py
 
       - name: OSS-2 regression tests
         run: |
