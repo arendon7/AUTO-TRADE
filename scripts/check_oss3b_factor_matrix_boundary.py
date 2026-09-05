@@ -59,9 +59,9 @@ def main() -> int:
         return 1
     print(
         "AUTO-TRADE OSS-3B factor matrix boundary: PASS "
-        "(TRAIN/DEVELOPMENT only; FINAL_HOLDOUT denied; labels absent; "
-        "point-in-time availability enforced; no Qlib/network/process/broker/OMS/"
-        "Safety/PAPER/capital/LIVE authority)"
+        "(campaign + frozen split hash-bound; TRAIN/DEVELOPMENT only; "
+        "FINAL_HOLDOUT denied; labels absent; point-in-time availability enforced; "
+        "no Qlib/network/process/broker/OMS/Safety/PAPER/capital/LIVE authority)"
     )
     return 0
 
@@ -100,7 +100,11 @@ def _runtime_probe() -> list[str]:
 
     start = datetime(2026, 1, 1, tzinfo=timezone.utc)
     as_of = start + timedelta(days=1)
+    campaign_id = "oss3b-boundary-campaign"
+    research_split_hash = "6" * 64
     artifact = FactorMatrixArtifact.build(
+        campaign_id=campaign_id,
+        research_split_hash=research_split_hash,
         partition=FactorMatrixPartition.TRAIN,
         partition_start=start,
         partition_end=start + timedelta(days=2),
@@ -129,6 +133,10 @@ def _runtime_probe() -> list[str]:
     )
     evidence = artifact.to_research_evidence()
     errors: list[str] = []
+    if evidence.campaign_id != campaign_id:
+        errors.append("runtime evidence lost campaign identity")
+    if evidence.research_split_hash != research_split_hash:
+        errors.append("runtime evidence lost frozen research split identity")
     if evidence.partition not in {"TRAIN", "DEVELOPMENT"}:
         errors.append("runtime evidence exposes forbidden partition")
     if evidence.labels_included:
