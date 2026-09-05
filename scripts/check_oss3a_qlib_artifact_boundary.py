@@ -82,7 +82,7 @@ def _scan(path: Path) -> list[str]:
                     errors.append(f"line {node.lineno}: forbidden authority symbol {alias.name}")
         elif isinstance(node, ast.Call):
             name = _call_name(node.func)
-            if name in FORBIDDEN_CALLS:
+            if name in FORBIDDEN_CALLS and not _is_allowlisted_safe_call(node.func):
                 errors.append(f"line {node.lineno}: forbidden call {name}")
         elif isinstance(node, ast.Name) and node.id in FORBIDDEN_NAMES:
             errors.append(f"line {node.lineno}: forbidden authority symbol {node.id}")
@@ -122,6 +122,17 @@ def _runtime_probe() -> list[str]:
 
 def _forbidden_module(module: str) -> bool:
     return any(module == prefix or module.startswith(prefix + ".") for prefix in FORBIDDEN_IMPORT_PREFIXES)
+
+
+def _is_allowlisted_safe_call(func: ast.expr) -> bool:
+    # `re.compile` creates deterministic regular-expression validators.  It is
+    # unrelated to Python's builtin `compile`, which remains forbidden.
+    return (
+        isinstance(func, ast.Attribute)
+        and func.attr == "compile"
+        and isinstance(func.value, ast.Name)
+        and func.value.id == "re"
+    )
 
 
 def _call_name(func: ast.expr) -> str:
