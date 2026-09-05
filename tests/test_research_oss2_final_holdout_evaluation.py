@@ -304,14 +304,16 @@ def test_whipsaw_holdout_mechanically_fails_at_least_one_gate(tmp_path, now):
     assert receipt.failure_code == ""
     if receipt.decision is OSS2FinalHoldoutDecision.FAIL:
         assert receipt.failed_gate_ids
-        assert all(gate_id in {
-            "FINAL_NET_RETURN_MIN",
-            "FINAL_SHARPE_MIN",
-            "FINAL_DRAWDOWN_MAX",
-        } for gate_id in receipt.failed_gate_ids)
+        assert all(
+            gate_id
+            in {
+                "FINAL_NET_RETURN_MIN",
+                "FINAL_SHARPE_MIN",
+                "FINAL_DRAWDOWN_MAX",
+            }
+            for gate_id in receipt.failed_gate_ids
+        )
     else:
-        # The test still proves the decision is exclusively gate-derived; market
-        # path details can move with deterministic engine implementation changes.
         assert receipt.failed_gate_ids == ()
         assert all(gate.passed for gate in receipt.gates)
 
@@ -330,29 +332,25 @@ def test_selected_candidate_is_independently_read_only_and_exact(tmp_path, now):
 
 
 def test_wrong_candidate_identity_fails_before_permit_consumption(tmp_path, now):
-    db, protocol, candidate, registry = _setup(tmp_path, now)
-    altered = type(candidate)(
-        campaign_id=candidate.campaign_id,
-        trial_id="different-trial",
-        trial_fingerprint=candidate.trial_fingerprint,
-        result_hash=candidate.result_hash,
-        config_hash=candidate.config_hash,
-        spec=candidate.spec,
-    )
+    db, protocol, candidate, _ = _setup(tmp_path, now)
     with pytest.raises(OSS2FinalHoldoutEvaluationIntegrityError):
-        registry.evaluate_and_record(
-            evaluation_id="oss2h-bad-candidate",
-            protocol=protocol,
-            candidate=altered,
-            holdout=ProtectedOSS2FinalHoldout(_universe(now + timedelta(days=1))),
-            now=now + timedelta(seconds=3),
+        type(candidate)(
+            campaign_id=candidate.campaign_id,
+            trial_id="different-trial",
+            trial_fingerprint=candidate.trial_fingerprint,
+            result_hash=candidate.result_hash,
+            config_hash=candidate.config_hash,
+            spec=candidate.spec,
         )
     conn = sqlite3.connect(db)
     try:
-        assert conn.execute(
-            "SELECT COUNT(*) FROM holdout_permits WHERE permit_id = ?",
-            (protocol.holdout_authorization_id,),
-        ).fetchone()[0] == 0
+        assert (
+            conn.execute(
+                "SELECT COUNT(*) FROM holdout_permits WHERE permit_id = ?",
+                (protocol.holdout_authorization_id,),
+            ).fetchone()[0]
+            == 0
+        )
     finally:
         conn.close()
 
@@ -404,8 +402,6 @@ def test_read_only_reader_detects_side_column_tamper(tmp_path, now):
 
 def test_read_only_reader_rejects_consumed_incomplete_state(tmp_path, now):
     db, protocol, candidate, registry = _setup(tmp_path, now)
-    # Exercise the internal durable start primitive to simulate process death
-    # after authorization consumption but before terminalization.
     from autotrade.research.oss2_final_holdout_evaluation import _build_start
     from autotrade.research.oss2_campaign import backtest_config_from_oss2_trial
     from autotrade.research.registry import HoldoutPermit
@@ -475,7 +471,10 @@ def test_terminal_json_hash_tamper_is_detected(tmp_path, now):
         conn.execute("DROP TRIGGER oss2_final_holdout_evaluations_no_update")
         conn.execute(
             "UPDATE oss2_final_holdout_evaluations SET receipt_json=? WHERE evaluation_id=?",
-            (json.dumps(payload, sort_keys=True, separators=(",", ":")), receipt.evaluation_id),
+            (
+                json.dumps(payload, sort_keys=True, separators=(",", ":")),
+                receipt.evaluation_id,
+            ),
         )
         conn.commit()
     finally:
