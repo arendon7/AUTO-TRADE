@@ -6,6 +6,7 @@ It is intentionally research-only and excludes FINAL_HOLDOUT data.
 
 Scientific boundary:
 - TRAIN or DEVELOPMENT only; FINAL_HOLDOUT is structurally rejected;
+- exact campaign + frozen research-split identity are hash-bound;
 - features only: no label/target field exists in the schema;
 - exact feature definitions and source lineage are hash-bound;
 - every row carries `available_at` and `as_of`, with available_at <= as_of;
@@ -37,6 +38,7 @@ MAX_ROWS = 2_000_000
 MAX_FEATURES = 512
 
 _HASH_RE = re.compile(r"^[0-9a-f]{64}$")
+_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,127}$")
 _NAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_.:-]{0,127}$")
 _SYMBOL_RE = re.compile(r"^[A-Z0-9][A-Z0-9._:/-]{0,31}$")
 _SOURCE_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,127}$")
@@ -48,6 +50,8 @@ _MANIFEST_KEYS = frozenset(
     {
         "producer_id",
         "producer_code_hash",
+        "campaign_id",
+        "research_split_hash",
         "source_dataset_hash",
         "source_universe_hash",
         "partition",
@@ -177,10 +181,12 @@ class FactorMatrixRow:
 
 @dataclass(frozen=True, slots=True)
 class FactorMatrixManifest:
-    """Immutable provenance and partition envelope."""
+    """Immutable provenance, campaign and partition envelope."""
 
     producer_id: str
     producer_code_hash: str
+    campaign_id: str
+    research_split_hash: str
     source_dataset_hash: str
     source_universe_hash: str
     partition: str
@@ -196,8 +202,11 @@ class FactorMatrixManifest:
     def __post_init__(self) -> None:
         if self.producer_id != OSS3B_PRODUCER_ID:
             raise FactorMatrixGovernanceError("noncanonical OSS-3B producer")
+        if not _ID_RE.fullmatch(self.campaign_id):
+            raise ValueError("invalid OSS-3B campaign_id")
         for name, value in (
             ("producer_code_hash", self.producer_code_hash),
+            ("research_split_hash", self.research_split_hash),
             ("source_dataset_hash", self.source_dataset_hash),
             ("source_universe_hash", self.source_universe_hash),
             ("feature_schema_hash", self.feature_schema_hash),
@@ -214,18 +223,7 @@ class FactorMatrixManifest:
         end = _parse_canonical_utc(self.partition_end, "partition_end")
         if not start < end:
             raise FactorMatrixGovernanceError("partition window must be positive")
-        if (
-            not isinstance(self.feature_count, int)
-            or isinstance(self.feature_count, bool)
-            or not 1 <= self.feature_count <= MAX_FEATURES
-        ):
-            raise ValueError("feature_count is outside the OSS-3B bound")
-        if (
-            not isinstance(self.row_count, int)
-            or isinstance(self.row_count, bool)
-            or not 1 <= self.row_count <= MAX_ROWS
-        ):
-            raise ValueError("row_count is outside the OSS-3B bound")
+        _validate_counts(self.feature_count, self.row_count)
         if self.missing_value_policy != "FORBID":
             raise FactorMatrixGovernanceError("OSS-3B V1 missing-value policy must be FORBID")
         if self.point_in_time_policy != "AVAILABLE_AT_LE_AS_OF":
@@ -246,6 +244,8 @@ class FactorMatrixManifest:
         return {
             "producer_id": self.producer_id,
             "producer_code_hash": self.producer_code_hash,
+            "campaign_id": self.campaign_id,
+            "research_split_hash": self.research_split_hash,
             "source_dataset_hash": self.source_dataset_hash,
             "source_universe_hash": self.source_universe_hash,
             "partition": self.partition,
@@ -267,6 +267,8 @@ class FactorMatrixEvidence:
     evidence_version: str
     artifact_hash: str
     manifest_fingerprint: str
+    campaign_id: str
+    research_split_hash: str
     partition: str
     partition_start: str
     partition_end: str
@@ -287,9 +289,12 @@ class FactorMatrixEvidence:
     def __post_init__(self) -> None:
         if self.evidence_version != OSS3B_EVIDENCE_VERSION:
             raise FactorMatrixIntegrityError("noncanonical OSS-3B evidence version")
+        if not _ID_RE.fullmatch(self.campaign_id):
+            raise FactorMatrixIntegrityError("invalid evidence campaign_id")
         for name, value in (
             ("artifact_hash", self.artifact_hash),
             ("manifest_fingerprint", self.manifest_fingerprint),
+            ("research_split_hash", self.research_split_hash),
             ("feature_schema_hash", self.feature_schema_hash),
             ("source_dataset_hash", self.source_dataset_hash),
             ("source_universe_hash", self.source_universe_hash),
@@ -300,6 +305,14 @@ class FactorMatrixEvidence:
             FactorMatrixPartition(self.partition)
         except ValueError as exc:
             raise FactorMatrixGovernanceError("evidence contains forbidden partition") from exc
+        start = _parse_canonical_utc(self.partition_start, "partition_start")
+        end = _parse_canonical_utc(self.partition_end, "partition_end")
+        if not start < end:
+            raise FactorMatrixIntegrityError("evidence partition window is invalid")
+        try:
+            _validate_counts(self.feature_count, self.row_count)
+        except ValueError as exc:
+            raise FactorMatrixIntegrityError("evidence counts are invalid") from exc
         if self.point_in_time_policy != "AVAILABLE_AT_LE_AS_OF":
             raise FactorMatrixIntegrityError("point-in-time policy drifted")
         if self.labels_included or self.final_holdout_included:
@@ -317,7 +330,7 @@ class FactorMatrixEvidence:
 
     @property
     def qlib_training_dataset_hash(self) -> str:
-        """Exact dataset identity a future OSS-3C producer must bind."""
+        """Exact dataset identity a future isolated Qlib producer must bind."""
         return self.artifact_hash
 
     def to_dict(self) -> dict[str, object]:
@@ -325,6 +338,8 @@ class FactorMatrixEvidence:
             "evidence_version": self.evidence_version,
             "artifact_hash": self.artifact_hash,
             "manifest_fingerprint": self.manifest_fingerprint,
+            "campaign_id": self.campaign_id,
+            "research_split_hash": self.research_split_hash,
             "partition": self.partition,
             "partition_start": self.partition_start,
             "partition_end": self.partition_end,
@@ -371,6 +386,8 @@ class FactorMatrixArtifact:
     def build(
         cls,
         *,
+        campaign_id: str,
+        research_split_hash: str,
         partition: FactorMatrixPartition,
         partition_start: datetime,
         partition_end: datetime,
@@ -387,6 +404,8 @@ class FactorMatrixArtifact:
         manifest = FactorMatrixManifest(
             producer_id=OSS3B_PRODUCER_ID,
             producer_code_hash=producer_code_hash,
+            campaign_id=campaign_id,
+            research_split_hash=research_split_hash,
             source_dataset_hash=source_dataset_hash,
             source_universe_hash=source_universe_hash,
             partition=partition.value,
@@ -419,6 +438,8 @@ class FactorMatrixArtifact:
             evidence_version=OSS3B_EVIDENCE_VERSION,
             artifact_hash=self.artifact_hash,
             manifest_fingerprint=manifest.fingerprint,
+            campaign_id=manifest.campaign_id,
+            research_split_hash=manifest.research_split_hash,
             partition=manifest.partition,
             partition_start=manifest.partition_start,
             partition_end=manifest.partition_end,
@@ -541,10 +562,27 @@ def _validate_rows(
         raise FactorMatrixIntegrityError("row payload hash mismatch")
 
 
+def _validate_counts(feature_count: int, row_count: int) -> None:
+    if (
+        not isinstance(feature_count, int)
+        or isinstance(feature_count, bool)
+        or not 1 <= feature_count <= MAX_FEATURES
+    ):
+        raise ValueError("feature_count is outside the OSS-3B bound")
+    if (
+        not isinstance(row_count, int)
+        or isinstance(row_count, bool)
+        or not 1 <= row_count <= MAX_ROWS
+    ):
+        raise ValueError("row_count is outside the OSS-3B bound")
+
+
 def _manifest_from_mapping(data: Mapping[str, object]) -> FactorMatrixManifest:
     return FactorMatrixManifest(
         producer_id=_string(data, "producer_id"),
         producer_code_hash=_string(data, "producer_code_hash"),
+        campaign_id=_string(data, "campaign_id"),
+        research_split_hash=_string(data, "research_split_hash"),
         source_dataset_hash=_string(data, "source_dataset_hash"),
         source_universe_hash=_string(data, "source_universe_hash"),
         partition=_string(data, "partition"),
