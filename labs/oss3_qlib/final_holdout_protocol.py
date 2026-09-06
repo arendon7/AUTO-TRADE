@@ -1,13 +1,14 @@
 """OSS-3D2J preregistered predictive FINAL_HOLDOUT protocol.
 
-D2J freezes the exact D2I DEVELOPMENT ranking winner, the exact protected
-FINAL_HOLDOUT identity commitment and the ex-ante predictive decision rule for
-one later evaluation.  It does not accept raw holdout label values, inspect
-holdout outcomes, issue/consume a permit, or evaluate the holdout.
+D2J freezes three deeply immutable objects before final validation:
+1. the exact D2I DEVELOPMENT ranking-winner lineage;
+2. a value-opaque commitment to the exact protected FINAL_HOLDOUT identity;
+3. the ex-ante predictive decision policy for one later evaluation.
 
-The protocol is predictive rather than economic.  Even a later PASS may only
-establish one-shot out-of-sample predictive evidence.  It cannot establish
-trading profitability or authorize promotion, PAPER, LIVE or capital.
+D2J does not accept raw holdout label values, inspect outcomes, issue or consume
+an authorization permit, or evaluate the holdout.  A later PASS may establish
+one-shot out-of-sample predictive evidence only; it cannot establish trading
+profitability or authorize promotion, PAPER, LIVE or capital.
 """
 
 from __future__ import annotations
@@ -38,6 +39,7 @@ from .family_evaluation_batch import (
 
 
 OSS3D2J_CONTRACT_VERSION = "OSS3D2J_FINAL_HOLDOUT_PROTOCOL_V1"
+OSS3D2J_WINNER_BINDING_VERSION = "OSS3D2J_WINNER_LINEAGE_BINDING_V1"
 OSS3D2J_COMMITMENT_VERSION = "OSS3D2J_PROTECTED_FINAL_HOLDOUT_COMMITMENT_V1"
 POLICY_ID = "OSS3D2J_PREDICTIVE_FINAL_VALIDATION_POLICY_V1"
 FINAL_HOLDOUT_SPLIT = "FINAL_HOLDOUT"
@@ -74,14 +76,127 @@ class OSS3FinalHoldoutProtocolConflict(OSS3FinalHoldoutProtocolError):
 
 
 @dataclass(frozen=True, slots=True)
-class OSS3ProtectedFinalHoldoutCommitment:
-    """Value-opaque identity for the one future predictive holdout.
+class OSS3D2JWinnerLineageBinding:
+    """Deep immutable projection of the exact D2I winner and D2H roots."""
 
-    The hashes may commit to protected feature/label artifacts, but this object
-    intentionally contains no label values or per-row outcomes.  Structural
-    counts and key hashes are safe to inspect before final validation and make
-    sample adequacy and dataset substitution fail closed.
-    """
+    binding_version: str
+    source_d2i_contract_version: str
+    source_d2i_seal_fingerprint: str
+    source_d2h_preregistration_fingerprint: str
+    source_d2h_batch_evidence_fingerprint: str
+    selection_scope: str
+    selected_trial_id: str
+    selected_hypothesis_id: str
+    model_family: str
+    model_config_hash: str
+    request_hash: str
+    prediction_artifact_hash: str
+    prediction_receipt_hash: str
+    environment_attestation_hash: str
+    d2g_run_evidence_hash: str
+    d2d_evaluation_artifact_hash: str
+    shared_runner_code_hash: str
+    runtime_environment_hash: str
+    d2e_plan_fingerprint: str
+    d2e_tournament_evidence_fingerprint: str
+    source_winner_primary_metric: float
+    source_winner_raw_p_value: float
+    source_winner_holm_adjusted_p_value: float
+
+    def __post_init__(self) -> None:
+        if self.binding_version != OSS3D2J_WINNER_BINDING_VERSION:
+            raise OSS3FinalHoldoutProtocolIntegrityError(
+                "noncanonical D2J winner binding version"
+            )
+        if self.source_d2i_contract_version != OSS3D2I_CONTRACT_VERSION:
+            raise OSS3FinalHoldoutProtocolIntegrityError(
+                "D2J winner binding requires canonical D2I seal"
+            )
+        if self.selection_scope != SELECTION_SCOPE:
+            raise OSS3FinalHoldoutProtocolIntegrityError(
+                "D2J winner selection scope drifted"
+            )
+        for name in (
+            "selected_trial_id",
+            "selected_hypothesis_id",
+            "model_family",
+        ):
+            _require_id(getattr(self, name), name)
+        for name in (
+            "source_d2i_seal_fingerprint",
+            "source_d2h_preregistration_fingerprint",
+            "source_d2h_batch_evidence_fingerprint",
+            "model_config_hash",
+            "request_hash",
+            "prediction_artifact_hash",
+            "prediction_receipt_hash",
+            "environment_attestation_hash",
+            "d2g_run_evidence_hash",
+            "d2d_evaluation_artifact_hash",
+            "shared_runner_code_hash",
+            "runtime_environment_hash",
+            "d2e_plan_fingerprint",
+            "d2e_tournament_evidence_fingerprint",
+        ):
+            _require_hash(getattr(self, name), name)
+        for name in (
+            "source_winner_primary_metric",
+            "source_winner_raw_p_value",
+            "source_winner_holm_adjusted_p_value",
+        ):
+            value = getattr(self, name)
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, (int, float))
+                or not isfinite(float(value))
+            ):
+                raise ValueError(f"{name} must be finite")
+        if not 0.0 <= self.source_winner_raw_p_value <= 1.0:
+            raise ValueError("source_winner_raw_p_value outside [0,1]")
+        if not 0.0 <= self.source_winner_holm_adjusted_p_value <= 1.0:
+            raise ValueError("source_winner_holm_adjusted_p_value outside [0,1]")
+        if self.source_winner_holm_adjusted_p_value < self.source_winner_raw_p_value:
+            raise OSS3FinalHoldoutProtocolIntegrityError(
+                "source Holm-adjusted p-value cannot be below raw p-value"
+            )
+
+    @property
+    def fingerprint(self) -> str:
+        return _hash(self.to_dict())
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "binding_version": self.binding_version,
+            "source_d2i_contract_version": self.source_d2i_contract_version,
+            "source_d2i_seal_fingerprint": self.source_d2i_seal_fingerprint,
+            "source_d2h_preregistration_fingerprint": self.source_d2h_preregistration_fingerprint,
+            "source_d2h_batch_evidence_fingerprint": self.source_d2h_batch_evidence_fingerprint,
+            "selection_scope": self.selection_scope,
+            "selected_trial_id": self.selected_trial_id,
+            "selected_hypothesis_id": self.selected_hypothesis_id,
+            "model_family": self.model_family,
+            "model_config_hash": self.model_config_hash,
+            "request_hash": self.request_hash,
+            "prediction_artifact_hash": self.prediction_artifact_hash,
+            "prediction_receipt_hash": self.prediction_receipt_hash,
+            "environment_attestation_hash": self.environment_attestation_hash,
+            "d2g_run_evidence_hash": self.d2g_run_evidence_hash,
+            "d2d_evaluation_artifact_hash": self.d2d_evaluation_artifact_hash,
+            "shared_runner_code_hash": self.shared_runner_code_hash,
+            "runtime_environment_hash": self.runtime_environment_hash,
+            "d2e_plan_fingerprint": self.d2e_plan_fingerprint,
+            "d2e_tournament_evidence_fingerprint": self.d2e_tournament_evidence_fingerprint,
+            "source_winner_primary_metric": float(self.source_winner_primary_metric),
+            "source_winner_raw_p_value": float(self.source_winner_raw_p_value),
+            "source_winner_holm_adjusted_p_value": float(
+                self.source_winner_holm_adjusted_p_value
+            ),
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class OSS3ProtectedFinalHoldoutCommitment:
+    """Value-opaque identity for the one future predictive holdout."""
 
     commitment_version: str
     source_campaign_id: str
@@ -146,7 +261,9 @@ class OSS3ProtectedFinalHoldoutCommitment:
             raise OSS3FinalHoldoutProtocolGovernanceError(
                 "FINAL_HOLDOUT cross sections are too small for Rank IC"
             )
-        if self.row_count < self.cross_section_count * self.minimum_cross_section_observation_count:
+        if self.row_count < (
+            self.cross_section_count * self.minimum_cross_section_observation_count
+        ):
             raise OSS3FinalHoldoutProtocolIntegrityError(
                 "FINAL_HOLDOUT structural counts are internally inconsistent"
             )
@@ -233,7 +350,10 @@ class OSS3FinalHoldoutProtocolPolicy:
             ("min_holdout_cross_sections", MIN_HOLDOUT_CROSS_SECTIONS),
             ("min_holdout_total_observations", MIN_HOLDOUT_TOTAL_OBSERVATIONS),
             ("min_cross_section_observations", MIN_CROSS_SECTION_OBSERVATIONS),
-            ("min_nonzero_rank_ic_cross_sections", MIN_NONZERO_RANK_IC_CROSS_SECTIONS),
+            (
+                "min_nonzero_rank_ic_cross_sections",
+                MIN_NONZERO_RANK_IC_CROSS_SECTIONS,
+            ),
         ):
             value = getattr(self, name)
             if not isinstance(value, int) or isinstance(value, bool) or value != expected:
@@ -309,63 +429,10 @@ class OSS3FinalHoldoutProtocolPolicy:
 class OSS3FinalHoldoutProtocolReceipt:
     protocol_id: str
     contract_version: str
-    source_d2i_contract_version: str
-    source_d2i_seal_fingerprint: str
-    source_d2h_preregistration_fingerprint: str
-    source_d2h_batch_evidence_fingerprint: str
-    selection_scope: str
-    selected_trial_id: str
-    selected_hypothesis_id: str
-    model_family: str
-    model_config_hash: str
-    request_hash: str
-    prediction_artifact_hash: str
-    prediction_receipt_hash: str
-    environment_attestation_hash: str
-    d2g_run_evidence_hash: str
-    d2d_evaluation_artifact_hash: str
-    shared_runner_code_hash: str
-    runtime_environment_hash: str
-    d2e_plan_fingerprint: str
-    d2e_tournament_evidence_fingerprint: str
-    source_winner_primary_metric: float
-    source_winner_raw_p_value: float
-    source_winner_holm_adjusted_p_value: float
-    holdout_commitment_version: str
-    holdout_commitment_fingerprint: str
-    holdout_source_campaign_id: str
-    holdout_research_split_hash: str
-    holdout_source_universe_hash: str
-    holdout_label_definition_hash: str
-    holdout_feature_artifact_hash: str
-    holdout_label_artifact_hash: str
-    holdout_evaluation_keyset_hash: str
-    holdout_cross_section_key_hash: str
-    holdout_partition_start: str
-    holdout_partition_end: str
-    holdout_row_count: int
-    holdout_cross_section_count: int
-    holdout_minimum_cross_section_observation_count: int
-    policy_fingerprint: str
+    winner_binding: OSS3D2JWinnerLineageBinding
+    holdout_commitment: OSS3ProtectedFinalHoldoutCommitment
+    policy: OSS3FinalHoldoutProtocolPolicy
     expected_holdout_authorization_id: str
-    primary_metric: str
-    min_mean_cross_sectional_rank_ic: float
-    max_one_sided_sign_test_p_value: float
-    min_holdout_cross_sections: int
-    min_holdout_total_observations: int
-    min_cross_section_observations: int
-    min_nonzero_rank_ic_cross_sections: int
-    sign_test_policy: str
-    zero_ic_policy: str
-    single_candidate_policy: str
-    max_evaluations: int
-    retuning_allowed: bool
-    reselection_allowed: bool
-    fallback_candidate_allowed: bool
-    second_attempt_allowed: bool
-    failure_is_terminal: bool
-    split_name: str
-    permit_purpose: str
     final_holdout_observed: bool
     final_holdout_consumed: bool
     holdout_permit_issued: bool
@@ -381,128 +448,32 @@ class OSS3FinalHoldoutProtocolReceipt:
     receipt_hash: str
 
     def __post_init__(self) -> None:
-        for name in (
-            "protocol_id",
-            "selected_trial_id",
-            "selected_hypothesis_id",
-            "model_family",
-            "holdout_source_campaign_id",
+        _require_id(self.protocol_id, "protocol_id")
+        _require_id(
+            self.expected_holdout_authorization_id,
             "expected_holdout_authorization_id",
-        ):
-            _require_id(getattr(self, name), name)
-        for name in (
-            "source_d2i_seal_fingerprint",
-            "source_d2h_preregistration_fingerprint",
-            "source_d2h_batch_evidence_fingerprint",
-            "model_config_hash",
-            "request_hash",
-            "prediction_artifact_hash",
-            "prediction_receipt_hash",
-            "environment_attestation_hash",
-            "d2g_run_evidence_hash",
-            "d2d_evaluation_artifact_hash",
-            "shared_runner_code_hash",
-            "runtime_environment_hash",
-            "d2e_plan_fingerprint",
-            "d2e_tournament_evidence_fingerprint",
-            "holdout_commitment_fingerprint",
-            "holdout_research_split_hash",
-            "holdout_source_universe_hash",
-            "holdout_label_definition_hash",
-            "holdout_feature_artifact_hash",
-            "holdout_label_artifact_hash",
-            "holdout_evaluation_keyset_hash",
-            "holdout_cross_section_key_hash",
-            "policy_fingerprint",
-            "receipt_hash",
-        ):
-            _require_hash(getattr(self, name), name)
+        )
+        _require_hash(self.receipt_hash, "receipt_hash")
         if self.contract_version != OSS3D2J_CONTRACT_VERSION:
             raise OSS3FinalHoldoutProtocolIntegrityError(
                 "noncanonical D2J contract version"
             )
-        if self.source_d2i_contract_version != OSS3D2I_CONTRACT_VERSION:
-            raise OSS3FinalHoldoutProtocolIntegrityError(
-                "D2J requires canonical D2I seal"
-            )
-        if self.holdout_commitment_version != OSS3D2J_COMMITMENT_VERSION:
-            raise OSS3FinalHoldoutProtocolIntegrityError(
-                "D2J requires canonical protected holdout commitment"
-            )
-        if self.selection_scope != SELECTION_SCOPE:
-            raise OSS3FinalHoldoutProtocolIntegrityError(
-                "D2J source selection scope drifted"
-            )
-        for name in (
-            "source_winner_primary_metric",
-            "source_winner_raw_p_value",
-            "source_winner_holm_adjusted_p_value",
+        if not isinstance(self.winner_binding, OSS3D2JWinnerLineageBinding):
+            raise TypeError("winner_binding must be OSS3D2JWinnerLineageBinding")
+        if not isinstance(
+            self.holdout_commitment,
+            OSS3ProtectedFinalHoldoutCommitment,
         ):
-            value = getattr(self, name)
-            if isinstance(value, bool) or not isinstance(value, (int, float)) or not isfinite(float(value)):
-                raise ValueError(f"{name} must be finite")
-        if not 0.0 <= self.source_winner_raw_p_value <= 1.0:
-            raise ValueError("source_winner_raw_p_value outside [0,1]")
-        if not 0.0 <= self.source_winner_holm_adjusted_p_value <= 1.0:
-            raise ValueError("source_winner_holm_adjusted_p_value outside [0,1]")
-        if self.source_winner_holm_adjusted_p_value < self.source_winner_raw_p_value:
-            raise OSS3FinalHoldoutProtocolIntegrityError(
-                "source Holm-adjusted p-value cannot be below raw p-value"
+            raise TypeError(
+                "holdout_commitment must be OSS3ProtectedFinalHoldoutCommitment"
             )
-        _parse_canonical_utc(self.holdout_partition_start, "holdout_partition_start")
-        _parse_canonical_utc(self.holdout_partition_end, "holdout_partition_end")
-        policy = canonical_oss3d2j_policy()
-        if self.policy_fingerprint != policy.fingerprint:
-            raise OSS3FinalHoldoutProtocolIntegrityError(
-                "D2J policy fingerprint mismatch"
-            )
-        expected_policy = policy.to_dict()
-        for name in (
-            "primary_metric",
-            "min_mean_cross_sectional_rank_ic",
-            "max_one_sided_sign_test_p_value",
-            "min_holdout_cross_sections",
-            "min_holdout_total_observations",
-            "min_cross_section_observations",
-            "min_nonzero_rank_ic_cross_sections",
-            "sign_test_policy",
-            "zero_ic_policy",
-            "single_candidate_policy",
-            "max_evaluations",
-            "retuning_allowed",
-            "reselection_allowed",
-            "fallback_candidate_allowed",
-            "second_attempt_allowed",
-            "failure_is_terminal",
-            "split_name",
-            "permit_purpose",
-        ):
-            if getattr(self, name) != expected_policy[name]:
-                raise OSS3FinalHoldoutProtocolIntegrityError(
-                    f"D2J policy field drifted: {name}"
-                )
-        if self.holdout_row_count < policy.min_holdout_total_observations:
-            raise OSS3FinalHoldoutProtocolIntegrityError(
-                "D2J receipt holdout row_count below frozen policy"
-            )
-        if self.holdout_cross_section_count < policy.min_holdout_cross_sections:
-            raise OSS3FinalHoldoutProtocolIntegrityError(
-                "D2J receipt holdout cross sections below frozen policy"
-            )
-        if (
-            self.holdout_minimum_cross_section_observation_count
-            < policy.min_cross_section_observations
-        ):
-            raise OSS3FinalHoldoutProtocolIntegrityError(
-                "D2J receipt holdout cross-section size below frozen policy"
-            )
+        if not isinstance(self.policy, OSS3FinalHoldoutProtocolPolicy):
+            raise TypeError("policy must be OSS3FinalHoldoutProtocolPolicy")
         expected_authorization = _authorization_id(
             protocol_id=self.protocol_id,
-            d2i_seal_fingerprint=self.source_d2i_seal_fingerprint,
-            holdout_commitment_fingerprint=self.holdout_commitment_fingerprint,
-            selected_trial_id=self.selected_trial_id,
-            model_config_hash=self.model_config_hash,
-            policy_fingerprint=self.policy_fingerprint,
+            winner_binding_fingerprint=self.winner_binding.fingerprint,
+            holdout_commitment_fingerprint=self.holdout_commitment.fingerprint,
+            policy_fingerprint=self.policy.fingerprint,
         )
         if self.expected_holdout_authorization_id != expected_authorization:
             raise OSS3FinalHoldoutProtocolIntegrityError(
@@ -513,92 +484,61 @@ class OSS3FinalHoldoutProtocolReceipt:
             raise OSS3FinalHoldoutProtocolIntegrityError("D2J receipt hash mismatch")
 
     @property
+    def source_d2i_seal_fingerprint(self) -> str:
+        return self.winner_binding.source_d2i_seal_fingerprint
+
+    @property
+    def source_d2h_preregistration_fingerprint(self) -> str:
+        return self.winner_binding.source_d2h_preregistration_fingerprint
+
+    @property
+    def source_d2h_batch_evidence_fingerprint(self) -> str:
+        return self.winner_binding.source_d2h_batch_evidence_fingerprint
+
+    @property
+    def selected_trial_id(self) -> str:
+        return self.winner_binding.selected_trial_id
+
+    @property
+    def model_config_hash(self) -> str:
+        return self.winner_binding.model_config_hash
+
+    @property
+    def holdout_commitment_fingerprint(self) -> str:
+        return self.holdout_commitment.fingerprint
+
+    @property
+    def policy_fingerprint(self) -> str:
+        return self.policy.fingerprint
+
+    @property
     def gate_specification(self) -> tuple[tuple[str, str, float], ...]:
         return (
             (
                 "FINAL_NONZERO_RANK_IC_CROSS_SECTIONS_MIN",
                 ">=",
-                float(self.min_nonzero_rank_ic_cross_sections),
+                float(self.policy.min_nonzero_rank_ic_cross_sections),
             ),
             (
                 "FINAL_MEAN_CROSS_SECTIONAL_RANK_IC_MIN",
                 ">=",
-                float(self.min_mean_cross_sectional_rank_ic),
+                float(self.policy.min_mean_cross_sectional_rank_ic),
             ),
             (
                 "FINAL_ONE_SIDED_EXACT_SIGN_TEST_P_MAX",
                 "<=",
-                float(self.max_one_sided_sign_test_p_value),
+                float(self.policy.max_one_sided_sign_test_p_value),
             ),
         )
 
     def to_dict(self, *, include_hash: bool = True) -> dict[str, object]:
-        payload = {
+        payload: dict[str, object] = {
             "protocol_id": self.protocol_id,
             "contract_version": self.contract_version,
-            "source_d2i_contract_version": self.source_d2i_contract_version,
-            "source_d2i_seal_fingerprint": self.source_d2i_seal_fingerprint,
-            "source_d2h_preregistration_fingerprint": self.source_d2h_preregistration_fingerprint,
-            "source_d2h_batch_evidence_fingerprint": self.source_d2h_batch_evidence_fingerprint,
-            "selection_scope": self.selection_scope,
-            "selected_trial_id": self.selected_trial_id,
-            "selected_hypothesis_id": self.selected_hypothesis_id,
-            "model_family": self.model_family,
-            "model_config_hash": self.model_config_hash,
-            "request_hash": self.request_hash,
-            "prediction_artifact_hash": self.prediction_artifact_hash,
-            "prediction_receipt_hash": self.prediction_receipt_hash,
-            "environment_attestation_hash": self.environment_attestation_hash,
-            "d2g_run_evidence_hash": self.d2g_run_evidence_hash,
-            "d2d_evaluation_artifact_hash": self.d2d_evaluation_artifact_hash,
-            "shared_runner_code_hash": self.shared_runner_code_hash,
-            "runtime_environment_hash": self.runtime_environment_hash,
-            "d2e_plan_fingerprint": self.d2e_plan_fingerprint,
-            "d2e_tournament_evidence_fingerprint": self.d2e_tournament_evidence_fingerprint,
-            "source_winner_primary_metric": float(self.source_winner_primary_metric),
-            "source_winner_raw_p_value": float(self.source_winner_raw_p_value),
-            "source_winner_holm_adjusted_p_value": float(
-                self.source_winner_holm_adjusted_p_value
-            ),
-            "holdout_commitment_version": self.holdout_commitment_version,
-            "holdout_commitment_fingerprint": self.holdout_commitment_fingerprint,
-            "holdout_source_campaign_id": self.holdout_source_campaign_id,
-            "holdout_research_split_hash": self.holdout_research_split_hash,
-            "holdout_source_universe_hash": self.holdout_source_universe_hash,
-            "holdout_label_definition_hash": self.holdout_label_definition_hash,
-            "holdout_feature_artifact_hash": self.holdout_feature_artifact_hash,
-            "holdout_label_artifact_hash": self.holdout_label_artifact_hash,
-            "holdout_evaluation_keyset_hash": self.holdout_evaluation_keyset_hash,
-            "holdout_cross_section_key_hash": self.holdout_cross_section_key_hash,
-            "holdout_partition_start": self.holdout_partition_start,
-            "holdout_partition_end": self.holdout_partition_end,
-            "holdout_row_count": self.holdout_row_count,
-            "holdout_cross_section_count": self.holdout_cross_section_count,
-            "holdout_minimum_cross_section_observation_count": self.holdout_minimum_cross_section_observation_count,
-            "policy_fingerprint": self.policy_fingerprint,
+            "winner_binding": self.winner_binding.to_dict(),
+            "holdout_commitment": self.holdout_commitment.to_dict(),
+            "policy": self.policy.to_dict(),
             "expected_holdout_authorization_id": self.expected_holdout_authorization_id,
-            "primary_metric": self.primary_metric,
-            "min_mean_cross_sectional_rank_ic": float(
-                self.min_mean_cross_sectional_rank_ic
-            ),
-            "max_one_sided_sign_test_p_value": float(
-                self.max_one_sided_sign_test_p_value
-            ),
-            "min_holdout_cross_sections": self.min_holdout_cross_sections,
-            "min_holdout_total_observations": self.min_holdout_total_observations,
-            "min_cross_section_observations": self.min_cross_section_observations,
-            "min_nonzero_rank_ic_cross_sections": self.min_nonzero_rank_ic_cross_sections,
-            "sign_test_policy": self.sign_test_policy,
-            "zero_ic_policy": self.zero_ic_policy,
-            "single_candidate_policy": self.single_candidate_policy,
-            "max_evaluations": self.max_evaluations,
-            "retuning_allowed": self.retuning_allowed,
-            "reselection_allowed": self.reselection_allowed,
-            "fallback_candidate_allowed": self.fallback_candidate_allowed,
-            "second_attempt_allowed": self.second_attempt_allowed,
-            "failure_is_terminal": self.failure_is_terminal,
-            "split_name": self.split_name,
-            "permit_purpose": self.permit_purpose,
             "final_holdout_observed": self.final_holdout_observed,
             "final_holdout_consumed": self.final_holdout_consumed,
             "holdout_permit_issued": self.holdout_permit_issued,
@@ -618,7 +558,7 @@ class OSS3FinalHoldoutProtocolReceipt:
 
 
 class SQLiteOSS3FinalHoldoutProtocolRegistry:
-    """Append-only one-seal/one-holdout D2J protocol registry."""
+    """Append-only one-winner/one-holdout D2J protocol registry."""
 
     def __init__(self, path: str | Path) -> None:
         self.path = Path(path)
@@ -686,6 +626,10 @@ class SQLiteOSS3FinalHoldoutProtocolRegistry:
             raise TypeError(
                 "holdout_commitment must be OSS3ProtectedFinalHoldoutCommitment"
             )
+        _verify_holdout_compatibility(
+            preregistration=preregistration,
+            holdout_commitment=holdout_commitment,
+        )
         candidate = _build_receipt(
             protocol_id=protocol_id,
             seal=seal,
@@ -902,81 +846,111 @@ def _verify_d2i_source(
         )
 
 
+def _verify_holdout_compatibility(
+    *,
+    preregistration: FamilyEvaluationPreregistration,
+    holdout_commitment: OSS3ProtectedFinalHoldoutCommitment,
+) -> None:
+    dataset = preregistration.d2e_plan.dataset
+    for name, expected, actual in (
+        (
+            "campaign",
+            dataset.source_campaign_id,
+            holdout_commitment.source_campaign_id,
+        ),
+        (
+            "research split",
+            dataset.research_split_hash,
+            holdout_commitment.research_split_hash,
+        ),
+        (
+            "universe",
+            dataset.source_universe_hash,
+            holdout_commitment.source_universe_hash,
+        ),
+        (
+            "label definition",
+            dataset.label_definition_hash,
+            holdout_commitment.label_definition_hash,
+        ),
+    ):
+        if expected != actual:
+            raise OSS3FinalHoldoutProtocolIntegrityError(
+                f"D2J holdout {name} differs from frozen DEVELOPMENT research identity"
+            )
+    development_end = _parse_canonical_utc(
+        dataset.evaluation_end,
+        "development evaluation_end",
+    )
+    holdout_start = _parse_canonical_utc(
+        holdout_commitment.partition_start,
+        "holdout partition_start",
+    )
+    if holdout_start < development_end:
+        raise OSS3FinalHoldoutProtocolIntegrityError(
+            "D2J holdout chronological boundary overlaps DEVELOPMENT"
+        )
+    if holdout_commitment.label_artifact_hash == dataset.development_label_artifact_hash:
+        raise OSS3FinalHoldoutProtocolIntegrityError(
+            "D2J holdout label artifact cannot reuse DEVELOPMENT labels"
+        )
+    if holdout_commitment.evaluation_keyset_hash == dataset.evaluation_keyset_hash:
+        raise OSS3FinalHoldoutProtocolIntegrityError(
+            "D2J holdout keyset cannot reuse DEVELOPMENT support"
+        )
+
+
+def _build_winner_binding(
+    seal: DevelopmentWinnerSelectionSeal,
+) -> OSS3D2JWinnerLineageBinding:
+    return OSS3D2JWinnerLineageBinding(
+        binding_version=OSS3D2J_WINNER_BINDING_VERSION,
+        source_d2i_contract_version=seal.contract_version,
+        source_d2i_seal_fingerprint=seal.fingerprint,
+        source_d2h_preregistration_fingerprint=seal.preregistration_fingerprint,
+        source_d2h_batch_evidence_fingerprint=seal.d2h_batch_evidence_fingerprint,
+        selection_scope=seal.selection_scope,
+        selected_trial_id=seal.selected_trial_id,
+        selected_hypothesis_id=seal.selected_hypothesis_id,
+        model_family=seal.model_family,
+        model_config_hash=seal.model_config_hash,
+        request_hash=seal.request_hash,
+        prediction_artifact_hash=seal.prediction_artifact_hash,
+        prediction_receipt_hash=seal.prediction_receipt_hash,
+        environment_attestation_hash=seal.environment_attestation_hash,
+        d2g_run_evidence_hash=seal.d2g_run_evidence_hash,
+        d2d_evaluation_artifact_hash=seal.d2d_evaluation_artifact_hash,
+        shared_runner_code_hash=seal.shared_runner_code_hash,
+        runtime_environment_hash=seal.runtime_environment_hash,
+        d2e_plan_fingerprint=seal.d2e_plan_fingerprint,
+        d2e_tournament_evidence_fingerprint=seal.d2e_tournament_evidence_fingerprint,
+        source_winner_primary_metric=seal.winner_primary_metric,
+        source_winner_raw_p_value=seal.winner_raw_p_value,
+        source_winner_holm_adjusted_p_value=seal.winner_holm_adjusted_p_value,
+    )
+
+
 def _build_receipt(
     *,
     protocol_id: str,
     seal: DevelopmentWinnerSelectionSeal,
     holdout_commitment: OSS3ProtectedFinalHoldoutCommitment,
 ) -> OSS3FinalHoldoutProtocolReceipt:
+    winner_binding = _build_winner_binding(seal)
     policy = canonical_oss3d2j_policy()
     authorization_id = _authorization_id(
         protocol_id=protocol_id,
-        d2i_seal_fingerprint=seal.fingerprint,
+        winner_binding_fingerprint=winner_binding.fingerprint,
         holdout_commitment_fingerprint=holdout_commitment.fingerprint,
-        selected_trial_id=seal.selected_trial_id,
-        model_config_hash=seal.model_config_hash,
         policy_fingerprint=policy.fingerprint,
     )
     values: dict[str, object] = {
         "protocol_id": protocol_id,
         "contract_version": OSS3D2J_CONTRACT_VERSION,
-        "source_d2i_contract_version": seal.contract_version,
-        "source_d2i_seal_fingerprint": seal.fingerprint,
-        "source_d2h_preregistration_fingerprint": seal.preregistration_fingerprint,
-        "source_d2h_batch_evidence_fingerprint": seal.d2h_batch_evidence_fingerprint,
-        "selection_scope": seal.selection_scope,
-        "selected_trial_id": seal.selected_trial_id,
-        "selected_hypothesis_id": seal.selected_hypothesis_id,
-        "model_family": seal.model_family,
-        "model_config_hash": seal.model_config_hash,
-        "request_hash": seal.request_hash,
-        "prediction_artifact_hash": seal.prediction_artifact_hash,
-        "prediction_receipt_hash": seal.prediction_receipt_hash,
-        "environment_attestation_hash": seal.environment_attestation_hash,
-        "d2g_run_evidence_hash": seal.d2g_run_evidence_hash,
-        "d2d_evaluation_artifact_hash": seal.d2d_evaluation_artifact_hash,
-        "shared_runner_code_hash": seal.shared_runner_code_hash,
-        "runtime_environment_hash": seal.runtime_environment_hash,
-        "d2e_plan_fingerprint": seal.d2e_plan_fingerprint,
-        "d2e_tournament_evidence_fingerprint": seal.d2e_tournament_evidence_fingerprint,
-        "source_winner_primary_metric": seal.winner_primary_metric,
-        "source_winner_raw_p_value": seal.winner_raw_p_value,
-        "source_winner_holm_adjusted_p_value": seal.winner_holm_adjusted_p_value,
-        "holdout_commitment_version": holdout_commitment.commitment_version,
-        "holdout_commitment_fingerprint": holdout_commitment.fingerprint,
-        "holdout_source_campaign_id": holdout_commitment.source_campaign_id,
-        "holdout_research_split_hash": holdout_commitment.research_split_hash,
-        "holdout_source_universe_hash": holdout_commitment.source_universe_hash,
-        "holdout_label_definition_hash": holdout_commitment.label_definition_hash,
-        "holdout_feature_artifact_hash": holdout_commitment.feature_artifact_hash,
-        "holdout_label_artifact_hash": holdout_commitment.label_artifact_hash,
-        "holdout_evaluation_keyset_hash": holdout_commitment.evaluation_keyset_hash,
-        "holdout_cross_section_key_hash": holdout_commitment.cross_section_key_hash,
-        "holdout_partition_start": holdout_commitment.partition_start,
-        "holdout_partition_end": holdout_commitment.partition_end,
-        "holdout_row_count": holdout_commitment.row_count,
-        "holdout_cross_section_count": holdout_commitment.cross_section_count,
-        "holdout_minimum_cross_section_observation_count": holdout_commitment.minimum_cross_section_observation_count,
-        "policy_fingerprint": policy.fingerprint,
+        "winner_binding": winner_binding,
+        "holdout_commitment": holdout_commitment,
+        "policy": policy,
         "expected_holdout_authorization_id": authorization_id,
-        "primary_metric": policy.primary_metric,
-        "min_mean_cross_sectional_rank_ic": policy.min_mean_cross_sectional_rank_ic,
-        "max_one_sided_sign_test_p_value": policy.max_one_sided_sign_test_p_value,
-        "min_holdout_cross_sections": policy.min_holdout_cross_sections,
-        "min_holdout_total_observations": policy.min_holdout_total_observations,
-        "min_cross_section_observations": policy.min_cross_section_observations,
-        "min_nonzero_rank_ic_cross_sections": policy.min_nonzero_rank_ic_cross_sections,
-        "sign_test_policy": policy.sign_test_policy,
-        "zero_ic_policy": policy.zero_ic_policy,
-        "single_candidate_policy": policy.single_candidate_policy,
-        "max_evaluations": policy.max_evaluations,
-        "retuning_allowed": policy.retuning_allowed,
-        "reselection_allowed": policy.reselection_allowed,
-        "fallback_candidate_allowed": policy.fallback_candidate_allowed,
-        "second_attempt_allowed": policy.second_attempt_allowed,
-        "failure_is_terminal": policy.failure_is_terminal,
-        "split_name": policy.split_name,
-        "permit_purpose": policy.permit_purpose,
         "final_holdout_observed": False,
         "final_holdout_consumed": False,
         "holdout_permit_issued": False,
@@ -990,27 +964,45 @@ def _build_receipt(
         "capital_authority": "NONE",
         "live_trading": "BLOCKED",
     }
-    receipt_hash = _hash(values)
-    return OSS3FinalHoldoutProtocolReceipt(**values, receipt_hash=receipt_hash)
+    hash_payload = {
+        "protocol_id": protocol_id,
+        "contract_version": OSS3D2J_CONTRACT_VERSION,
+        "winner_binding": winner_binding.to_dict(),
+        "holdout_commitment": holdout_commitment.to_dict(),
+        "policy": policy.to_dict(),
+        "expected_holdout_authorization_id": authorization_id,
+        "final_holdout_observed": False,
+        "final_holdout_consumed": False,
+        "holdout_permit_issued": False,
+        "holdout_permit_consumed": False,
+        "final_holdout_checkout_authorized": False,
+        "predictive_validation_passed": False,
+        "profitability_claim_authorized": False,
+        "promotion_authorized": False,
+        "execution_authorized": False,
+        "paper_execution_authorized": False,
+        "capital_authority": "NONE",
+        "live_trading": "BLOCKED",
+    }
+    return OSS3FinalHoldoutProtocolReceipt(
+        **values,
+        receipt_hash=_hash(hash_payload),
+    )
 
 
 def _authorization_id(
     *,
     protocol_id: str,
-    d2i_seal_fingerprint: str,
+    winner_binding_fingerprint: str,
     holdout_commitment_fingerprint: str,
-    selected_trial_id: str,
-    model_config_hash: str,
     policy_fingerprint: str,
 ) -> str:
     digest = _hash(
         {
             "contract_version": OSS3D2J_CONTRACT_VERSION,
             "protocol_id": protocol_id,
-            "source_d2i_seal_fingerprint": d2i_seal_fingerprint,
+            "winner_binding_fingerprint": winner_binding_fingerprint,
             "holdout_commitment_fingerprint": holdout_commitment_fingerprint,
-            "selected_trial_id": selected_trial_id,
-            "model_config_hash": model_config_hash,
             "policy_fingerprint": policy_fingerprint,
             "permit_purpose": FINAL_VALIDATION_PURPOSE,
             "max_evaluations": 1,
@@ -1030,7 +1022,28 @@ def _receipt_from_row(row: sqlite3.Row) -> OSS3FinalHoldoutProtocolReceipt:
         raise OSS3FinalHoldoutProtocolIntegrityError(
             "D2J receipt JSON must be an object"
         )
-    receipt = OSS3FinalHoldoutProtocolReceipt(**dict(payload))
+    values = dict(payload)
+    winner_payload = values.pop("winner_binding", None)
+    holdout_payload = values.pop("holdout_commitment", None)
+    policy_payload = values.pop("policy", None)
+    if not isinstance(winner_payload, Mapping):
+        raise OSS3FinalHoldoutProtocolIntegrityError(
+            "D2J durable winner binding is invalid"
+        )
+    if not isinstance(holdout_payload, Mapping):
+        raise OSS3FinalHoldoutProtocolIntegrityError(
+            "D2J durable holdout commitment is invalid"
+        )
+    if not isinstance(policy_payload, Mapping):
+        raise OSS3FinalHoldoutProtocolIntegrityError(
+            "D2J durable policy is invalid"
+        )
+    receipt = OSS3FinalHoldoutProtocolReceipt(
+        **values,
+        winner_binding=OSS3D2JWinnerLineageBinding(**dict(winner_payload)),
+        holdout_commitment=OSS3ProtectedFinalHoldoutCommitment(**dict(holdout_payload)),
+        policy=OSS3FinalHoldoutProtocolPolicy(**dict(policy_payload)),
+    )
     for column, expected in (
         ("protocol_id", receipt.protocol_id),
         ("source_d2i_seal_fingerprint", receipt.source_d2i_seal_fingerprint),
