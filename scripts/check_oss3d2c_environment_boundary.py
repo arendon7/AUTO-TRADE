@@ -16,6 +16,7 @@ D2B_SEMANTIC_FILES = (
 )
 
 FORBIDDEN_IMPORT_PREFIXES = (
+    "os",
     "socket",
     "subprocess",
     "requests",
@@ -41,7 +42,6 @@ FORBIDDEN_CALLS = {
     "cwd",
     "getcwd",
     "chdir",
-    "system",
     "popen",
     "Popen",
     "urlopen",
@@ -111,9 +111,6 @@ def _scan_attestation() -> list[str]:
                 errors.append(f"line {node.lineno}: forbidden call {name}")
         elif isinstance(node, ast.Name) and node.id in FORBIDDEN_AUTHORITY_NAMES:
             errors.append(f"line {node.lineno}: forbidden authority symbol {node.id}")
-        elif isinstance(node, ast.Attribute):
-            if isinstance(node.value, ast.Name) and node.value.id == "os" and node.attr == "environ":
-                errors.append(f"line {node.lineno}: os.environ access is forbidden")
     return errors
 
 
@@ -139,6 +136,8 @@ def _check_source_contract() -> list[str]:
     forbidden = (
         "os.environ",
         "os.getenv",
+        "os.system",
+        "os.popen",
         "platform.node(",
         "socket.",
         "subprocess.",
