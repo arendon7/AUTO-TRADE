@@ -55,8 +55,13 @@ jobs:
             labs/oss3_qlib/tests/test_family_evaluation_batch.py \
             labs/oss3_qlib/tests/test_family_evaluation_batch_binding_immutability.py \
             scripts/check_oss3d2h_family_evaluation_batch_boundary.py
-      - name: D2H core-only structural boundary before Qlib install
+      - name: D2H runtime-free structural boundary before Qlib install
         run: python scripts/check_oss3d2h_family_evaluation_batch_boundary.py
+      - name: Execute D2H deterministic and adversarial orchestration before Qlib install
+        run: |
+          python -m pytest -q \
+            labs/oss3_qlib/tests/test_family_evaluation_batch.py \
+            labs/oss3_qlib/tests/test_family_evaluation_batch_binding_immutability.py
       - name: Install exact isolated Qlib runtime
         run: python -m pip install -r labs/oss3_qlib/requirements.txt
       - name: Assert pyqlib 0.9.7
@@ -66,11 +71,6 @@ jobs:
           assert qlib.__version__ == "0.9.7", qlib.__version__
           print("OSS-3D2H pyqlib runtime regression: 0.9.7 PASS")
           PY
-      - name: Execute D2H orchestration and binding immutability with exact runtime installed
-        run: |
-          python -m pytest -q \
-            labs/oss3_qlib/tests/test_family_evaluation_batch.py \
-            labs/oss3_qlib/tests/test_family_evaluation_batch_binding_immutability.py
       - name: Execute all six D2F candidates through real D2G Qlib runtime
         run: python -m pytest -q labs/oss3_qlib/tests/test_family_runner.py
       - name: Re-prove D2G and D2H boundaries after Qlib install
