@@ -84,6 +84,13 @@ def main() -> int:
     required_contract = (
         "from autotrade.research.oss3_concrete_model_family import (",
         '"src/autotrade/research/oss3_concrete_model_family.py"',
+        '"src/autotrade/research/oss3_development_inference.py"',
+        '"src/autotrade/research/oss3_factor_matrix_artifact.py"',
+        '"src/autotrade/research/oss3_supervised_label_artifact.py"',
+        '"src/autotrade/research/oss3_training_bundle.py"',
+        '"src/autotrade/research/oss3_qlib_artifact.py"',
+        '"src/autotrade/research/oss3_development_model_tournament.py"',
+        '"labs/oss3_qlib/environment_attestation.py"',
         '"labs/oss3_qlib/family_runner.py"',
         '"labs/oss3_qlib/family_environment_attestation.py"',
         "candidate_from_config_hash",
@@ -102,6 +109,9 @@ def main() -> int:
     required_runner = (
         "candidate = assert_family_request_contract(request.manifest)",
         "config = candidate_runtime_config(candidate)",
+        "candidate = candidate_from_config_hash(self.model_config_hash)",
+        "if candidate.candidate_id != self.candidate_id:",
+        "if self.shared_runner_code_hash != family_runner_code_hash():",
         "with deny_network():",
         "from qlib.contrib.model.linear import LinearModel",
         'estimator=str(config["estimator"])',
@@ -138,6 +148,8 @@ def main() -> int:
         "RuntimeEnvironmentIdentity(",
         "policy_id=RUNTIME_ENVIRONMENT_POLICY",
         "model_config_hash=model_config_hash",
+        "current_runner_hash = family_runner_code_hash()",
+        "if actual_runner_hash != current_runner_hash:",
         "runner_code_hash=actual_runner_hash",
         "execution_authorized: bool = False",
         "paper_execution_authorized: bool = False",
@@ -163,7 +175,7 @@ def main() -> int:
         return 1
     print(
         "AUTO-TRADE OSS-3D2G isolated finite-family boundary: PASS "
-        "(exact D2F hashes only; one shared semantic runner; real Qlib under no-network; "
+        "(exact D2F hashes only; full shared semantic runtime; real Qlib under no-network; "
         "TRAIN labels only; no DEVELOPMENT labels/FINAL_HOLDOUT/tuning/broker/OMS/Safety/PAPER/capital/LIVE)"
     )
     return 0
