@@ -1,7 +1,9 @@
 from __future__ import annotations
 
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
+from hashlib import sha256
+import json
 from pathlib import Path
 
 import pytest
@@ -31,6 +33,7 @@ from autotrade.research.trials import SQLiteTrialLedger, TrialStatus
 from labs.oss3_qlib.environment_attestation import InstalledDistribution
 from labs.oss3_qlib.family_environment_attestation import CandidateEnvironmentAttestation
 from labs.oss3_qlib.family_evaluation_batch import (
+    OSS3D2G_RUN_EVIDENCE_VERSION,
     OSS3D2H_BATCH_EVIDENCE_VERSION,
     OSS3D2H_PREREGISTRATION_VERSION,
     FamilyEvaluationBatchGovernanceError,
@@ -42,10 +45,6 @@ from labs.oss3_qlib.family_evaluation_batch import (
     preregister_family_evaluation,
 )
 from labs.oss3_qlib.family_model_contract import family_runner_code_hash
-from labs.oss3_qlib.family_runner import (
-    OSS3D2G_RUN_EVIDENCE_VERSION,
-    FamilyCandidateRunEvidence,
-)
 
 
 UTC = timezone.utc
@@ -61,6 +60,66 @@ UNIVERSE = "2" * 64
 FEATURE_CODE = "3" * 64
 LABEL_CODE = "4" * 64
 SYMBOLS = ("BTCUSDT", "ETHUSDT", "SOLUSDT")
+
+
+@dataclass(frozen=True, slots=True)
+class SyntheticD2GRunEvidence:
+    """Runtime-free test double with the exact serialized D2G evidence contract."""
+
+    evidence_version: str
+    candidate_id: str
+    model_config_hash: str
+    shared_runner_code_hash: str
+    request_hash: str
+    prediction_artifact_hash: str
+    prediction_receipt_hash: str
+    environment_attestation_hash: str
+    runtime_environment_hash: str
+    development_labels_loaded: bool = False
+    final_holdout_loaded: bool = False
+    broker_credentials_present: bool = False
+    network_allowed: bool = False
+    adaptive_search: bool = False
+    hyperparameter_optimization: bool = False
+    execution_authorized: bool = False
+    paper_execution_authorized: bool = False
+    capital_authority: str = "NONE"
+    live_trading: str = "BLOCKED"
+
+    @property
+    def fingerprint(self) -> str:
+        return sha256(
+            json.dumps(
+                self.to_dict(),
+                sort_keys=True,
+                separators=(",", ":"),
+                ensure_ascii=False,
+                allow_nan=False,
+            ).encode("utf-8")
+        ).hexdigest()
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "evidence_version": self.evidence_version,
+            "candidate_id": self.candidate_id,
+            "model_config_hash": self.model_config_hash,
+            "shared_runner_code_hash": self.shared_runner_code_hash,
+            "request_hash": self.request_hash,
+            "prediction_artifact_hash": self.prediction_artifact_hash,
+            "prediction_receipt_hash": self.prediction_receipt_hash,
+            "environment_attestation_hash": self.environment_attestation_hash,
+            "runtime_environment_hash": self.runtime_environment_hash,
+            "development_labels_loaded": self.development_labels_loaded,
+            "final_holdout_loaded": self.final_holdout_loaded,
+            "broker_credentials_present": self.broker_credentials_present,
+            "network_allowed": self.network_allowed,
+            "adaptive_search": self.adaptive_search,
+            "hyperparameter_optimization": self.hyperparameter_optimization,
+            "execution_authorized": self.execution_authorized,
+            "paper_execution_authorized": self.paper_execution_authorized,
+            "capital_authority": self.capital_authority,
+            "live_trading": self.live_trading,
+        }
 
 
 def _factor_definitions():
@@ -305,7 +364,7 @@ def _candidate_output(
         libc_name="glibc",
         libc_version="2.39",
     )
-    run_evidence = FamilyCandidateRunEvidence(
+    run_evidence = SyntheticD2GRunEvidence(
         evidence_version=OSS3D2G_RUN_EVIDENCE_VERSION,
         candidate_id=binding.candidate_id,
         model_config_hash=binding.model_config_hash,
@@ -595,6 +654,7 @@ def test_d2h_module_has_no_qlib_execution_or_final_holdout_surface():
     assert "from qlib" not in source
     assert "LinearModel" not in source
     assert "qlib.init(" not in source
+    assert "from .family_runner import" not in source
     assert "--final-holdout" not in source
     assert "final_holdout_path" not in source
     assert "submit_order" not in source
