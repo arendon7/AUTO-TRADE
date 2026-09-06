@@ -157,13 +157,76 @@ class FrozenCandidateOutput:
 
 
 @dataclass(frozen=True, slots=True)
+class FrozenCandidateOutputBinding:
+    """Deeply immutable preregistration projection of one D2G output set."""
+
+    candidate_id: str
+    request_hash: str
+    prediction_artifact_hash: str
+    prediction_receipt_hash: str
+    environment_attestation_hash: str
+    runtime_environment_hash: str
+    d2g_run_evidence_hash: str
+    model_config_hash: str
+    shared_runner_code_hash: str
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.candidate_id, str) or not _ID_RE.fullmatch(self.candidate_id):
+            raise ValueError("invalid candidate_id")
+        for name in (
+            "request_hash",
+            "prediction_artifact_hash",
+            "prediction_receipt_hash",
+            "environment_attestation_hash",
+            "runtime_environment_hash",
+            "d2g_run_evidence_hash",
+            "model_config_hash",
+            "shared_runner_code_hash",
+        ):
+            _require_hash(getattr(self, name), name)
+
+    @classmethod
+    def from_output(cls, output: FrozenCandidateOutput) -> "FrozenCandidateOutputBinding":
+        if not isinstance(output, FrozenCandidateOutput):
+            raise TypeError("output must be FrozenCandidateOutput")
+        return cls(
+            candidate_id=output.candidate_id,
+            request_hash=output.request.request_hash,
+            prediction_artifact_hash=output.prediction.artifact_hash,
+            prediction_receipt_hash=output.receipt.fingerprint,
+            environment_attestation_hash=output.attestation.artifact_hash,
+            runtime_environment_hash=output.runtime_environment.fingerprint,
+            d2g_run_evidence_hash=output.run_evidence.fingerprint,
+            model_config_hash=output.request.manifest.model_config_hash,
+            shared_runner_code_hash=output.request.manifest.expected_runner_code_hash,
+        )
+
+    @property
+    def fingerprint(self) -> str:
+        return _hash(self.to_dict())
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "candidate_id": self.candidate_id,
+            "request_hash": self.request_hash,
+            "prediction_artifact_hash": self.prediction_artifact_hash,
+            "prediction_receipt_hash": self.prediction_receipt_hash,
+            "environment_attestation_hash": self.environment_attestation_hash,
+            "runtime_environment_hash": self.runtime_environment_hash,
+            "d2g_run_evidence_hash": self.d2g_run_evidence_hash,
+            "model_config_hash": self.model_config_hash,
+            "shared_runner_code_hash": self.shared_runner_code_hash,
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class FamilyEvaluationPreregistration:
     preregistration_version: str
     d2f_plan_fingerprint: str
     d2f_request_set_fingerprint: str
     d2h_code_version: str
     development_label_artifact_hash: str
-    candidate_output_bindings: tuple[dict[str, object], ...]
+    candidate_output_bindings: tuple[FrozenCandidateOutputBinding, ...]
     d2e_plan: OSS3D2EPlan
     label_values_used: bool = False
     development_metrics_computed: bool = False
@@ -187,9 +250,13 @@ class FamilyEvaluationPreregistration:
             raise TypeError("d2e_plan must be OSS3D2EPlan")
         if not 2 <= len(self.candidate_output_bindings) <= MAX_CANDIDATES:
             raise FamilyEvaluationBatchGovernanceError("D2H candidate count outside bound")
-        candidate_ids = tuple(str(item.get("candidate_id", "")) for item in self.candidate_output_bindings)
+        if any(not isinstance(item, FrozenCandidateOutputBinding) for item in self.candidate_output_bindings):
+            raise TypeError("candidate_output_bindings must be immutable D2H bindings")
+        candidate_ids = tuple(item.candidate_id for item in self.candidate_output_bindings)
         if candidate_ids != tuple(candidate.trial_id for candidate in self.d2e_plan.candidates):
             raise FamilyEvaluationBatchIntegrityError("D2H bindings differ from frozen D2E candidate universe")
+        if candidate_ids != tuple(sorted(candidate_ids)) or len(set(candidate_ids)) != len(candidate_ids):
+            raise FamilyEvaluationBatchIntegrityError("D2H preregistration bindings are not canonical")
         if self.label_values_used or self.development_metrics_computed:
             raise FamilyEvaluationBatchGovernanceError(
                 "D2H preregistration must exist before label-value use or DEVELOPMENT metrics"
@@ -214,7 +281,8 @@ class FamilyEvaluationPreregistration:
             "d2f_request_set_fingerprint": self.d2f_request_set_fingerprint,
             "d2h_code_version": self.d2h_code_version,
             "development_label_artifact_hash": self.development_label_artifact_hash,
-            "candidate_output_bindings": list(self.candidate_output_bindings),
+            "candidate_output_bindings": [item.to_dict() for item in self.candidate_output_bindings],
+            "candidate_output_binding_hashes": [item.fingerprint for item in self.candidate_output_bindings],
             "d2e_plan_fingerprint": self.d2e_plan.fingerprint,
             "d2e_plan": self.d2e_plan.to_dict(),
             "label_values_used": self.label_values_used,
@@ -425,7 +493,7 @@ def prepare_family_evaluation_preregistration(
         candidates=candidates,
         code_version=code_version,
     )
-    bindings = tuple(output.to_dict() for output in output_tuple)
+    bindings = tuple(FrozenCandidateOutputBinding.from_output(output) for output in output_tuple)
     return FamilyEvaluationPreregistration(
         preregistration_version=OSS3D2H_PREREGISTRATION_VERSION,
         d2f_plan_fingerprint=d2f_plan.fingerprint,
@@ -583,7 +651,8 @@ def _verify_outputs_against_preregistration(
     expected_ids = tuple(candidate.trial_id for candidate in preregistration.d2e_plan.candidates)
     if tuple(output.candidate_id for output in outputs) != expected_ids:
         raise FamilyEvaluationBatchIntegrityError("output universe differs from preregistered D2E plan")
-    if tuple(output.to_dict() for output in outputs) != preregistration.candidate_output_bindings:
+    current_bindings = tuple(FrozenCandidateOutputBinding.from_output(output) for output in outputs)
+    if current_bindings != preregistration.candidate_output_bindings:
         raise FamilyEvaluationBatchIntegrityError("frozen D2G outputs differ from preregistration")
     runtime_hashes = {output.runtime_environment.fingerprint for output in outputs}
     if runtime_hashes != {preregistration.d2e_plan.runtime_environment.fingerprint}:
