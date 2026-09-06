@@ -35,8 +35,9 @@ from .family_environment_attestation import (
 )
 from .family_model_contract import (
     QLIB_VERSION,
-    candidate_runtime_config,
     assert_family_request_contract,
+    candidate_from_config_hash,
+    candidate_runtime_config,
     family_runner_code_hash,
 )
 from .network_guard import deny_network
@@ -110,6 +111,11 @@ class FamilyCandidateRunEvidence:
             value = getattr(self, name)
             if not isinstance(value, str) or not _HASH_RE.fullmatch(value):
                 raise ValueError(f"invalid {name}")
+        candidate = candidate_from_config_hash(self.model_config_hash)
+        if candidate.candidate_id != self.candidate_id:
+            raise QlibFamilyLabIntegrityError("D2G evidence candidate/config identity mismatch")
+        if self.shared_runner_code_hash != family_runner_code_hash():
+            raise QlibFamilyLabIntegrityError("D2G evidence shared runner hash drifted")
         if (
             self.development_labels_loaded
             or self.final_holdout_loaded
