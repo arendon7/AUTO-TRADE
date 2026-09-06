@@ -1,22 +1,19 @@
 """OSS-3D2E preregistered DEVELOPMENT model tournament.
 
-D2E is downstream of OSS-3D2D. It freezes a finite model family before any
-candidate result is recorded, ingests only immutable D2D DEVELOPMENT
-evaluations that exactly match their preregistered identity, and reuses the
-canonical TrialLedger/Tournament machinery for deterministic ranking.
+D2E freezes a finite model family before results, ingests immutable OSS-3D2D
+DEVELOPMENT evaluations, and reuses the canonical TrialLedger/Tournament
+machinery for deterministic ranking.
 
 Scientific/governance boundary:
 - DEVELOPMENT only; FINAL_HOLDOUT is structurally forbidden;
-- the complete candidate universe is frozen in CampaignSpec before results;
-- one primary metric is fixed: mean_cross_sectional_rank_ic / MAXIMIZE;
-- exact metric ties use the existing immutable Tournament identity tie-break;
-- auxiliary D2D metrics are diagnostic and cannot change ranking;
-- the primary metric is recomputed from D2D cross-sections before ingestion;
-- one-sided exact sign-test p-values over cross-sectional rank-IC signs are
-  recorded per candidate and Holm-adjusted over the complete frozen family;
-- all completed candidates must use identical cross-sectional timestamp support;
-- no model execution, Qlib runtime, tuning loop, FINAL_HOLDOUT access, PnL,
-  Sharpe, broker, OMS, Safety, OrderIntent, PAPER, capital or LIVE authority.
+- candidate universe and one primary metric are frozen before results;
+- primary metric is mean_cross_sectional_rank_ic / MAXIMIZE and is recomputed
+  from D2D cross-sections before ingestion;
+- exact sign-test p-values are Holm-adjusted over the complete frozen family;
+- completed candidates require identical cross-sectional timestamp support;
+- each candidate binds its own D2C attestation hash because D2C V1 also binds
+  model/config; fairness instead uses a shared model-neutral runtime identity;
+- no Qlib execution, tuning, PnL, broker, OMS, Safety, PAPER, capital or LIVE.
 """
 
 from __future__ import annotations
@@ -50,12 +47,14 @@ PRIMARY_METRIC = "mean_cross_sectional_rank_ic"
 PRIMARY_DIRECTION = RankingDirection.MAXIMIZE
 MULTIPLE_TESTING_POLICY = "EXACT_SIGN_TEST_PLUS_HOLM_V1"
 COMMON_SUPPORT_POLICY = "EXACT_CROSS_SECTION_TIMESTAMP_SUPPORT_V1"
+RUNTIME_ENVIRONMENT_POLICY = "D2C_MODEL_NEUTRAL_RUNTIME_IDENTITY_V1"
 MIN_CANDIDATES = 2
 MAX_CANDIDATES = 32
+MAX_DISTRIBUTIONS = 4096
 
 _HASH_RE = re.compile(r"^[0-9a-f]{64}$")
 _ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,127}$")
-_VERSION_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$")
+_VERSION_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9.!+_-]{0,127}$")
 
 
 class DevelopmentModelTournamentError(RuntimeError):
@@ -119,6 +118,75 @@ class DevelopmentDatasetBinding:
 
 
 @dataclass(frozen=True, slots=True)
+class RuntimeEnvironmentIdentity:
+    """Model-neutral subset of an OSS-3D2C environment manifest.
+
+    D2C V1 also binds model family/config and runner code, so its artifact hash
+    is expected to differ across model candidates. This identity deliberately
+    excludes those model-specific fields while retaining the actual Python,
+    platform, libc, Qlib and installed-distribution environment.
+    """
+
+    policy_id: str
+    python_implementation: str
+    python_version: str
+    platform_system: str
+    platform_machine: str
+    libc_name: str
+    libc_version: str
+    qlib_distribution: str
+    qlib_version: str
+    distribution_count: int
+    distribution_set_hash: str
+
+    def __post_init__(self) -> None:
+        if self.policy_id != RUNTIME_ENVIRONMENT_POLICY:
+            raise DevelopmentModelTournamentGovernanceError("noncanonical runtime environment policy")
+        if not isinstance(self.python_implementation, str) or not self.python_implementation:
+            raise ValueError("python_implementation must be non-empty")
+        if self.python_implementation != self.python_implementation.lower():
+            raise ValueError("python_implementation must be lowercase")
+        for name in ("python_version", "libc_version", "qlib_version"):
+            value = getattr(self, name)
+            if not isinstance(value, str) or not _VERSION_RE.fullmatch(value):
+                raise ValueError(f"invalid {name}")
+        for name in ("platform_system", "platform_machine"):
+            value = getattr(self, name)
+            if not isinstance(value, str) or not value:
+                raise ValueError(f"{name} must be non-empty")
+        if not isinstance(self.libc_name, str):
+            raise ValueError("libc_name must be a string")
+        if self.qlib_distribution != "pyqlib":
+            raise DevelopmentModelTournamentGovernanceError("runtime identity requires pyqlib")
+        if (
+            not isinstance(self.distribution_count, int)
+            or isinstance(self.distribution_count, bool)
+            or not 1 <= self.distribution_count <= MAX_DISTRIBUTIONS
+        ):
+            raise ValueError("distribution_count outside D2E bound")
+        _require_hash(self.distribution_set_hash, "distribution_set_hash")
+
+    @property
+    def fingerprint(self) -> str:
+        return _hash(self.to_dict())
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "policy_id": self.policy_id,
+            "python_implementation": self.python_implementation,
+            "python_version": self.python_version,
+            "platform_system": self.platform_system,
+            "platform_machine": self.platform_machine,
+            "libc_name": self.libc_name,
+            "libc_version": self.libc_version,
+            "qlib_distribution": self.qlib_distribution,
+            "qlib_version": self.qlib_version,
+            "distribution_count": self.distribution_count,
+            "distribution_set_hash": self.distribution_set_hash,
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class DevelopmentModelCandidate:
     trial_id: str
     hypothesis_id: str
@@ -170,6 +238,7 @@ class OSS3D2EPlan:
     plan_version: str
     campaign: CampaignSpec
     dataset: DevelopmentDatasetBinding
+    runtime_environment: RuntimeEnvironmentIdentity
     candidates: tuple[DevelopmentModelCandidate, ...]
     trials: tuple[TrialSpec, ...]
     tournament: TournamentSpec
@@ -203,6 +272,8 @@ class OSS3D2EPlan:
             raise DevelopmentModelTournamentIntegrityError("campaign family drifted")
         if self.campaign.purpose != OSS3D2E_PURPOSE:
             raise DevelopmentModelTournamentIntegrityError("campaign purpose drifted")
+        if not isinstance(self.runtime_environment, RuntimeEnvironmentIdentity):
+            raise TypeError("runtime_environment must be RuntimeEnvironmentIdentity")
         candidate_ids = tuple(candidate.trial_id for candidate in self.candidates)
         if not MIN_CANDIDATES <= len(candidate_ids) <= MAX_CANDIDATES:
             raise DevelopmentModelTournamentGovernanceError("candidate family size outside D2E bounds")
@@ -212,6 +283,12 @@ class OSS3D2EPlan:
             raise DevelopmentModelTournamentGovernanceError("duplicate substantive model identity")
         if len({candidate.request_hash for candidate in self.candidates}) != len(self.candidates):
             raise DevelopmentModelTournamentGovernanceError("duplicate inference request identity")
+        if len({candidate.qlib_version for candidate in self.candidates}) != 1:
+            raise DevelopmentModelTournamentCompatibilityError("all candidates must use one Qlib version")
+        if len({candidate.expected_runner_code_hash for candidate in self.candidates}) != 1:
+            raise DevelopmentModelTournamentCompatibilityError("all candidates must use one runner code hash")
+        if {candidate.qlib_version for candidate in self.candidates} != {self.runtime_environment.qlib_version}:
+            raise DevelopmentModelTournamentCompatibilityError("candidate Qlib version differs from runtime identity")
         if self.campaign.expected_trial_ids != candidate_ids:
             raise DevelopmentModelTournamentIntegrityError("campaign universe differs from candidates")
         trial_ids = tuple(trial.trial_id for trial in self.trials)
@@ -247,6 +324,8 @@ class OSS3D2EPlan:
             "plan_version": self.plan_version,
             "campaign_fingerprint": self.campaign.fingerprint,
             "dataset": self.dataset.to_dict(),
+            "runtime_environment": self.runtime_environment.to_dict(),
+            "runtime_environment_hash": self.runtime_environment.fingerprint,
             "candidates": [candidate.to_dict() for candidate in self.candidates],
             "trial_fingerprints": [trial.fingerprint for trial in self.trials],
             "tournament_fingerprint": self.tournament.fingerprint,
@@ -265,6 +344,7 @@ class OSS3D2EPlan:
 class OSS3D2ETournamentEvidence:
     evidence_version: str
     plan_fingerprint: str
+    runtime_environment_hash: str
     tournament: TournamentEvidence
     holm: HolmEvidence
     family_size: int
@@ -285,6 +365,7 @@ class OSS3D2ETournamentEvidence:
         if self.evidence_version != OSS3D2E_EVIDENCE_VERSION:
             raise DevelopmentModelTournamentIntegrityError("noncanonical D2E evidence version")
         _require_hash(self.plan_fingerprint, "plan_fingerprint")
+        _require_hash(self.runtime_environment_hash, "runtime_environment_hash")
         _require_hash(self.common_cross_section_key_hash, "common_cross_section_key_hash")
         if not MIN_CANDIDATES <= self.family_size <= MAX_CANDIDATES:
             raise DevelopmentModelTournamentIntegrityError("invalid evidence family_size")
@@ -329,6 +410,7 @@ class OSS3D2ETournamentEvidence:
         return {
             "evidence_version": self.evidence_version,
             "plan_fingerprint": self.plan_fingerprint,
+            "runtime_environment_hash": self.runtime_environment_hash,
             "tournament": self.tournament.to_payload(),
             "holm": {
                 "campaign_id": self.holm.campaign_id,
@@ -358,6 +440,7 @@ def build_oss3d2e_plan(
     tournament_campaign_id: str,
     tournament_id: str,
     dataset: DevelopmentDatasetBinding,
+    runtime_environment: RuntimeEnvironmentIdentity,
     candidates: Iterable[DevelopmentModelCandidate],
     code_version: str,
 ) -> OSS3D2EPlan:
@@ -368,6 +451,8 @@ def build_oss3d2e_plan(
         raise ValueError("invalid tournament_id")
     if not isinstance(dataset, DevelopmentDatasetBinding):
         raise TypeError("dataset must be DevelopmentDatasetBinding")
+    if not isinstance(runtime_environment, RuntimeEnvironmentIdentity):
+        raise TypeError("runtime_environment must be RuntimeEnvironmentIdentity")
     _require_hash(code_version, "code_version")
     candidate_tuple = tuple(sorted(tuple(candidates), key=lambda item: item.trial_id))
     if not MIN_CANDIDATES <= len(candidate_tuple) <= MAX_CANDIDATES:
@@ -382,8 +467,8 @@ def build_oss3d2e_plan(
         raise DevelopmentModelTournamentCompatibilityError("all candidates must use one Qlib version")
     if len({candidate.expected_runner_code_hash for candidate in candidate_tuple}) != 1:
         raise DevelopmentModelTournamentCompatibilityError("all candidates must use one runner code hash")
-    if len({candidate.environment_attestation_hash for candidate in candidate_tuple}) != 1:
-        raise DevelopmentModelTournamentCompatibilityError("all candidates must use one environment attestation")
+    if {candidate.qlib_version for candidate in candidate_tuple} != {runtime_environment.qlib_version}:
+        raise DevelopmentModelTournamentCompatibilityError("candidate Qlib version differs from runtime identity")
 
     trial_ids = tuple(candidate.trial_id for candidate in candidate_tuple)
     campaign = CampaignSpec(
@@ -418,6 +503,7 @@ def build_oss3d2e_plan(
                 "qlib_version": candidate.qlib_version,
                 "expected_runner_code_hash": candidate.expected_runner_code_hash,
                 "environment_attestation_hash": candidate.environment_attestation_hash,
+                "runtime_environment_hash": runtime_environment.fingerprint,
                 "metric_policy_id": METRIC_POLICY_ID,
                 "primary_metric": PRIMARY_METRIC,
                 "multiple_testing_policy": MULTIPLE_TESTING_POLICY,
@@ -438,6 +524,7 @@ def build_oss3d2e_plan(
         plan_version=OSS3D2E_PLAN_VERSION,
         campaign=campaign,
         dataset=dataset,
+        runtime_environment=runtime_environment,
         candidates=candidate_tuple,
         trials=trials,
         tournament=tournament,
@@ -450,7 +537,6 @@ def preregister_oss3d2e_plan(
     *,
     now: datetime,
 ) -> None:
-    """Durably create the frozen campaign and preregister every candidate."""
     if not isinstance(plan, OSS3D2EPlan):
         raise TypeError("plan must be OSS3D2EPlan")
     ledger.create_campaign(plan.campaign, now=now)
@@ -467,7 +553,6 @@ def record_oss3d2e_evaluation(
     receipt: DevelopmentPredictionReceipt,
     now: datetime,
 ):
-    """Bind one immutable D2D evaluation to its preregistered candidate."""
     candidate = plan.candidate(trial_id)
     frozen_trial = plan.trial(trial_id)
     record = ledger.get_trial(trial_id)
@@ -494,6 +579,7 @@ def record_oss3d2e_evaluation(
         "evaluation_artifact_hash": evaluation.artifact_hash,
         "prediction_receipt_hash": receipt.fingerprint,
         "environment_attestation_hash": evaluation.manifest.environment_attestation_hash,
+        "runtime_environment_hash": plan.runtime_environment.fingerprint,
     }
     return ledger.record_completed(
         trial_id=trial_id,
@@ -511,7 +597,6 @@ def record_oss3d2e_failure(
     failure_code: str,
     now: datetime,
 ):
-    """Record an explicit terminal candidate failure without fabricating metrics."""
     plan.candidate(trial_id)
     frozen_trial = plan.trial(trial_id)
     record = ledger.get_trial(trial_id)
@@ -528,7 +613,6 @@ def evaluate_oss3d2e_tournament(
     ledger: SQLiteTrialLedger,
     plan: OSS3D2EPlan,
 ) -> OSS3D2ETournamentEvidence:
-    """Rank the complete frozen family and attach Holm-adjusted sign evidence."""
     accounting = ledger.require_complete_campaign(plan.campaign.campaign_id)
     if accounting.expected_trial_ids != plan.campaign.expected_trial_ids:
         raise DevelopmentModelTournamentIntegrityError("durable campaign universe drifted")
@@ -539,19 +623,29 @@ def evaluate_oss3d2e_tournament(
 
     support_hashes: set[str] = set()
     support_counts: set[int] = set()
+    runtime_hashes: set[str] = set()
     for record in completed:
         support_hash = record.metrics.get("cross_section_key_hash")
         support_count = record.metrics.get("cross_section_count")
+        runtime_hash = record.metrics.get("runtime_environment_hash")
         if not isinstance(support_hash, str):
             raise DevelopmentModelTournamentIntegrityError("completed candidate lacks support hash")
         _require_hash(support_hash, "cross_section_key_hash")
         if not isinstance(support_count, int) or isinstance(support_count, bool) or support_count < 1:
             raise DevelopmentModelTournamentIntegrityError("completed candidate lacks support count")
+        if not isinstance(runtime_hash, str):
+            raise DevelopmentModelTournamentIntegrityError("completed candidate lacks runtime environment hash")
+        _require_hash(runtime_hash, "runtime_environment_hash")
         support_hashes.add(support_hash)
         support_counts.add(support_count)
+        runtime_hashes.add(runtime_hash)
     if len(support_hashes) != 1 or len(support_counts) != 1:
         raise DevelopmentModelTournamentCompatibilityError(
             "completed candidates do not share exact cross-sectional support"
+        )
+    if runtime_hashes != {plan.runtime_environment.fingerprint}:
+        raise DevelopmentModelTournamentCompatibilityError(
+            "completed candidates do not share the frozen runtime environment"
         )
 
     tournament = evaluate_strategy_tournament(ledger, plan.tournament)
@@ -567,6 +661,7 @@ def evaluate_oss3d2e_tournament(
     return OSS3D2ETournamentEvidence(
         evidence_version=OSS3D2E_EVIDENCE_VERSION,
         plan_fingerprint=plan.fingerprint,
+        runtime_environment_hash=plan.runtime_environment.fingerprint,
         tournament=tournament,
         holm=holm,
         family_size=len(plan.candidates),
@@ -610,6 +705,7 @@ def _verify_trial_matches_candidate(
         "qlib_version": candidate.qlib_version,
         "expected_runner_code_hash": candidate.expected_runner_code_hash,
         "environment_attestation_hash": candidate.environment_attestation_hash,
+        "runtime_environment_hash": plan.runtime_environment.fingerprint,
         "metric_policy_id": METRIC_POLICY_ID,
         "primary_metric": PRIMARY_METRIC,
         "multiple_testing_policy": MULTIPLE_TESTING_POLICY,
@@ -644,7 +740,7 @@ def _verify_evaluation_binding(
         ("model config", candidate.model_config_hash, m.model_config_hash),
         ("Qlib version", candidate.qlib_version, m.qlib_version),
         ("runner code", candidate.expected_runner_code_hash, m.producer_code_hash),
-        ("environment attestation", candidate.environment_attestation_hash, m.environment_attestation_hash),
+        ("candidate D2C attestation", candidate.environment_attestation_hash, m.environment_attestation_hash),
         ("prediction receipt", receipt.fingerprint, m.prediction_receipt_hash),
         ("evaluation prediction artifact", receipt.prediction_artifact_hash, m.prediction_artifact_hash),
         ("evaluation prediction manifest", receipt.prediction_manifest_hash, m.prediction_manifest_hash),
@@ -679,7 +775,6 @@ def _verify_evaluation_binding(
 
 
 def _one_sided_exact_sign_test(values: tuple[float, ...]) -> float:
-    """Return P[X >= observed positives], X~Binomial(n_nonzero, 0.5)."""
     if not values:
         raise DevelopmentModelTournamentGovernanceError("sign test requires cross-sectional evidence")
     positives = 0
