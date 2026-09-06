@@ -28,8 +28,12 @@ FORBIDDEN_TEXT = (
     "promotion_authorized=True",
     'capital_authority="LIMITED"',
     'live_trading="ENABLED"',
+    "candidate_output_bindings: tuple[dict",
 )
 REQUIRED_TEXT = (
+    "class FrozenCandidateOutputBinding:",
+    "candidate_output_bindings: tuple[FrozenCandidateOutputBinding, ...]",
+    "FrozenCandidateOutputBinding.from_output",
     "prepare_family_evaluation_preregistration",
     "preregister_family_evaluation",
     "_require_durable_preregistration",
@@ -69,14 +73,14 @@ def main() -> None:
         raise SystemExit(f"OSS-3D2H boundary FAIL: forbidden imports {forbidden_imports}")
     for marker in FORBIDDEN_TEXT:
         if marker in source:
-            raise SystemExit(f"OSS-3D2H boundary FAIL: forbidden authority marker {marker!r}")
+            raise SystemExit(f"OSS-3D2H boundary FAIL: forbidden authority/mutability marker {marker!r}")
     for marker in REQUIRED_TEXT:
         if marker not in source:
             raise SystemExit(f"OSS-3D2H boundary FAIL: required contract marker missing {marker!r}")
 
     # Preregistration identity checking must precede D2D value evaluation in the
-    # completed batch function. This guards the core scientific sequencing at
-    # source level in addition to behavioral tests.
+    # completed batch function. This guards the scientific sequencing at source
+    # level in addition to behavioral tests.
     evaluate_start = source.index("def evaluate_preregistered_family(")
     evaluate_body = source[evaluate_start:]
     durable_pos = evaluate_body.index("_require_durable_preregistration")
@@ -84,16 +88,17 @@ def main() -> None:
     if durable_pos >= metric_pos:
         raise SystemExit("OSS-3D2H boundary FAIL: DEVELOPMENT evaluation precedes durable preregistration")
 
-    if "row.value" in source[source.index("def _verify_label_identity_without_values("):]:
-        helper = source[source.index("def _verify_label_identity_without_values("):source.index("def _verify_outputs_against_preregistration(")]
-        if "row.value" in helper:
-            raise SystemExit("OSS-3D2H boundary FAIL: label-identity helper reads DEVELOPMENT values")
+    helper_start = source.index("def _verify_label_identity_without_values(")
+    helper_end = source.index("def _verify_outputs_against_preregistration(")
+    helper = source[helper_start:helper_end]
+    if "row.value" in helper or ".value)" in helper:
+        raise SystemExit("OSS-3D2H boundary FAIL: label-identity helper reads DEVELOPMENT values")
 
     print(
         "AUTO-TRADE OSS-3D2H family evaluation batch boundary: PASS "
-        "(frozen six-candidate D2G outputs -> label-value-free D2E plan -> durable preregistration "
-        "-> D2D DEVELOPMENT evaluation -> D2E sign-test/Holm tournament; FINAL_HOLDOUT/promotion/"
-        "broker/OMS/Safety/PAPER/capital/LIVE denied)"
+        "(immutable frozen six-candidate D2G bindings -> label-value-free D2E plan -> durable "
+        "preregistration -> D2D DEVELOPMENT evaluation -> D2E sign-test/Holm tournament; "
+        "FINAL_HOLDOUT/promotion/broker/OMS/Safety/PAPER/capital/LIVE denied)"
     )
 
 
