@@ -90,16 +90,72 @@ def main() -> int:
         line_by_name: dict[str, int] = {}
         for name, lineno in calls:
             line_by_name.setdefault(name, lineno)
-        for required in ("_reject_broker_credentials", "_consume_and_record_start", "_checkout"):
+        for required in (
+            "_reject_broker_credentials",
+            "_verify_exact_final_runtime",
+            "_consume_and_record_start",
+            "_checkout",
+        ):
             if required not in line_by_name:
                 errors.append(f"missing D2K sequencing call: {required}")
-        if all(name in line_by_name for name in ("_reject_broker_credentials", "_consume_and_record_start", "_checkout")):
-            if not (
-                line_by_name["_reject_broker_credentials"]
-                < line_by_name["_consume_and_record_start"]
-                < line_by_name["_checkout"]
+        ordered = (
+            "_reject_broker_credentials",
+            "_verify_exact_final_runtime",
+            "_consume_and_record_start",
+            "_checkout",
+        )
+        if all(name in line_by_name for name in ordered):
+            if tuple(line_by_name[name] for name in ordered) != tuple(
+                sorted(line_by_name[name] for name in ordered)
             ):
-                errors.append("D2K must reject credentials, burn permit, then checkout holdout")
+                errors.append(
+                    "D2K must reject credentials, verify exact runtime, burn permit, then checkout holdout"
+                )
+
+    checkout_node = _method(tree, "ProtectedOSS3FinalHoldout", "_checkout")
+    if checkout_node is None:
+        errors.append("missing ProtectedOSS3FinalHoldout._checkout")
+    else:
+        checkout_source = ast.get_source_segment(source, checkout_node) or ""
+        for marker in (
+            "start_receipt",
+            "registry_path",
+            "_verify_durable_checkout_authorization(",
+            "start_receipt.holdout_authorization_id",
+            "start_receipt.holdout_commitment_fingerprint",
+        ):
+            if marker not in checkout_source:
+                errors.append(f"protected checkout lacks durable proof marker: {marker}")
+
+    runtime_node = _function(tree, "_verify_exact_final_runtime")
+    if runtime_node is None:
+        errors.append("missing _verify_exact_final_runtime")
+    else:
+        runtime_source = ast.get_source_segment(source, runtime_node) or ""
+        for marker in (
+            "collect_candidate_environment_attestation(",
+            "attestation.artifact_hash != winner.environment_attestation_hash",
+            "attestation.runtime_environment.fingerprint != winner.runtime_environment_hash",
+            "attestation.manifest.runner_code_hash != winner.shared_runner_code_hash",
+        ):
+            if marker not in runtime_source:
+                errors.append(f"D2K exact runtime proof missing: {marker}")
+
+    durable_node = _function(tree, "_verify_durable_checkout_authorization")
+    if durable_node is None:
+        errors.append("missing durable checkout authorization verifier")
+    else:
+        durable_source = ast.get_source_segment(source, durable_node) or ""
+        for marker in (
+            "mode=ro",
+            "PRAGMA query_only = ON",
+            "oss3_final_holdout_evaluation_starts",
+            "holdout_permits",
+            "_start_from_row(row)",
+            "_verify_permit_row(permit_row, durable_start)",
+        ):
+            if marker not in durable_source:
+                errors.append(f"durable checkout proof missing: {marker}")
 
     qlib_imports = []
     for node in ast.walk(tree):
@@ -144,6 +200,10 @@ def main() -> int:
         "protocol.policy.min_holdout_cross_sections",
         "D2K may not refit on DEVELOPMENT",
         "D2K must replay exact original TRAIN bundle",
+        "source_environment_attestation_hash",
+        "final_environment_attestation_hash",
+        "source_runtime_environment_hash",
+        "final_runtime_environment_hash",
         '"retuning_allowed": False',
         '"reselection_allowed": False',
         '"fallback_candidate_allowed": False',
@@ -179,6 +239,21 @@ def main() -> int:
     for snippet in forbidden_text:
         if snippet in source:
             errors.append(f"forbidden D2K surface: {snippet}")
+
+    # D2K's protected checkout is intentionally internal.  Prevent accidental
+    # production bypasses from being added elsewhere in the repository. Tests
+    # may call it only to prove that forged permits fail closed.
+    for root in (ROOT / "src", ROOT / "labs"):
+        if not root.is_dir():
+            continue
+        for path in root.rglob("*.py"):
+            if path == TARGET or "tests" in path.parts:
+                continue
+            text = path.read_text(encoding="utf-8")
+            if "ProtectedOSS3FinalHoldout" in text and "._checkout(" in text:
+                errors.append(
+                    f"production D2K protected checkout bypass: {path.relative_to(ROOT)}"
+                )
 
     return _finish(errors)
 
@@ -218,8 +293,8 @@ def _finish(errors: list[str]) -> int:
         return 1
     print(
         "AUTO-TRADE OSS-3D2K FINAL_HOLDOUT evaluator boundary: PASS "
-        "(credential reject -> durable permit burn -> protected checkout; exact original TRAIN replay; "
-        "three preregistered predictive gates; terminal no-retry; no broker/OMS/Safety/PAPER/capital/LIVE)"
+        "(credential reject -> exact D2G environment -> durable permit/start proof -> protected checkout; "
+        "original TRAIN replay; preregistered predictive gates; terminal no-retry; no execution authority)"
     )
     return 0
 
