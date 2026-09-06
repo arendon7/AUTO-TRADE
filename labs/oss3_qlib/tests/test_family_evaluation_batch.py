@@ -2,19 +2,24 @@ from __future__ import annotations
 
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
-import os
 from pathlib import Path
 
 import pytest
 
-from autotrade.research.oss3_concrete_model_family import build_concrete_model_request_set
+from autotrade.research.oss3_concrete_model_family import (
+    CANONICAL_CANDIDATES,
+    MODEL_FAMILY,
+    QLIB_VERSION,
+    build_concrete_model_request_set,
+)
+from autotrade.research.oss3_development_evaluation import DevelopmentEvaluationGovernanceError
 from autotrade.research.oss3_factor_matrix_artifact import (
     FactorDefinition,
     FactorMatrixArtifact,
     FactorMatrixPartition,
     FactorMatrixRow,
 )
-from autotrade.research.oss3_qlib_artifact import QlibPredictionArtifact
+from autotrade.research.oss3_qlib_artifact import QlibPredictionArtifact, QlibPredictionRow
 from autotrade.research.oss3_supervised_label_artifact import (
     LabelDefinition,
     LabelPartition,
@@ -22,7 +27,8 @@ from autotrade.research.oss3_supervised_label_artifact import (
     SupervisedLabelRow,
 )
 from autotrade.research.oss3_training_bundle import TrainingBundleArtifact
-from autotrade.research.trials import SQLiteTrialLedger
+from autotrade.research.trials import SQLiteTrialLedger, TrialStatus
+from labs.oss3_qlib.environment_attestation import InstalledDistribution
 from labs.oss3_qlib.family_environment_attestation import CandidateEnvironmentAttestation
 from labs.oss3_qlib.family_evaluation_batch import (
     OSS3D2H_BATCH_EVIDENCE_VERSION,
@@ -36,59 +42,72 @@ from labs.oss3_qlib.family_evaluation_batch import (
     preregister_family_evaluation,
 )
 from labs.oss3_qlib.family_model_contract import family_runner_code_hash
-from labs.oss3_qlib.family_runner import run_isolated_qlib_family_candidate
+from labs.oss3_qlib.family_runner import (
+    OSS3D2G_RUN_EVIDENCE_VERSION,
+    FamilyCandidateRunEvidence,
+)
 
 
 UTC = timezone.utc
 BASE = datetime(2026, 3, 1, tzinfo=UTC)
-TRAIN_END = BASE + timedelta(days=10)
+TRAIN_END = BASE + timedelta(days=7)
 DEV_START = TRAIN_END
-DEV_END = DEV_START + timedelta(days=5)
-CAMPAIGN = "oss3d2h-campaign-001"
+DEV_END = DEV_START + timedelta(days=4)
+CAMPAIGN = "oss3d2h-source-campaign-001"
+TOURNAMENT_CAMPAIGN = "oss3d2h-tournament-campaign-001"
+TOURNAMENT_ID = "oss3d2h-tournament-001"
 SPLIT = "1" * 64
 UNIVERSE = "2" * 64
 FEATURE_CODE = "3" * 64
 LABEL_CODE = "4" * 64
-SYMBOLS = ("ADAUSDT", "BTCUSDT", "ETHUSDT", "SOLUSDT")
-LABEL_DEF = LabelDefinition(
-    name="forward_return",
-    dtype="float64",
-    role="LABEL",
-    formula_hash="b" * 64,
-    source_id="synthetic-bars-v1",
-    source_hash="c" * 64,
-)
+SYMBOLS = ("BTCUSDT", "ETHUSDT", "SOLUSDT")
 
 
-def _defs():
+def _factor_definitions():
     return (
         FactorDefinition(
-            name="momentum_20", dtype="float64", role="FEATURE",
-            formula_hash="5" * 64, source_id="synthetic-bars-v1",
-            source_hash="6" * 64, lookback_bars=20,
+            name="momentum_20",
+            dtype="float64",
+            role="FEATURE",
+            formula_hash="5" * 64,
+            source_id="synthetic-bars-v1",
+            source_hash="6" * 64,
+            lookback_bars=20,
         ),
         FactorDefinition(
-            name="volatility_20", dtype="float64", role="FEATURE",
-            formula_hash="7" * 64, source_id="synthetic-bars-v1",
-            source_hash="8" * 64, lookback_bars=20,
+            name="volatility_20",
+            dtype="float64",
+            role="FEATURE",
+            formula_hash="7" * 64,
+            source_id="synthetic-bars-v1",
+            source_hash="8" * 64,
+            lookback_bars=20,
         ),
+    )
+
+
+def _label_definition():
+    return LabelDefinition(
+        name="forward_return",
+        dtype="float64",
+        role="LABEL",
+        formula_hash="9" * 64,
+        source_id="synthetic-bars-v1",
+        source_hash="a" * 64,
     )
 
 
 def _train_features():
     rows = []
-    for day in range(8):
-        timestamp = BASE + timedelta(days=day, hours=1)
-        for idx, symbol in enumerate(SYMBOLS, start=1):
+    for day in range(5):
+        timestamp = BASE + timedelta(days=day + 1)
+        for index, symbol in enumerate(SYMBOLS, start=1):
             rows.append(
                 FactorMatrixRow(
                     as_of=timestamp.isoformat(),
                     available_at=(timestamp - timedelta(minutes=1)).isoformat(),
                     symbol=symbol,
-                    values=(
-                        0.8 + day * 0.55 + idx * 0.19,
-                        1.3 - day * 0.07 + idx * 0.04 + ((day + idx) % 3) * 0.03,
-                    ),
+                    values=(1.0 + day * 0.5 + index * 0.2, 0.9 - day * 0.04 + index * 0.03),
                 )
             )
     return FactorMatrixArtifact.build(
@@ -98,23 +117,23 @@ def _train_features():
         partition_start=BASE,
         partition_end=TRAIN_END,
         producer_code_hash=FEATURE_CODE,
-        source_dataset_hash="9" * 64,
+        source_dataset_hash="b" * 64,
         source_universe_hash=UNIVERSE,
-        features=_defs(),
+        features=_factor_definitions(),
         rows=tuple(rows),
     )
 
 
-def _train_labels(features):
+def _train_labels(train_features: FactorMatrixArtifact):
     rows = tuple(
         SupervisedLabelRow(
             label_as_of=row.as_of,
             horizon_end=(datetime.fromisoformat(row.as_of) + timedelta(hours=1)).isoformat(),
             available_at=(datetime.fromisoformat(row.as_of) + timedelta(hours=1, minutes=1)).isoformat(),
             symbol=row.symbol,
-            value=0.031 * float(row.values[0]) - 0.017 * float(row.values[1]) + 0.004,
+            value=0.03 * float(row.values[0]) - 0.01 * float(row.values[1]) + 0.002,
         )
-        for row in features.rows
+        for row in train_features.rows
     )
     return SupervisedLabelArtifact.build(
         campaign_id=CAMPAIGN,
@@ -123,24 +142,24 @@ def _train_labels(features):
         partition_start=BASE,
         partition_end=TRAIN_END,
         producer_code_hash=LABEL_CODE,
-        source_dataset_hash="a" * 64,
+        source_dataset_hash="c" * 64,
         source_universe_hash=UNIVERSE,
-        label=LABEL_DEF,
+        label=_label_definition(),
         rows=rows,
     )
 
 
 def _development_features():
     rows = []
-    for day in range(4):
-        timestamp = DEV_START + timedelta(days=day)
-        for idx, symbol in enumerate(SYMBOLS, start=1):
+    for day in range(3):
+        timestamp = DEV_START + timedelta(days=day, hours=2)
+        for index, symbol in enumerate(SYMBOLS, start=1):
             rows.append(
                 FactorMatrixRow(
                     as_of=timestamp.isoformat(),
                     available_at=(timestamp - timedelta(minutes=1)).isoformat(),
                     symbol=symbol,
-                    values=(5.0 + day * 0.37 + idx * 0.23, 0.42 + day * 0.06 + idx * 0.025),
+                    values=(5.0 + day * 0.3 + index * 0.2, 0.5 + day * 0.05 + index * 0.01),
                 )
             )
     return FactorMatrixArtifact.build(
@@ -152,21 +171,22 @@ def _development_features():
         producer_code_hash=FEATURE_CODE,
         source_dataset_hash="d" * 64,
         source_universe_hash=UNIVERSE,
-        features=_defs(),
+        features=_factor_definitions(),
         rows=tuple(rows),
     )
 
 
-def _development_labels(features, *, value_shift=0.0):
+def _development_labels(dev_features: FactorMatrixArtifact, *, value_shift: float = 0.0):
+    target_by_symbol = {"BTCUSDT": 0.01, "ETHUSDT": 0.02, "SOLUSDT": 0.03}
     rows = tuple(
         SupervisedLabelRow(
             label_as_of=row.as_of,
-            horizon_end=(datetime.fromisoformat(row.as_of) + timedelta(hours=2)).isoformat(),
-            available_at=(datetime.fromisoformat(row.as_of) + timedelta(hours=2, minutes=1)).isoformat(),
+            horizon_end=(datetime.fromisoformat(row.as_of) + timedelta(hours=1)).isoformat(),
+            available_at=(datetime.fromisoformat(row.as_of) + timedelta(hours=1, minutes=1)).isoformat(),
             symbol=row.symbol,
-            value=0.028 * float(row.values[0]) - 0.021 * float(row.values[1]) + 0.003 + value_shift,
+            value=target_by_symbol[row.symbol] + value_shift,
         )
-        for row in features.rows
+        for row in dev_features.rows
     )
     return SupervisedLabelArtifact.build(
         campaign_id=CAMPAIGN,
@@ -177,113 +197,271 @@ def _development_labels(features, *, value_shift=0.0):
         producer_code_hash=LABEL_CODE,
         source_dataset_hash="e" * 64,
         source_universe_hash=UNIVERSE,
-        label=LABEL_DEF,
+        label=_label_definition(),
         rows=rows,
     )
 
 
-def _preregistration(plan, request_set, outputs, labels):
-    return prepare_family_evaluation_preregistration(
+def _train_partition_labels(dev_features: FactorMatrixArtifact):
+    rows = tuple(
+        SupervisedLabelRow(
+            label_as_of=(BASE + timedelta(days=1, minutes=index)).isoformat(),
+            horizon_end=(BASE + timedelta(days=1, hours=1, minutes=index)).isoformat(),
+            available_at=(BASE + timedelta(days=1, hours=1, minutes=index + 1)).isoformat(),
+            symbol=row.symbol,
+            value=0.01 + index * 0.001,
+        )
+        for index, row in enumerate(dev_features.rows)
+    )
+    return SupervisedLabelArtifact.build(
+        campaign_id=CAMPAIGN,
+        research_split_hash=SPLIT,
+        partition=LabelPartition.TRAIN,
+        partition_start=BASE,
+        partition_end=TRAIN_END,
+        producer_code_hash=LABEL_CODE,
+        source_dataset_hash="f" * 64,
+        source_universe_hash=UNIVERSE,
+        label=_label_definition(),
+        rows=rows,
+    )
+
+
+def _base_contract():
+    train_features = _train_features()
+    train_labels = _train_labels(train_features)
+    bundle = TrainingBundleArtifact.build(features=train_features, labels=train_labels)
+    dev_features = _development_features()
+    plan, request_set = build_concrete_model_request_set(
+        training_bundle=bundle,
+        development_features=dev_features,
+        shared_runner_code_hash=family_runner_code_hash(),
+    )
+    return plan, request_set, bundle, dev_features
+
+
+def _prediction_scores(candidate_index: int, *, constant: bool = False):
+    if constant:
+        return {symbol: 1.0 for symbol in SYMBOLS}
+    permutations = (
+        (1.0, 2.0, 3.0),
+        (1.0, 3.0, 2.0),
+        (2.0, 1.0, 3.0),
+        (3.0, 2.0, 1.0),
+        (2.0, 3.0, 1.0),
+        (3.0, 1.0, 2.0),
+    )
+    return dict(zip(SYMBOLS, permutations[candidate_index], strict=True))
+
+
+def _candidate_output(
+    *,
+    candidate_index: int,
+    binding,
+    bundle: TrainingBundleArtifact,
+    dev_features: FactorMatrixArtifact,
+    constant: bool = False,
+):
+    scores = _prediction_scores(candidate_index, constant=constant)
+    rows = tuple(
+        QlibPredictionRow(
+            timestamp=row.as_of,
+            symbol=row.symbol,
+            score=scores[row.symbol]
+            if constant
+            else scores[row.symbol] + (datetime.fromisoformat(row.as_of) - DEV_START).days * 0.01,
+        )
+        for row in dev_features.rows
+    )
+    manifest = binding.request.manifest
+    prediction = QlibPredictionArtifact.build(
+        qlib_version=QLIB_VERSION,
+        model_family=MODEL_FAMILY,
+        model_config_hash=binding.model_config_hash,
+        training_dataset_hash=bundle.artifact_hash,
+        feature_schema_hash=manifest.feature_schema_hash,
+        producer_code_hash=family_runner_code_hash(),
+        train_start=datetime.fromisoformat(manifest.train_start),
+        train_end=datetime.fromisoformat(manifest.train_end),
+        inference_start=datetime.fromisoformat(manifest.inference_start),
+        inference_end=datetime.fromisoformat(manifest.inference_end),
+        rows=rows,
+    )
+    receipt = binding.request.bind_prediction(
+        prediction=prediction,
+        training_bundle=bundle,
+        development_features=dev_features,
+    )
+    attestation = CandidateEnvironmentAttestation.build(
+        model_config_hash=binding.model_config_hash,
+        distributions=(
+            InstalledDistribution(name="numpy", version="2.0.0"),
+            InstalledDistribution(name="pyqlib", version=QLIB_VERSION),
+        ),
+        python_implementation="cpython",
+        python_version="3.12.10",
+        platform_system="linux",
+        platform_machine="x86_64",
+        libc_name="glibc",
+        libc_version="2.39",
+    )
+    run_evidence = FamilyCandidateRunEvidence(
+        evidence_version=OSS3D2G_RUN_EVIDENCE_VERSION,
+        candidate_id=binding.candidate_id,
+        model_config_hash=binding.model_config_hash,
+        shared_runner_code_hash=family_runner_code_hash(),
+        request_hash=binding.request.request_hash,
+        prediction_artifact_hash=prediction.artifact_hash,
+        prediction_receipt_hash=receipt.fingerprint,
+        environment_attestation_hash=attestation.artifact_hash,
+        runtime_environment_hash=attestation.runtime_environment.fingerprint,
+    )
+    return FrozenCandidateOutput(
+        candidate_id=binding.candidate_id,
+        request=binding.request,
+        prediction=prediction,
+        receipt=receipt,
+        attestation=attestation,
+        run_evidence=run_evidence,
+    )
+
+
+def _family_outputs(*, constant_candidate: int | None = None):
+    plan, request_set, bundle, dev_features = _base_contract()
+    outputs = tuple(
+        _candidate_output(
+            candidate_index=index,
+            binding=binding,
+            bundle=bundle,
+            dev_features=dev_features,
+            constant=index == constant_candidate,
+        )
+        for index, binding in enumerate(request_set.bindings)
+    )
+    return plan, request_set, bundle, dev_features, outputs
+
+
+def _preregistration(*, outputs=None, labels=None):
+    plan, request_set, _, dev_features, generated_outputs = _family_outputs()
+    actual_outputs = generated_outputs if outputs is None else outputs
+    actual_labels = _development_labels(dev_features) if labels is None else labels
+    preregistration = prepare_family_evaluation_preregistration(
+        d2f_plan=plan,
+        d2f_request_set=request_set,
+        outputs=actual_outputs,
+        development_labels=actual_labels,
+        tournament_campaign_id=TOURNAMENT_CAMPAIGN,
+        tournament_id=TOURNAMENT_ID,
+    )
+    return plan, request_set, dev_features, actual_outputs, actual_labels, preregistration
+
+
+def test_prepare_preregistration_freezes_exact_six_candidate_universe_before_metrics():
+    _, _, _, outputs, labels, preregistration = _preregistration()
+    assert preregistration.preregistration_version == OSS3D2H_PREREGISTRATION_VERSION
+    assert preregistration.label_values_used is False
+    assert preregistration.development_metrics_computed is False
+    assert preregistration.final_holdout_observed is False
+    assert preregistration.execution_authorized is False
+    assert preregistration.paper_execution_authorized is False
+    assert preregistration.capital_authority == "NONE"
+    assert preregistration.live_trading == "BLOCKED"
+    assert preregistration.development_label_artifact_hash == labels.artifact_hash
+    assert tuple(candidate.trial_id for candidate in preregistration.d2e_plan.candidates) == tuple(
+        candidate.candidate_id for candidate in CANONICAL_CANDIDATES
+    )
+    assert len(outputs) == len(preregistration.d2e_plan.candidates) == 6
+    assert {candidate.expected_runner_code_hash for candidate in preregistration.d2e_plan.candidates} == {
+        family_runner_code_hash()
+    }
+    assert preregistration.d2e_plan.final_holdout_observable is False
+
+
+def test_prepare_is_deterministic_for_same_frozen_inputs():
+    plan, request_set, _, dev_features, outputs = _family_outputs()
+    labels = _development_labels(dev_features)
+    first = prepare_family_evaluation_preregistration(
+        d2f_plan=plan,
+        d2f_request_set=request_set,
+        outputs=reversed(outputs),
+        development_labels=labels,
+        tournament_campaign_id=TOURNAMENT_CAMPAIGN,
+        tournament_id=TOURNAMENT_ID,
+    )
+    second = prepare_family_evaluation_preregistration(
         d2f_plan=plan,
         d2f_request_set=request_set,
         outputs=outputs,
         development_labels=labels,
-        tournament_campaign_id="oss3d2h-tournament-campaign-001",
-        tournament_id="oss3d2h-tournament-001",
+        tournament_campaign_id=TOURNAMENT_CAMPAIGN,
+        tournament_id=TOURNAMENT_ID,
     )
+    assert first.fingerprint == second.fingerprint
+    assert first.d2e_plan.fingerprint == second.d2e_plan.fingerprint
 
 
-@pytest.fixture(scope="module")
-def real_family(tmp_path_factory):
-    tmp_path = tmp_path_factory.mktemp("oss3d2h-real-family")
-    broker_prefixes = (
-        "APCA_", "ALPACA_", "IBKR_", "BINANCE_", "COINBASE_", "KRAKEN_",
-        "BYBIT_", "OKX_", "BITGET_", "KUCOIN_", "BROKER_",
-    )
-    removed = {key: value for key, value in os.environ.items() if any(key.startswith(p) for p in broker_prefixes)}
-    for key in removed:
-        os.environ.pop(key, None)
-    try:
-        train_features = _train_features()
-        train_labels = _train_labels(train_features)
-        bundle = TrainingBundleArtifact.build(features=train_features, labels=train_labels)
-        dev_features = _development_features()
-        dev_labels = _development_labels(dev_features)
-        plan, request_set = build_concrete_model_request_set(
-            training_bundle=bundle,
-            development_features=dev_features,
-            shared_runner_code_hash=family_runner_code_hash(),
+def test_prepare_rejects_incomplete_family():
+    plan, request_set, _, dev_features, outputs = _family_outputs()
+    with pytest.raises(FamilyEvaluationBatchGovernanceError, match="exact complete"):
+        prepare_family_evaluation_preregistration(
+            d2f_plan=plan,
+            d2f_request_set=request_set,
+            outputs=outputs[:-1],
+            development_labels=_development_labels(dev_features),
+            tournament_campaign_id=TOURNAMENT_CAMPAIGN,
+            tournament_id=TOURNAMENT_ID,
         )
-        common = {
-            "bundle": tmp_path / "bundle.json",
-            "train_features": tmp_path / "train-features.json",
-            "train_labels": tmp_path / "train-labels.json",
-            "dev_features": tmp_path / "dev-features.json",
-        }
-        bundle.write(common["bundle"])
-        train_features.write(common["train_features"])
-        train_labels.write(common["train_labels"])
-        dev_features.write(common["dev_features"])
-
-        outputs = []
-        for binding in request_set.bindings:
-            root = tmp_path / binding.candidate_id
-            root.mkdir()
-            request_path = root / "request.json"
-            prediction_path = root / "prediction.json"
-            attestation_path = root / "attestation.json"
-            binding.request.write(request_path)
-            run_evidence = run_isolated_qlib_family_candidate(
-                request_path=request_path,
-                training_bundle_path=common["bundle"],
-                train_features_path=common["train_features"],
-                train_labels_path=common["train_labels"],
-                development_features_path=common["dev_features"],
-                prediction_output_path=prediction_path,
-                receipt_output_path=root / "receipt.json",
-                environment_attestation_output_path=attestation_path,
-                runtime_identity_output_path=root / "runtime.json",
-                run_evidence_output_path=root / "evidence.json",
-            )
-            prediction = QlibPredictionArtifact.read(prediction_path)
-            attestation = CandidateEnvironmentAttestation.read(attestation_path)
-            receipt = binding.request.bind_prediction(
-                prediction=prediction,
-                training_bundle=bundle,
-                development_features=dev_features,
-            )
-            outputs.append(
-                FrozenCandidateOutput(
-                    candidate_id=binding.candidate_id,
-                    request=binding.request,
-                    prediction=prediction,
-                    receipt=receipt,
-                    attestation=attestation,
-                    run_evidence=run_evidence,
-                )
-            )
-        yield plan, request_set, tuple(outputs), dev_features, dev_labels
-    finally:
-        os.environ.update(removed)
 
 
-def test_end_to_end_six_real_models_preregister_then_evaluate_and_tournament(real_family, tmp_path):
-    plan, request_set, outputs, _, labels = real_family
-    prereg = _preregistration(plan, request_set, outputs, labels)
-    assert prereg.preregistration_version == OSS3D2H_PREREGISTRATION_VERSION
-    assert prereg.label_values_used is False
-    assert prereg.development_metrics_computed is False
-    assert prereg.final_holdout_observed is False
-    assert len(prereg.candidate_output_bindings) == 6
-    assert prereg.d2h_code_version == family_evaluation_code_hash()
+def test_prepare_rejects_non_development_labels():
+    plan, request_set, _, dev_features, outputs = _family_outputs()
+    with pytest.raises(FamilyEvaluationBatchGovernanceError, match="DEVELOPMENT labels only"):
+        prepare_family_evaluation_preregistration(
+            d2f_plan=plan,
+            d2f_request_set=request_set,
+            outputs=outputs,
+            development_labels=_train_partition_labels(dev_features),
+            tournament_campaign_id=TOURNAMENT_CAMPAIGN,
+            tournament_id=TOURNAMENT_ID,
+        )
 
-    ledger = SQLiteTrialLedger(tmp_path / "trials.sqlite")
-    now = datetime(2026, 3, 20, tzinfo=UTC)
-    preregister_family_evaluation(ledger, prereg, now=now)
+
+def test_evaluation_requires_durable_preregistration(tmp_path):
+    _, _, _, outputs, labels, preregistration = _preregistration()
+    ledger = SQLiteTrialLedger(tmp_path / "d2h.sqlite3")
+    with pytest.raises(FamilyEvaluationBatchGovernanceError, match="durable D2E preregistration"):
+        evaluate_preregistered_family(
+            ledger,
+            preregistration,
+            outputs=outputs,
+            development_labels=labels,
+            now=datetime(2026, 4, 1, tzinfo=UTC),
+        )
+
+
+def test_full_six_candidate_batch_evaluates_after_preregistration(tmp_path):
+    _, _, _, outputs, labels, preregistration = _preregistration()
+    ledger = SQLiteTrialLedger(tmp_path / "d2h.sqlite3")
+    now = datetime(2026, 4, 1, tzinfo=UTC)
+    preregister_family_evaluation(ledger, preregistration, now=now)
+
+    before = ledger.campaign_accounting(preregistration.d2e_plan.campaign.campaign_id)
+    assert before.completed_trial_ids == ()
+    assert before.failed_trial_ids == ()
+    assert before.unterminated_trial_ids == before.expected_trial_ids
+
     evidence = evaluate_preregistered_family(
-        ledger, prereg, outputs=outputs, development_labels=labels, now=now + timedelta(seconds=1)
+        ledger,
+        preregistration,
+        outputs=outputs,
+        development_labels=labels,
+        now=now + timedelta(minutes=1),
     )
     assert evidence.evidence_version == OSS3D2H_BATCH_EVIDENCE_VERSION
+    assert evidence.preregistration_fingerprint == preregistration.fingerprint
+    assert evidence.d2e_plan_fingerprint == preregistration.d2e_plan.fingerprint
+    assert evidence.development_label_artifact_hash == labels.artifact_hash
+    assert evidence.shared_runner_code_hash == family_runner_code_hash()
     assert len(evidence.evaluations) == 6
     assert evidence.label_values_used_after_preregistration is True
     assert evidence.development_metrics_computed is True
@@ -293,104 +471,131 @@ def test_end_to_end_six_real_models_preregister_then_evaluate_and_tournament(rea
     assert evidence.paper_execution_authorized is False
     assert evidence.capital_authority == "NONE"
     assert evidence.live_trading == "BLOCKED"
-    assert evidence.tournament_evidence.plan_fingerprint == prereg.d2e_plan.fingerprint
-    assert evidence.tournament_evidence.winner_trial_id in {output.candidate_id for output in outputs}
-    assert evidence.tournament_evidence.holm_evidence.family_size == 6
-    assert len({item.d2d_evaluation_artifact_hash for item in evidence.evaluations}) == 6
+    assert evidence.tournament_evidence.winner_trial_id == CANONICAL_CANDIDATES[0].candidate_id
+    assert evidence.tournament_evidence.final_holdout_observed is False
+    assert evidence.tournament_evidence.promotion_authorized is False
+
+    after = ledger.require_complete_campaign(preregistration.d2e_plan.campaign.campaign_id)
+    assert after.completed_trial_ids == after.expected_trial_ids
+    assert after.failed_trial_ids == ()
 
 
-def test_prepare_is_deterministic_and_canonicalizes_output_order(real_family):
-    plan, request_set, outputs, _, labels = real_family
-    left = _preregistration(plan, request_set, outputs, labels)
-    right = _preregistration(plan, request_set, tuple(reversed(outputs)), labels)
-    assert left.fingerprint == right.fingerprint
-    assert left.development_label_artifact_hash == labels.artifact_hash
-    assert left.label_values_used is False
-    assert left.development_metrics_computed is False
-
-
-def test_evaluation_requires_durable_preregistration(real_family, tmp_path):
-    plan, request_set, outputs, _, labels = real_family
-    prereg = _preregistration(plan, request_set, outputs, labels)
-    with pytest.raises(FamilyEvaluationBatchGovernanceError, match="durable"):
-        evaluate_preregistered_family(
-            SQLiteTrialLedger(tmp_path / "missing.sqlite"), prereg,
-            outputs=outputs, development_labels=labels,
-            now=datetime(2026, 3, 20, tzinfo=UTC),
-        )
-
-
-def test_missing_candidate_fails_before_preregistration(real_family):
-    plan, request_set, outputs, _, labels = real_family
-    with pytest.raises(FamilyEvaluationBatchGovernanceError, match="exact complete"):
-        _preregistration(plan, request_set, outputs[:-1], labels)
-
-
-def test_candidate_identity_mutation_fails_at_construction(real_family):
-    _, _, outputs, _, _ = real_family
-    with pytest.raises(FamilyEvaluationBatchIntegrityError, match="candidate id"):
-        replace(outputs[0], candidate_id=outputs[1].candidate_id)
-
-
-def test_different_label_artifact_after_preregistration_fails(real_family, tmp_path):
-    plan, request_set, outputs, dev_features, labels = real_family
-    prereg = _preregistration(plan, request_set, outputs, labels)
-    ledger = SQLiteTrialLedger(tmp_path / "trials.sqlite")
-    preregister_family_evaluation(ledger, prereg, now=datetime(2026, 3, 20, tzinfo=UTC))
+def test_label_artifact_is_immutable_after_preregistration(tmp_path):
+    _, _, dev_features, outputs, labels, preregistration = _preregistration()
+    ledger = SQLiteTrialLedger(tmp_path / "d2h.sqlite3")
+    preregister_family_evaluation(
+        ledger,
+        preregistration,
+        now=datetime(2026, 4, 1, tzinfo=UTC),
+    )
     altered = _development_labels(dev_features, value_shift=0.001)
-    with pytest.raises(FamilyEvaluationBatchIntegrityError, match="label artifact"):
+    assert altered.artifact_hash != labels.artifact_hash
+    with pytest.raises(FamilyEvaluationBatchIntegrityError, match="label artifact differs"):
         evaluate_preregistered_family(
-            ledger, prereg, outputs=outputs, development_labels=altered,
-            now=datetime(2026, 3, 20, 0, 0, 1, tzinfo=UTC),
+            ledger,
+            preregistration,
+            outputs=outputs,
+            development_labels=altered,
+            now=datetime(2026, 4, 1, 0, 1, tzinfo=UTC),
         )
 
 
-def test_train_labels_are_rejected_before_preregistration(real_family):
-    plan, request_set, outputs, _, _ = real_family
-    train_features = _train_features()
-    train_labels = _train_labels(train_features)
-    with pytest.raises(FamilyEvaluationBatchGovernanceError, match="DEVELOPMENT"):
-        _preregistration(plan, request_set, outputs, train_labels)
-
-
-def test_evaluating_twice_is_rejected_by_untouched_ledger_rule(real_family, tmp_path):
-    plan, request_set, outputs, _, labels = real_family
-    prereg = _preregistration(plan, request_set, outputs, labels)
-    ledger = SQLiteTrialLedger(tmp_path / "trials.sqlite")
-    now = datetime(2026, 3, 20, tzinfo=UTC)
-    preregister_family_evaluation(ledger, prereg, now=now)
-    evaluate_preregistered_family(
-        ledger, prereg, outputs=outputs, development_labels=labels, now=now + timedelta(seconds=1)
+def test_output_universe_cannot_change_after_preregistration(tmp_path):
+    _, _, _, outputs, labels, preregistration = _preregistration()
+    ledger = SQLiteTrialLedger(tmp_path / "d2h.sqlite3")
+    preregister_family_evaluation(
+        ledger,
+        preregistration,
+        now=datetime(2026, 4, 1, tzinfo=UTC),
     )
-    with pytest.raises(FamilyEvaluationBatchGovernanceError, match="untouched"):
+    with pytest.raises(FamilyEvaluationBatchIntegrityError, match="output universe"):
         evaluate_preregistered_family(
-            ledger, prereg, outputs=outputs, development_labels=labels,
-            now=now + timedelta(seconds=2),
+            ledger,
+            preregistration,
+            outputs=outputs[:-1],
+            development_labels=labels,
+            now=datetime(2026, 4, 1, 0, 1, tzinfo=UTC),
         )
 
 
-def test_authority_mutations_are_denied(real_family, tmp_path):
-    plan, request_set, outputs, _, labels = real_family
-    prereg = _preregistration(plan, request_set, outputs, labels)
-    with pytest.raises(FamilyEvaluationBatchGovernanceError):
-        replace(prereg, final_holdout_observed=True)
-    with pytest.raises(FamilyEvaluationBatchGovernanceError):
-        replace(prereg, execution_authorized=True)
-
-    ledger = SQLiteTrialLedger(tmp_path / "trials.sqlite")
-    now = datetime(2026, 3, 20, tzinfo=UTC)
-    preregister_family_evaluation(ledger, prereg, now=now)
-    evidence = evaluate_preregistered_family(
-        ledger, prereg, outputs=outputs, development_labels=labels, now=now + timedelta(seconds=1)
+def test_all_d2d_artifacts_are_prevalidated_before_any_terminal_write(tmp_path):
+    plan, request_set, bundle, dev_features = _base_contract()
+    outputs = tuple(
+        _candidate_output(
+            candidate_index=index,
+            binding=binding,
+            bundle=bundle,
+            dev_features=dev_features,
+            constant=index == 5,
+        )
+        for index, binding in enumerate(request_set.bindings)
     )
-    with pytest.raises(FamilyEvaluationBatchGovernanceError):
-        replace(evidence, promotion_authorized=True)
-    with pytest.raises(FamilyEvaluationBatchGovernanceError):
-        replace(evidence, paper_execution_authorized=True)
-    with pytest.raises(FamilyEvaluationBatchGovernanceError):
-        replace(evidence, capital_authority="LIMITED")
+    labels = _development_labels(dev_features)
+    preregistration = prepare_family_evaluation_preregistration(
+        d2f_plan=plan,
+        d2f_request_set=request_set,
+        outputs=outputs,
+        development_labels=labels,
+        tournament_campaign_id=TOURNAMENT_CAMPAIGN,
+        tournament_id=TOURNAMENT_ID,
+    )
+    ledger = SQLiteTrialLedger(tmp_path / "d2h.sqlite3")
+    preregister_family_evaluation(
+        ledger,
+        preregistration,
+        now=datetime(2026, 4, 1, tzinfo=UTC),
+    )
+    with pytest.raises(DevelopmentEvaluationGovernanceError, match="constant"):
+        evaluate_preregistered_family(
+            ledger,
+            preregistration,
+            outputs=outputs,
+            development_labels=labels,
+            now=datetime(2026, 4, 1, 0, 1, tzinfo=UTC),
+        )
+    records = ledger.list_trials(preregistration.d2e_plan.campaign.campaign_id)
+    assert len(records) == 6
+    assert all(record.status is TrialStatus.PREREGISTERED for record in records)
 
 
-def test_family_evaluation_code_hash_fails_if_semantic_file_missing(tmp_path):
+def test_preregistration_authority_flags_fail_closed():
+    _, _, _, _, _, preregistration = _preregistration()
+    with pytest.raises(FamilyEvaluationBatchGovernanceError, match="HOLDOUT"):
+        replace(preregistration, final_holdout_observed=True)
+    with pytest.raises(FamilyEvaluationBatchGovernanceError, match="execution"):
+        replace(preregistration, paper_execution_authorized=True)
+    with pytest.raises(FamilyEvaluationBatchGovernanceError, match="capital"):
+        replace(preregistration, capital_authority="PAPER")
+    with pytest.raises(FamilyEvaluationBatchGovernanceError, match="capital"):
+        replace(preregistration, live_trading="ENABLED")
+
+
+def test_preregistration_cannot_claim_label_values_or_metrics_already_used():
+    _, _, _, _, _, preregistration = _preregistration()
+    with pytest.raises(FamilyEvaluationBatchGovernanceError, match="before label-value"):
+        replace(preregistration, label_values_used=True)
+    with pytest.raises(FamilyEvaluationBatchGovernanceError, match="before label-value"):
+        replace(preregistration, development_metrics_computed=True)
+
+
+def test_d2h_code_hash_is_deterministic_and_bound_to_semantic_files(tmp_path):
+    first = family_evaluation_code_hash()
+    second = family_evaluation_code_hash()
+    assert first == second
+    assert len(first) == 64
     with pytest.raises(FamilyEvaluationBatchIntegrityError, match="semantic file missing"):
         family_evaluation_code_hash(repo_root=tmp_path)
+
+
+def test_d2h_module_has_no_qlib_execution_or_final_holdout_surface():
+    source = (Path(__file__).resolve().parents[1] / "family_evaluation_batch.py").read_text(
+        encoding="utf-8"
+    )
+    assert "import qlib" not in source
+    assert "from qlib" not in source
+    assert "LinearModel" not in source
+    assert "qlib.init(" not in source
+    assert "--final-holdout" not in source
+    assert "final_holdout_path" not in source
+    assert "submit_order" not in source
+    assert "place_order" not in source
