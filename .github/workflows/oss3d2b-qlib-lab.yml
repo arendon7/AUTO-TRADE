@@ -26,6 +26,8 @@ jobs:
   oss3d2b:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    env:
+      PYTHONPATH: ${{ github.workspace }}
     steps:
       - name: Checkout
         uses: actions/checkout@v5
