@@ -24,7 +24,7 @@ import json
 from math import isfinite, sqrt
 import re
 from statistics import median
-from typing import Iterable, Mapping, Sequence
+from typing import Sequence
 
 from .oss3_development_inference import DevelopmentPredictionReceipt
 from .oss3_qlib_artifact import QlibPredictionArtifact
@@ -367,7 +367,7 @@ def evaluate_development_predictions(
         raise DevelopmentEvaluationIntegrityError("evaluation row count mismatch")
     if len(prediction_keys) < MIN_OBSERVATIONS:
         raise DevelopmentEvaluationGovernanceError("too few DEVELOPMENT observations")
-    keyset_hash = _hash([{"timestamp": ts, "symbol": symbol} for ts, symbol in prediction_keys])
+    keyset_hash = _keyset_hash(prediction_keys)
     if keyset_hash != receipt.inference_keyset_hash:
         raise DevelopmentEvaluationIntegrityError("evaluation keyset does not match D2A receipt")
 
@@ -532,6 +532,13 @@ def _sign(value: float) -> int:
     return 0
 
 
+def _keyset_hash(pairs: Sequence[tuple[str, str]]) -> str:
+    """Use the exact OSS-3D2A keyset byte semantics."""
+    return sha256(
+        _canonical_json([[timestamp, symbol] for timestamp, symbol in pairs]).encode("utf-8")
+    ).hexdigest()
+
+
 def _require_equal(name: str, expected: object, actual: object) -> None:
     if expected != actual:
         raise DevelopmentEvaluationCompatibilityError(
@@ -551,7 +558,13 @@ def _require_finite(value: object, name: str) -> None:
 
 def _canonical_json(payload: object) -> str:
     try:
-        return json.dumps(payload, sort_keys=True, separators=(",", ":"), allow_nan=False)
+        return json.dumps(
+            payload,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+            allow_nan=False,
+        )
     except (TypeError, ValueError) as exc:
         raise DevelopmentEvaluationIntegrityError("value is not canonical JSON") from exc
 
