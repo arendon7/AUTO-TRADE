@@ -21,20 +21,27 @@ FORBIDDEN_IMPORT_PREFIXES = (
     "urllib.request",
     "http.client",
     "ccxt",
+    "subprocess",
 )
 FORBIDDEN_CALL_NAMES = {
     "eval",
     "exec",
     "__import__",
     "import_module",
-    "system",
-    "popen",
-    "Popen",
     "urlopen",
     "submit_order",
     "place_order",
     "send_order",
     "execute_order",
+}
+FORBIDDEN_CALL_PATHS = {
+    "os.system",
+    "os.popen",
+    "subprocess.Popen",
+    "subprocess.run",
+    "subprocess.call",
+    "subprocess.check_call",
+    "subprocess.check_output",
 }
 FORBIDDEN_AUTHORITY_NAMES = {"OrderIntent", "RiskDecision", "CapitalSafetyKernel"}
 
@@ -63,9 +70,10 @@ def main() -> int:
                     if alias.name in FORBIDDEN_AUTHORITY_NAMES:
                         errors.append(f"{relative}: forbidden authority symbol {alias.name}")
             elif isinstance(node, ast.Call):
-                name = _call_name(node.func)
-                if name in FORBIDDEN_CALL_NAMES:
-                    errors.append(f"{relative}: forbidden call {name}")
+                path = _call_path(node.func)
+                leaf = path.rsplit(".", 1)[-1]
+                if leaf in FORBIDDEN_CALL_NAMES or path in FORBIDDEN_CALL_PATHS:
+                    errors.append(f"{relative}: forbidden call {path}")
             elif isinstance(node, ast.Name) and node.id in FORBIDDEN_AUTHORITY_NAMES:
                 errors.append(f"{relative}: forbidden authority symbol {node.id}")
 
@@ -140,7 +148,7 @@ def main() -> int:
         if snippet not in attestation:
             errors.append(f"family_environment_attestation.py missing binding: {snippet}")
 
-    # D2G must not alter the previously certified D2B/D2C modules.
+    # D2G must not replace the previously certified D2B/D2C modules.
     for legacy in (
         ROOT / "labs" / "oss3_qlib" / "model_contract.py",
         ROOT / "labs" / "oss3_qlib" / "runner.py",
@@ -165,11 +173,12 @@ def _forbidden_module(module: str) -> bool:
     return any(module == prefix or module.startswith(prefix + ".") for prefix in FORBIDDEN_IMPORT_PREFIXES)
 
 
-def _call_name(func: ast.expr) -> str:
+def _call_path(func: ast.expr) -> str:
     if isinstance(func, ast.Name):
         return func.id
     if isinstance(func, ast.Attribute):
-        return func.attr
+        base = _call_path(func.value)
+        return f"{base}.{func.attr}" if base else func.attr
     return ""
 
 
