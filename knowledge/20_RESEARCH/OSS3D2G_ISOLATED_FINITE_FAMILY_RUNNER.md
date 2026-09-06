@@ -53,17 +53,26 @@ Unknown hashes fail closed before Qlib execution.
 
 ## Shared semantic runner identity
 
-Every candidate uses the same D2G runner code hash. The hash covers:
+Every candidate uses the same D2G runner code hash. It is intentionally broader than the executable wrapper: it hashes every source file that can alter how the frozen request is interpreted or executed.
 
-- the D2F concrete-family source;
-- D2G family contract;
-- shared dataset adapter;
-- shared network guard;
+The semantic set includes:
+
+- D2F concrete model-family source;
+- D2A DEVELOPMENT request/receipt contract;
+- factor-matrix artifact contract;
+- supervised-label artifact contract;
+- TRAIN bundle contract;
+- OSS-3A Qlib prediction artifact contract;
+- D2E model-neutral runtime-identity contract;
+- the legacy sanitized environment-distribution primitives reused by D2G;
+- D2G family model contract;
+- dataset adapter;
+- network guard;
 - D2G family runner;
-- D2G family attestation code;
+- D2G candidate environment attestation;
 - pinned Qlib requirements.
 
-Therefore changing the candidate family, execution semantics, network boundary, environment evidence or pinned runtime necessarily changes the common runner identity.
+Therefore drift in candidate admission, lineage validation, dataset interpretation, prediction serialization, environment identity, network isolation or Qlib runtime changes the common runner hash and invalidates old D2F requests.
 
 ## Runtime model construction
 
@@ -131,6 +140,8 @@ It records the same core reproducibility dimensions:
 - shared D2G runner hash;
 - research-only authority flags.
 
+The builder rejects even a syntactically valid runner hash when it differs from the current semantic runtime hash. A misleading/stale attestation therefore cannot be constructed through the canonical API.
+
 Because `model_config_hash` differs, candidate attestation hashes differ as expected.
 
 ## Model-neutral D2E runtime identity
@@ -160,6 +171,8 @@ Each invocation emits `OSS3D2G_CANDIDATE_RUN_EVIDENCE_V1`, binding:
 - environment attestation hash;
 - model-neutral runtime environment hash.
 
+The evidence object itself fails closed unless the candidate id resolves to the supplied frozen config hash and its shared runner hash equals the current semantic runtime hash.
+
 It also permanently records:
 
 ```text
@@ -176,6 +189,12 @@ live_trading = BLOCKED
 ```
 
 `verify_family_candidate_outputs()` rebinds request, prediction, receipt, attestation and evidence against the current frozen D2F/D2G contract.
+
+## CI coverage
+
+The dedicated workflow triggers on every file included in the semantic runtime hash. It also re-proves D2F, D2A, the research artifact lineage contracts, D2E, the legacy D2B/D2C canary boundaries, Research Authority, W83 and the one-shot FINAL_HOLDOUT boundary.
+
+The decisive integration test installs pinned Qlib 0.9.7 and executes all six preregistered candidates under one isolated environment.
 
 ## Scientific boundary
 
