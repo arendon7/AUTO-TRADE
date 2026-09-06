@@ -29,12 +29,13 @@ from autotrade.research.oss3_development_model_tournament import (
     OSS3D2E_FAMILY_ID,
     OSS3D2E_PLAN_VERSION,
     PRIMARY_METRIC,
+    RUNTIME_ENVIRONMENT_POLICY,
     DevelopmentDatasetBinding,
     DevelopmentModelCandidate,
     DevelopmentModelTournamentCompatibilityError,
     DevelopmentModelTournamentGovernanceError,
     DevelopmentModelTournamentIntegrityError,
-    OSS3D2ETournamentEvidence,
+    RuntimeEnvironmentIdentity,
     _one_sided_exact_sign_test,
     build_oss3d2e_plan,
     evaluate_oss3d2e_tournament,
@@ -55,8 +56,7 @@ SOURCE_CAMPAIGN = "oss3-source-campaign-001"
 TOURNAMENT_CAMPAIGN = "oss3d2e-campaign-001"
 TOURNAMENT_ID = "oss3d2e-tournament-001"
 QLIB_VERSION = "0.9.7"
-RUNNER = sha256(b"runner").hexdigest()
-ENVIRONMENT = sha256(b"environment").hexdigest()
+RUNNER = sha256(b"shared-generalized-runner").hexdigest()
 CODE_VERSION = sha256(b"d2e-code").hexdigest()
 
 
@@ -79,6 +79,24 @@ def _dataset(**overrides) -> DevelopmentDatasetBinding:
     return DevelopmentDatasetBinding(**values)
 
 
+def _runtime(**overrides) -> RuntimeEnvironmentIdentity:
+    values = {
+        "policy_id": RUNTIME_ENVIRONMENT_POLICY,
+        "python_implementation": "cpython",
+        "python_version": "3.12.14",
+        "platform_system": "Linux",
+        "platform_machine": "x86_64",
+        "libc_name": "glibc",
+        "libc_version": "2.39",
+        "qlib_distribution": "pyqlib",
+        "qlib_version": QLIB_VERSION,
+        "distribution_count": 198,
+        "distribution_set_hash": _h("distribution-set"),
+    }
+    values.update(overrides)
+    return RuntimeEnvironmentIdentity(**values)
+
+
 def _candidate(index: int, **overrides) -> DevelopmentModelCandidate:
     values = {
         "trial_id": f"model-{index:02d}",
@@ -88,19 +106,21 @@ def _candidate(index: int, **overrides) -> DevelopmentModelCandidate:
         "request_hash": _h(f"request-{index}"),
         "qlib_version": QLIB_VERSION,
         "expected_runner_code_hash": RUNNER,
-        "environment_attestation_hash": ENVIRONMENT,
+        # D2C V1 is model-bound; candidates are expected to have distinct artifacts.
+        "environment_attestation_hash": _h(f"d2c-attestation-{index}"),
     }
     values.update(overrides)
     return DevelopmentModelCandidate(**values)
 
 
-def _plan(*, candidates=None, dataset=None):
+def _plan(*, candidates=None, dataset=None, runtime=None):
     if candidates is None:
         candidates = (_candidate(1), _candidate(2))
     return build_oss3d2e_plan(
         tournament_campaign_id=TOURNAMENT_CAMPAIGN,
         tournament_id=TOURNAMENT_ID,
         dataset=_dataset() if dataset is None else dataset,
+        runtime_environment=_runtime() if runtime is None else runtime,
         candidates=candidates,
         code_version=CODE_VERSION,
     )
@@ -237,11 +257,18 @@ def _ledger(tmp_path) -> SQLiteTrialLedger:
     return SQLiteTrialLedger(tmp_path / "research.sqlite3")
 
 
-def _record_pair(tmp_path, *, first_rank=(0.8, 0.6, 0.4, 0.2), second_rank=(0.4, 0.2, -0.1, 0.1)):
+def _record_pair(
+    tmp_path,
+    *,
+    first_rank=(0.8, 0.6, 0.4, 0.2),
+    second_rank=(0.4, 0.2, -0.1, 0.1),
+):
     ledger = _ledger(tmp_path)
     plan = _plan()
     preregister_oss3d2e_plan(ledger, plan, now=NOW)
-    for offset, (candidate, ranks) in enumerate(zip(plan.candidates, (first_rank, second_rank), strict=True), start=1):
+    for offset, (candidate, ranks) in enumerate(
+        zip(plan.candidates, (first_rank, second_rank), strict=True), start=1
+    ):
         receipt = _receipt(candidate, plan.dataset)
         evaluation = _evaluation(candidate, plan.dataset, receipt, rank_ics=ranks)
         record_oss3d2e_evaluation(
@@ -267,6 +294,7 @@ def test_plan_is_deterministic_sorted_and_development_only():
     assert plan.primary_metric == PRIMARY_METRIC
     assert plan.multiple_testing_policy == MULTIPLE_TESTING_POLICY
     assert plan.common_support_policy == COMMON_SUPPORT_POLICY
+    assert plan.runtime_environment.fingerprint == _runtime().fingerprint
     assert all(trial.phase is TrialPhase.DEVELOPMENT for trial in plan.trials)
     assert all(trial.split_name == "DEVELOPMENT" for trial in plan.trials)
     assert all(not trial.holdout_authorization_id for trial in plan.trials)
@@ -275,6 +303,16 @@ def test_plan_is_deterministic_sorted_and_development_only():
     assert plan.paper_execution_authorized is False
     assert plan.capital_authority == "NONE"
     assert plan.live_trading == "BLOCKED"
+
+
+def test_distinct_model_bound_d2c_attestations_are_expected_and_accepted():
+    c1, c2 = _candidate(1), _candidate(2)
+    assert c1.environment_attestation_hash != c2.environment_attestation_hash
+    plan = _plan(candidates=(c1, c2))
+    assert plan.candidates[0].environment_attestation_hash != plan.candidates[1].environment_attestation_hash
+    assert {trial.parameters["runtime_environment_hash"] for trial in plan.trials} == {
+        plan.runtime_environment.fingerprint
+    }
 
 
 @pytest.mark.parametrize(
@@ -289,6 +327,35 @@ def test_plan_is_deterministic_sorted_and_development_only():
 def test_dataset_requires_positive_canonical_utc_window(start, end):
     with pytest.raises(ValueError):
         _dataset(evaluation_start=start, evaluation_end=end)
+
+
+@pytest.mark.parametrize(
+    "overrides,exc",
+    [
+        ({"policy_id": "OTHER"}, DevelopmentModelTournamentGovernanceError),
+        ({"python_implementation": "CPython"}, ValueError),
+        ({"python_version": "bad version"}, ValueError),
+        ({"platform_system": ""}, ValueError),
+        ({"qlib_distribution": "qlib"}, DevelopmentModelTournamentGovernanceError),
+        ({"distribution_count": 0}, ValueError),
+        ({"distribution_count": 4097}, ValueError),
+        ({"distribution_set_hash": "bad"}, ValueError),
+    ],
+)
+def test_runtime_identity_validation_is_fail_closed(overrides, exc):
+    with pytest.raises(exc):
+        _runtime(**overrides)
+
+
+def test_runtime_identity_is_model_neutral_and_deterministic():
+    first = _runtime()
+    second = _runtime()
+    assert first.fingerprint == second.fingerprint
+    assert "model_family" not in first.to_dict()
+    assert "model_config_hash" not in first.to_dict()
+    assert "runner_code_hash" not in first.to_dict()
+    assert first.qlib_distribution == "pyqlib"
+    assert first.qlib_version == QLIB_VERSION
 
 
 def test_plan_rejects_family_size_outside_bounds():
@@ -323,12 +390,16 @@ def test_plan_rejects_duplicate_trial_model_and_request_identities():
     [
         ("qlib_version", "0.9.8"),
         ("expected_runner_code_hash", _h("other-runner")),
-        ("environment_attestation_hash", _h("other-environment")),
     ],
 )
-def test_plan_requires_one_runtime_environment_across_family(field, value):
+def test_plan_requires_one_qlib_and_runner_across_family(field, value):
     with pytest.raises(DevelopmentModelTournamentCompatibilityError):
         _plan(candidates=(_candidate(1), replace(_candidate(2), **{field: value})))
+
+
+def test_plan_requires_candidate_qlib_to_match_common_runtime_identity():
+    with pytest.raises(DevelopmentModelTournamentCompatibilityError):
+        _plan(runtime=_runtime(qlib_version="0.9.8"))
 
 
 def test_plan_lookup_fails_closed_for_unknown_trial():
@@ -384,7 +455,7 @@ def test_result_cannot_be_recorded_before_preregistration(tmp_path):
         )
 
 
-def test_record_evaluation_rebinds_primary_metric_and_exact_sign_test(tmp_path):
+def test_record_evaluation_rebinds_primary_metric_sign_test_and_runtime(tmp_path):
     ledger = _ledger(tmp_path)
     plan = _plan()
     preregister_oss3d2e_plan(ledger, plan, now=NOW)
@@ -403,6 +474,8 @@ def test_record_evaluation_rebinds_primary_metric_and_exact_sign_test(tmp_path):
     assert float(record.p_value) == pytest.approx(1 / 16)
     assert record.metrics["evaluation_artifact_hash"] == evaluation.artifact_hash
     assert record.metrics["prediction_receipt_hash"] == receipt.fingerprint
+    assert record.metrics["environment_attestation_hash"] == candidate.environment_attestation_hash
+    assert record.metrics["runtime_environment_hash"] == plan.runtime_environment.fingerprint
     with pytest.raises(DevelopmentModelTournamentGovernanceError):
         record_oss3d2e_evaluation(
             ledger,
@@ -428,7 +501,7 @@ def test_record_evaluation_rebinds_primary_metric_and_exact_sign_test(tmp_path):
         ("model_config_hash", _h("other-config")),
         ("qlib_version", "0.9.8"),
         ("producer_code_hash", _h("other-runner")),
-        ("environment_attestation_hash", _h("other-environment")),
+        ("environment_attestation_hash", _h("other-attestation")),
     ],
 )
 def test_evaluation_lineage_drift_is_rejected(tmp_path, manifest_field, bad_value):
@@ -563,6 +636,9 @@ def test_declared_primary_metric_cannot_disagree_with_cross_sections(tmp_path):
 )
 def test_exact_one_sided_sign_test(values, expected):
     assert _one_sided_exact_sign_test(values) == pytest.approx(expected)
+
+
+def test_empty_sign_series_fails_closed():
     with pytest.raises(DevelopmentModelTournamentGovernanceError):
         _one_sided_exact_sign_test(())
 
@@ -586,7 +662,7 @@ def test_tournament_requires_every_preregistered_candidate_terminal(tmp_path):
         evaluate_oss3d2e_tournament(ledger, plan)
 
 
-def test_tournament_ranks_only_primary_metric_and_holm_adjusts_full_family(tmp_path):
+def test_tournament_ranks_primary_metric_and_holm_adjusts_full_family(tmp_path):
     ledger, plan = _record_pair(tmp_path)
     evidence = evaluate_oss3d2e_tournament(ledger, plan)
     assert evidence.evidence_version == OSS3D2E_EVIDENCE_VERSION
@@ -598,6 +674,7 @@ def test_tournament_ranks_only_primary_metric_and_holm_adjusts_full_family(tmp_p
     assert evidence.family_size == 2
     assert evidence.holm.raw_p_values["model-02"] == pytest.approx(5 / 16)
     assert evidence.holm.adjusted_p_values["model-02"] == pytest.approx(5 / 16)
+    assert evidence.runtime_environment_hash == plan.runtime_environment.fingerprint
     assert evidence.research_only is True
     assert evidence.final_holdout_observed is False
     assert evidence.promotion_authorized is False
@@ -654,12 +731,28 @@ def test_tournament_rejects_different_cross_sectional_support(tmp_path):
     receipt2 = _receipt(second, plan.dataset)
     eval1 = _evaluation(first, plan.dataset, receipt1)
     shifted = tuple((DEV_START + timedelta(days=i, hours=1)).isoformat() for i in range(4))
-    eval2 = _evaluation(second, plan.dataset, receipt2, rank_ics=(0.4, 0.2, -0.1, 0.1), timestamps=shifted)
-    record_oss3d2e_evaluation(
-        ledger, plan, trial_id=first.trial_id, evaluation=eval1, receipt=receipt1, now=NOW + timedelta(minutes=1)
+    eval2 = _evaluation(
+        second,
+        plan.dataset,
+        receipt2,
+        rank_ics=(0.4, 0.2, -0.1, 0.1),
+        timestamps=shifted,
     )
     record_oss3d2e_evaluation(
-        ledger, plan, trial_id=second.trial_id, evaluation=eval2, receipt=receipt2, now=NOW + timedelta(minutes=2)
+        ledger,
+        plan,
+        trial_id=first.trial_id,
+        evaluation=eval1,
+        receipt=receipt1,
+        now=NOW + timedelta(minutes=1),
+    )
+    record_oss3d2e_evaluation(
+        ledger,
+        plan,
+        trial_id=second.trial_id,
+        evaluation=eval2,
+        receipt=receipt2,
+        now=NOW + timedelta(minutes=2),
     )
     with pytest.raises(DevelopmentModelTournamentCompatibilityError):
         evaluate_oss3d2e_tournament(ledger, plan)
@@ -703,15 +796,17 @@ def test_evidence_mutations_cannot_grant_authority_or_rewrite_p_values(tmp_path)
         replace(evidence, winner_raw_p_value=0.99)
     with pytest.raises(DevelopmentModelTournamentIntegrityError):
         replace(evidence, winner_holm_adjusted_p_value=0.99)
+    with pytest.raises(ValueError):
+        replace(evidence, runtime_environment_hash="bad")
 
 
-def test_plan_parameter_surface_is_exact_and_hash_bound():
+def test_plan_parameter_surface_binds_individual_attestation_and_common_runtime():
     plan = _plan()
-    candidate = plan.candidates[0]
-    trial = plan.trials[0]
-    assert trial.dataset_hash == plan.dataset.dataset_hash
-    assert trial.parameters["request_hash"] == candidate.request_hash
-    assert trial.parameters["environment_attestation_hash"] == ENVIRONMENT
-    assert trial.parameters["primary_metric"] == PRIMARY_METRIC
-    assert trial.parameters["multiple_testing_policy"] == MULTIPLE_TESTING_POLICY
-    assert trial.parameters["common_support_policy"] == COMMON_SUPPORT_POLICY
+    for trial, candidate in zip(plan.trials, plan.candidates, strict=True):
+        assert trial.dataset_hash == plan.dataset.dataset_hash
+        assert trial.parameters["request_hash"] == candidate.request_hash
+        assert trial.parameters["environment_attestation_hash"] == candidate.environment_attestation_hash
+        assert trial.parameters["runtime_environment_hash"] == plan.runtime_environment.fingerprint
+        assert trial.parameters["primary_metric"] == PRIMARY_METRIC
+        assert trial.parameters["multiple_testing_policy"] == MULTIPLE_TESTING_POLICY
+        assert trial.parameters["common_support_policy"] == COMMON_SUPPORT_POLICY
