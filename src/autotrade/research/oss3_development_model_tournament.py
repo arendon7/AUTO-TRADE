@@ -39,7 +39,7 @@ from .tournament import (
     TournamentSpec,
     evaluate_strategy_tournament,
 )
-from .trials import CampaignSpec, SQLiteTrialLedger, TrialPhase, TrialSpec, TrialStatus
+from .trials import CampaignSpec, SQLiteTrialLedger, TrialPhase, TrialSpec
 
 
 OSS3D2E_PLAN_VERSION = "OSS3D2E_DEVELOPMENT_MODEL_TOURNAMENT_PLAN_V1"
@@ -315,6 +315,11 @@ class OSS3D2ETournamentEvidence:
             raise DevelopmentModelTournamentIntegrityError("winner raw p-value mismatch")
         if self.holm.adjusted_p_values.get(self.winner_trial_id) != self.winner_holm_adjusted_p_value:
             raise DevelopmentModelTournamentIntegrityError("winner Holm p-value mismatch")
+        winner_entries = tuple(entry for entry in self.tournament.entries if entry.trial_id == self.winner_trial_id)
+        if len(winner_entries) != 1 or winner_entries[0].metric_value is None:
+            raise DevelopmentModelTournamentIntegrityError("winner tournament entry mismatch")
+        if float(winner_entries[0].metric_value) != self.winner_primary_metric:
+            raise DevelopmentModelTournamentIntegrityError("winner primary metric mismatch")
 
     @property
     def fingerprint(self) -> str:
@@ -641,11 +646,14 @@ def _verify_evaluation_binding(
         ("runner code", candidate.expected_runner_code_hash, m.producer_code_hash),
         ("environment attestation", candidate.environment_attestation_hash, m.environment_attestation_hash),
         ("prediction receipt", receipt.fingerprint, m.prediction_receipt_hash),
+        ("evaluation prediction artifact", receipt.prediction_artifact_hash, m.prediction_artifact_hash),
+        ("evaluation prediction manifest", receipt.prediction_manifest_hash, m.prediction_manifest_hash),
         ("request hash", candidate.request_hash, receipt.request_hash),
         ("receipt campaign", d.source_campaign_id, receipt.campaign_id),
         ("receipt split", d.research_split_hash, receipt.research_split_hash),
         ("receipt universe", d.source_universe_hash, receipt.source_universe_hash),
         ("receipt label definition", d.label_definition_hash, receipt.label_definition_hash),
+        ("receipt keyset", d.evaluation_keyset_hash, receipt.inference_keyset_hash),
         ("receipt model family", candidate.model_family, receipt.model_family),
         ("receipt model config", candidate.model_config_hash, receipt.model_config_hash),
         ("receipt Qlib version", candidate.qlib_version, receipt.qlib_version),
