@@ -60,7 +60,16 @@ Distribution names use a PEP-503-like canonical form:
 lowercase + collapse [-_.]+ to '-'
 ```
 
-The manifest must be sorted and unique after normalization. Duplicate normalized package identities fail closed.
+The final manifest must be sorted and unique after normalization. `importlib.metadata` may enumerate the same installed distribution more than once when multiple metadata discovery paths describe the **same canonical package and same version**; D2C treats that as enumeration noise and collapses those identical records deterministically.
+
+The rule is deliberately asymmetric:
+
+```text
+same canonical name + same version  -> collapse to one manifest row
+same canonical name + different versions -> FAIL CLOSED
+```
+
+Thus D2C does not hide an ambiguous effective environment. If conflicting versions are observed for one canonical package name, attestation stops and names the conflicting package.
 
 The primary runtime remains a hard contract:
 
@@ -128,7 +137,7 @@ The dedicated workflow performs, in order:
 5. static authority/privacy boundary before external runtime install;
 6. install certified `pyqlib==0.9.7` lab requirements;
 7. verify effective primary Qlib version;
-8. run D2C tests;
+8. run D2C tests, including duplicate-metadata collapse and conflicting-version denial;
 9. capture the environment twice and require exact equality;
 10. verify the captured evidence;
 11. re-run D2C boundary after external dependencies exist;
