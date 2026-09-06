@@ -7,6 +7,7 @@ on:
     paths:
       - "labs/oss3_qlib/family_evaluation_batch.py"
       - "labs/oss3_qlib/tests/test_family_evaluation_batch.py"
+      - "labs/oss3_qlib/tests/test_family_evaluation_batch_binding_immutability.py"
       - "labs/oss3_qlib/family_runner.py"
       - "labs/oss3_qlib/family_model_contract.py"
       - "labs/oss3_qlib/family_environment_attestation.py"
@@ -52,11 +53,15 @@ jobs:
           python -m py_compile \
             labs/oss3_qlib/family_evaluation_batch.py \
             labs/oss3_qlib/tests/test_family_evaluation_batch.py \
+            labs/oss3_qlib/tests/test_family_evaluation_batch_binding_immutability.py \
             scripts/check_oss3d2h_family_evaluation_batch_boundary.py
       - name: D2H boundary before Qlib install
         run: python scripts/check_oss3d2h_family_evaluation_batch_boundary.py
       - name: Execute D2H deterministic and adversarial orchestration without Qlib
-        run: python -m pytest -q labs/oss3_qlib/tests/test_family_evaluation_batch.py
+        run: |
+          python -m pytest -q \
+            labs/oss3_qlib/tests/test_family_evaluation_batch.py \
+            labs/oss3_qlib/tests/test_family_evaluation_batch_binding_immutability.py
       - name: Install exact isolated Qlib runtime
         run: python -m pip install -r labs/oss3_qlib/requirements.txt
       - name: Assert pyqlib 0.9.7
