@@ -21,12 +21,20 @@ from autotrade.research.oss3_concrete_model_family import (
 
 OSS3D2G_CONTRACT_VERSION = "OSS3D2G_ISOLATED_FAMILY_MODEL_CONTRACT_V1"
 
-# Every file that can alter candidate resolution, dataset exposure, network
-# isolation, runtime execution or attestation semantics is part of the common
-# runner identity. The D2F source itself is included so changing the frozen
-# family necessarily changes the D2G runner hash.
+# Hash every source file that can alter candidate admission, D2A request
+# interpretation, artifact lineage, dataset exposure, network isolation,
+# Qlib execution, environment evidence or D2E runtime-identity projection.
+# This makes the runner identity a semantic-runtime identity, not merely a
+# hash of the thin executable wrapper.
 SEMANTIC_FILES = (
     "src/autotrade/research/oss3_concrete_model_family.py",
+    "src/autotrade/research/oss3_development_inference.py",
+    "src/autotrade/research/oss3_factor_matrix_artifact.py",
+    "src/autotrade/research/oss3_supervised_label_artifact.py",
+    "src/autotrade/research/oss3_training_bundle.py",
+    "src/autotrade/research/oss3_qlib_artifact.py",
+    "src/autotrade/research/oss3_development_model_tournament.py",
+    "labs/oss3_qlib/environment_attestation.py",
     "labs/oss3_qlib/family_model_contract.py",
     "labs/oss3_qlib/dataset_adapter.py",
     "labs/oss3_qlib/network_guard.py",
@@ -41,7 +49,7 @@ class FamilyModelContractError(RuntimeError):
 
 
 def family_runner_code_hash(*, repo_root: Path | None = None) -> str:
-    """Hash the common semantic runtime used by every D2F candidate."""
+    """Hash the complete common semantic runtime used by every D2F candidate."""
     root = Path(__file__).resolve().parents[2] if repo_root is None else Path(repo_root)
     digest = sha256()
     for relative in SEMANTIC_FILES:
