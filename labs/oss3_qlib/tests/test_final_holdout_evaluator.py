@@ -4,6 +4,7 @@ from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
 import sqlite3
+from types import SimpleNamespace
 
 import pytest
 
@@ -19,6 +20,8 @@ from labs.oss3_qlib.final_holdout_evaluator import (
     OSS3FinalHoldoutEvaluationIntegrityError,
     ProtectedOSS3FinalHoldout,
     SQLiteOSS3FinalHoldoutEvaluationRegistry,
+    _build_start,
+    _verify_exact_final_runtime,
     evaluator_semantic_hash,
     read_oss3d2k_evaluation_read_only,
 )
@@ -59,6 +62,19 @@ def test_real_qlib_one_shot_final_holdout_passes_predictive_gates_only(tmp_path)
     assert receipt.metrics.one_sided_exact_sign_test_p_value <= 0.05
     assert tuple(gate.passed for gate in receipt.gates) == (True, True, True)
     assert receipt.failed_gate_ids == ()
+
+    # Final validation must run in the exact D2G environment that produced the
+    # selected winner.  This binds more than the Qlib top-level version.
+    assert (
+        receipt.final_environment_attestation_hash
+        == receipt.source_environment_attestation_hash
+        == source.winner_seal.environment_attestation_hash
+    )
+    assert (
+        receipt.final_runtime_environment_hash
+        == receipt.source_runtime_environment_hash
+        == source.winner_seal.runtime_environment_hash
+    )
 
     assert receipt.final_holdout_observed is True
     assert receipt.final_holdout_consumed is True
@@ -266,22 +282,64 @@ def test_exact_original_train_bundle_is_required_before_consumption(tmp_path):
     ) is None
 
 
-def test_protected_wrapper_rejects_direct_second_checkout(tmp_path):
+def test_final_runtime_drift_is_rejected_before_permit_burn(tmp_path, monkeypatch):
+    source = build_d2k_source(tmp_path, label_mode="aligned")
+    winner = source.protocol.winner_binding
+    fake = SimpleNamespace(
+        artifact_hash="f" * 64,
+        runtime_environment=SimpleNamespace(
+            fingerprint=winner.runtime_environment_hash,
+        ),
+        manifest=SimpleNamespace(
+            runner_code_hash=winner.shared_runner_code_hash,
+            qlib_version="0.9.7",
+        ),
+        verify_current_contract=lambda: None,
+    )
+    monkeypatch.setattr(
+        "labs.oss3_qlib.final_holdout_evaluator.collect_candidate_environment_attestation",
+        lambda **_kwargs: fake,
+    )
+    registry = SQLiteOSS3FinalHoldoutEvaluationRegistry(tmp_path / "d2k-evaluation.sqlite3")
+    with pytest.raises(OSS3FinalHoldoutEvaluationIntegrityError, match="final environment attestation"):
+        registry.evaluate(
+            evaluation_id="oss3d2k-runtime-drift",
+            protocol=source.protocol,
+            source_request=source.source_request,
+            training_bundle=source.training_bundle,
+            train_features=source.train_features,
+            train_labels=source.train_labels,
+            holdout=source.holdout,
+            now=NOW,
+        )
+    assert read_oss3d2k_evaluation_read_only(
+        registry.path,
+        protocol_id=source.protocol.protocol_id,
+    ) is None
+
+
+def test_forged_permit_cannot_checkout_without_durable_start(tmp_path):
     source = build_d2k_source(tmp_path, label_mode="aligned")
     permit = HoldoutPermit(
         permit_id=source.protocol.expected_holdout_authorization_id,
         issued_by="OSS3D2K_FINAL_HOLDOUT_EVALUATOR",
         purpose="final_validation",
     )
-    material = source.holdout._checkout(
-        permit=permit,
-        expected_authorization_id=source.protocol.expected_holdout_authorization_id,
+    attestation = _verify_exact_final_runtime(source.protocol)
+    start = _build_start(
+        evaluation_id="oss3d2k-forged-checkout",
+        protocol=source.protocol,
+        source_request=source.source_request,
+        training_bundle=source.training_bundle,
+        final_attestation=attestation,
+        started_at=NOW,
     )
-    assert material.commitment.fingerprint == source.protocol.holdout_commitment.fingerprint
-    with pytest.raises(OSS3FinalHoldoutAlreadyConsumed):
+    with pytest.raises(OSS3FinalHoldoutEvaluationGovernanceError, match="no durable D2K registry"):
         source.holdout._checkout(
             permit=permit,
             expected_authorization_id=source.protocol.expected_holdout_authorization_id,
+            start_receipt=start,
+            registry_path=tmp_path / "never-created.sqlite3",
         )
 
 
