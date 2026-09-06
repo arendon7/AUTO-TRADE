@@ -15,8 +15,13 @@ on:
       - 'labs/oss3_qlib/development_winner_seal.py'
       - 'labs/oss3_qlib/family_evaluation_batch.py'
       - 'labs/oss3_qlib/family_model_contract.py'
+      - 'labs/oss3_qlib/family_environment_attestation.py'
+      - 'labs/oss3_qlib/environment_attestation.py'
       - 'labs/oss3_qlib/network_guard.py'
+      - 'labs/oss3_qlib/requirements.txt'
       - 'src/autotrade/research/oss3_development_inference.py'
+      - 'src/autotrade/research/oss3_factor_matrix_artifact.py'
+      - 'src/autotrade/research/oss3_supervised_label_artifact.py'
       - 'src/autotrade/research/oss3_training_bundle.py'
 
 permissions:
@@ -68,7 +73,7 @@ jobs:
           assert version == '0.9.7', version
           print(f'pyqlib=={version}')
           PY
-      - name: D2K real-runtime deterministic and adversarial tests
+      - name: D2K real-runtime durable-checkout and adversarial tests
         run: python -m pytest -q labs/oss3_qlib/tests/test_final_holdout_evaluator.py
       - name: Re-run six-candidate D2G real-runtime proof
         run: python -m pytest -q labs/oss3_qlib/tests/test_family_runner.py
