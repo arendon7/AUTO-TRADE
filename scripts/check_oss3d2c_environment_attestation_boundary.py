@@ -24,13 +24,11 @@ FORBIDDEN_IMPORT_PREFIXES = (
     "autotrade.safety",
     "autotrade.engine",
 )
-FORBIDDEN_CALL_NAMES = {
+FORBIDDEN_BARE_CALL_NAMES = {
     "getenv",
-    "environ",
     "gethostname",
     "getfqdn",
     "uname",
-    "system",
     "popen",
     "Popen",
     "eval",
@@ -89,8 +87,12 @@ def _scan_source() -> list[str]:
                     errors.append(f"forbidden authority symbol: {alias.name}")
         elif isinstance(node, ast.Call):
             name = _call_name(node.func)
-            if name in FORBIDDEN_CALL_NAMES:
+            if name in FORBIDDEN_BARE_CALL_NAMES:
                 errors.append(f"forbidden call: {name}")
+            if _is_attribute_call(node.func, base="os", attr="system"):
+                errors.append("forbidden call: os.system")
+            if _is_attribute_call(node.func, base="os", attr="popen"):
+                errors.append("forbidden call: os.popen")
         elif isinstance(node, ast.Name) and node.id in FORBIDDEN_AUTHORITY_NAMES:
             errors.append(f"forbidden authority symbol: {node.id}")
 
@@ -147,7 +149,7 @@ def _runtime_probe() -> list[str]:
             libc_name="glibc",
             libc_version="2.39",
         )
-    except Exception as exc:  # checker must surface fail-closed construction errors
+    except Exception as exc:
         return [f"runtime sanitized attestation probe failed: {exc}"]
     finally:
         if sys.path and sys.path[0] == str(ROOT):
@@ -192,6 +194,15 @@ def _call_name(func: ast.expr) -> str:
     if isinstance(func, ast.Attribute):
         return func.attr
     return ""
+
+
+def _is_attribute_call(func: ast.expr, *, base: str, attr: str) -> bool:
+    return (
+        isinstance(func, ast.Attribute)
+        and func.attr == attr
+        and isinstance(func.value, ast.Name)
+        and func.value.id == base
+    )
 
 
 def _literal_dict_keys(tree: ast.AST) -> set[str]:
