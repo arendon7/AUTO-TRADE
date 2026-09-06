@@ -28,7 +28,11 @@ from autotrade.research.oss3_supervised_label_artifact import (
     SupervisedLabelRow,
 )
 from autotrade.research.oss3_training_bundle import TrainingBundleArtifact
-from labs.oss3_qlib.family_environment_attestation import CandidateEnvironmentAttestation
+from labs.oss3_qlib.environment_attestation import InstalledDistribution
+from labs.oss3_qlib.family_environment_attestation import (
+    CandidateEnvironmentAttestation,
+    FamilyEnvironmentAttestationIntegrityError,
+)
 from labs.oss3_qlib.family_model_contract import (
     FamilyModelContractError,
     assert_family_request_contract,
@@ -37,7 +41,10 @@ from labs.oss3_qlib.family_model_contract import (
     public_family_runtime_contract,
 )
 from labs.oss3_qlib.family_runner import (
+    OSS3D2G_RUN_EVIDENCE_VERSION,
+    FamilyCandidateRunEvidence,
     QlibFamilyLabGovernanceError,
+    QlibFamilyLabIntegrityError,
     run_isolated_qlib_family_candidate,
     verify_family_candidate_outputs,
 )
@@ -217,6 +224,13 @@ def _clear_broker_env(monkeypatch):
             monkeypatch.delenv(key, raising=False)
 
 
+def _synthetic_distributions():
+    return (
+        InstalledDistribution(name="numpy", version="2.0.0"),
+        InstalledDistribution(name="pyqlib", version=QLIB_VERSION),
+    )
+
+
 def test_family_runtime_contract_is_exactly_d2f_and_nonadaptive():
     contract = public_family_runtime_contract()
     assert contract["model_family"] == MODEL_FAMILY
@@ -346,6 +360,42 @@ def test_request_with_wrong_shared_runner_hash_is_rejected():
         assert_family_request_contract(request.manifest)
 
 
+def test_candidate_attestation_rejects_stale_or_forged_runner_hash():
+    with pytest.raises(FamilyEnvironmentAttestationIntegrityError, match="semantic runtime"):
+        CandidateEnvironmentAttestation.build(
+            model_config_hash=CANONICAL_CANDIDATES[0].model_config_hash,
+            distributions=_synthetic_distributions(),
+            python_implementation="cpython",
+            python_version="3.12.10",
+            platform_system="linux",
+            platform_machine="x86_64",
+            libc_name="glibc",
+            libc_version="2.39",
+            runner_hash="e" * 64,
+        )
+
+
+def test_run_evidence_rejects_candidate_config_mismatch_and_runner_drift():
+    common = dict(
+        evidence_version=OSS3D2G_RUN_EVIDENCE_VERSION,
+        candidate_id=CANONICAL_CANDIDATES[1].candidate_id,
+        model_config_hash=CANONICAL_CANDIDATES[0].model_config_hash,
+        shared_runner_code_hash=family_runner_code_hash(),
+        request_hash="1" * 64,
+        prediction_artifact_hash="2" * 64,
+        prediction_receipt_hash="3" * 64,
+        environment_attestation_hash="4" * 64,
+        runtime_environment_hash="5" * 64,
+    )
+    with pytest.raises(QlibFamilyLabIntegrityError, match="candidate/config"):
+        FamilyCandidateRunEvidence(**common)
+
+    common["candidate_id"] = CANONICAL_CANDIDATES[0].candidate_id
+    common["shared_runner_code_hash"] = "e" * 64
+    with pytest.raises(QlibFamilyLabIntegrityError, match="runner hash"):
+        FamilyCandidateRunEvidence(**common)
+
+
 def test_runner_rejects_exchange_credentials_before_reading_inputs(tmp_path, monkeypatch):
     monkeypatch.setenv("BINANCE_API_KEY", "must-never-enter-research-lab")
     missing = tmp_path / "missing"
@@ -375,14 +425,7 @@ def test_family_runner_has_no_development_label_or_holdout_cli_surface():
 
 
 def test_candidate_attestation_is_config_specific_but_runtime_identity_is_model_neutral():
-    distributions = (
-        # Same exact environment, two different preregistered configs.
-        # CandidateEnvironmentAttestation canonicalizes/sorts these.
-        __import__("labs.oss3_qlib.environment_attestation", fromlist=["InstalledDistribution"])
-        .InstalledDistribution(name="numpy", version="2.0.0"),
-        __import__("labs.oss3_qlib.environment_attestation", fromlist=["InstalledDistribution"])
-        .InstalledDistribution(name="pyqlib", version=QLIB_VERSION),
-    )
+    distributions = _synthetic_distributions()
     left = CandidateEnvironmentAttestation.build(
         model_config_hash=CANONICAL_CANDIDATES[0].model_config_hash,
         distributions=distributions,
