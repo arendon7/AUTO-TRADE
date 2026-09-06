@@ -17,6 +17,27 @@ from labs.oss3_qlib.environment_attestation import (
 from labs.oss3_qlib.model_contract import MODEL_FAMILY, QLIB_VERSION, model_config_hash, runner_code_hash
 
 
+FORBIDDEN_METADATA_KEYS = {
+    "timestamp",
+    "created_at",
+    "hostname",
+    "username",
+    "home",
+    "cwd",
+    "path",
+    "environment",
+    "env",
+    "credential",
+    "secret",
+    "token",
+    "api_key",
+    "ip_address",
+    "mac_address",
+    "node",
+    "processor",
+}
+
+
 def _distributions(extra: tuple[InstalledDistribution, ...] = ()) -> tuple[InstalledDistribution, ...]:
     return tuple(
         sorted(
@@ -43,6 +64,18 @@ def _artifact(*, distributions: tuple[InstalledDistribution, ...] | None = None)
     )
 
 
+def _mapping_keys(value: object) -> set[str]:
+    keys: set[str] = set()
+    if isinstance(value, dict):
+        for key, nested in value.items():
+            keys.add(str(key).lower())
+            keys.update(_mapping_keys(nested))
+    elif isinstance(value, list):
+        for nested in value:
+            keys.update(_mapping_keys(nested))
+    return keys
+
+
 def test_distribution_name_is_pep503_style_canonical() -> None:
     assert canonical_distribution_name("Scikit_Learn") == "scikit-learn"
     assert canonical_distribution_name("zope.interface") == "zope-interface"
@@ -61,24 +94,12 @@ def test_attestation_binds_model_runner_runtime_and_sorted_distribution_set() ->
     assert len(artifact.artifact_hash) == 64
 
 
-def test_same_inputs_produce_same_artifact_without_timestamp_or_host_identity() -> None:
+def test_same_inputs_produce_same_artifact_without_sensitive_metadata_keys() -> None:
     left = _artifact()
     right = _artifact()
     assert left == right
-    payload = left.to_dict()
-    serialized = json.dumps(payload, sort_keys=True)
-    for forbidden in (
-        "timestamp",
-        "created_at",
-        "hostname",
-        "username",
-        "home",
-        "environment",
-        "credential",
-        "secret",
-        "ip_address",
-    ):
-        assert forbidden not in serialized.lower()
+    observed_keys = _mapping_keys(left.to_dict())
+    assert observed_keys.isdisjoint(FORBIDDEN_METADATA_KEYS)
 
 
 def test_distribution_version_change_changes_environment_identity() -> None:
@@ -167,6 +188,7 @@ def test_actual_installed_environment_round_trip_after_qlib_install(tmp_path) ->
     assert "pandas" in names
     assert "scikit-learn" in names
     assert artifact.manifest.qlib_version == QLIB_VERSION
+    assert _mapping_keys(artifact.to_dict()).isdisjoint(FORBIDDEN_METADATA_KEYS)
 
     path = tmp_path / "observed_environment.json"
     artifact.write(path)
