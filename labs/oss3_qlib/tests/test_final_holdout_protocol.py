@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from pathlib import Path
 import sqlite3
 
@@ -19,6 +19,7 @@ from labs.oss3_qlib.final_holdout_protocol import (
     MIN_NONZERO_RANK_IC_CROSS_SECTIONS,
     OSS3D2J_COMMITMENT_VERSION,
     OSS3D2J_CONTRACT_VERSION,
+    OSS3D2J_WINNER_BINDING_VERSION,
     OSS3FinalHoldoutProtocolConflict,
     OSS3FinalHoldoutProtocolGovernanceError,
     OSS3FinalHoldoutProtocolIntegrityError,
@@ -29,9 +30,6 @@ from labs.oss3_qlib.final_holdout_protocol import (
     read_oss3d2j_protocol_read_only,
 )
 from labs.oss3_qlib.tests.d2i_fixture import build_completed_d2h_evidence
-
-
-UTC = timezone.utc
 
 
 def _source(tmp_path):
@@ -154,24 +152,38 @@ def test_holdout_commitment_rejects_inadequate_or_observed_material(tmp_path, up
         _holdout_commitment(preregistration, **updates)
 
 
+def test_holdout_commitment_rejects_internally_inconsistent_counts(tmp_path):
+    preregistration, _, _ = _source(tmp_path)
+    with pytest.raises(OSS3FinalHoldoutProtocolIntegrityError, match="internally inconsistent"):
+        _holdout_commitment(
+            preregistration,
+            row_count=100,
+            cross_section_count=40,
+            minimum_cross_section_observation_count=3,
+        )
+
+
 def test_protocol_rebinds_exact_d2i_d2h_and_holdout_commitment(tmp_path):
     preregistration, batch, seal, commitment, _, receipt = _record(tmp_path)
+    winner = receipt.winner_binding
+    holdout = receipt.holdout_commitment
     assert receipt.contract_version == OSS3D2J_CONTRACT_VERSION
-    assert receipt.source_d2i_seal_fingerprint == seal.fingerprint
-    assert receipt.source_d2h_preregistration_fingerprint == preregistration.fingerprint
-    assert receipt.source_d2h_batch_evidence_fingerprint == batch.fingerprint
-    assert receipt.selected_trial_id == seal.selected_trial_id
-    assert receipt.model_config_hash == seal.model_config_hash
-    assert receipt.d2e_plan_fingerprint == seal.d2e_plan_fingerprint
-    assert receipt.d2e_tournament_evidence_fingerprint == seal.d2e_tournament_evidence_fingerprint
-    assert receipt.source_winner_primary_metric == seal.winner_primary_metric
-    assert receipt.source_winner_raw_p_value == seal.winner_raw_p_value
-    assert receipt.source_winner_holm_adjusted_p_value == seal.winner_holm_adjusted_p_value
-    assert receipt.holdout_commitment_fingerprint == commitment.fingerprint
-    assert receipt.holdout_feature_artifact_hash == commitment.feature_artifact_hash
-    assert receipt.holdout_label_artifact_hash == commitment.label_artifact_hash
-    assert receipt.holdout_evaluation_keyset_hash == commitment.evaluation_keyset_hash
-    assert receipt.holdout_cross_section_key_hash == commitment.cross_section_key_hash
+    assert winner.binding_version == OSS3D2J_WINNER_BINDING_VERSION
+    assert winner.source_d2i_seal_fingerprint == seal.fingerprint
+    assert winner.source_d2h_preregistration_fingerprint == preregistration.fingerprint
+    assert winner.source_d2h_batch_evidence_fingerprint == batch.fingerprint
+    assert winner.selected_trial_id == seal.selected_trial_id
+    assert winner.model_config_hash == seal.model_config_hash
+    assert winner.d2e_plan_fingerprint == seal.d2e_plan_fingerprint
+    assert winner.d2e_tournament_evidence_fingerprint == seal.d2e_tournament_evidence_fingerprint
+    assert winner.source_winner_primary_metric == seal.winner_primary_metric
+    assert winner.source_winner_raw_p_value == seal.winner_raw_p_value
+    assert winner.source_winner_holm_adjusted_p_value == seal.winner_holm_adjusted_p_value
+    assert holdout.fingerprint == commitment.fingerprint
+    assert holdout.feature_artifact_hash == commitment.feature_artifact_hash
+    assert holdout.label_artifact_hash == commitment.label_artifact_hash
+    assert holdout.evaluation_keyset_hash == commitment.evaluation_keyset_hash
+    assert holdout.cross_section_key_hash == commitment.cross_section_key_hash
     assert receipt.expected_holdout_authorization_id.startswith("oss3d2j:")
     assert receipt.gate_specification == (
         ("FINAL_NONZERO_RANK_IC_CROSS_SECTIONS_MIN", ">=", 20.0),
@@ -300,14 +312,20 @@ def test_cross_wired_d2h_preregistration_is_rejected(tmp_path):
         )
 
 
-def test_holdout_must_match_development_campaign_split_universe_and_label(tmp_path):
+@pytest.mark.parametrize(
+    "updates,match",
+    (
+        ({"source_campaign_id": "different-campaign"}, "holdout campaign"),
+        ({"research_split_hash": "f" * 64}, "research split"),
+        ({"source_universe_hash": "f" * 64}, "holdout universe"),
+        ({"label_definition_hash": "f" * 64}, "label definition"),
+    ),
+)
+def test_holdout_must_match_development_research_identity(tmp_path, updates, match):
     preregistration, batch, seal = _source(tmp_path)
-    commitment = _holdout_commitment(
-        preregistration,
-        source_universe_hash="f" * 64,
-    )
+    commitment = _holdout_commitment(preregistration, **updates)
     registry = SQLiteOSS3FinalHoldoutProtocolRegistry(tmp_path / "d2j.sqlite3")
-    with pytest.raises(OSS3FinalHoldoutProtocolIntegrityError, match="holdout.*universe"):
+    with pytest.raises(OSS3FinalHoldoutProtocolIntegrityError, match=match):
         registry.preregister_and_record(
             protocol_id="oss3d2j-protocol-001",
             seal=seal,
@@ -319,7 +337,9 @@ def test_holdout_must_match_development_campaign_split_universe_and_label(tmp_pa
 
 def test_holdout_must_be_chronologically_after_development(tmp_path):
     preregistration, batch, seal = _source(tmp_path)
-    development_start = datetime.fromisoformat(preregistration.d2e_plan.dataset.evaluation_start)
+    development_start = datetime.fromisoformat(
+        preregistration.d2e_plan.dataset.evaluation_start
+    )
     commitment = _holdout_commitment(
         preregistration,
         partition_start=(development_start - timedelta(days=1)).isoformat(),
@@ -334,6 +354,30 @@ def test_holdout_must_be_chronologically_after_development(tmp_path):
             batch_evidence=batch,
             holdout_commitment=commitment,
         )
+
+
+def test_holdout_cannot_reuse_development_labels_or_keyset(tmp_path):
+    preregistration, batch, seal = _source(tmp_path)
+    dataset = preregistration.d2e_plan.dataset
+    registry = SQLiteOSS3FinalHoldoutProtocolRegistry(tmp_path / "d2j.sqlite3")
+    for updates, match in (
+        (
+            {"label_artifact_hash": dataset.development_label_artifact_hash},
+            "cannot reuse DEVELOPMENT labels",
+        ),
+        (
+            {"evaluation_keyset_hash": dataset.evaluation_keyset_hash},
+            "cannot reuse DEVELOPMENT support",
+        ),
+    ):
+        with pytest.raises(OSS3FinalHoldoutProtocolIntegrityError, match=match):
+            registry.preregister_and_record(
+                protocol_id="oss3d2j-protocol-001",
+                seal=seal,
+                preregistration=preregistration,
+                batch_evidence=batch,
+                holdout_commitment=_holdout_commitment(preregistration, **updates),
+            )
 
 
 def test_registry_tables_are_append_only(tmp_path):
@@ -378,6 +422,16 @@ def test_read_only_reader_round_trips_and_detects_durable_column_tamper(tmp_path
             registry.path,
             seal_fingerprint=seal.fingerprint,
         )
+
+
+def test_nested_protocol_identity_is_deeply_immutable(tmp_path):
+    *_, receipt = _record(tmp_path)
+    with pytest.raises(Exception):
+        receipt.winner_binding.selected_trial_id = "mutated"  # type: ignore[misc]
+    with pytest.raises(Exception):
+        receipt.holdout_commitment.row_count = 999  # type: ignore[misc]
+    with pytest.raises(Exception):
+        receipt.policy.max_evaluations = 2  # type: ignore[misc]
 
 
 def test_source_has_no_holdout_evaluator_permit_or_execution_surface():
