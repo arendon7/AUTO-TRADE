@@ -1,0 +1,105 @@
+name: OSS-3D2G Isolated Finite-Family Runner
+
+on:
+  pull_request:
+    branches:
+      - research/oss3d2f-concrete-model-family
+    paths:
+      - 'labs/oss3_qlib/family_model_contract.py'
+      - 'labs/oss3_qlib/family_environment_attestation.py'
+      - 'labs/oss3_qlib/family_runner.py'
+      - 'labs/oss3_qlib/tests/test_family_runner.py'
+      - 'scripts/check_oss3d2g_isolated_family_runner_boundary.py'
+      - 'knowledge/20_RESEARCH/OSS3D2G_ISOLATED_FINITE_FAMILY_RUNNER.md'
+      - '.github/workflows/oss3d2g-isolated-family-runner.yml'
+      - 'src/autotrade/research/oss3_concrete_model_family.py'
+      - 'src/autotrade/research/oss3_development_inference.py'
+      - 'src/autotrade/research/oss3_factor_matrix_artifact.py'
+      - 'src/autotrade/research/oss3_supervised_label_artifact.py'
+      - 'src/autotrade/research/oss3_training_bundle.py'
+      - 'src/autotrade/research/oss3_qlib_artifact.py'
+      - 'src/autotrade/research/oss3_development_model_tournament.py'
+      - 'labs/oss3_qlib/environment_attestation.py'
+      - 'labs/oss3_qlib/dataset_adapter.py'
+      - 'labs/oss3_qlib/network_guard.py'
+      - 'labs/oss3_qlib/requirements.txt'
+
+permissions:
+  contents: read
+
+jobs:
+  oss3d2g:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    env:
+      PYTHONPATH: ${{ github.workspace }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Install AUTO-TRADE core only
+        run: python -m pip install -e '.[dev]'
+      - name: Compile D2G lab, tests and boundary
+        run: |
+          python -m py_compile \
+            labs/oss3_qlib/family_model_contract.py \
+            labs/oss3_qlib/family_environment_attestation.py \
+            labs/oss3_qlib/family_runner.py \
+            labs/oss3_qlib/tests/test_family_runner.py \
+            scripts/check_oss3d2g_isolated_family_runner_boundary.py
+      - name: Prove D2G research-only boundary before Qlib install
+        run: python scripts/check_oss3d2g_isolated_family_runner_boundary.py
+      - name: Re-prove frozen D2F family before external runtime
+        run: |
+          python -m pytest -q tests/test_research_oss3_concrete_model_family.py
+          python scripts/check_oss3d2f_concrete_model_family_boundary.py
+      - name: Install pinned isolated Qlib runtime
+        run: python -m pip install -r labs/oss3_qlib/requirements.txt
+      - name: Verify exact Qlib runtime version
+        run: |
+          python - <<'PY'
+          import qlib
+          assert qlib.__version__ == '0.9.7', qlib.__version__
+          print('OSS-3D2G pyqlib runtime: 0.9.7 PASS')
+          PY
+      - name: Execute all six preregistered models in real Qlib
+        run: python -m pytest -q labs/oss3_qlib/tests/test_family_runner.py
+      - name: Re-prove D2G boundary after Qlib install
+        run: python scripts/check_oss3d2g_isolated_family_runner_boundary.py
+      - name: Legacy OSS-3D2B canary regression
+        run: |
+          python -m pytest -q labs/oss3_qlib/tests/test_runner.py
+          python scripts/check_oss3d2b_qlib_lab_boundary.py
+      - name: Legacy OSS-3D2C attestation regression
+        run: |
+          python -m pytest -q labs/oss3_qlib/tests/test_environment_attestation.py
+          python scripts/check_oss3d2c_environment_attestation_boundary.py
+      - name: OSS-3D2E tournament regression
+        run: |
+          python -m pytest -q tests/test_research_oss3_development_model_tournament.py
+          python scripts/check_oss3d2e_development_model_tournament_boundary.py
+      - name: OSS-3D2A inference-contract regression
+        run: |
+          python -m pytest -q tests/test_research_oss3_development_inference.py
+          python scripts/check_oss3d2a_development_inference_boundary.py
+      - name: Research artifact lineage regressions
+        run: |
+          python -m pytest -q \
+            tests/test_research_oss3_factor_matrix_artifact.py \
+            tests/test_research_oss3_supervised_label_artifact.py \
+            tests/test_research_oss3_training_bundle.py \
+            tests/test_research_oss3_qlib_artifact.py
+      - name: Research authority regression
+        run: python scripts/check_research_authority.py
+      - name: W83 canonical strategy runtime re-proof
+        run: python scripts/check_w83_strategy_version_binding_boundary.py
+      - name: OSS-2H one-shot FINAL_HOLDOUT regression
+        run: |
+          python -m pytest -q \
+            tests/test_research_oss2_final_holdout_evaluation.py \
+            tests/test_research_oss2_final_holdout_evaluation_adversarial.py \
+            tests/test_research_oss2_final_holdout_evaluation_edges.py
+          python scripts/check_oss2h_final_holdout_evaluation_boundary.py
