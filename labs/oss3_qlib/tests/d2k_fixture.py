@@ -1,13 +1,17 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 
 from autotrade.research.oss3_concrete_model_family import build_concrete_model_request_set
 from autotrade.research.oss3_training_bundle import TrainingBundleArtifact
 from autotrade.research.trials import SQLiteTrialLedger
 from labs.oss3_qlib.development_winner_seal import seal_development_winner
+from labs.oss3_qlib.family_environment_attestation import (
+    collect_candidate_environment_attestation,
+)
 from labs.oss3_qlib.family_evaluation_batch import (
+    FrozenCandidateOutput,
     evaluate_preregistered_family,
     prepare_family_evaluation_preregistration,
     preregister_family_evaluation,
@@ -43,6 +47,38 @@ class D2KSource:
     protocol: object
 
 
+def _runtime_bound_output(*, index, binding, training_bundle, development_features):
+    """Reuse deterministic D2I predictions but bind them to the real D2G runtime.
+
+    D2K's purpose is final-runtime reproducibility, so unlike the runtime-free
+    D2I fixture its source D2G attestation is collected from the exact current
+    environment.  D2K later requires this attestation to reproduce bit-for-bit
+    before it burns the FINAL_HOLDOUT permit.
+    """
+    base = d2i_fixture._candidate_output(
+        index=index,
+        binding=binding,
+        bundle=training_bundle,
+        development_features=development_features,
+    )
+    attestation = collect_candidate_environment_attestation(
+        model_config_hash=binding.model_config_hash
+    )
+    evidence = replace(
+        base.run_evidence,
+        environment_attestation_hash=attestation.artifact_hash,
+        runtime_environment_hash=attestation.runtime_environment.fingerprint,
+    )
+    return FrozenCandidateOutput(
+        candidate_id=base.candidate_id,
+        request=base.request,
+        prediction=base.prediction,
+        receipt=base.receipt,
+        attestation=attestation,
+        run_evidence=evidence,
+    )
+
+
 def build_d2k_source(tmp_path, *, label_mode: str = "aligned") -> D2KSource:
     train_features = d2i_fixture._train_features()
     train_labels = d2i_fixture._train_labels(train_features)
@@ -59,10 +95,10 @@ def build_d2k_source(tmp_path, *, label_mode: str = "aligned") -> D2KSource:
         shared_runner_code_hash=family_runner_code_hash(),
     )
     outputs = tuple(
-        d2i_fixture._candidate_output(
+        _runtime_bound_output(
             index=index,
             binding=binding,
-            bundle=training_bundle,
+            training_bundle=training_bundle,
             development_features=development_features,
         )
         for index, binding in enumerate(request_set.bindings)
@@ -141,9 +177,6 @@ def build_final_holdout_material(*, source_request, train_features, label_mode: 
     for day in range(40):
         timestamp = start + timedelta(days=day)
         for index, symbol in enumerate(symbols, start=1):
-            # Preserve the source TRAIN feature relation while moving strictly
-            # beyond DEVELOPMENT.  The selected Lasso winner therefore has a
-            # real, non-degenerate Qlib prediction surface on FINAL_HOLDOUT.
             feature_rows.append(
                 FinalHoldoutFeatureRow(
                     as_of=timestamp.isoformat(),
