@@ -2,7 +2,7 @@
 
 ## Scope
 
-OSS-3D2H is a DEVELOPMENT-only orchestration and evidence layer. It joins the already-certified research stages without adding a new model family or a new optimizer:
+OSS-3D2H is a DEVELOPMENT-only orchestration and evidence layer. It joins the already-certified research stages without adding a new model family, optimizer or trading authority:
 
 ```text
 OSS-3D2F frozen six-model family
@@ -22,19 +22,35 @@ FINAL_HOLDOUT is not an input to D2H.
 
 ## Scientific sequencing
 
-The central invariant is that the model universe and ranking policy are durable before DEVELOPMENT label values become semantically active.
+The central invariant is that the complete model universe, ranking policy and exact prediction evidence are durable before DEVELOPMENT label values become semantically active.
 
 `prepare_family_evaluation_preregistration()` may inspect only DEVELOPMENT label identity and support required to freeze the experiment: artifact hash, manifest identity, partition bounds, row count and `(label_as_of, symbol)` keys. It must not inspect `row.value` or compute DEVELOPMENT metrics.
 
 `preregister_family_evaluation()` durably creates the complete D2E campaign and all six preregistered trial specs.
 
-`evaluate_preregistered_family()` first revalidates the frozen D2G outputs, exact label artifact and untouched durable preregistration. Only after that check does it invoke OSS-3D2D, where label values are allowed for predictive evaluation.
+`evaluate_preregistered_family()` first revalidates the frozen D2G outputs, exact label artifact and untouched durable preregistration. Only after those checks does it invoke OSS-3D2D, where label values are allowed for predictive evaluation.
 
-## Atomicity before ledger writes
+## Immutable D2G preregistration bindings
 
-All six D2D evaluation artifacts are built in memory before the first terminal trial write. An invalid candidate/label pair therefore fails before any partial family result is recorded.
+D2H does not store mutable dictionaries as the canonical candidate binding. Each frozen D2G output is projected into `FrozenCandidateOutputBinding`, a frozen typed contract that binds:
 
-After all six D2D artifacts exist, D2H records them against the six preregistered D2E trials and invokes the D2E tournament. Re-running the batch against an already-terminalized ledger is rejected.
+- candidate id;
+- D2A request hash;
+- OSS-3A prediction artifact hash;
+- D2A receipt fingerprint;
+- candidate environment-attestation hash;
+- model-neutral runtime-environment hash;
+- D2G run-evidence fingerprint;
+- model-config hash;
+- shared D2G semantic runner hash.
+
+The preregistration contains exactly six immutable bindings in canonical candidate order. Replacing, omitting or changing any output after preregistration fails closed.
+
+## Prevalidation before ledger writes
+
+All six D2D evaluation artifacts are built in memory before the first terminal trial write. An invalid candidate/label pair therefore fails before any family result is terminalized.
+
+After all six D2D artifacts exist, D2H records them against the six preregistered D2E trials and invokes the D2E tournament. Re-running a completed batch against an already-terminalized campaign is rejected; D2H does not silently overwrite or reinterpret an existing experiment.
 
 ## Exact family and provenance
 
@@ -79,14 +95,19 @@ capital_authority = NONE
 live_trading = BLOCKED
 ```
 
-D2H has no broker, OMS, Safety, OrderIntent or network authority. Qlib execution belongs to D2G; D2H only consumes already-frozen D2G evidence, although its dedicated integration test executes the full six-model chain to prove compatibility.
+D2H has no Qlib import, broker, OMS, Safety, OrderIntent or network authority. Qlib execution belongs exclusively to D2G; D2H consumes already-frozen D2G evidence.
 
 ## CI certification intent
 
-The dedicated D2H workflow installs exactly `pyqlib==0.9.7`, executes the six preregistered models once, performs durable preregistration, evaluates all six predictions through D2D, completes the D2E tournament, and then re-runs D2G/D2E/D2D/D2A/D2F, Research Authority, W83 and the protected FINAL_HOLDOUT boundary.
+The dedicated D2H workflow intentionally proves two separate boundaries:
 
-Core Safety must independently remain above the existing 85% branch-aware coverage floor. The floor must never be reduced to certify D2H.
+1. **Before Qlib is installed**, D2H deterministic/adversarial tests prove exact-six-family preregistration, immutable bindings, durable-before-metrics sequencing, label-artifact immutability, full-family prevalidation and authority denial.
+2. **Afterwards**, CI installs exactly `pyqlib==0.9.7` and re-runs the D2G six-model real-runtime suite to prove that the upstream outputs consumed by D2H remain executable under the certified isolated runtime.
+
+The workflow then re-proves D2G, D2E, D2D, D2A, D2F, artifact lineage, Research Authority, W83 and the protected one-shot FINAL_HOLDOUT boundary.
+
+Core Safety must independently remain above the existing branch-aware coverage floor. The floor must never be reduced to certify D2H.
 
 ## Interpretation
 
-A successful D2H tournament is DEVELOPMENT research evidence only. A DEVELOPMENT winner is not a trading strategy promotion, does not prove future alpha or profitability, and has no PAPER/LIVE or capital authority. FINAL_HOLDOUT remains a later, separately governed one-shot frontier.
+A successful D2H tournament is DEVELOPMENT research evidence only. A DEVELOPMENT winner is not a trading-strategy promotion, does not prove future alpha or profitability, and has no PAPER/LIVE or capital authority. FINAL_HOLDOUT remains a later, separately governed one-shot frontier.
