@@ -9,6 +9,10 @@ TARGET = ROOT / "labs/oss3_qlib/family_evaluation_batch.py"
 
 FORBIDDEN_IMPORT_ROOTS = {
     "qlib",
+    "pandas",
+    "numpy",
+    "scipy",
+    "sklearn",
     "requests",
     "httpx",
     "aiohttp",
@@ -18,6 +22,7 @@ FORBIDDEN_IMPORT_ROOTS = {
     "ib_insync",
     "ccxt",
 }
+FORBIDDEN_RELATIVE_MODULES = {"family_runner", "dataset_adapter", "network_guard"}
 FORBIDDEN_CALL_NAMES = {"eval", "exec", "compile", "__import__"}
 FORBIDDEN_TEXT = (
     "OrderIntent(",
@@ -29,11 +34,15 @@ FORBIDDEN_TEXT = (
     'capital_authority="LIMITED"',
     'live_trading="ENABLED"',
     "candidate_output_bindings: tuple[dict",
+    "from .family_runner import",
+    "from .dataset_adapter import",
 )
 REQUIRED_TEXT = (
     "class FrozenCandidateOutputBinding:",
     "candidate_output_bindings: tuple[FrozenCandidateOutputBinding, ...]",
     "FrozenCandidateOutputBinding.from_output",
+    "_verify_frozen_candidate_output",
+    "_d2g_evidence_payload",
     "prepare_family_evaluation_preregistration",
     "preregister_family_evaluation",
     "_require_durable_preregistration",
@@ -51,11 +60,14 @@ def main() -> None:
     tree = ast.parse(source, filename=str(TARGET))
 
     imported_roots: set[str] = set()
+    relative_modules: set[str] = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             imported_roots.update(alias.name.split(".", 1)[0] for alias in node.names)
         elif isinstance(node, ast.ImportFrom) and node.module:
             imported_roots.add(node.module.split(".", 1)[0])
+            if node.level:
+                relative_modules.add(node.module)
         elif isinstance(node, ast.Call):
             if isinstance(node.func, ast.Name) and node.func.id in FORBIDDEN_CALL_NAMES:
                 raise SystemExit(f"OSS-3D2H boundary FAIL: forbidden dynamic call {node.func.id}")
@@ -71,6 +83,11 @@ def main() -> None:
     forbidden_imports = sorted(imported_roots & FORBIDDEN_IMPORT_ROOTS)
     if forbidden_imports:
         raise SystemExit(f"OSS-3D2H boundary FAIL: forbidden imports {forbidden_imports}")
+    forbidden_relative = sorted(relative_modules & FORBIDDEN_RELATIVE_MODULES)
+    if forbidden_relative:
+        raise SystemExit(
+            f"OSS-3D2H boundary FAIL: runtime-heavy relative imports {forbidden_relative}"
+        )
     for marker in FORBIDDEN_TEXT:
         if marker in source:
             raise SystemExit(f"OSS-3D2H boundary FAIL: forbidden authority/mutability marker {marker!r}")
@@ -96,9 +113,9 @@ def main() -> None:
 
     print(
         "AUTO-TRADE OSS-3D2H family evaluation batch boundary: PASS "
-        "(immutable frozen six-candidate D2G bindings -> label-value-free D2E plan -> durable "
-        "preregistration -> D2D DEVELOPMENT evaluation -> D2E sign-test/Holm tournament; "
-        "FINAL_HOLDOUT/promotion/broker/OMS/Safety/PAPER/capital/LIVE denied)"
+        "(runtime-free immutable six-candidate D2G evidence rebinding -> label-value-free D2E plan "
+        "-> durable preregistration -> D2D DEVELOPMENT evaluation -> D2E sign-test/Holm tournament; "
+        "Qlib/pandas/family-runner/FINAL_HOLDOUT/promotion/broker/OMS/Safety/PAPER/capital/LIVE denied)"
     )
 
 
