@@ -400,13 +400,23 @@ def _collect_installed_distributions() -> tuple[InstalledDistribution, ...]:
 def _canonicalize_distributions(
     distributions: Iterable[InstalledDistribution],
 ) -> tuple[InstalledDistribution, ...]:
-    manifest = tuple(sorted(distributions))
-    names = [item.name for item in manifest]
-    if len(names) != len(set(names)):
-        raise EnvironmentAttestationIntegrityError(
-            "duplicate canonical distribution identity"
-        )
-    return manifest
+    versions_by_name: dict[str, set[str]] = {}
+    for item in distributions:
+        if not isinstance(item, InstalledDistribution):
+            raise EnvironmentAttestationIntegrityError(
+                "distribution manifest contains a noncanonical entry"
+            )
+        versions_by_name.setdefault(item.name, set()).add(item.version)
+
+    manifest: list[InstalledDistribution] = []
+    for name in sorted(versions_by_name):
+        versions = sorted(versions_by_name[name])
+        if len(versions) != 1:
+            raise EnvironmentAttestationIntegrityError(
+                f"conflicting installed versions for canonical distribution {name}"
+            )
+        manifest.append(InstalledDistribution(name=name, version=versions[0]))
+    return tuple(manifest)
 
 
 def _from_document(document: object) -> QlibEnvironmentAttestation:
