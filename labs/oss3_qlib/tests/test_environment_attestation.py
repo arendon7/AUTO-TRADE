@@ -98,12 +98,27 @@ def test_duplicate_json_key_fails_closed(tmp_path: Path) -> None:
         QlibEnvironmentAttestation.read(target)
 
 
-def test_duplicate_normalized_distribution_identity_fails_closed() -> None:
+def test_identical_duplicate_distribution_metadata_collapses_deterministically() -> None:
     current = collect_environment_attestation()
     manifest = list(current.installed_distributions)
     manifest.append(InstalledDistribution(name="pyqlib", version="0.9.7"))
 
-    with pytest.raises(EnvironmentAttestationIntegrityError, match="duplicate canonical"):
+    collapsed = collect_environment_attestation(distributions=manifest)
+
+    assert collapsed.installed_distributions == current.installed_distributions
+    assert collapsed.installed_manifest_hash == current.installed_manifest_hash
+    assert collapsed.attestation_hash == current.attestation_hash
+
+
+def test_conflicting_distribution_versions_fail_closed() -> None:
+    current = collect_environment_attestation()
+    manifest = list(current.installed_distributions)
+    manifest.append(InstalledDistribution(name="pyqlib", version="9.9.9"))
+
+    with pytest.raises(
+        EnvironmentAttestationIntegrityError,
+        match="conflicting installed versions for canonical distribution pyqlib",
+    ):
         collect_environment_attestation(distributions=manifest)
 
 
