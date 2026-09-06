@@ -2,9 +2,11 @@
 
 D2K is the first OSS-3 frontier allowed to expose protected FINAL_HOLDOUT
 outcomes.  It consumes the exact D2J authorization identity durably before
-checkout, replays the winner's original D2A TRAIN bundle without refitting on
-DEVELOPMENT, executes the frozen model config under the pinned Qlib runtime,
-and evaluates only the D2J-preregistered Rank-IC gates.
+checkout, proves that the protected wrapper can see that durable consumption,
+replays the winner's original D2A TRAIN bundle without refitting on
+DEVELOPMENT, requires the exact source D2G runtime environment, executes the
+frozen model under the pinned Qlib runtime, and evaluates only the
+D2J-preregistered Rank-IC gates.
 
 Any failure after durable authorization consumption is terminal.  PASS is
 predictive evidence only: D2K grants no profitability, promotion, broker,
@@ -33,6 +35,10 @@ from autotrade.research.oss3_supervised_label_artifact import SupervisedLabelArt
 from autotrade.research.oss3_training_bundle import TrainingBundleArtifact
 from autotrade.research.registry import HoldoutPermit, SQLiteExperimentRegistry
 
+from .family_environment_attestation import (
+    CandidateEnvironmentAttestation,
+    collect_candidate_environment_attestation,
+)
 from .family_model_contract import (
     QLIB_VERSION,
     candidate_from_config_hash,
@@ -41,6 +47,7 @@ from .family_model_contract import (
 )
 from .final_holdout_protocol import (
     FINAL_VALIDATION_PURPOSE,
+    OSS3D2J_COMMITMENT_VERSION,
     OSS3D2J_CONTRACT_VERSION,
     OSS3FinalHoldoutProtocolReceipt,
     OSS3ProtectedFinalHoldoutCommitment,
@@ -74,12 +81,20 @@ SENSITIVE_ENV_PREFIXES = (
     "BROKER_",
 )
 
+# Every source that can alter protocol interpretation, source-runtime identity,
+# TRAIN replay, protected-material validation, network isolation or Qlib
+# execution is bound into the D2K semantic identity.
 SEMANTIC_FILES = (
     "labs/oss3_qlib/final_holdout_evaluator.py",
     "labs/oss3_qlib/final_holdout_protocol.py",
     "labs/oss3_qlib/family_model_contract.py",
+    "labs/oss3_qlib/family_environment_attestation.py",
+    "labs/oss3_qlib/environment_attestation.py",
     "labs/oss3_qlib/network_guard.py",
+    "labs/oss3_qlib/requirements.txt",
     "src/autotrade/research/oss3_development_inference.py",
+    "src/autotrade/research/oss3_factor_matrix_artifact.py",
+    "src/autotrade/research/oss3_supervised_label_artifact.py",
     "src/autotrade/research/oss3_training_bundle.py",
 )
 
@@ -121,15 +136,10 @@ class FinalHoldoutFeatureRow:
             )
         if not _SYMBOL_RE.fullmatch(self.symbol):
             raise ValueError("invalid FINAL_HOLDOUT feature symbol")
-        if not self.values:
-            raise ValueError("FINAL_HOLDOUT feature row cannot be empty")
-        if any(
-            isinstance(value, bool)
-            or not isinstance(value, (int, float))
-            or not isfinite(float(value))
-            for value in self.values
-        ):
-            raise ValueError("FINAL_HOLDOUT feature values must be finite")
+        if not isinstance(self.values, tuple) or not self.values:
+            raise ValueError("FINAL_HOLDOUT feature values must be a non-empty tuple")
+        for value in self.values:
+            _require_finite(value, "FINAL_HOLDOUT feature value")
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -162,12 +172,7 @@ class FinalHoldoutLabelRow:
             )
         if not _SYMBOL_RE.fullmatch(self.symbol):
             raise ValueError("invalid FINAL_HOLDOUT label symbol")
-        if (
-            isinstance(self.value, bool)
-            or not isinstance(self.value, (int, float))
-            or not isfinite(float(self.value))
-        ):
-            raise ValueError("FINAL_HOLDOUT label value must be finite")
+        _require_finite(self.value, "FINAL_HOLDOUT label value")
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -218,12 +223,17 @@ class OSS3FinalHoldoutMaterial:
             raise OSS3FinalHoldoutEvaluationGovernanceError(
                 "FINAL_HOLDOUT material window must be positive"
             )
-        if not self.feature_names or len(set(self.feature_names)) != len(self.feature_names):
+        if (
+            not isinstance(self.feature_names, tuple)
+            or not self.feature_names
+            or len(set(self.feature_names)) != len(self.feature_names)
+            or any(not isinstance(name, str) or not name for name in self.feature_names)
+        ):
             raise OSS3FinalHoldoutEvaluationIntegrityError(
-                "FINAL_HOLDOUT feature_names must be non-empty and unique"
+                "FINAL_HOLDOUT feature_names must be unique non-empty strings"
             )
-        if any(not isinstance(name, str) or not name for name in self.feature_names):
-            raise ValueError("invalid FINAL_HOLDOUT feature name")
+        if not isinstance(self.feature_rows, tuple) or not isinstance(self.label_rows, tuple):
+            raise TypeError("FINAL_HOLDOUT rows must be immutable tuples")
         if not self.feature_rows or not self.label_rows:
             raise OSS3FinalHoldoutEvaluationGovernanceError(
                 "FINAL_HOLDOUT material cannot be empty"
@@ -269,8 +279,8 @@ class OSS3FinalHoldoutMaterial:
                 raise OSS3FinalHoldoutEvaluationGovernanceError(
                     "FINAL_HOLDOUT row falls outside committed partition"
                 )
-
-        # Constructing the public commitment must remain valid at all times.
+        # Construction must itself prove that the D2J public commitment is
+        # structurally valid, including minimum sample adequacy.
         _ = self.commitment
 
     @property
@@ -320,7 +330,7 @@ class OSS3FinalHoldoutMaterial:
         counts = _cross_section_counts(tuple(row.as_of for row in self.feature_rows))
         minimum = min(count for _, count in counts)
         return OSS3ProtectedFinalHoldoutCommitment(
-            commitment_version="OSS3D2J_PROTECTED_FINAL_HOLDOUT_COMMITMENT_V1",
+            commitment_version=OSS3D2J_COMMITMENT_VERSION,
             source_campaign_id=self.source_campaign_id,
             research_split_hash=self.research_split_hash,
             source_universe_hash=self.source_universe_hash,
@@ -340,7 +350,14 @@ class OSS3FinalHoldoutMaterial:
 
 
 class ProtectedOSS3FinalHoldout:
-    """Opaque one-process FINAL_HOLDOUT wrapper with one checkout."""
+    """Opaque one-process FINAL_HOLDOUT wrapper with durable checkout proof.
+
+    The actual material is private.  A structurally correct HoldoutPermit is
+    insufficient: checkout also re-opens the canonical D2K SQLite registry in
+    query-only mode and requires the exact permit and start receipt to have
+    already been committed durably.  This closes the accidental forged-permit
+    bypass that a field-only permit check would leave open.
+    """
 
     __slots__ = ("__material", "__checked_out")
 
@@ -359,19 +376,33 @@ class ProtectedOSS3FinalHoldout:
         *,
         permit: HoldoutPermit,
         expected_authorization_id: str,
+        start_receipt: "OSS3FinalHoldoutStartReceipt",
+        registry_path: str | Path,
     ) -> OSS3FinalHoldoutMaterial:
         if self.__checked_out:
             raise OSS3FinalHoldoutAlreadyConsumed(
                 "protected OSS-3 FINAL_HOLDOUT already checked out"
             )
+        if not isinstance(permit, HoldoutPermit):
+            raise TypeError("permit must be HoldoutPermit")
+        if not isinstance(start_receipt, OSS3FinalHoldoutStartReceipt):
+            raise TypeError("start_receipt must be OSS3FinalHoldoutStartReceipt")
         if (
             permit.permit_id != expected_authorization_id
             or permit.purpose != FINAL_VALIDATION_PURPOSE
             or permit.issued_by != _ISSUED_BY
+            or start_receipt.holdout_authorization_id != permit.permit_id
+            or start_receipt.holdout_commitment_fingerprint != self.commitment.fingerprint
         ):
             raise OSS3FinalHoldoutEvaluationGovernanceError(
-                "FINAL_HOLDOUT checkout requires exact consumed D2K permit"
+                "FINAL_HOLDOUT checkout requires exact D2K permit/start identity"
             )
+        _verify_durable_checkout_authorization(
+            registry_path=registry_path,
+            permit=permit,
+            start_receipt=start_receipt,
+            commitment=self.commitment,
+        )
         self.__checked_out = True
         return self.__material
 
@@ -386,12 +417,7 @@ class FinalHoldoutPredictionRow:
         _parse_canonical_utc(self.timestamp, "prediction timestamp")
         if not _SYMBOL_RE.fullmatch(self.symbol):
             raise ValueError("invalid prediction symbol")
-        if (
-            isinstance(self.score, bool)
-            or not isinstance(self.score, (int, float))
-            or not isfinite(float(self.score))
-        ):
-            raise ValueError("prediction score must be finite")
+        _require_finite(self.score, "prediction score")
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -541,6 +567,10 @@ class OSS3FinalHoldoutStartReceipt:
     training_bundle_hash: str
     model_config_hash: str
     source_runner_code_hash: str
+    source_environment_attestation_hash: str
+    source_runtime_environment_hash: str
+    final_environment_attestation_hash: str
+    final_runtime_environment_hash: str
     evaluator_semantic_hash: str
     started_at: str
     start_hash: str
@@ -556,6 +586,10 @@ class OSS3FinalHoldoutStartReceipt:
             "training_bundle_hash",
             "model_config_hash",
             "source_runner_code_hash",
+            "source_environment_attestation_hash",
+            "source_runtime_environment_hash",
+            "final_environment_attestation_hash",
+            "final_runtime_environment_hash",
             "evaluator_semantic_hash",
             "start_hash",
         ):
@@ -564,12 +598,20 @@ class OSS3FinalHoldoutStartReceipt:
             raise OSS3FinalHoldoutEvaluationIntegrityError(
                 "noncanonical D2K start version"
             )
+        if self.final_environment_attestation_hash != self.source_environment_attestation_hash:
+            raise OSS3FinalHoldoutEvaluationIntegrityError(
+                "D2K final environment attestation differs from frozen source environment"
+            )
+        if self.final_runtime_environment_hash != self.source_runtime_environment_hash:
+            raise OSS3FinalHoldoutEvaluationIntegrityError(
+                "D2K final runtime identity differs from frozen source runtime"
+            )
         _parse_canonical_utc(self.started_at, "started_at")
         if self.start_hash != _hash(self.to_dict(include_hash=False)):
             raise OSS3FinalHoldoutEvaluationIntegrityError("D2K start hash mismatch")
 
     def to_dict(self, *, include_hash: bool = True) -> dict[str, object]:
-        payload = {
+        payload: dict[str, object] = {
             "evaluation_id": self.evaluation_id,
             "start_version": self.start_version,
             "protocol_id": self.protocol_id,
@@ -581,6 +623,10 @@ class OSS3FinalHoldoutStartReceipt:
             "training_bundle_hash": self.training_bundle_hash,
             "model_config_hash": self.model_config_hash,
             "source_runner_code_hash": self.source_runner_code_hash,
+            "source_environment_attestation_hash": self.source_environment_attestation_hash,
+            "source_runtime_environment_hash": self.source_runtime_environment_hash,
+            "final_environment_attestation_hash": self.final_environment_attestation_hash,
+            "final_runtime_environment_hash": self.final_runtime_environment_hash,
             "evaluator_semantic_hash": self.evaluator_semantic_hash,
             "started_at": self.started_at,
         }
@@ -602,6 +648,10 @@ class OSS3FinalHoldoutEvaluationReceipt:
     source_request_hash: str
     training_bundle_hash: str
     model_config_hash: str
+    source_environment_attestation_hash: str
+    source_runtime_environment_hash: str
+    final_environment_attestation_hash: str
+    final_runtime_environment_hash: str
     evaluator_semantic_hash: str
     prediction_payload_hash: str
     result_hash: str
@@ -639,6 +689,10 @@ class OSS3FinalHoldoutEvaluationReceipt:
             "source_request_hash",
             "training_bundle_hash",
             "model_config_hash",
+            "source_environment_attestation_hash",
+            "source_runtime_environment_hash",
+            "final_environment_attestation_hash",
+            "final_runtime_environment_hash",
             "evaluator_semantic_hash",
             "receipt_hash",
         ):
@@ -650,6 +704,14 @@ class OSS3FinalHoldoutEvaluationReceipt:
         if self.receipt_version != OSS3D2K_RECEIPT_VERSION:
             raise OSS3FinalHoldoutEvaluationIntegrityError(
                 "noncanonical D2K receipt version"
+            )
+        if self.final_environment_attestation_hash != self.source_environment_attestation_hash:
+            raise OSS3FinalHoldoutEvaluationIntegrityError(
+                "terminal D2K environment differs from frozen source environment"
+            )
+        if self.final_runtime_environment_hash != self.source_runtime_environment_hash:
+            raise OSS3FinalHoldoutEvaluationIntegrityError(
+                "terminal D2K runtime differs from frozen source runtime"
             )
         started = _parse_canonical_utc(self.started_at, "started_at")
         terminal = _parse_canonical_utc(self.terminal_at, "terminal_at")
@@ -740,7 +802,9 @@ class OSS3FinalHoldoutEvaluationReceipt:
                 raise OSS3FinalHoldoutEvaluationIntegrityError(
                     "D2K decision must be mechanically derived from gates"
                 )
-            if self.predictive_validation_passed is (self.decision is not OSS3FinalHoldoutDecision.PASS):
+            if self.predictive_validation_passed is not (
+                self.decision is OSS3FinalHoldoutDecision.PASS
+            ):
                 raise OSS3FinalHoldoutEvaluationIntegrityError(
                     "predictive_validation_passed differs from terminal decision"
                 )
@@ -764,6 +828,10 @@ class OSS3FinalHoldoutEvaluationReceipt:
             "source_request_hash": self.source_request_hash,
             "training_bundle_hash": self.training_bundle_hash,
             "model_config_hash": self.model_config_hash,
+            "source_environment_attestation_hash": self.source_environment_attestation_hash,
+            "source_runtime_environment_hash": self.source_runtime_environment_hash,
+            "final_environment_attestation_hash": self.final_environment_attestation_hash,
+            "final_runtime_environment_hash": self.final_runtime_environment_hash,
             "evaluator_semantic_hash": self.evaluator_semantic_hash,
             "prediction_payload_hash": self.prediction_payload_hash,
             "result_hash": self.result_hash,
@@ -857,9 +925,18 @@ class QlibFinalHoldoutDatasetAdapter:
         _assert_finite_frame(self._train, "TRAIN")
         _assert_finite_frame(self._test, "FINAL_HOLDOUT")
 
-    def prepare(self, segment: object, col_set: object, data_key: object = "infer") -> pd.DataFrame:
+    def prepare(
+        self,
+        segment: object,
+        col_set: object,
+        data_key: object = "infer",
+    ) -> pd.DataFrame:
         if segment == "train":
-            if data_key != "learn" or tuple(col_set) != ("feature", "label"):
+            if (
+                data_key != "learn"
+                or not isinstance(col_set, (list, tuple))
+                or tuple(col_set) != ("feature", "label")
+            ):
                 raise OSS3FinalHoldoutEvaluationIntegrityError(
                     "unexpected Qlib TRAIN prepare contract"
                 )
@@ -889,6 +966,8 @@ class SQLiteOSS3FinalHoldoutEvaluationRegistry:
 
     def _initialize(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        # Reuse the canonical permit table contract; D2K then couples its own
+        # start row to the permit in one BEGIN IMMEDIATE transaction.
         SQLiteExperimentRegistry(self.path)
         conn = self._connect()
         try:
@@ -905,6 +984,10 @@ class SQLiteOSS3FinalHoldoutEvaluationRegistry:
                     source_request_hash TEXT NOT NULL,
                     training_bundle_hash TEXT NOT NULL,
                     model_config_hash TEXT NOT NULL,
+                    source_environment_attestation_hash TEXT NOT NULL,
+                    source_runtime_environment_hash TEXT NOT NULL,
+                    final_environment_attestation_hash TEXT NOT NULL,
+                    final_runtime_environment_hash TEXT NOT NULL,
                     evaluator_semantic_hash TEXT NOT NULL,
                     started_at TEXT NOT NULL,
                     start_hash TEXT NOT NULL UNIQUE,
@@ -981,7 +1064,10 @@ class SQLiteOSS3FinalHoldoutEvaluationRegistry:
             train_labels=train_labels,
             holdout_commitment=commitment,
         )
+        # Secrets are rejected before runtime attestation and, critically,
+        # before permit consumption.
         _reject_broker_credentials()
+        final_attestation = _verify_exact_final_runtime(protocol)
 
         permit = HoldoutPermit(
             permit_id=protocol.expected_holdout_authorization_id,
@@ -993,14 +1079,19 @@ class SQLiteOSS3FinalHoldoutEvaluationRegistry:
             protocol=protocol,
             source_request=source_request,
             training_bundle=training_bundle,
+            final_attestation=final_attestation,
             started_at=now,
         )
         self._consume_and_record_start(permit=permit, start=start)
 
         try:
+            # The wrapper independently proves that this exact start + permit
+            # are already durable in this registry before exposing labels.
             material = holdout._checkout(
                 permit=permit,
                 expected_authorization_id=protocol.expected_holdout_authorization_id,
+                start_receipt=start,
+                registry_path=self.path,
             )
             if material.commitment.fingerprint != start.holdout_commitment_fingerprint:
                 raise OSS3FinalHoldoutEvaluationIntegrityError(
@@ -1079,8 +1170,12 @@ class SQLiteOSS3FinalHoldoutEvaluationRegistry:
                     winner_binding_fingerprint, holdout_commitment_fingerprint,
                     holdout_authorization_id, source_request_hash,
                     training_bundle_hash, model_config_hash,
+                    source_environment_attestation_hash,
+                    source_runtime_environment_hash,
+                    final_environment_attestation_hash,
+                    final_runtime_environment_hash,
                     evaluator_semantic_hash, started_at, start_hash, start_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     start.evaluation_id,
@@ -1092,6 +1187,10 @@ class SQLiteOSS3FinalHoldoutEvaluationRegistry:
                     start.source_request_hash,
                     start.training_bundle_hash,
                     start.model_config_hash,
+                    start.source_environment_attestation_hash,
+                    start.source_runtime_environment_hash,
+                    start.final_environment_attestation_hash,
+                    start.final_runtime_environment_hash,
                     start.evaluator_semantic_hash,
                     start.started_at,
                     start.start_hash,
@@ -1183,6 +1282,7 @@ def read_oss3d2k_evaluation_read_only(
     conn.row_factory = sqlite3.Row
     try:
         conn.execute("PRAGMA query_only = ON")
+        _require_d2k_tables(conn)
         start = conn.execute(
             "SELECT * FROM oss3_final_holdout_evaluation_starts WHERE protocol_id = ?",
             (protocol_id,),
@@ -1209,6 +1309,12 @@ def read_oss3d2k_evaluation_read_only(
             or receipt.protocol_id != start_receipt.protocol_id
             or receipt.holdout_authorization_id
             != start_receipt.holdout_authorization_id
+            or receipt.source_environment_attestation_hash
+            != start_receipt.source_environment_attestation_hash
+            or receipt.final_environment_attestation_hash
+            != start_receipt.final_environment_attestation_hash
+            or receipt.final_runtime_environment_hash
+            != start_receipt.final_runtime_environment_hash
         ):
             raise OSS3FinalHoldoutEvaluationIntegrityError(
                 "D2K start/terminal chain mismatch"
@@ -1217,18 +1323,7 @@ def read_oss3d2k_evaluation_read_only(
             "SELECT issued_by, purpose, used_at FROM holdout_permits WHERE permit_id = ?",
             (receipt.holdout_authorization_id,),
         ).fetchone()
-        if permit is None:
-            raise OSS3FinalHoldoutEvaluationIntegrityError(
-                "D2K terminal receipt missing consumed permit"
-            )
-        if (
-            str(permit["issued_by"]) != _ISSUED_BY
-            or str(permit["purpose"]) != FINAL_VALIDATION_PURPOSE
-            or str(permit["used_at"]) != start_receipt.started_at
-        ):
-            raise OSS3FinalHoldoutEvaluationIntegrityError(
-                "D2K consumed permit side columns drifted"
-            )
+        _verify_permit_row(permit, start_receipt)
         return receipt
     finally:
         conn.close()
@@ -1300,6 +1395,8 @@ def _verify_replay_inputs(
         raise TypeError("train_features must be FactorMatrixArtifact")
     if not isinstance(train_labels, SupervisedLabelArtifact):
         raise TypeError("train_labels must be SupervisedLabelArtifact")
+    if not isinstance(holdout_commitment, OSS3ProtectedFinalHoldoutCommitment):
+        raise TypeError("holdout_commitment must be OSS3ProtectedFinalHoldoutCommitment")
     winner = protocol.winner_binding
     request = source_request.manifest
     bundle = training_bundle.manifest
@@ -1358,13 +1455,44 @@ def _verify_replay_inputs(
         raise OSS3FinalHoldoutEvaluationGovernanceError(
             "D2K may not refit on DEVELOPMENT"
         )
-    if _parse_canonical_utc(holdout_commitment.partition_start, "holdout start") < _parse_canonical_utc(
+    if _parse_canonical_utc(
+        holdout_commitment.partition_start,
+        "holdout start",
+    ) < _parse_canonical_utc(
         request.inference_end,
         "source DEVELOPMENT inference_end",
     ):
         raise OSS3FinalHoldoutEvaluationIntegrityError(
             "D2K FINAL_HOLDOUT overlaps source DEVELOPMENT window"
         )
+
+
+def _verify_exact_final_runtime(
+    protocol: OSS3FinalHoldoutProtocolReceipt,
+) -> CandidateEnvironmentAttestation:
+    """Require the final evaluator to reproduce the winner's D2G environment."""
+    winner = protocol.winner_binding
+    attestation = collect_candidate_environment_attestation(
+        model_config_hash=winner.model_config_hash
+    )
+    attestation.verify_current_contract()
+    if attestation.artifact_hash != winner.environment_attestation_hash:
+        raise OSS3FinalHoldoutEvaluationIntegrityError(
+            "D2K final environment attestation differs from frozen D2G winner"
+        )
+    if attestation.runtime_environment.fingerprint != winner.runtime_environment_hash:
+        raise OSS3FinalHoldoutEvaluationIntegrityError(
+            "D2K final model-neutral runtime differs from frozen D2G winner"
+        )
+    if attestation.manifest.runner_code_hash != winner.shared_runner_code_hash:
+        raise OSS3FinalHoldoutEvaluationIntegrityError(
+            "D2K final runner identity differs from frozen D2G winner"
+        )
+    if attestation.manifest.qlib_version != QLIB_VERSION:
+        raise OSS3FinalHoldoutEvaluationIntegrityError(
+            "D2K final environment does not contain exact Qlib version"
+        )
+    return attestation
 
 
 def _run_frozen_final_model(
@@ -1523,20 +1651,26 @@ def _build_start(
     protocol: OSS3FinalHoldoutProtocolReceipt,
     source_request: DevelopmentInferenceRequest,
     training_bundle: TrainingBundleArtifact,
+    final_attestation: CandidateEnvironmentAttestation,
     started_at: datetime,
 ) -> OSS3FinalHoldoutStartReceipt:
+    winner = protocol.winner_binding
     values = {
         "evaluation_id": evaluation_id,
         "start_version": OSS3D2K_START_VERSION,
         "protocol_id": protocol.protocol_id,
         "protocol_receipt_hash": protocol.receipt_hash,
-        "winner_binding_fingerprint": protocol.winner_binding.fingerprint,
+        "winner_binding_fingerprint": winner.fingerprint,
         "holdout_commitment_fingerprint": protocol.holdout_commitment.fingerprint,
         "holdout_authorization_id": protocol.expected_holdout_authorization_id,
         "source_request_hash": source_request.request_hash,
         "training_bundle_hash": training_bundle.artifact_hash,
-        "model_config_hash": protocol.winner_binding.model_config_hash,
-        "source_runner_code_hash": protocol.winner_binding.shared_runner_code_hash,
+        "model_config_hash": winner.model_config_hash,
+        "source_runner_code_hash": winner.shared_runner_code_hash,
+        "source_environment_attestation_hash": winner.environment_attestation_hash,
+        "source_runtime_environment_hash": winner.runtime_environment_hash,
+        "final_environment_attestation_hash": final_attestation.artifact_hash,
+        "final_runtime_environment_hash": final_attestation.runtime_environment.fingerprint,
         "evaluator_semantic_hash": evaluator_semantic_hash(),
         "started_at": started_at.astimezone(timezone.utc).isoformat(),
     }
@@ -1608,10 +1742,9 @@ def _build_metric_receipt(
             "predictive_validation_passed": decision is OSS3FinalHoldoutDecision.PASS,
         }
     )
-    payload = _terminal_payload_for_hash(values)
     return OSS3FinalHoldoutEvaluationReceipt(
         **values,
-        receipt_hash=_hash(payload),
+        receipt_hash=_hash(_terminal_payload_for_hash(values)),
     )
 
 
@@ -1665,6 +1798,10 @@ def _terminal_base(
         "source_request_hash": start.source_request_hash,
         "training_bundle_hash": start.training_bundle_hash,
         "model_config_hash": start.model_config_hash,
+        "source_environment_attestation_hash": start.source_environment_attestation_hash,
+        "source_runtime_environment_hash": start.source_runtime_environment_hash,
+        "final_environment_attestation_hash": start.final_environment_attestation_hash,
+        "final_runtime_environment_hash": start.final_runtime_environment_hash,
         "evaluator_semantic_hash": start.evaluator_semantic_hash,
         "started_at": start.started_at,
         "terminal_at": terminal_at.astimezone(timezone.utc).isoformat(),
@@ -1717,10 +1854,100 @@ def _gate(
     )
 
 
+def _verify_durable_checkout_authorization(
+    *,
+    registry_path: str | Path,
+    permit: HoldoutPermit,
+    start_receipt: OSS3FinalHoldoutStartReceipt,
+    commitment: OSS3ProtectedFinalHoldoutCommitment,
+) -> None:
+    """Prove permit + start were committed before protected material release."""
+    resolved = Path(registry_path).resolve()
+    if not resolved.is_file():
+        raise OSS3FinalHoldoutEvaluationGovernanceError(
+            "FINAL_HOLDOUT checkout has no durable D2K registry"
+        )
+    conn = sqlite3.connect(f"file:{resolved}?mode=ro", uri=True)
+    conn.row_factory = sqlite3.Row
+    try:
+        conn.execute("PRAGMA query_only = ON")
+        _require_d2k_tables(conn)
+        row = conn.execute(
+            "SELECT * FROM oss3_final_holdout_evaluation_starts WHERE start_hash = ?",
+            (start_receipt.start_hash,),
+        ).fetchone()
+        if row is None:
+            raise OSS3FinalHoldoutEvaluationGovernanceError(
+                "FINAL_HOLDOUT checkout start is not durably recorded"
+            )
+        durable_start = _start_from_row(row)
+        if durable_start != start_receipt:
+            raise OSS3FinalHoldoutEvaluationIntegrityError(
+                "FINAL_HOLDOUT checkout start differs from durable receipt"
+            )
+        if durable_start.holdout_commitment_fingerprint != commitment.fingerprint:
+            raise OSS3FinalHoldoutEvaluationIntegrityError(
+                "FINAL_HOLDOUT checkout commitment differs from durable start"
+            )
+        permit_row = conn.execute(
+            "SELECT issued_by, purpose, used_at FROM holdout_permits WHERE permit_id = ?",
+            (permit.permit_id,),
+        ).fetchone()
+        _verify_permit_row(permit_row, durable_start)
+        terminal = conn.execute(
+            "SELECT receipt_hash FROM oss3_final_holdout_evaluations WHERE evaluation_id = ?",
+            (durable_start.evaluation_id,),
+        ).fetchone()
+        if terminal is not None:
+            raise OSS3FinalHoldoutAlreadyConsumed(
+                "FINAL_HOLDOUT evaluation is already terminal"
+            )
+    finally:
+        conn.close()
+
+
+def _require_d2k_tables(conn: sqlite3.Connection) -> None:
+    tables = {
+        str(row["name"])
+        for row in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        ).fetchall()
+    }
+    required = {
+        "holdout_permits",
+        "oss3_final_holdout_evaluation_starts",
+        "oss3_final_holdout_evaluations",
+    }
+    if not required.issubset(tables):
+        raise OSS3FinalHoldoutEvaluationIntegrityError(
+            "D2K durable registry tables are missing"
+        )
+
+
+def _verify_permit_row(
+    permit_row: sqlite3.Row | None,
+    start_receipt: OSS3FinalHoldoutStartReceipt,
+) -> None:
+    if permit_row is None:
+        raise OSS3FinalHoldoutEvaluationIntegrityError(
+            "D2K durable start is missing its consumed permit"
+        )
+    if (
+        str(permit_row["issued_by"]) != _ISSUED_BY
+        or str(permit_row["purpose"]) != FINAL_VALIDATION_PURPOSE
+        or str(permit_row["used_at"]) != start_receipt.started_at
+    ):
+        raise OSS3FinalHoldoutEvaluationIntegrityError(
+            "D2K consumed permit side columns drifted"
+        )
+
+
 def _start_from_row(row: sqlite3.Row) -> OSS3FinalHoldoutStartReceipt:
     try:
         payload = json.loads(str(row["start_json"]))
-        receipt = OSS3FinalHoldoutStartReceipt(**payload)
+        if not isinstance(payload, Mapping):
+            raise TypeError("start_json must be object")
+        receipt = OSS3FinalHoldoutStartReceipt(**dict(payload))
     except (json.JSONDecodeError, TypeError, ValueError) as exc:
         raise OSS3FinalHoldoutEvaluationIntegrityError(
             "invalid durable D2K start receipt"
@@ -1735,6 +1962,10 @@ def _start_from_row(row: sqlite3.Row) -> OSS3FinalHoldoutStartReceipt:
         ("source_request_hash", receipt.source_request_hash),
         ("training_bundle_hash", receipt.training_bundle_hash),
         ("model_config_hash", receipt.model_config_hash),
+        ("source_environment_attestation_hash", receipt.source_environment_attestation_hash),
+        ("source_runtime_environment_hash", receipt.source_runtime_environment_hash),
+        ("final_environment_attestation_hash", receipt.final_environment_attestation_hash),
+        ("final_runtime_environment_hash", receipt.final_runtime_environment_hash),
         ("evaluator_semantic_hash", receipt.evaluator_semantic_hash),
         ("started_at", receipt.started_at),
         ("start_hash", receipt.start_hash),
@@ -1767,7 +1998,9 @@ def _terminal_from_row(row: sqlite3.Row) -> OSS3FinalHoldoutEvaluationReceipt:
         raw_gates = values.get("gates")
         if not isinstance(raw_gates, list):
             raise TypeError("gates must be list")
-        values["gates"] = tuple(OSS3FinalHoldoutGate(**dict(item)) for item in raw_gates)
+        values["gates"] = tuple(
+            OSS3FinalHoldoutGate(**dict(item)) for item in raw_gates
+        )
         raw_failed = values.get("failed_gate_ids")
         if not isinstance(raw_failed, list):
             raise TypeError("failed_gate_ids must be list")
@@ -1827,9 +2060,9 @@ def _pearson(left: Sequence[float], right: Sequence[float]) -> float:
         raise OSS3FinalHoldoutEvaluationGovernanceError(
             "Rank IC undefined for constant values"
         )
-    value = sum(a * b for a, b in zip(left_centered, right_centered, strict=True)) / sqrt(
-        left_ss * right_ss
-    )
+    value = sum(
+        a * b for a, b in zip(left_centered, right_centered, strict=True)
+    ) / sqrt(left_ss * right_ss)
     if not isfinite(value):
         raise OSS3FinalHoldoutEvaluationIntegrityError(
             "Rank IC produced non-finite value"
