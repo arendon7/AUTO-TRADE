@@ -49,17 +49,55 @@ Candidate identity binds:
 - exact OSS-3D2A request SHA-256;
 - Qlib version;
 - expected isolated-runner code SHA-256;
-- D2C environment-attestation SHA-256.
+- the candidate-specific OSS-3D2C environment-attestation SHA-256.
 
 The family must contain between 2 and 32 candidates. Trial IDs, substantive `(model_family, model_config_hash)` identities and inference request hashes must all be unique. Adding a new candidate after preregistration requires a new campaign; the existing campaign is not expanded.
+
+## D2C attestation versus common runtime identity
+
+OSS-3D2C V1 is not a model-neutral environment document. Its manifest deliberately binds not only Python/Qlib/distributions, but also:
+
+- `model_family`;
+- `model_config_hash`;
+- `runner_code_hash`.
+
+Therefore two legitimate model candidates can and normally will have different D2C `artifact_hash` values even when they were executed in the same scientific software environment.
+
+D2E preserves that exact candidate-specific attestation hash for provenance, but does **not** require those artifact hashes to be equal.
+
+For fair comparison, D2E separately freezes a `RuntimeEnvironmentIdentity` containing only the model-neutral D2C fields:
+
+- policy `D2C_MODEL_NEUTRAL_RUNTIME_IDENTITY_V1`;
+- Python implementation and version;
+- platform system and machine architecture;
+- libc name and version;
+- Qlib distribution and version;
+- installed-distribution count;
+- installed-distribution-set SHA-256.
+
+Its canonical fingerprint is the common `runtime_environment_hash` for the tournament family.
+
+This creates two simultaneous guarantees:
+
+```text
+candidate-specific D2C artifact hash
+    -> proves the exact model/config/runner-associated attestation for that candidate
+
+shared RuntimeEnvironmentIdentity hash
+    -> proves candidates are compared under the same model-neutral software environment
+```
+
+The shared runner-code hash is enforced independently at candidate level. It is intentionally excluded from `RuntimeEnvironmentIdentity`, because it is not an installed-environment property.
+
+A future execution stage must derive and verify the model-neutral identity from every concrete D2C attestation before it preregisters the real D2E campaign. D2E itself remains core-side and does not import the isolated lab.
 
 ## Fair-comparison constraints
 
 All candidates in one D2E family must share:
 
 - one Qlib version;
-- one runner code hash;
-- one environment-attestation hash;
+- one generalized runner code hash;
+- one model-neutral `RuntimeEnvironmentIdentity` fingerprint;
 - one source campaign;
 - one frozen research-split hash;
 - one source-universe hash;
@@ -67,6 +105,8 @@ All candidates in one D2E family must share:
 - one DEVELOPMENT label artifact;
 - one exact evaluation keyset;
 - one canonical UTC DEVELOPMENT evaluation window.
+
+Each candidate retains its own exact D2C attestation hash, model family, model-config hash and inference-request hash.
 
 The evaluation window must use canonical `+00:00` UTC serialization. Naive timestamps, `Z` aliases and non-UTC offsets are rejected.
 
@@ -83,7 +123,8 @@ The checks include:
 - model family and model config;
 - Qlib version;
 - runner code hash;
-- D2C environment-attestation hash;
+- the candidate-specific D2C attestation hash;
+- the common model-neutral runtime-environment hash through the frozen trial parameters;
 - exact prediction-receipt fingerprint;
 - exact prediction artifact hash and prediction manifest hash carried by that receipt;
 - exact D2A request hash;
@@ -130,7 +171,7 @@ For `n` non-zero observations and `k` positives:
 p = P[X >= k],  X ~ Binomial(n, 0.5)
 ```
 
-This test is deliberately simple, exact and independent of return/PnL assumptions. It does not establish economic profitability.
+This test is deliberately simple, exact and independent of return/PnL assumptions. It does not establish economic profitability and does not model serial dependence; later robustness work can add block-based IC evidence without changing this preregistered ranking metric.
 
 ## Multiple-testing control
 
@@ -159,6 +200,7 @@ A failed candidate is ineligible but is not erased from family accounting.
 `OSS3D2ETournamentEvidence` binds:
 
 - D2E plan fingerprint;
+- common model-neutral `runtime_environment_hash`;
 - canonical tournament evidence/fingerprint;
 - Holm family evidence;
 - family size;
@@ -190,7 +232,10 @@ D2E fails closed when, among other cases:
 - campaign accounting is incomplete;
 - a candidate is outside the frozen universe;
 - the same substantive model/request is duplicated under another ID;
-- Qlib/runtime/environment identities differ within a family;
+- candidate Qlib or runner identities differ within a family;
+- candidate Qlib identity differs from the frozen model-neutral runtime identity;
+- completed trials do not retain the frozen common runtime-environment fingerprint;
+- a candidate-specific D2C attestation hash does not match its D2D evaluation;
 - D2A/D2D provenance differs from preregistration;
 - the primary metric does not recompute from D2D cross-sections;
 - completed candidates have different cross-sectional support;
@@ -201,4 +246,4 @@ D2E fails closed when, among other cases:
 
 D2E does **not** prove alpha, future returns, capacity, implementation shortfall, robustness under costs, or live tradability. A model can have positive DEVELOPMENT rank IC and still fail every later economic or risk gate.
 
-The appropriate next research stage after D2E certification is to extend the isolated Qlib runner with a small, predeclared finite model family and instantiate a D2E campaign **before** those DEVELOPMENT results are inspected. FINAL_HOLDOUT remains unavailable until the winning candidate has been frozen through the appropriate one-shot holdout protocol.
+The appropriate next research stage after D2E certification is to extend the isolated Qlib runner with a small, predeclared finite model family and instantiate a D2E campaign **before** those DEVELOPMENT results are inspected. That stage must derive the common `RuntimeEnvironmentIdentity` from every concrete candidate D2C attestation and prove equality before comparison. FINAL_HOLDOUT remains unavailable until the winning candidate has been frozen through the appropriate one-shot holdout protocol.
