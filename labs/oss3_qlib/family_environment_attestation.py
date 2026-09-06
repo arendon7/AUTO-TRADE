@@ -194,8 +194,13 @@ class CandidateEnvironmentAttestation:
         runner_hash: str | None = None,
     ) -> "CandidateEnvironmentAttestation":
         candidate_from_config_hash(model_config_hash)
-        actual_runner_hash = family_runner_code_hash() if runner_hash is None else runner_hash
+        current_runner_hash = family_runner_code_hash()
+        actual_runner_hash = current_runner_hash if runner_hash is None else runner_hash
         _require_hash(actual_runner_hash, "runner_hash")
+        if actual_runner_hash != current_runner_hash:
+            raise FamilyEnvironmentAttestationIntegrityError(
+                "candidate attestation runner hash differs from current D2G semantic runtime"
+            )
         canonical = tuple(sorted(distributions))
         _validate_distributions(canonical)
         manifest = CandidateEnvironmentManifest(
@@ -241,7 +246,9 @@ class CandidateEnvironmentAttestation:
     def verify_current_contract(self) -> None:
         candidate_from_config_hash(self.manifest.model_config_hash)
         if self.manifest.runner_code_hash != family_runner_code_hash():
-            raise FamilyEnvironmentAttestationIntegrityError("attestation runner hash differs from current D2G contract")
+            raise FamilyEnvironmentAttestationIntegrityError(
+                "attestation runner hash differs from current D2G contract"
+            )
 
     def to_dict(self) -> dict[str, object]:
         return {
