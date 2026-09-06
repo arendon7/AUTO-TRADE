@@ -11,10 +11,10 @@ Scientific/governance boundary:
 - one primary metric is fixed: mean_cross_sectional_rank_ic / MAXIMIZE;
 - exact metric ties use the existing immutable Tournament identity tie-break;
 - auxiliary D2D metrics are diagnostic and cannot change ranking;
+- the primary metric is recomputed from D2D cross-sections before ingestion;
 - one-sided exact sign-test p-values over cross-sectional rank-IC signs are
   recorded per candidate and Holm-adjusted over the complete frozen family;
-- all completed candidates must use the exact same cross-sectional timestamp
-  support before a tournament can be accepted;
+- all completed candidates must use identical cross-sectional timestamp support;
 - no model execution, Qlib runtime, tuning loop, FINAL_HOLDOUT access, PnL,
   Sharpe, broker, OMS, Safety, OrderIntent, PAPER, capital or LIVE authority.
 """
@@ -22,7 +22,7 @@ Scientific/governance boundary:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal
 from hashlib import sha256
 import json
@@ -31,10 +31,7 @@ import re
 from typing import Iterable
 
 from .multiple_testing import HolmEvidence, campaign_holm_evidence
-from .oss3_development_evaluation import (
-    DevelopmentEvaluationArtifact,
-    METRIC_POLICY_ID,
-)
+from .oss3_development_evaluation import DevelopmentEvaluationArtifact, METRIC_POLICY_ID
 from .oss3_development_inference import DevelopmentPredictionReceipt
 from .tournament import (
     RankingDirection,
@@ -42,14 +39,7 @@ from .tournament import (
     TournamentSpec,
     evaluate_strategy_tournament,
 )
-from .trials import (
-    CampaignSpec,
-    SQLiteTrialLedger,
-    TrialGovernanceError,
-    TrialPhase,
-    TrialSpec,
-    TrialStatus,
-)
+from .trials import CampaignSpec, SQLiteTrialLedger, TrialPhase, TrialSpec, TrialStatus
 
 
 OSS3D2E_PLAN_VERSION = "OSS3D2E_DEVELOPMENT_MODEL_TOURNAMENT_PLAN_V1"
@@ -106,9 +96,9 @@ class DevelopmentDatasetBinding:
             "evaluation_keyset_hash",
         ):
             _require_hash(getattr(self, name), name)
-        if not self.evaluation_start or not self.evaluation_end:
-            raise ValueError("evaluation window is required")
-        if self.evaluation_start >= self.evaluation_end:
+        start = _parse_canonical_utc(self.evaluation_start, "evaluation_start")
+        end = _parse_canonical_utc(self.evaluation_end, "evaluation_end")
+        if not start < end:
             raise ValueError("evaluation window must be positive")
 
     @property
@@ -157,6 +147,10 @@ class DevelopmentModelCandidate:
     @property
     def fingerprint(self) -> str:
         return _hash(self.to_dict())
+
+    @property
+    def model_identity(self) -> tuple[str, str]:
+        return (self.model_family, self.model_config_hash)
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -214,6 +208,10 @@ class OSS3D2EPlan:
             raise DevelopmentModelTournamentGovernanceError("candidate family size outside D2E bounds")
         if candidate_ids != tuple(sorted(candidate_ids)) or len(set(candidate_ids)) != len(candidate_ids):
             raise DevelopmentModelTournamentIntegrityError("candidates must be unique canonical order")
+        if len({candidate.model_identity for candidate in self.candidates}) != len(self.candidates):
+            raise DevelopmentModelTournamentGovernanceError("duplicate substantive model identity")
+        if len({candidate.request_hash for candidate in self.candidates}) != len(self.candidates):
+            raise DevelopmentModelTournamentGovernanceError("duplicate inference request identity")
         if self.campaign.expected_trial_ids != candidate_ids:
             raise DevelopmentModelTournamentIntegrityError("campaign universe differs from candidates")
         trial_ids = tuple(trial.trial_id for trial in self.trials)
@@ -288,17 +286,12 @@ class OSS3D2ETournamentEvidence:
             raise DevelopmentModelTournamentIntegrityError("noncanonical D2E evidence version")
         _require_hash(self.plan_fingerprint, "plan_fingerprint")
         _require_hash(self.common_cross_section_key_hash, "common_cross_section_key_hash")
-        if self.family_size < MIN_CANDIDATES or self.family_size > MAX_CANDIDATES:
+        if not MIN_CANDIDATES <= self.family_size <= MAX_CANDIDATES:
             raise DevelopmentModelTournamentIntegrityError("invalid evidence family_size")
         if not self.winner_trial_id:
             raise DevelopmentModelTournamentGovernanceError("D2E requires an eligible winner")
-        for name in (
-            "winner_primary_metric",
-            "winner_raw_p_value",
-            "winner_holm_adjusted_p_value",
-        ):
-            value = float(getattr(self, name))
-            if not isfinite(value):
+        for name in ("winner_primary_metric", "winner_raw_p_value", "winner_holm_adjusted_p_value"):
+            if not isfinite(float(getattr(self, name))):
                 raise DevelopmentModelTournamentIntegrityError(f"{name} must be finite")
         if not 0.0 <= self.winner_raw_p_value <= 1.0:
             raise DevelopmentModelTournamentIntegrityError("winner_raw_p_value outside [0,1]")
@@ -316,6 +309,12 @@ class OSS3D2ETournamentEvidence:
             raise DevelopmentModelTournamentIntegrityError("winner identity mismatch")
         if self.holm.family_size != self.family_size:
             raise DevelopmentModelTournamentIntegrityError("Holm family size mismatch")
+        if self.holm.campaign_id != self.tournament.campaign_id:
+            raise DevelopmentModelTournamentIntegrityError("Holm campaign mismatch")
+        if self.holm.raw_p_values.get(self.winner_trial_id) != self.winner_raw_p_value:
+            raise DevelopmentModelTournamentIntegrityError("winner raw p-value mismatch")
+        if self.holm.adjusted_p_values.get(self.winner_trial_id) != self.winner_holm_adjusted_p_value:
+            raise DevelopmentModelTournamentIntegrityError("winner Holm p-value mismatch")
 
     @property
     def fingerprint(self) -> str:
@@ -362,24 +361,23 @@ def build_oss3d2e_plan(
         raise ValueError("invalid tournament_campaign_id")
     if not _ID_RE.fullmatch(tournament_id):
         raise ValueError("invalid tournament_id")
+    if not isinstance(dataset, DevelopmentDatasetBinding):
+        raise TypeError("dataset must be DevelopmentDatasetBinding")
     _require_hash(code_version, "code_version")
-    candidate_tuple = tuple(candidates)
+    candidate_tuple = tuple(sorted(tuple(candidates), key=lambda item: item.trial_id))
     if not MIN_CANDIDATES <= len(candidate_tuple) <= MAX_CANDIDATES:
         raise DevelopmentModelTournamentGovernanceError("candidate family size outside D2E bounds")
-    candidate_tuple = tuple(sorted(candidate_tuple, key=lambda item: item.trial_id))
     if len({candidate.trial_id for candidate in candidate_tuple}) != len(candidate_tuple):
         raise DevelopmentModelTournamentGovernanceError("duplicate candidate trial_id")
-    if len({candidate.fingerprint for candidate in candidate_tuple}) != len(candidate_tuple):
-        raise DevelopmentModelTournamentGovernanceError("duplicate candidate identity")
-
-    qlib_versions = {candidate.qlib_version for candidate in candidate_tuple}
-    runner_hashes = {candidate.expected_runner_code_hash for candidate in candidate_tuple}
-    environment_hashes = {candidate.environment_attestation_hash for candidate in candidate_tuple}
-    if len(qlib_versions) != 1:
+    if len({candidate.model_identity for candidate in candidate_tuple}) != len(candidate_tuple):
+        raise DevelopmentModelTournamentGovernanceError("duplicate substantive model identity")
+    if len({candidate.request_hash for candidate in candidate_tuple}) != len(candidate_tuple):
+        raise DevelopmentModelTournamentGovernanceError("duplicate inference request identity")
+    if len({candidate.qlib_version for candidate in candidate_tuple}) != 1:
         raise DevelopmentModelTournamentCompatibilityError("all candidates must use one Qlib version")
-    if len(runner_hashes) != 1:
+    if len({candidate.expected_runner_code_hash for candidate in candidate_tuple}) != 1:
         raise DevelopmentModelTournamentCompatibilityError("all candidates must use one runner code hash")
-    if len(environment_hashes) != 1:
+    if len({candidate.environment_attestation_hash for candidate in candidate_tuple}) != 1:
         raise DevelopmentModelTournamentCompatibilityError("all candidates must use one environment attestation")
 
     trial_ids = tuple(candidate.trial_id for candidate in candidate_tuple)
@@ -448,6 +446,8 @@ def preregister_oss3d2e_plan(
     now: datetime,
 ) -> None:
     """Durably create the frozen campaign and preregister every candidate."""
+    if not isinstance(plan, OSS3D2EPlan):
+        raise TypeError("plan must be OSS3D2EPlan")
     ledger.create_campaign(plan.campaign, now=now)
     for trial in plan.trials:
         ledger.preregister(trial, now=now)
@@ -472,11 +472,10 @@ def record_oss3d2e_evaluation(
         raise DevelopmentModelTournamentIntegrityError("durable trial differs from frozen D2E plan")
     if record.status.terminal:
         raise DevelopmentModelTournamentGovernanceError("candidate result is already terminal")
-
     _verify_evaluation_binding(plan, candidate, evaluation, receipt)
+
     rank_ics = tuple(float(item.spearman_ic) for item in evaluation.cross_sections)
     raw_p = _one_sided_exact_sign_test(rank_ics)
-    cross_section_key_hash = _cross_section_key_hash(evaluation)
     metrics = {
         PRIMARY_METRIC: float(evaluation.metrics.mean_cross_sectional_rank_ic),
         "mean_cross_sectional_ic": float(evaluation.metrics.mean_cross_sectional_ic),
@@ -486,7 +485,7 @@ def record_oss3d2e_evaluation(
         "mae": float(evaluation.metrics.mae),
         "rmse": float(evaluation.metrics.rmse),
         "cross_section_count": evaluation.metrics.cross_section_count,
-        "cross_section_key_hash": cross_section_key_hash,
+        "cross_section_key_hash": _cross_section_key_hash(evaluation),
         "evaluation_artifact_hash": evaluation.artifact_hash,
         "prediction_receipt_hash": receipt.fingerprint,
         "environment_attestation_hash": evaluation.manifest.environment_attestation_hash,
@@ -515,6 +514,8 @@ def record_oss3d2e_failure(
         raise DevelopmentModelTournamentGovernanceError("candidate was not preregistered")
     if record.spec.fingerprint != frozen_trial.fingerprint:
         raise DevelopmentModelTournamentIntegrityError("durable trial differs from frozen D2E plan")
+    if record.status.terminal:
+        raise DevelopmentModelTournamentGovernanceError("candidate result is already terminal")
     return ledger.record_failed(trial_id=trial_id, failure_code=failure_code, now=now)
 
 
@@ -530,6 +531,7 @@ def evaluate_oss3d2e_tournament(
     completed = [records[trial_id] for trial_id in accounting.completed_trial_ids]
     if not completed:
         raise DevelopmentModelTournamentGovernanceError("no completed D2E candidate exists")
+
     support_hashes: set[str] = set()
     support_counts: set[int] = set()
     for record in completed:
@@ -557,7 +559,6 @@ def evaluate_oss3d2e_tournament(
         raise DevelopmentModelTournamentIntegrityError("winner lacks primary metric")
     if winner.p_value is None:
         raise DevelopmentModelTournamentIntegrityError("winner lacks preregistered p-value")
-    adjusted = holm.adjusted_p_values[tournament.winner_trial_id]
     return OSS3D2ETournamentEvidence(
         evidence_version=OSS3D2E_EVIDENCE_VERSION,
         plan_fingerprint=plan.fingerprint,
@@ -567,7 +568,7 @@ def evaluate_oss3d2e_tournament(
         winner_trial_id=tournament.winner_trial_id,
         winner_primary_metric=float(winner_metric),
         winner_raw_p_value=float(winner.p_value),
-        winner_holm_adjusted_p_value=float(adjusted),
+        winner_holm_adjusted_p_value=float(holm.adjusted_p_values[tournament.winner_trial_id]),
         common_cross_section_key_hash=next(iter(support_hashes)),
     )
 
@@ -651,6 +652,7 @@ def _verify_evaluation_binding(
         ("receipt runner code", candidate.expected_runner_code_hash, receipt.producer_code_hash),
         ("receipt inference start", d.evaluation_start, receipt.inference_start),
         ("receipt inference end", d.evaluation_end, receipt.inference_end),
+        ("receipt/evaluation observations", receipt.prediction_count, m.observation_count),
     ):
         if expected != actual:
             raise DevelopmentModelTournamentCompatibilityError(f"{name} mismatch")
@@ -658,12 +660,18 @@ def _verify_evaluation_binding(
         raise DevelopmentModelTournamentGovernanceError("D2D metric policy drifted")
     if evaluation.metrics.cross_section_count != len(evaluation.cross_sections):
         raise DevelopmentModelTournamentIntegrityError("D2D cross-section count mismatch")
-    if not isfinite(float(evaluation.metrics.mean_cross_sectional_rank_ic)):
-        raise DevelopmentModelTournamentIntegrityError("primary metric must be finite")
+    rank_ics = tuple(float(item.spearman_ic) for item in evaluation.cross_sections)
+    if not rank_ics:
+        raise DevelopmentModelTournamentGovernanceError("D2D has no cross-sectional rank IC evidence")
+    if any(not isfinite(value) for value in rank_ics):
+        raise DevelopmentModelTournamentIntegrityError("primary rank-IC evidence must be finite")
+    recomputed_primary = sum(rank_ics) / len(rank_ics)
+    if float(evaluation.metrics.mean_cross_sectional_rank_ic) != recomputed_primary:
+        raise DevelopmentModelTournamentIntegrityError("D2D primary metric does not rebind to cross-sections")
 
 
 def _one_sided_exact_sign_test(values: tuple[float, ...]) -> float:
-    """P[X >= observed positives], X~Binomial(n_nonzero, 0.5)."""
+    """Return P[X >= observed positives], X~Binomial(n_nonzero, 0.5)."""
     if not values:
         raise DevelopmentModelTournamentGovernanceError("sign test requires cross-sectional evidence")
     positives = 0
@@ -678,14 +686,15 @@ def _one_sided_exact_sign_test(values: tuple[float, ...]) -> float:
     n = positives + negatives
     if n == 0:
         return 1.0
-    numerator = sum(comb(n, k) for k in range(positives, n + 1))
-    return numerator / float(2**n)
+    return sum(comb(n, k) for k in range(positives, n + 1)) / float(2**n)
 
 
 def _cross_section_key_hash(evaluation: DevelopmentEvaluationArtifact) -> str:
     timestamps = [item.timestamp for item in evaluation.cross_sections]
     if timestamps != sorted(timestamps) or len(set(timestamps)) != len(timestamps):
         raise DevelopmentModelTournamentIntegrityError("D2D cross-section timestamps are not canonical")
+    for timestamp in timestamps:
+        _parse_canonical_utc(timestamp, "cross-section timestamp")
     return _hash(timestamps)
 
 
@@ -699,6 +708,20 @@ def _deny_authority(
         raise DevelopmentModelTournamentGovernanceError("D2E cannot authorize execution")
     if capital_authority != "NONE" or live_trading != "BLOCKED":
         raise DevelopmentModelTournamentGovernanceError("D2E cannot grant capital or LIVE")
+
+
+def _parse_canonical_utc(value: object, name: str) -> datetime:
+    if not isinstance(value, str) or not value:
+        raise ValueError(f"{name} must be a canonical UTC timestamp")
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError as exc:
+        raise ValueError(f"{name} must be a canonical UTC timestamp") from exc
+    if parsed.tzinfo is None or parsed.utcoffset() != timezone.utc.utcoffset(parsed):
+        raise ValueError(f"{name} must be UTC")
+    if value != parsed.astimezone(timezone.utc).isoformat():
+        raise ValueError(f"{name} must use canonical UTC serialization")
+    return parsed
 
 
 def _require_hash(value: object, name: str) -> None:
