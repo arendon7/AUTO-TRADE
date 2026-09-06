@@ -12,6 +12,11 @@ The sequence is intentionally two-phase:
 
 FINAL_HOLDOUT is structurally unavailable. No Qlib execution, network, broker,
 OMS, Safety, OrderIntent, PAPER, capital or LIVE authority exists here.
+
+D2H intentionally does not import ``family_runner``. That module imports the
+Qlib/pandas dataset adapter. D2H instead re-verifies the serialized D2G run
+evidence contract by fields and fingerprint, preserving a true runtime-free
+orchestration boundary.
 """
 
 from __future__ import annotations
@@ -22,7 +27,7 @@ from hashlib import sha256
 import json
 from pathlib import Path
 import re
-from typing import Iterable
+from typing import Iterable, Mapping
 
 from autotrade.research.oss3_concrete_model_family import (
     CANONICAL_CANDIDATES,
@@ -56,20 +61,41 @@ from autotrade.research.oss3_supervised_label_artifact import (
 from autotrade.research.trials import SQLiteTrialLedger, TrialStatus
 
 from .family_environment_attestation import CandidateEnvironmentAttestation
-from .family_model_contract import family_runner_code_hash
-from .family_runner import (
-    FamilyCandidateRunEvidence,
-    verify_family_candidate_outputs,
-)
+from .family_model_contract import assert_family_request_contract, family_runner_code_hash
 
 
 OSS3D2H_PREREGISTRATION_VERSION = "OSS3D2H_FAMILY_EVALUATION_PREREGISTRATION_V1"
 OSS3D2H_BATCH_EVIDENCE_VERSION = "OSS3D2H_FAMILY_EVALUATION_BATCH_EVIDENCE_V1"
+OSS3D2G_RUN_EVIDENCE_VERSION = "OSS3D2G_CANDIDATE_RUN_EVIDENCE_V1"
 HYPOTHESIS_PREFIX = "oss3d2h"
 MAX_CANDIDATES = 16
 
 _HASH_RE = re.compile(r"^[0-9a-f]{64}$")
 _ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,127}$")
+
+_D2G_RUN_EVIDENCE_KEYS = frozenset(
+    {
+        "evidence_version",
+        "candidate_id",
+        "model_config_hash",
+        "shared_runner_code_hash",
+        "request_hash",
+        "prediction_artifact_hash",
+        "prediction_receipt_hash",
+        "environment_attestation_hash",
+        "runtime_environment_hash",
+        "development_labels_loaded",
+        "final_holdout_loaded",
+        "broker_credentials_present",
+        "network_allowed",
+        "adaptive_search",
+        "hyperparameter_optimization",
+        "execution_authorized",
+        "paper_execution_authorized",
+        "capital_authority",
+        "live_trading",
+    }
+)
 
 # Files that can change how D2H validates frozen inference evidence, exposes
 # DEVELOPMENT labels, records D2D metrics or ranks the D2E family.
@@ -110,8 +136,9 @@ class FamilyEvaluationBatchCompatibilityError(FamilyEvaluationBatchError):
 class FrozenCandidateOutput:
     """One already-produced D2G candidate output set.
 
-    Construction re-verifies request -> prediction -> receipt -> attestation ->
-    D2G evidence against the current frozen D2F/D2G contract.
+    D2H independently re-verifies request -> prediction -> receipt ->
+    attestation -> D2G run-evidence bindings without importing the runtime-heavy
+    D2G executable module.
     """
 
     candidate_id: str
@@ -119,24 +146,20 @@ class FrozenCandidateOutput:
     prediction: QlibPredictionArtifact
     receipt: DevelopmentPredictionReceipt
     attestation: CandidateEnvironmentAttestation
-    run_evidence: FamilyCandidateRunEvidence
+    run_evidence: object
 
     def __post_init__(self) -> None:
         if not isinstance(self.candidate_id, str) or not _ID_RE.fullmatch(self.candidate_id):
             raise ValueError("invalid candidate_id")
-        verify_family_candidate_outputs(
-            request=self.request,
-            prediction=self.prediction,
-            receipt=self.receipt,
-            attestation=self.attestation,
-            evidence=self.run_evidence,
-        )
-        if self.run_evidence.candidate_id != self.candidate_id:
-            raise FamilyEvaluationBatchIntegrityError("candidate id differs from D2G evidence")
+        _verify_frozen_candidate_output(self)
 
     @property
     def runtime_environment(self) -> RuntimeEnvironmentIdentity:
         return self.attestation.runtime_environment
+
+    @property
+    def run_evidence_fingerprint(self) -> str:
+        return _d2g_evidence_fingerprint(self.run_evidence)
 
     @property
     def fingerprint(self) -> str:
@@ -150,7 +173,7 @@ class FrozenCandidateOutput:
             "prediction_receipt_hash": self.receipt.fingerprint,
             "environment_attestation_hash": self.attestation.artifact_hash,
             "runtime_environment_hash": self.runtime_environment.fingerprint,
-            "d2g_run_evidence_hash": self.run_evidence.fingerprint,
+            "d2g_run_evidence_hash": self.run_evidence_fingerprint,
             "model_config_hash": self.request.manifest.model_config_hash,
             "shared_runner_code_hash": self.request.manifest.expected_runner_code_hash,
         }
@@ -196,7 +219,7 @@ class FrozenCandidateOutputBinding:
             prediction_receipt_hash=output.receipt.fingerprint,
             environment_attestation_hash=output.attestation.artifact_hash,
             runtime_environment_hash=output.runtime_environment.fingerprint,
-            d2g_run_evidence_hash=output.run_evidence.fingerprint,
+            d2g_run_evidence_hash=output.run_evidence_fingerprint,
             model_config_hash=output.request.manifest.model_config_hash,
             shared_runner_code_hash=output.request.manifest.expected_runner_code_hash,
         )
@@ -573,7 +596,7 @@ def evaluate_preregistered_family(
             prediction_artifact_hash=output.prediction.artifact_hash,
             receipt_hash=output.receipt.fingerprint,
             environment_attestation_hash=output.attestation.artifact_hash,
-            d2g_run_evidence_hash=output.run_evidence.fingerprint,
+            d2g_run_evidence_hash=output.run_evidence_fingerprint,
             d2d_evaluation_artifact_hash=evaluation.artifact_hash,
         )
         for output, evaluation in zip(output_tuple, evaluations, strict=True)
@@ -608,7 +631,7 @@ def _verify_exact_family(
             raise FamilyEvaluationBatchIntegrityError("D2G request differs from D2F preregistered request")
         if output.request.manifest.model_config_hash != candidate.model_config_hash:
             raise FamilyEvaluationBatchIntegrityError("D2G model config differs from D2F candidate")
-        if output.run_evidence.model_config_hash != candidate.model_config_hash:
+        if _evidence_string(output.run_evidence, "model_config_hash") != candidate.model_config_hash:
             raise FamilyEvaluationBatchIntegrityError("D2G evidence model config differs from D2F candidate")
         if output.request.manifest.expected_runner_code_hash != d2f_plan.shared_runner_code_hash:
             raise FamilyEvaluationBatchIntegrityError("candidate runner differs from frozen D2F runner")
@@ -688,6 +711,92 @@ def _require_durable_preregistration(
         raise FamilyEvaluationBatchIntegrityError("durable trial specs differ from D2E plan")
     if any(record.status is not TrialStatus.PREREGISTERED for record in records):
         raise FamilyEvaluationBatchGovernanceError("all D2H trials must still be PREREGISTERED")
+
+
+def _verify_frozen_candidate_output(output: FrozenCandidateOutput) -> None:
+    request = output.request
+    prediction = output.prediction
+    receipt = output.receipt
+    attestation = output.attestation
+    candidate = assert_family_request_contract(request.manifest)
+    if candidate.candidate_id != output.candidate_id:
+        raise FamilyEvaluationBatchIntegrityError("candidate id differs from frozen D2F config")
+
+    attestation.verify_current_contract()
+    current_runner_hash = family_runner_code_hash()
+    for name, expected, actual in (
+        ("prediction model family", request.manifest.model_family, prediction.manifest.model_family),
+        ("prediction model config", request.manifest.model_config_hash, prediction.manifest.model_config_hash),
+        ("prediction producer code", current_runner_hash, prediction.manifest.producer_code_hash),
+        ("receipt request", request.request_hash, receipt.request_hash),
+        ("receipt prediction artifact", prediction.artifact_hash, receipt.prediction_artifact_hash),
+        ("receipt prediction manifest", prediction.manifest.fingerprint, receipt.prediction_manifest_hash),
+        ("receipt prediction count", prediction.manifest.prediction_count, receipt.prediction_count),
+        ("receipt model family", request.manifest.model_family, receipt.model_family),
+        ("receipt model config", request.manifest.model_config_hash, receipt.model_config_hash),
+        ("receipt Qlib version", request.manifest.required_qlib_version, receipt.qlib_version),
+        ("receipt producer code", current_runner_hash, receipt.producer_code_hash),
+        ("attestation model config", request.manifest.model_config_hash, attestation.manifest.model_config_hash),
+        ("attestation runner", request.manifest.expected_runner_code_hash, attestation.manifest.runner_code_hash),
+    ):
+        if expected != actual:
+            raise FamilyEvaluationBatchIntegrityError(f"D2G frozen output mismatch: {name}")
+
+    expected_evidence = {
+        "evidence_version": OSS3D2G_RUN_EVIDENCE_VERSION,
+        "candidate_id": output.candidate_id,
+        "model_config_hash": request.manifest.model_config_hash,
+        "shared_runner_code_hash": request.manifest.expected_runner_code_hash,
+        "request_hash": request.request_hash,
+        "prediction_artifact_hash": prediction.artifact_hash,
+        "prediction_receipt_hash": receipt.fingerprint,
+        "environment_attestation_hash": attestation.artifact_hash,
+        "runtime_environment_hash": attestation.runtime_environment.fingerprint,
+        "development_labels_loaded": False,
+        "final_holdout_loaded": False,
+        "broker_credentials_present": False,
+        "network_allowed": False,
+        "adaptive_search": False,
+        "hyperparameter_optimization": False,
+        "execution_authorized": False,
+        "paper_execution_authorized": False,
+        "capital_authority": "NONE",
+        "live_trading": "BLOCKED",
+    }
+    actual_evidence = _d2g_evidence_payload(output.run_evidence)
+    if actual_evidence != expected_evidence:
+        raise FamilyEvaluationBatchIntegrityError("D2G run evidence does not bind to frozen output")
+
+
+def _d2g_evidence_payload(evidence: object) -> dict[str, object]:
+    to_dict = getattr(evidence, "to_dict", None)
+    if not callable(to_dict):
+        raise FamilyEvaluationBatchIntegrityError("D2G run evidence lacks canonical to_dict()")
+    payload = to_dict()
+    if not isinstance(payload, Mapping) or frozenset(payload) != _D2G_RUN_EVIDENCE_KEYS:
+        raise FamilyEvaluationBatchIntegrityError("D2G run evidence schema mismatch")
+    result = dict(payload)
+    fingerprint = getattr(evidence, "fingerprint", None)
+    if not isinstance(fingerprint, str) or not _HASH_RE.fullmatch(fingerprint):
+        raise FamilyEvaluationBatchIntegrityError("D2G run evidence fingerprint is invalid")
+    if _hash(result) != fingerprint:
+        raise FamilyEvaluationBatchIntegrityError("D2G run evidence fingerprint mismatch")
+    return result
+
+
+def _d2g_evidence_fingerprint(evidence: object) -> str:
+    _d2g_evidence_payload(evidence)
+    fingerprint = getattr(evidence, "fingerprint")
+    assert isinstance(fingerprint, str)
+    return fingerprint
+
+
+def _evidence_string(evidence: object, name: str) -> str:
+    payload = _d2g_evidence_payload(evidence)
+    value = payload.get(name)
+    if not isinstance(value, str):
+        raise FamilyEvaluationBatchIntegrityError(f"D2G run evidence field {name} is not a string")
+    return value
 
 
 def _deny_authority(
