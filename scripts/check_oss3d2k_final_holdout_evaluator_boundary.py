@@ -119,8 +119,6 @@ def main() -> int:
         runner_end = getattr(runner, "end_lineno", runner_start)
         if any(not runner_start <= node.lineno <= runner_end for node in qlib_imports):
             errors.append("Qlib imports must remain inside isolated D2K model execution")
-        if "with deny_network():" not in ast.get_source_segment(source, runner) if False else False:
-            pass
         runner_source = ast.get_source_segment(source, runner) or ""
         for snippet in (
             "with deny_network():",
