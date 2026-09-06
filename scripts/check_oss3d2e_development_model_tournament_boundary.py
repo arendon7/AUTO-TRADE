@@ -87,12 +87,18 @@ def main() -> int:
         'PRIMARY_METRIC = "mean_cross_sectional_rank_ic"',
         'MULTIPLE_TESTING_POLICY = "EXACT_SIGN_TEST_PLUS_HOLM_V1"',
         'COMMON_SUPPORT_POLICY = "EXACT_CROSS_SECTION_TIMESTAMP_SUPPORT_V1"',
+        'RUNTIME_ENVIRONMENT_POLICY = "D2C_MODEL_NEUTRAL_RUNTIME_IDENTITY_V1"',
+        'class RuntimeEnvironmentIdentity:',
+        '"runtime_environment_hash": runtime_environment.fingerprint',
+        '"environment_attestation_hash": candidate.environment_attestation_hash',
+        'runtime_hashes != {plan.runtime_environment.fingerprint}',
         'phase=TrialPhase.DEVELOPMENT',
         'split_name="DEVELOPMENT"',
         'candidate_trial_ids=trial_ids',
         'p_value=Decimal(str(raw_p))',
         'campaign_holm_evidence(ledger, plan.campaign.campaign_id)',
         '("receipt keyset", d.evaluation_keyset_hash, receipt.inference_keyset_hash)',
+        '("candidate D2C attestation", candidate.environment_attestation_hash, m.environment_attestation_hash)',
         '("evaluation prediction artifact", receipt.prediction_artifact_hash, m.prediction_artifact_hash)',
         'recomputed_primary = sum(rank_ics) / len(rank_ics)',
         'final_holdout_observable: bool = False',
@@ -106,6 +112,16 @@ def main() -> int:
         if snippet not in source:
             errors.append(f"missing required D2E binding: {snippet}")
 
+    # D2C V1 deliberately binds model/config/runner in its artifact manifest, so
+    # D2E must not require one identical artifact hash across distinct models.
+    forbidden_design_snippets = (
+        'len({candidate.environment_attestation_hash for candidate in candidate_tuple}) != 1',
+        'all candidates must use one environment attestation',
+    )
+    for snippet in forbidden_design_snippets:
+        if snippet in source:
+            errors.append(f"D2E incorrectly equates model-bound D2C artifacts: {snippet}")
+
     if "FINAL_HOLDOUT" not in source:
         errors.append("D2E source must document FINAL_HOLDOUT exclusion")
     return _finish(errors)
@@ -118,9 +134,10 @@ def _finish(errors: list[str]) -> int:
         return 1
     print(
         "AUTO-TRADE OSS-3D2E DEVELOPMENT model tournament boundary: PASS "
-        "(frozen finite family; exact D2D/D2A provenance; primary mean rank IC only; "
-        "exact sign-test + Holm; common timestamp support; FINAL_HOLDOUT/promotion/"
-        "broker/OMS/Safety/PAPER/capital/LIVE authority denied)"
+        "(frozen finite family; candidate-specific D2C artifacts + shared model-neutral runtime; "
+        "exact D2D/D2A provenance; primary mean rank IC only; exact sign-test + Holm; "
+        "common timestamp support; FINAL_HOLDOUT/promotion/broker/OMS/Safety/PAPER/"
+        "capital/LIVE authority denied)"
     )
     return 0
 
