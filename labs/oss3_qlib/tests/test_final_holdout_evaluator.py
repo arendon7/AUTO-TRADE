@@ -7,9 +7,12 @@ import sqlite3
 
 import pytest
 
+from autotrade.research.oss3_factor_matrix_artifact import (
+    FactorMatrixArtifact,
+    FactorMatrixPartition,
+)
 from autotrade.research.registry import HoldoutPermit
 from labs.oss3_qlib.final_holdout_evaluator import (
-    FinalHoldoutFeatureRow,
     OSS3FinalHoldoutAlreadyConsumed,
     OSS3FinalHoldoutDecision,
     OSS3FinalHoldoutEvaluationGovernanceError,
@@ -19,10 +22,7 @@ from labs.oss3_qlib.final_holdout_evaluator import (
     evaluator_semantic_hash,
     read_oss3d2k_evaluation_read_only,
 )
-from labs.oss3_qlib.tests.d2k_fixture import (
-    build_d2k_source,
-    build_final_holdout_material,
-)
+from labs.oss3_qlib.tests.d2k_fixture import build_d2k_source
 
 
 UTC = timezone.utc
@@ -229,14 +229,27 @@ def test_broker_credentials_are_rejected_before_permit_burn(tmp_path, monkeypatc
 
 def test_exact_original_train_bundle_is_required_before_consumption(tmp_path):
     source = build_d2k_source(tmp_path, label_mode="aligned")
-    row = source.train_features.rows[0]
-    altered_row = replace(row, values=(float(row.values[0]) + 1.0, float(row.values[1])))
-    altered_features = replace(
-        source.train_features,
-        rows=(altered_row,) + source.train_features.rows[1:],
+    original = source.train_features
+    manifest = original.manifest
+    row = original.rows[0]
+    altered_row = replace(
+        row,
+        values=(float(row.values[0]) + 1.0, float(row.values[1])),
+    )
+    altered_features = FactorMatrixArtifact.build(
+        campaign_id=manifest.campaign_id,
+        research_split_hash=manifest.research_split_hash,
+        partition=FactorMatrixPartition.TRAIN,
+        partition_start=datetime.fromisoformat(manifest.partition_start),
+        partition_end=datetime.fromisoformat(manifest.partition_end),
+        producer_code_hash=manifest.producer_code_hash,
+        source_dataset_hash=manifest.source_dataset_hash,
+        source_universe_hash=manifest.source_universe_hash,
+        features=original.features,
+        rows=(altered_row,) + original.rows[1:],
     )
     registry = SQLiteOSS3FinalHoldoutEvaluationRegistry(tmp_path / "d2k-evaluation.sqlite3")
-    with pytest.raises(Exception):
+    with pytest.raises(OSS3FinalHoldoutEvaluationIntegrityError, match="train_feature_artifact_hash"):
         registry.evaluate(
             evaluation_id="oss3d2k-train-drift",
             protocol=source.protocol,
