@@ -6,10 +6,15 @@ on:
       - research/oss3d2m-preregistered-economic-protocol
     paths:
       - 'labs/oss3_qlib/economic_holdout_evaluator.py'
+      - 'labs/oss3_qlib/economic_prediction_precommit.py'
       - 'labs/oss3_qlib/tests/d2n_fixture.py'
+      - 'labs/oss3_qlib/tests/d2n_precommit_fixture.py'
       - 'labs/oss3_qlib/tests/test_economic_holdout_evaluator.py'
+      - 'labs/oss3_qlib/tests/test_economic_prediction_precommit.py'
       - 'scripts/check_oss3d2n_economic_holdout_evaluator_boundary.py'
+      - 'scripts/check_oss3d2n_economic_prediction_precommit_boundary.py'
       - 'knowledge/20_RESEARCH/OSS3D2N_ONE_SHOT_ECONOMIC_HOLDOUT_EVALUATOR.md'
+      - 'knowledge/20_RESEARCH/OSS3D2N_PREDICTION_PRECOMMIT_HARDENING.md'
       - '.github/workflows/oss3d2n-one-shot-economic-holdout-evaluator.yml'
       - 'labs/oss3_qlib/predictive_economic_protocol.py'
       - 'labs/oss3_qlib/predictive_strategy_contract.py'
@@ -45,12 +50,19 @@ jobs:
         run: |
           python -m py_compile \
             labs/oss3_qlib/economic_holdout_evaluator.py \
+            labs/oss3_qlib/economic_prediction_precommit.py \
             labs/oss3_qlib/tests/d2n_fixture.py \
+            labs/oss3_qlib/tests/d2n_precommit_fixture.py \
             labs/oss3_qlib/tests/test_economic_holdout_evaluator.py \
-            scripts/check_oss3d2n_economic_holdout_evaluator_boundary.py
+            labs/oss3_qlib/tests/test_economic_prediction_precommit.py \
+            scripts/check_oss3d2n_economic_holdout_evaluator_boundary.py \
+            scripts/check_oss3d2n_economic_prediction_precommit_boundary.py
 
       - name: D2N one-shot economic authority boundary before Qlib
         run: python scripts/check_oss3d2n_economic_holdout_evaluator_boundary.py
+
+      - name: D2N prediction precommit boundary before Qlib
+        run: python scripts/check_oss3d2n_economic_prediction_precommit_boundary.py
 
       - name: Re-prove D2M preregistration boundary before Qlib
         run: |
@@ -95,7 +107,10 @@ jobs:
           print(f'pyqlib=={version}')
           PY
 
-      - name: D2N deterministic and adversarial one-shot economic tests
+      - name: D2N canonical prediction-precommit admission tests
+        run: python -m pytest -q labs/oss3_qlib/tests/test_economic_prediction_precommit.py
+
+      - name: D2N internal deterministic and adversarial economic regression
         run: python -m pytest -q labs/oss3_qlib/tests/test_economic_holdout_evaluator.py
 
       - name: Re-prove certified D2K predictive one-shot evaluator
