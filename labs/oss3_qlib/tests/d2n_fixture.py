@@ -6,13 +6,24 @@ from decimal import Decimal
 from pathlib import Path
 
 from autotrade.research.market import Bar, InstrumentMetadata, MarketDataset
+from autotrade.research.oss3_concrete_model_family import build_concrete_model_request_set
 from autotrade.research.oss3_qlib_artifact import QlibPredictionArtifact, QlibPredictionRow
+from autotrade.research.oss3_training_bundle import TrainingBundleArtifact
+from autotrade.research.trials import SQLiteTrialLedger
 from autotrade.research.universe import AlignedMarketUniverse
+from labs.oss3_qlib.development_winner_seal import seal_development_winner
 from labs.oss3_qlib.economic_holdout_evaluator import (
     OSS3D2N_MATERIAL_VERSION,
     EconomicHoldoutMaterial,
     ProtectedEconomicHoldout,
 )
+from labs.oss3_qlib.family_evaluation_batch import (
+    FrozenCandidateOutput,
+    evaluate_preregistered_family,
+    prepare_family_evaluation_preregistration,
+    preregister_family_evaluation,
+)
+from labs.oss3_qlib.family_model_contract import family_runner_code_hash
 from labs.oss3_qlib.final_holdout_evaluator import (
     ProtectedOSS3FinalHoldout,
     SQLiteOSS3FinalHoldoutEvaluationRegistry,
@@ -25,8 +36,7 @@ from labs.oss3_qlib.predictive_strategy_contract import (
     SQLiteOSS3PredictiveStrategyRegistry,
     build_predictive_strategy_binding,
 )
-from labs.oss3_qlib.tests.d2l_fixture import D2LSource, build_d2l_source
-from labs.oss3_qlib.tests import d2k_fixture
+from labs.oss3_qlib.tests import d2i_fixture, d2k_fixture
 
 
 UTC = timezone.utc
@@ -35,8 +45,24 @@ TIMEFRAME_SECONDS = 86_400
 
 
 @dataclass(frozen=True, slots=True)
+class RuntimeBoundD2NLineage:
+    """D2F->D2I lineage whose D2G attestations come from the current runtime."""
+
+    train_features: object
+    train_labels: object
+    training_bundle: TrainingBundleArtifact
+    development_features: object
+    development_labels: object
+    outputs: tuple[FrozenCandidateOutput, ...]
+    preregistration: object
+    batch_evidence: object
+    winner_seal: object
+    winner_output: FrozenCandidateOutput
+
+
+@dataclass(frozen=True, slots=True)
 class D2NSource:
-    lineage: D2LSource
+    lineage: RuntimeBoundD2NLineage
     shared_sqlite_path: Path
     d2j_protocol: object
     d2l_binding: object
@@ -47,11 +73,81 @@ class D2NSource:
     economic_holdout: ProtectedEconomicHoldout
 
 
+def build_runtime_bound_d2n_lineage(tmp_path) -> RuntimeBoundD2NLineage:
+    """Build DEVELOPMENT lineage with exact current D2G runtime attestations.
+
+    D2L's generic fixture is intentionally runtime-free. D2N necessarily runs
+    after Qlib is installed because it re-proves D2K. Its winner must therefore
+    be bound to the exact current D2G environment rather than to the synthetic
+    attestation used by runtime-free D2L tests.
+    """
+    train_features = d2i_fixture._train_features()
+    train_labels = d2i_fixture._train_labels(train_features)
+    training_bundle = TrainingBundleArtifact.build(
+        features=train_features,
+        labels=train_labels,
+    )
+    development_features = d2i_fixture._development_features()
+    development_labels = d2i_fixture._development_labels(development_features)
+
+    d2f_plan, request_set = build_concrete_model_request_set(
+        training_bundle=training_bundle,
+        development_features=development_features,
+        shared_runner_code_hash=family_runner_code_hash(),
+    )
+    outputs = tuple(
+        d2k_fixture._runtime_bound_output(
+            index=index,
+            binding=binding,
+            training_bundle=training_bundle,
+            development_features=development_features,
+        )
+        for index, binding in enumerate(request_set.bindings)
+    )
+    preregistration = prepare_family_evaluation_preregistration(
+        d2f_plan=d2f_plan,
+        d2f_request_set=request_set,
+        outputs=outputs,
+        development_labels=development_labels,
+        tournament_campaign_id="oss3d2n-runtime-tournament-campaign-001",
+        tournament_id="oss3d2n-runtime-tournament-001",
+    )
+    ledger = SQLiteTrialLedger(tmp_path / "d2n-runtime-development.sqlite3")
+    now = datetime(2026, 6, 1, tzinfo=UTC)
+    preregister_family_evaluation(ledger, preregistration, now=now)
+    batch_evidence = evaluate_preregistered_family(
+        ledger,
+        preregistration,
+        outputs=outputs,
+        development_labels=development_labels,
+        now=now + timedelta(minutes=1),
+    )
+    winner_seal = seal_development_winner(
+        preregistration=preregistration,
+        batch_evidence=batch_evidence,
+    )
+    winner_output = next(
+        output for output in outputs if output.candidate_id == winner_seal.selected_trial_id
+    )
+    return RuntimeBoundD2NLineage(
+        train_features=train_features,
+        train_labels=train_labels,
+        training_bundle=training_bundle,
+        development_features=development_features,
+        development_labels=development_labels,
+        outputs=outputs,
+        preregistration=preregistration,
+        batch_evidence=batch_evidence,
+        winner_seal=winner_seal,
+        winner_output=winner_output,
+    )
+
+
 def build_d2n_source(tmp_path, *, market_mode: str = "favorable") -> D2NSource:
     if market_mode not in {"favorable", "adverse", "flat"}:
         raise ValueError("unsupported market_mode")
 
-    lineage = build_d2l_source(tmp_path)
+    lineage = build_runtime_bound_d2n_lineage(tmp_path)
     shared = tmp_path / f"d2n-shared-{market_mode}.sqlite3"
 
     predictive_material = d2k_fixture.build_final_holdout_material(
