@@ -1,24 +1,28 @@
 """OSS-3D2L preregistered predictor-to-strategy semantics.
 
-D2L converts the already-selected OSS-3 DEVELOPMENT winner into one explicit,
-deterministic *research target-allocation contract*.  It does not execute Qlib,
-read labels, create orders or grant execution authority.
+D2L gives the selected OSS-3 Qlib predictor one explicit, deterministic
+research portfolio-construction meaning before FINAL_HOLDOUT outcomes can be
+observed. It accepts only the already-frozen D2J protocol plus the exact D2G
+DEVELOPMENT winner output. It never accepts labels, executes Qlib, constructs
+orders or grants broker/OMS/Safety/PAPER/capital/LIVE authority.
 
-The scientific ordering is intentional:
+Scientific order for a real campaign::
 
-    D2I winner -> D2J value-opaque FINAL_HOLDOUT protocol
-        -> D2L portfolio semantics preregistration
-            -> later D2K one-shot FINAL_HOLDOUT evaluation
+    D2I winner
+      -> D2J value-opaque FINAL_HOLDOUT protocol
+        -> D2L durable predictor-to-strategy preregistration
+          -> D2K one-shot predictive FINAL_HOLDOUT evaluation
 
-A D2L preregistration is valid only when it is committed in the same
-canonical SQLite file intended for D2K before any D2K start/permit consumption
-for the protocol.  This prevents choosing portfolio construction after seeing
-FINAL_HOLDOUT outcomes.
+D2L is stored in the same authoritative SQLite file intended for D2K and the
+new preregistration is rejected if a D2K start or holdout permit already exists
+for that protocol. That makes portfolio semantics ex-ante state, rather than a
+choice made after seeing the holdout.
 
-D2L consumes only score ranks.  It never uses DEVELOPMENT label values, score
-magnitude thresholds or post-hoc score-sign inversion.  Output is immutable
-target-weight evidence with a mandatory one-bar execution delay; it is not an
-OrderIntent and has no broker/OMS/Safety/PAPER/capital/LIVE authority.
+The v1 policy is deliberately simple and safety-first: descending score rank,
+long-only, top-fraction selection, equal weights, 25% per-asset cap, at least
+25% cash, no leverage, no sign flip, no score-magnitude threshold, deterministic
+symbol tie-break and a mandatory one-bar execution delay. Output is target
+allocation evidence only, never an OrderIntent.
 """
 
 from __future__ import annotations
@@ -32,18 +36,12 @@ from math import isfinite
 from pathlib import Path
 import re
 import sqlite3
-from typing import Mapping, Sequence
+from typing import Mapping
 
-from autotrade.research.oss3_qlib_artifact import (
-    QlibPredictionArtifact,
-    QlibPredictionRow,
-)
+from autotrade.research.oss3_qlib_artifact import QlibPredictionArtifact, QlibPredictionRow
 
 from .family_evaluation_batch import FrozenCandidateOutput
-from .final_holdout_protocol import (
-    OSS3D2J_CONTRACT_VERSION,
-    OSS3FinalHoldoutProtocolReceipt,
-)
+from .final_holdout_protocol import OSS3D2J_CONTRACT_VERSION, OSS3FinalHoldoutProtocolReceipt
 
 
 OSS3D2L_POLICY_VERSION = "OSS3D2L_PREDICTIVE_PORTFOLIO_POLICY_V1"
@@ -67,6 +65,9 @@ _SYMBOL_RE = re.compile(r"^[A-Z0-9][A-Z0-9._:/-]{0,31}$")
 _ZERO = Decimal("0")
 _ONE = Decimal("1")
 
+# Source that can alter winner admission, rank projection or the D2J/D2L
+# pre-holdout governance contract. Deliberately excludes D2K and all execution
+# modules: D2L has no dependency on holdout outcomes or execution authority.
 SEMANTIC_FILES = (
     "labs/oss3_qlib/predictive_strategy_contract.py",
     "labs/oss3_qlib/development_winner_seal.py",
@@ -94,7 +95,7 @@ class PredictiveStrategyContractConflict(PredictiveStrategyContractError):
 
 @dataclass(frozen=True, slots=True)
 class PredictivePortfolioPolicy:
-    """One non-adaptive, rank-only portfolio construction policy."""
+    """One non-adaptive rank-only portfolio policy."""
 
     policy_version: str
     policy_id: str
@@ -122,37 +123,25 @@ class PredictivePortfolioPolicy:
 
     def __post_init__(self) -> None:
         if self.policy_version != OSS3D2L_POLICY_VERSION:
-            raise PredictiveStrategyContractIntegrityError(
-                "noncanonical D2L policy version"
-            )
+            raise PredictiveStrategyContractIntegrityError("noncanonical D2L policy version")
         _require_id(self.policy_id, "policy_id")
         if self.score_direction != SCORE_DIRECTION:
-            raise PredictiveStrategyContractGovernanceError(
-                "D2L score direction is frozen to descending"
-            )
+            raise PredictiveStrategyContractGovernanceError("D2L score direction is frozen")
         if self.selection_mode != SELECTION_MODE:
-            raise PredictiveStrategyContractGovernanceError(
-                "D2L selection mode is frozen to TOP_FRACTION"
-            )
+            raise PredictiveStrategyContractGovernanceError("D2L selection mode is frozen")
         if self.weighting_mode != WEIGHTING_MODE:
-            raise PredictiveStrategyContractGovernanceError(
-                "D2L weighting mode is frozen to equal weight"
-            )
+            raise PredictiveStrategyContractGovernanceError("D2L weighting mode is frozen")
         if self.rebalance_mode != REBALANCE_MODE:
-            raise PredictiveStrategyContractGovernanceError(
-                "D2L rebalance mode is frozen"
-            )
+            raise PredictiveStrategyContractGovernanceError("D2L rebalance mode is frozen")
         if self.tie_break_policy != TIE_BREAK_POLICY:
-            raise PredictiveStrategyContractGovernanceError(
-                "D2L tie-break policy is frozen"
-            )
-        for name, value in (
-            ("selection_fraction", self.selection_fraction),
-            ("gross_target", self.gross_target),
-            ("max_weight_per_asset", self.max_weight_per_asset),
-            ("reserve_cash_min", self.reserve_cash_min),
+            raise PredictiveStrategyContractGovernanceError("D2L tie-break policy is frozen")
+        for name in (
+            "selection_fraction",
+            "gross_target",
+            "max_weight_per_asset",
+            "reserve_cash_min",
         ):
-            _require_decimal(value, name)
+            _require_decimal(getattr(self, name), name)
         if not _ZERO < self.selection_fraction <= _ONE:
             raise ValueError("selection_fraction must be in (0,1]")
         if not _ZERO < self.gross_target <= _ONE:
@@ -169,28 +158,27 @@ class PredictivePortfolioPolicy:
             raise PredictiveStrategyContractGovernanceError(
                 "per-asset cap may not exceed gross target"
             )
-        for name, value, minimum in (
-            ("min_selected_assets", self.min_selected_assets, 1),
-            ("max_selected_assets", self.max_selected_assets, 1),
-            ("min_cross_section_observations", self.min_cross_section_observations, 3),
-            ("execution_delay_bars", self.execution_delay_bars, 1),
+        for name, minimum in (
+            ("min_selected_assets", 1),
+            ("max_selected_assets", 1),
+            ("min_cross_section_observations", 3),
+            ("execution_delay_bars", 1),
         ):
+            value = getattr(self, name)
             if isinstance(value, bool) or not isinstance(value, int) or value < minimum:
                 raise ValueError(f"{name} must be integer >= {minimum}")
         if self.min_selected_assets > self.max_selected_assets:
             raise ValueError("min_selected_assets exceeds max_selected_assets")
         if self.execution_delay_bars != EXECUTION_DELAY_BARS:
             raise PredictiveStrategyContractGovernanceError(
-                "D2L requires exactly one-bar minimum execution delay"
+                "D2L requires exactly one-bar execution delay"
             )
         if self.require_positive_winner_metric is not True:
             raise PredictiveStrategyContractGovernanceError(
-                "D2L may not invert a non-positive winner after selection"
+                "D2L may not post-hoc invert a non-positive winner"
             )
         if self.rank_score_only is not True:
-            raise PredictiveStrategyContractGovernanceError(
-                "D2L may use score ranks only"
-            )
+            raise PredictiveStrategyContractGovernanceError("D2L may use score ranks only")
         if (
             self.adaptive_portfolio_search
             or self.hyperparameter_optimization
@@ -200,7 +188,7 @@ class PredictivePortfolioPolicy:
             or self.same_bar_execution_allowed
         ):
             raise PredictiveStrategyContractGovernanceError(
-                "D2L canonical policy forbids adaptive search, sign flip, shorting, leverage and same-bar execution"
+                "D2L forbids adaptive search, HPO, sign flip, shorting, leverage and same-bar execution"
             )
 
     @property
@@ -236,7 +224,7 @@ class PredictivePortfolioPolicy:
 
 
 def canonical_oss3d2l_policy() -> PredictivePortfolioPolicy:
-    """Return the single safety-first D2L v1 policy; no data-driven alternatives."""
+    """Return the single D2L v1 policy; there is no data-driven policy search."""
     return PredictivePortfolioPolicy(
         policy_version=OSS3D2L_POLICY_VERSION,
         policy_id="oss3d2l-canonical-long-only-v1",
@@ -274,7 +262,7 @@ class PredictiveRankedAsset:
 
     def __post_init__(self) -> None:
         if isinstance(self.rank, bool) or not isinstance(self.rank, int) or self.rank < 1:
-            raise ValueError("rank must be integer >=1")
+            raise ValueError("rank must be integer >= 1")
         if not _SYMBOL_RE.fullmatch(self.symbol):
             raise ValueError("invalid ranked symbol")
         if isinstance(self.score, bool) or not isinstance(self.score, (int, float)):
@@ -282,7 +270,7 @@ class PredictiveRankedAsset:
         if not isfinite(float(self.score)):
             raise ValueError("score must be finite")
         _require_decimal(self.target_weight, "target_weight")
-        if self.target_weight < _ZERO or self.target_weight > _ONE:
+        if not _ZERO <= self.target_weight <= _ONE:
             raise ValueError("target_weight outside [0,1]")
         if self.selected is not (self.target_weight > _ZERO):
             raise PredictiveStrategyContractIntegrityError(
@@ -301,6 +289,8 @@ class PredictiveRankedAsset:
 
 @dataclass(frozen=True, slots=True)
 class PredictiveTargetAllocation:
+    """Immutable target-weight evidence; explicitly not an execution request."""
+
     allocation_version: str
     strategy_id: str
     strategy_version: str
@@ -325,9 +315,7 @@ class PredictiveTargetAllocation:
 
     def __post_init__(self) -> None:
         if self.allocation_version != OSS3D2L_ALLOCATION_VERSION:
-            raise PredictiveStrategyContractIntegrityError(
-                "noncanonical D2L allocation version"
-            )
+            raise PredictiveStrategyContractIntegrityError("noncanonical D2L allocation version")
         _require_id(self.strategy_id, "strategy_id")
         _require_id(self.strategy_version, "strategy_version")
         for name in (
@@ -338,72 +326,57 @@ class PredictiveTargetAllocation:
         ):
             _require_hash(getattr(self, name), name)
         _parse_canonical_utc(self.as_of, "allocation as_of")
-        for name, value, minimum in (
-            ("source_symbol_count", self.source_symbol_count, 3),
-            ("selected_asset_count", self.selected_asset_count, 1),
-            ("execution_delay_bars", self.execution_delay_bars, 1),
+        for name, minimum in (
+            ("source_symbol_count", 3),
+            ("selected_asset_count", 1),
+            ("execution_delay_bars", 1),
         ):
+            value = getattr(self, name)
             if isinstance(value, bool) or not isinstance(value, int) or value < minimum:
                 raise ValueError(f"{name} must be integer >= {minimum}")
         if self.selected_asset_count > self.source_symbol_count:
-            raise PredictiveStrategyContractIntegrityError(
-                "selected assets exceed source cross-section"
-            )
+            raise PredictiveStrategyContractIntegrityError("selected assets exceed source support")
         if len(self.rankings) != self.source_symbol_count:
-            raise PredictiveStrategyContractIntegrityError(
-                "ranking count differs from source cross-section"
-            )
+            raise PredictiveStrategyContractIntegrityError("ranking count differs from support")
         if tuple(item.rank for item in self.rankings) != tuple(
             range(1, self.source_symbol_count + 1)
         ):
-            raise PredictiveStrategyContractIntegrityError(
-                "rankings must be contiguous canonical order"
-            )
+            raise PredictiveStrategyContractIntegrityError("rank order is not canonical")
         ranking_symbols = tuple(item.symbol for item in self.rankings)
         if len(set(ranking_symbols)) != len(ranking_symbols):
-            raise PredictiveStrategyContractIntegrityError(
-                "ranking symbols must be unique"
-            )
+            raise PredictiveStrategyContractIntegrityError("ranking symbols must be unique")
         weight_symbols = tuple(symbol for symbol, _ in self.target_weights)
         if weight_symbols != tuple(sorted(weight_symbols)):
-            raise PredictiveStrategyContractIntegrityError(
-                "target weights must use sorted symbols"
-            )
+            raise PredictiveStrategyContractIntegrityError("target weights must use sorted symbols")
         if set(weight_symbols) != set(ranking_symbols):
             raise PredictiveStrategyContractIntegrityError(
                 "target weights must cover exact ranking symbols"
             )
+        by_symbol = dict(self.target_weights)
         for symbol, weight in self.target_weights:
             if not _SYMBOL_RE.fullmatch(symbol):
                 raise ValueError("invalid target-weight symbol")
             _require_decimal(weight, "target weight")
-            if weight < _ZERO or weight > _ONE:
+            if not _ZERO <= weight <= _ONE:
                 raise ValueError("target weight outside [0,1]")
-        expected_selected = sum(1 for item in self.rankings if item.selected)
-        if expected_selected != self.selected_asset_count:
-            raise PredictiveStrategyContractIntegrityError(
-                "selected_asset_count mismatch"
-            )
-        by_symbol = dict(self.target_weights)
         if any(by_symbol[item.symbol] != item.target_weight for item in self.rankings):
             raise PredictiveStrategyContractIntegrityError(
-                "ranking target weights differ from canonical target_weights"
+                "ranking weights differ from target_weights"
             )
+        expected_selected = sum(1 for item in self.rankings if item.selected)
+        if expected_selected != self.selected_asset_count:
+            raise PredictiveStrategyContractIntegrityError("selected_asset_count mismatch")
         _require_decimal(self.invested_weight, "invested_weight")
         _require_decimal(self.cash_weight, "cash_weight")
         expected_invested = sum((weight for _, weight in self.target_weights), _ZERO)
         if self.invested_weight != expected_invested:
-            raise PredictiveStrategyContractIntegrityError(
-                "invested_weight mismatch"
-            )
+            raise PredictiveStrategyContractIntegrityError("invested_weight mismatch")
         if self.cash_weight != _ONE - self.invested_weight:
             raise PredictiveStrategyContractIntegrityError("cash_weight mismatch")
         if not _ZERO <= self.invested_weight <= _ONE:
-            raise ValueError("invested weight outside [0,1]")
+            raise ValueError("invested_weight outside [0,1]")
         if self.execution_delay_bars != EXECUTION_DELAY_BARS:
-            raise PredictiveStrategyContractGovernanceError(
-                "allocation execution delay drifted"
-            )
+            raise PredictiveStrategyContractGovernanceError("allocation delay drifted")
         _deny_authority(
             same_bar_execution_allowed=self.same_bar_execution_allowed,
             order_intents_generated=self.order_intents_generated,
@@ -412,6 +385,11 @@ class PredictiveTargetAllocation:
             capital_authority=self.capital_authority,
             live_trading=self.live_trading,
         )
+
+    @property
+    def semantic_fingerprint(self) -> str:
+        """Allocation semantics independent of derived strategy identity."""
+        return _allocation_semantic_fingerprint(self)
 
     @property
     def fingerprint(self) -> str:
@@ -445,6 +423,8 @@ class PredictiveTargetAllocation:
 
 @dataclass(frozen=True, slots=True)
 class OSS3PredictiveStrategyBinding:
+    """Frozen model + DEVELOPMENT score semantics + canonical portfolio policy."""
+
     binding_version: str
     protocol_id: str
     protocol_receipt_hash: str
@@ -469,7 +449,7 @@ class OSS3PredictiveStrategyBinding:
     source_inference_end: str
     policy: PredictivePortfolioPolicy
     binding_code_hash: str
-    development_allocation_fingerprints: tuple[str, ...]
+    development_allocation_semantic_fingerprints: tuple[str, ...]
     development_allocation_evidence_hash: str
     strategy_id: str
     strategy_version: str
@@ -494,9 +474,7 @@ class OSS3PredictiveStrategyBinding:
 
     def __post_init__(self) -> None:
         if self.binding_version != OSS3D2L_BINDING_VERSION:
-            raise PredictiveStrategyContractIntegrityError(
-                "noncanonical D2L binding version"
-            )
+            raise PredictiveStrategyContractIntegrityError("noncanonical D2L binding version")
         for name in (
             "protocol_id",
             "expected_holdout_authorization_id",
@@ -532,44 +510,33 @@ class OSS3PredictiveStrategyBinding:
         _parse_canonical_utc(self.source_inference_end, "source_inference_end")
         if not isinstance(self.policy, PredictivePortfolioPolicy):
             raise TypeError("policy must be PredictivePortfolioPolicy")
-        if not self.development_allocation_fingerprints:
+        if not self.development_allocation_semantic_fingerprints:
             raise PredictiveStrategyContractIntegrityError(
-                "D2L requires deterministic DEVELOPMENT allocation evidence"
+                "D2L requires DEVELOPMENT allocation semantics"
             )
-        for value in self.development_allocation_fingerprints:
-            _require_hash(value, "development allocation fingerprint")
+        for value in self.development_allocation_semantic_fingerprints:
+            _require_hash(value, "development allocation semantic fingerprint")
         if self.development_allocation_evidence_hash != _hash(
-            list(self.development_allocation_fingerprints)
+            list(self.development_allocation_semantic_fingerprints)
         ):
             raise PredictiveStrategyContractIntegrityError(
                 "DEVELOPMENT allocation evidence hash mismatch"
             )
         if self.strategy_id != STRATEGY_ID or self.runtime_kind != RUNTIME_KIND:
-            raise PredictiveStrategyContractGovernanceError(
-                "D2L strategy identity/runtime kind drifted"
-            )
-        if self.binding_code_hash != predictive_strategy_code_hash():
-            raise PredictiveStrategyContractIntegrityError(
-                "D2L semantic source identity drifted"
-            )
+            raise PredictiveStrategyContractGovernanceError("D2L strategy identity drifted")
         expected_semantic = _strategy_semantic_hash_from_binding(self)
         if self.strategy_semantic_hash != expected_semantic:
+            raise PredictiveStrategyContractIntegrityError("strategy semantic hash mismatch")
+        if self.strategy_version != _strategy_version(expected_semantic):
             raise PredictiveStrategyContractIntegrityError(
-                "strategy semantic hash mismatch"
-            )
-        expected_version = _strategy_version(expected_semantic)
-        if self.strategy_version != expected_version:
-            raise PredictiveStrategyContractIntegrityError(
-                "strategy version does not derive from semantic hash"
+                "strategy_version does not derive from semantic hash"
             )
         if self.development_predictions_used is not True:
             raise PredictiveStrategyContractIntegrityError(
-                "D2L binding must prove DEVELOPMENT score semantics"
+                "D2L must prove DEVELOPMENT score projection"
             )
         if self.development_labels_used:
-            raise PredictiveStrategyContractGovernanceError(
-                "D2L may not use DEVELOPMENT labels"
-            )
+            raise PredictiveStrategyContractGovernanceError("D2L may not use DEVELOPMENT labels")
         if self.policy_frozen_before_final_holdout is not True:
             raise PredictiveStrategyContractGovernanceError(
                 "D2L policy must be frozen before FINAL_HOLDOUT"
@@ -587,12 +554,10 @@ class OSS3PredictiveStrategyBinding:
             or self.paper_execution_authorized
         ):
             raise PredictiveStrategyContractGovernanceError(
-                "D2L binding exceeds pre-holdout research-only authority"
+                "D2L binding exceeds pre-holdout research authority"
             )
         if self.capital_authority != "NONE" or self.live_trading != "BLOCKED":
-            raise PredictiveStrategyContractGovernanceError(
-                "D2L cannot grant capital or LIVE authority"
-            )
+            raise PredictiveStrategyContractGovernanceError("D2L cannot grant capital/LIVE")
         if self.binding_hash != _hash(self.to_dict(include_hash=False)):
             raise PredictiveStrategyContractIntegrityError("D2L binding hash mismatch")
 
@@ -623,8 +588,8 @@ class OSS3PredictiveStrategyBinding:
             "policy": self.policy.to_dict(),
             "policy_fingerprint": self.policy.fingerprint,
             "binding_code_hash": self.binding_code_hash,
-            "development_allocation_fingerprints": list(
-                self.development_allocation_fingerprints
+            "development_allocation_semantic_fingerprints": list(
+                self.development_allocation_semantic_fingerprints
             ),
             "development_allocation_evidence_hash": self.development_allocation_evidence_hash,
             "strategy_id": self.strategy_id,
@@ -677,16 +642,11 @@ class OSS3PredictiveStrategyPreregistrationReceipt:
                 "noncanonical D2L preregistration version"
             )
         if self.ordering_contract != SHARED_SQLITE_ORDERING_CONTRACT:
-            raise PredictiveStrategyContractIntegrityError(
-                "D2L ordering contract drifted"
-            )
+            raise PredictiveStrategyContractIntegrityError("D2L ordering contract drifted")
         if not isinstance(self.binding, OSS3PredictiveStrategyBinding):
             raise TypeError("binding must be OSS3PredictiveStrategyBinding")
         _require_id(self.protocol_id, "protocol_id")
-        _require_id(
-            self.expected_holdout_authorization_id,
-            "expected_holdout_authorization_id",
-        )
+        _require_id(self.expected_holdout_authorization_id, "expected_holdout_authorization_id")
         _require_hash(self.protocol_receipt_hash, "protocol_receipt_hash")
         _require_hash(self.receipt_hash, "receipt_hash")
         _parse_canonical_utc(self.registered_at, "registered_at")
@@ -754,10 +714,7 @@ def build_predictive_strategy_binding(
     winner_output: FrozenCandidateOutput,
     policy: PredictivePortfolioPolicy | None = None,
 ) -> OSS3PredictiveStrategyBinding:
-    """Bind D2J winner scores to deterministic long-only target semantics.
-
-    No labels or FINAL_HOLDOUT material are accepted by this API.
-    """
+    """Freeze exact D2J winner score semantics without labels or holdout access."""
     if not isinstance(protocol, OSS3FinalHoldoutProtocolReceipt):
         raise TypeError("protocol must be OSS3FinalHoldoutProtocolReceipt")
     if not isinstance(winner_output, FrozenCandidateOutput):
@@ -777,17 +734,15 @@ def build_predictive_strategy_binding(
 
     manifest = winner_output.prediction.manifest
     code_hash = predictive_strategy_code_hash()
-    allocation_seed = _build_allocations(
+    seed_allocations = _build_allocations(
         prediction=winner_output.prediction,
         policy=selected_policy,
         strategy_id=STRATEGY_ID,
         strategy_version="PENDING",
         strategy_semantic_hash="0" * 64,
     )
-    provisional_allocation_hashes = tuple(
-        _allocation_semantic_fingerprint(item) for item in allocation_seed
-    )
-    allocation_evidence_hash = _hash(list(provisional_allocation_hashes))
+    semantic_fingerprints = tuple(item.semantic_fingerprint for item in seed_allocations)
+    allocation_evidence_hash = _hash(list(semantic_fingerprints))
     semantic_values = {
         "protocol_receipt_hash": protocol.receipt_hash,
         "winner_binding_fingerprint": protocol.winner_binding.fingerprint,
@@ -814,17 +769,14 @@ def build_predictive_strategy_binding(
     }
     semantic_hash = _hash(semantic_values)
     strategy_version = _strategy_version(semantic_hash)
-    allocations = _build_allocations(
+    final_allocations = _build_allocations(
         prediction=winner_output.prediction,
         policy=selected_policy,
         strategy_id=STRATEGY_ID,
         strategy_version=strategy_version,
         strategy_semantic_hash=semantic_hash,
     )
-    allocation_fingerprints = tuple(item.fingerprint for item in allocations)
-    # The semantic allocation hash excludes the strategy version/hash placeholders,
-    # while public allocation fingerprints include the final strategy identity.
-    if _hash([_allocation_semantic_fingerprint(item) for item in allocations]) != allocation_evidence_hash:
+    if tuple(item.semantic_fingerprint for item in final_allocations) != semantic_fingerprints:
         raise PredictiveStrategyContractIntegrityError(
             "D2L allocation semantics changed while deriving strategy identity"
         )
@@ -854,7 +806,7 @@ def build_predictive_strategy_binding(
         "source_inference_end": manifest.inference_end,
         "policy": selected_policy,
         "binding_code_hash": code_hash,
-        "development_allocation_fingerprints": allocation_fingerprints,
+        "development_allocation_semantic_fingerprints": semantic_fingerprints,
         "development_allocation_evidence_hash": allocation_evidence_hash,
         "strategy_id": STRATEGY_ID,
         "strategy_version": strategy_version,
@@ -887,14 +839,15 @@ def project_prediction_artifact(
     binding: OSS3PredictiveStrategyBinding,
     prediction: QlibPredictionArtifact,
 ) -> tuple[PredictiveTargetAllocation, ...]:
-    """Project one compatible frozen-model prediction artifact into target weights.
-
-    This remains research target evidence only.  It does not create orders.
-    """
+    """Project compatible frozen-model predictions into target weights only."""
     if not isinstance(binding, OSS3PredictiveStrategyBinding):
         raise TypeError("binding must be OSS3PredictiveStrategyBinding")
     if not isinstance(prediction, QlibPredictionArtifact):
         raise TypeError("prediction must be QlibPredictionArtifact")
+    if binding.binding_code_hash != predictive_strategy_code_hash():
+        raise PredictiveStrategyContractIntegrityError(
+            "current D2L projection code differs from frozen strategy source"
+        )
     manifest = prediction.manifest
     for name, expected, actual in (
         ("model_family", binding.model_family, manifest.model_family),
@@ -985,6 +938,10 @@ class SQLiteOSS3PredictiveStrategyRegistry:
         _require_aware(now, "now")
         _verify_pristine_protocol(protocol)
         _verify_binding_protocol(protocol=protocol, binding=binding)
+        if binding.binding_code_hash != predictive_strategy_code_hash():
+            raise PredictiveStrategyContractIntegrityError(
+                "current D2L code differs from binding code identity"
+            )
         conn = self._connect()
         try:
             conn.execute("BEGIN IMMEDIATE")
@@ -1072,9 +1029,7 @@ def read_oss3d2l_preregistration_read_only(
     _require_id(protocol_id, "protocol_id")
     resolved = Path(path).resolve()
     if not resolved.is_file():
-        raise PredictiveStrategyContractIntegrityError(
-            "D2L durable registry does not exist"
-        )
+        raise PredictiveStrategyContractIntegrityError("D2L durable registry does not exist")
     conn = sqlite3.connect(f"file:{resolved}?mode=ro", uri=True)
     conn.row_factory = sqlite3.Row
     try:
@@ -1099,17 +1054,13 @@ def predictive_strategy_code_hash() -> str:
             raise PredictiveStrategyContractIntegrityError(
                 f"missing D2L semantic file: {relative}"
             )
-        payload.append(
-            {"path": relative, "sha256": sha256(path.read_bytes()).hexdigest()}
-        )
+        payload.append({"path": relative, "sha256": sha256(path.read_bytes()).hexdigest()})
     return _hash(payload)
 
 
 def _verify_pristine_protocol(protocol: OSS3FinalHoldoutProtocolReceipt) -> None:
     if protocol.contract_version != OSS3D2J_CONTRACT_VERSION:
-        raise PredictiveStrategyContractIntegrityError(
-            "D2L requires canonical D2J protocol"
-        )
+        raise PredictiveStrategyContractIntegrityError("D2L requires canonical D2J protocol")
     if (
         protocol.final_holdout_observed
         or protocol.final_holdout_consumed
@@ -1140,8 +1091,8 @@ def _verify_winner_output(
     winner_output: FrozenCandidateOutput,
 ) -> None:
     winner = protocol.winner_binding
-    manifest = winner_output.request.manifest
-    prediction_manifest = winner_output.prediction.manifest
+    request = winner_output.request.manifest
+    prediction = winner_output.prediction.manifest
     for name, expected, actual in (
         ("candidate_id", winner.selected_trial_id, winner_output.candidate_id),
         ("request_hash", winner.request_hash, winner_output.request.request_hash),
@@ -1150,14 +1101,14 @@ def _verify_winner_output(
         ("environment_attestation_hash", winner.environment_attestation_hash, winner_output.attestation.artifact_hash),
         ("d2g_run_evidence_hash", winner.d2g_run_evidence_hash, winner_output.run_evidence_fingerprint),
         ("runtime_environment_hash", winner.runtime_environment_hash, winner_output.runtime_environment.fingerprint),
-        ("model_family", winner.model_family, manifest.model_family),
-        ("model_config_hash", winner.model_config_hash, manifest.model_config_hash),
-        ("shared_runner_code_hash", winner.shared_runner_code_hash, manifest.expected_runner_code_hash),
-        ("prediction model_family", winner.model_family, prediction_manifest.model_family),
-        ("prediction model_config_hash", winner.model_config_hash, prediction_manifest.model_config_hash),
-        ("prediction producer_code_hash", winner.shared_runner_code_hash, prediction_manifest.producer_code_hash),
-        ("prediction feature_schema_hash", manifest.feature_schema_hash, prediction_manifest.feature_schema_hash),
-        ("prediction training_dataset_hash", manifest.training_bundle_hash, prediction_manifest.training_dataset_hash),
+        ("model_family", winner.model_family, request.model_family),
+        ("model_config_hash", winner.model_config_hash, request.model_config_hash),
+        ("shared_runner_code_hash", winner.shared_runner_code_hash, request.expected_runner_code_hash),
+        ("prediction model_family", winner.model_family, prediction.model_family),
+        ("prediction model_config_hash", winner.model_config_hash, prediction.model_config_hash),
+        ("prediction producer_code_hash", winner.shared_runner_code_hash, prediction.producer_code_hash),
+        ("prediction feature_schema_hash", request.feature_schema_hash, prediction.feature_schema_hash),
+        ("prediction training_dataset_hash", request.training_bundle_hash, prediction.training_dataset_hash),
     ):
         if expected != actual:
             raise PredictiveStrategyContractIntegrityError(
@@ -1178,16 +1129,8 @@ def _verify_binding_protocol(
             protocol.expected_holdout_authorization_id,
             binding.expected_holdout_authorization_id,
         ),
-        (
-            "winner_binding_fingerprint",
-            protocol.winner_binding.fingerprint,
-            binding.winner_binding_fingerprint,
-        ),
-        (
-            "source_d2i_seal_fingerprint",
-            protocol.source_d2i_seal_fingerprint,
-            binding.source_d2i_seal_fingerprint,
-        ),
+        ("winner_binding_fingerprint", protocol.winner_binding.fingerprint, binding.winner_binding_fingerprint),
+        ("source_d2i_seal_fingerprint", protocol.source_d2i_seal_fingerprint, binding.source_d2i_seal_fingerprint),
         ("selected_trial_id", protocol.selected_trial_id, binding.selected_trial_id),
         ("model_config_hash", protocol.model_config_hash, binding.model_config_hash),
     ):
@@ -1209,9 +1152,8 @@ def _build_allocations(
     for row in prediction.rows:
         grouped.setdefault(row.timestamp, []).append(row)
     if not grouped:
-        raise PredictiveStrategyContractIntegrityError(
-            "prediction artifact has no cross sections"
-        )
+        raise PredictiveStrategyContractIntegrityError("prediction artifact has no cross sections")
+
     allocations: list[PredictiveTargetAllocation] = []
     for timestamp in sorted(grouped):
         rows = grouped[timestamp]
@@ -1240,15 +1182,11 @@ def _build_allocations(
         )
         invested = sum((weight for _, weight in weights), _ZERO)
         if invested > policy.gross_target:
-            raise PredictiveStrategyContractIntegrityError(
-                "D2L allocation exceeds gross target"
-            )
+            raise PredictiveStrategyContractIntegrityError("allocation exceeds gross target")
         if _ONE - invested < policy.reserve_cash_min:
-            raise PredictiveStrategyContractIntegrityError(
-                "D2L allocation violates cash reserve"
-            )
+            raise PredictiveStrategyContractIntegrityError("allocation violates cash reserve")
         by_symbol = dict(weights)
-        ranking = tuple(
+        rankings = tuple(
             PredictiveRankedAsset(
                 rank=index,
                 symbol=row.symbol,
@@ -1258,7 +1196,9 @@ def _build_allocations(
             )
             for index, row in enumerate(ordered, start=1)
         )
-        cross_section_hash = _hash([row.to_dict() for row in sorted(rows)])
+        cross_section_hash = _hash(
+            [row.to_dict() for row in sorted(rows, key=lambda item: item.symbol)]
+        )
         allocations.append(
             PredictiveTargetAllocation(
                 allocation_version=OSS3D2L_ALLOCATION_VERSION,
@@ -1271,7 +1211,7 @@ def _build_allocations(
                 source_cross_section_hash=cross_section_hash,
                 source_symbol_count=len(ordered),
                 selected_asset_count=selected_count,
-                rankings=ranking,
+                rankings=rankings,
                 target_weights=weights,
                 invested_weight=invested,
                 cash_weight=_ONE - invested,
@@ -1288,6 +1228,8 @@ def _build_allocations(
 
 
 def _selected_count(size: int, policy: PredictivePortfolioPolicy) -> int:
+    if isinstance(size, bool) or not isinstance(size, int) or size < 1:
+        raise ValueError("cross-section size must be positive integer")
     fraction_count = int(
         (Decimal(size) * policy.selection_fraction).to_integral_value(
             rounding=ROUND_CEILING
@@ -1303,21 +1245,12 @@ def _selected_count(size: int, policy: PredictivePortfolioPolicy) -> int:
 def _allocation_semantic_fingerprint(allocation: PredictiveTargetAllocation) -> str:
     return _hash(
         {
+            "policy_fingerprint": allocation.policy_fingerprint,
+            "prediction_artifact_hash": allocation.prediction_artifact_hash,
             "as_of": allocation.as_of,
             "source_cross_section_hash": allocation.source_cross_section_hash,
-            "rankings": [
-                {
-                    "rank": item.rank,
-                    "symbol": item.symbol,
-                    "score": float(item.score),
-                    "selected": item.selected,
-                    "target_weight": str(item.target_weight),
-                }
-                for item in allocation.rankings
-            ],
-            "target_weights": [
-                [symbol, str(weight)] for symbol, weight in allocation.target_weights
-            ],
+            "rankings": [item.to_dict() for item in allocation.rankings],
+            "target_weights": [[symbol, str(weight)] for symbol, weight in allocation.target_weights],
             "invested_weight": str(allocation.invested_weight),
             "cash_weight": str(allocation.cash_weight),
             "execution_delay_bars": allocation.execution_delay_bars,
@@ -1401,7 +1334,7 @@ def _require_no_d2k_start(
         ).fetchone()
         if row is not None:
             raise PredictiveStrategyContractGovernanceError(
-                "D2L strategy policy cannot be preregistered after D2K start"
+                "D2L cannot be preregistered after D2K start"
             )
     if _table_exists(conn, "holdout_permits"):
         permit = conn.execute(
@@ -1410,7 +1343,7 @@ def _require_no_d2k_start(
         ).fetchone()
         if permit is not None:
             raise PredictiveStrategyContractGovernanceError(
-                "D2L strategy policy cannot be preregistered after holdout permit consumption"
+                "D2L cannot be preregistered after holdout permit consumption"
             )
 
 
@@ -1428,12 +1361,12 @@ def _preregistration_from_row(
     try:
         payload = json.loads(str(row["receipt_json"]))
         if not isinstance(payload, Mapping):
-            raise TypeError("receipt_json must be an object")
+            raise TypeError("receipt_json must be object")
         values = dict(payload)
-        binding_payload = values.get("binding")
-        if not isinstance(binding_payload, Mapping):
+        raw_binding = values.get("binding")
+        if not isinstance(raw_binding, Mapping):
             raise TypeError("binding must be object")
-        values["binding"] = _binding_from_dict(binding_payload)
+        values["binding"] = _binding_from_dict(raw_binding)
         receipt = OSS3PredictiveStrategyPreregistrationReceipt(**values)
     except (json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
         raise PredictiveStrategyContractIntegrityError(
@@ -1442,10 +1375,7 @@ def _preregistration_from_row(
     for column, expected in (
         ("protocol_id", receipt.protocol_id),
         ("protocol_receipt_hash", receipt.protocol_receipt_hash),
-        (
-            "expected_holdout_authorization_id",
-            receipt.expected_holdout_authorization_id,
-        ),
+        ("expected_holdout_authorization_id", receipt.expected_holdout_authorization_id),
         ("winner_binding_fingerprint", receipt.binding.winner_binding_fingerprint),
         ("strategy_id", receipt.binding.strategy_id),
         ("strategy_version", receipt.binding.strategy_version),
@@ -1469,15 +1399,15 @@ def _preregistration_from_row(
 def _binding_from_dict(payload: Mapping[str, object]) -> OSS3PredictiveStrategyBinding:
     values = dict(payload)
     values.pop("policy_fingerprint", None)
-    policy_payload = values.get("policy")
-    if not isinstance(policy_payload, Mapping):
+    raw_policy = values.get("policy")
+    if not isinstance(raw_policy, Mapping):
         raise TypeError("policy must be object")
-    values["policy"] = _policy_from_dict(policy_payload)
-    raw_allocations = values.get("development_allocation_fingerprints")
-    if not isinstance(raw_allocations, list):
-        raise TypeError("development_allocation_fingerprints must be list")
-    values["development_allocation_fingerprints"] = tuple(
-        str(item) for item in raw_allocations
+    values["policy"] = _policy_from_dict(raw_policy)
+    raw_fingerprints = values.get("development_allocation_semantic_fingerprints")
+    if not isinstance(raw_fingerprints, list):
+        raise TypeError("development allocation semantic fingerprints must be list")
+    values["development_allocation_semantic_fingerprints"] = tuple(
+        str(item) for item in raw_fingerprints
     )
     return OSS3PredictiveStrategyBinding(**values)
 
@@ -1500,9 +1430,9 @@ def _binding_payload_from_values(values: Mapping[str, object]) -> dict[str, obje
     if isinstance(policy, PredictivePortfolioPolicy):
         payload["policy"] = policy.to_dict()
         payload["policy_fingerprint"] = policy.fingerprint
-    allocations = payload.get("development_allocation_fingerprints")
-    if isinstance(allocations, tuple):
-        payload["development_allocation_fingerprints"] = list(allocations)
+    fingerprints = payload.get("development_allocation_semantic_fingerprints")
+    if isinstance(fingerprints, tuple):
+        payload["development_allocation_semantic_fingerprints"] = list(fingerprints)
     return payload
 
 
@@ -1530,11 +1460,11 @@ def _deny_authority(
         or paper_execution_authorized
     ):
         raise PredictiveStrategyContractGovernanceError(
-            "D2L target allocation may not grant execution authority"
+            "D2L target allocations cannot grant execution authority"
         )
     if capital_authority != "NONE" or live_trading != "BLOCKED":
         raise PredictiveStrategyContractGovernanceError(
-            "D2L target allocation may not grant capital/LIVE"
+            "D2L target allocations cannot grant capital/LIVE"
         )
 
 
