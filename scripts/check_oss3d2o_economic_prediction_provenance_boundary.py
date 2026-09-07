@@ -78,8 +78,11 @@ def main() -> int:
     for marker in required:
         require(marker in source, f"missing D2O boundary marker: {marker}")
 
+    # Literal authority/state assignments are forbidden. Names such as
+    # "OrderIntent" may legitimately appear in documentation explaining that
+    # the layer has no such authority, so project-layer access is enforced by
+    # AST import checks below rather than a docstring-sensitive substring test.
     forbidden_text = (
-        "OrderIntent",
         "paper_execution_authorized=True",
         "execution_authorized=True",
         'capital_authority="PAPER"',
@@ -154,7 +157,7 @@ def main() -> int:
         )
 
     # D2O may see point-in-time features but must have no direct raw market or
-    # economic-evaluator input surface.  This keeps outcome access outside the
+    # economic-evaluator input surface. This keeps outcome access outside the
     # prediction producer.
     for forbidden in (
         "AlignedMarketUniverse",
