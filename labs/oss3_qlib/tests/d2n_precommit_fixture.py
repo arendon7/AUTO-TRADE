@@ -26,8 +26,12 @@ from labs.oss3_qlib.predictive_strategy_contract import (
     build_predictive_strategy_binding,
 )
 from labs.oss3_qlib.tests import d2k_fixture
-from labs.oss3_qlib.tests.d2l_fixture import D2LSource, build_d2l_source
-from labs.oss3_qlib.tests.d2n_fixture import _economic_prediction, _economic_universe
+from labs.oss3_qlib.tests.d2n_fixture import (
+    RuntimeBoundD2NLineage,
+    _economic_prediction,
+    _economic_universe,
+    build_runtime_bound_d2n_lineage,
+)
 
 
 UTC = timezone.utc
@@ -35,7 +39,7 @@ UTC = timezone.utc
 
 @dataclass(frozen=True, slots=True)
 class HardenedD2NSource:
-    lineage: D2LSource
+    lineage: RuntimeBoundD2NLineage
     shared_sqlite_path: Path
     d2j_protocol: object
     d2l_binding: object
@@ -56,7 +60,7 @@ def build_hardened_d2n_source(
     if market_mode not in {"favorable", "adverse", "flat"}:
         raise ValueError("unsupported market_mode")
 
-    lineage = build_d2l_source(tmp_path)
+    lineage = build_runtime_bound_d2n_lineage(tmp_path)
     shared = tmp_path / f"d2n-precommit-shared-{market_mode}.sqlite3"
 
     predictive_material = d2k_fixture.build_final_holdout_material(
