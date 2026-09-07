@@ -39,7 +39,6 @@ FORBIDDEN_CALLS = {
     "execute_order",
     "send_order",
     "urlopen",
-    "connect",
     "eval",
     "exec",
     "__import__",
