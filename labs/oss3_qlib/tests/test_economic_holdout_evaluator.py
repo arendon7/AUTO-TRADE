@@ -21,6 +21,7 @@ from labs.oss3_qlib.economic_holdout_evaluator import (
     economic_evaluator_semantic_hash,
     read_oss3d2n_evaluation_read_only,
 )
+from labs.oss3_qlib.final_holdout_evaluator import OSS3FinalHoldoutAlreadyConsumed
 from labs.oss3_qlib.tests.d2n_fixture import build_d2n_source
 
 
@@ -216,7 +217,7 @@ def test_holdout_commitment_drift_rejected_before_start(tmp_path):
         conn.close()
 
 
-def test_missing_durable_d2k_terminal_blocks_economic_evaluation(tmp_path):
+def test_consumed_d2k_without_terminal_blocks_economic_evaluation(tmp_path):
     source = build_d2n_source(tmp_path, market_mode="favorable")
     conn = sqlite3.connect(source.shared_sqlite_path)
     try:
@@ -226,9 +227,12 @@ def test_missing_durable_d2k_terminal_blocks_economic_evaluation(tmp_path):
     finally:
         conn.close()
     registry = SQLiteOSS3EconomicHoldoutEvaluationRegistry(source.shared_sqlite_path)
-    with pytest.raises(OSS3EconomicHoldoutGovernanceError, match="terminal D2K evidence"):
+    with pytest.raises(
+        OSS3FinalHoldoutAlreadyConsumed,
+        match="authorization consumed without terminal receipt",
+    ):
         registry.evaluate(
-            evaluation_id="oss3d2n-no-d2k",
+            evaluation_id="oss3d2n-no-d2k-terminal",
             economic_protocol=source.d2m_protocol,
             d2l_receipt=source.d2l_receipt,
             d2j_protocol=source.d2j_protocol,
