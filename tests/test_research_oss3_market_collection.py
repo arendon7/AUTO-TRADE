@@ -172,7 +172,7 @@ def test_plan_requires_complete_contiguous_symbol_month_grid():
         replace(plan, descriptors=plan.descriptors[:-1])
 
     removed_feb = tuple(item for item in plan.descriptors if item.period != "2025-02")
-    with pytest.raises(MarketCollectionIntegrityError, match="one exact descriptor"):
+    with pytest.raises(MarketCollectionGovernanceError, match="monthly periods must be contiguous"):
         replace(plan, descriptors=removed_feb)
 
 
@@ -208,8 +208,9 @@ def test_plan_registry_is_exact_idempotent_and_append_only(tmp_path):
                 (plan.collection_id,),
             )
 
+    valid_different_plan = replace(plan, development_start="2025-02-01T00:00:00+00:00")
     with pytest.raises(MarketCollectionGovernanceError, match="different plan"):
-        registry.preregister(replace(plan, train_start="2025-01-22T00:00:00+00:00"), now=NOW)
+        registry.preregister(valid_different_plan, now=NOW)
 
 
 def test_complete_d2t_family_stitches_into_exact_train_and_development_material():
@@ -220,7 +221,7 @@ def test_complete_d2t_family_stitches_into_exact_train_and_development_material(
         acquisition_receipt_hashes=_receipt_hashes(plan),
     )
     assert material.training_warmup.bar_count == 20
-    assert material.training.bar_count == 39  # Jan 21 through Feb 28, half-open at Mar 1.
+    assert material.training.bar_count == 39
     assert material.development_warmup.bar_count == 20
     assert material.development.bar_count == 31
     assert material.training_warmup.symbols == SYMBOLS
