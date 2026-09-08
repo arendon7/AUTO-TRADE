@@ -93,7 +93,12 @@ jobs:
           python - <<'PY'
           from pathlib import Path
           workflow = Path('.github/workflows/oss3d2u-historical-collection-acquisition.yml').read_text()
-          forbidden = ('curl ', 'wget ', 'data.binance.vision/data/', 'AUTOTRADE_ENABLE_R3_REAL_DATA=1')
+          forbidden = (
+              'cu' + 'rl ',
+              'wg' + 'et ',
+              'data.binance.vision' + '/data/',
+              'AUTOTRADE_ENABLE_R3_REAL_' + 'DATA=1',
+          )
           for marker in forbidden:
               assert marker not in workflow, f'real network marker in D2U CI: {marker}'
           print('D2U CI real network: ABSENT')
