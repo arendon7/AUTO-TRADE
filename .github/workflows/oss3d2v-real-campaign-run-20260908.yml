@@ -15,7 +15,6 @@ jobs:
     env:
       PYTHONPATH: ${{ github.workspace }}
       D2V_CERTIFIED_COMMIT: 3d76961e857469013f173c6c9f09f4d515923f24
-      D2V_EVIDENCE_ROOT: ${{ runner.temp }}/oss3d2v-evidence
     steps:
       - name: Checkout exact certified D2V code
         uses: actions/checkout@v5
@@ -45,9 +44,10 @@ jobs:
 
       - name: Execute exact 108-descriptor public GET campaign
         run: |
-          mkdir -p "$D2V_EVIDENCE_ROOT"
+          EVIDENCE_ROOT="${RUNNER_TEMP}/oss3d2v-evidence"
+          mkdir -p "$EVIDENCE_ROOT"
           python scripts/run_oss3d2v_real_acquisition.py \
-            --evidence-root "$D2V_EVIDENCE_ROOT" \
+            --evidence-root "$EVIDENCE_ROOT" \
             --execute-public-get \
             | tee "${RUNNER_TEMP}/d2v-real-result.json"
 
@@ -73,8 +73,9 @@ jobs:
 
       - name: Re-run entire campaign offline with zero GET authority
         run: |
+          EVIDENCE_ROOT="${RUNNER_TEMP}/oss3d2v-evidence"
           python scripts/run_oss3d2v_real_acquisition.py \
-            --evidence-root "$D2V_EVIDENCE_ROOT" \
+            --evidence-root "$EVIDENCE_ROOT" \
             | tee "${RUNNER_TEMP}/d2v-offline-reverify-result.json"
 
       - name: Validate offline full reverification and same seal
@@ -109,7 +110,8 @@ jobs:
           import json
           import os
           from pathlib import Path
-          root = Path(os.environ['D2V_EVIDENCE_ROOT'])
+          runner_temp = Path(os.environ['RUNNER_TEMP'])
+          root = runner_temp / 'oss3d2v-evidence'
           entries = []
           for path in sorted(p for p in root.rglob('*') if p.is_file()):
               raw = path.read_bytes()
@@ -124,16 +126,17 @@ jobs:
               'file_count': len(entries),
               'files': entries,
           }
-          inventory = Path(os.environ['RUNNER_TEMP']) / 'd2v-evidence-inventory.json'
+          inventory = runner_temp / 'd2v-evidence-inventory.json'
           inventory.write_text(json.dumps(payload, sort_keys=True, separators=(',', ':')) + '\n')
           print(f"evidence files: {len(entries)}")
           PY
 
       - name: Archive exact local evidence
         run: |
-          tar -C "$(dirname "$D2V_EVIDENCE_ROOT")" \
+          EVIDENCE_ROOT="${RUNNER_TEMP}/oss3d2v-evidence"
+          tar -C "$(dirname "$EVIDENCE_ROOT")" \
             -czf "${RUNNER_TEMP}/oss3d2v-real-evidence-20260908.tar.gz" \
-            "$(basename "$D2V_EVIDENCE_ROOT")"
+            "$(basename "$EVIDENCE_ROOT")"
           sha256sum "${RUNNER_TEMP}/oss3d2v-real-evidence-20260908.tar.gz" \
             | tee "${RUNNER_TEMP}/oss3d2v-real-evidence-20260908.tar.gz.sha256"
 
