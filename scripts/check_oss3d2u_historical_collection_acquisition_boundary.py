@@ -135,7 +135,7 @@ def main() -> int:
 
     # Acquisition lab is the sole network surface and may use only the existing
     # public GET-only transport abstraction. It must not import broker/trading or
-    # model/evaluator layers.
+    # model/evaluator layers. Every explicit ReadOnlyRequest must hard-code GET.
     allowed_external_names = {
         "HttpResponse",
         "PublicDataPolicy",
@@ -143,6 +143,7 @@ def main() -> int:
         "ReadOnlyRequest",
         "UrllibReadOnlyTransport",
     }
+    request_call_count = 0
     for node in ast.walk(acquisition_tree):
         if isinstance(node, ast.ImportFrom):
             module = node.module or ""
@@ -156,6 +157,13 @@ def main() -> int:
         elif isinstance(node, ast.Import):
             for alias in node.names:
                 require(alias.name.split(".", 1)[0] not in {"requests", "httpx", "aiohttp", "socket", "subprocess"}, f"D2U acquisition bypasses canonical transport: {alias.name}")
+        elif isinstance(node, ast.Call) and dotted_name(node.func) == "ReadOnlyRequest":
+            request_call_count += 1
+            method_keywords = [keyword for keyword in node.keywords if keyword.arg == "method"]
+            require(len(method_keywords) == 1, "D2U ReadOnlyRequest must specify exactly one method keyword")
+            method_node = method_keywords[0].value
+            require(isinstance(method_node, ast.Constant) and method_node.value == "GET", "D2U acquisition ReadOnlyRequest method must be literal GET")
+    require(request_call_count == 2, "D2U acquisition must define exactly the checksum and archive GET requests")
 
     for marker in (
         "CHECKSUM_A_THEN_ZIP_THEN_IDENTICAL_CHECKSUM_B_V1",
@@ -197,9 +205,6 @@ def main() -> int:
         "x-mbx-apikey",
         "/api/v3/order",
         "/api/v3/account",
-        "POST",
-        "DELETE",
-        "PUT",
         "model.fit",
         "model.predict",
         "SupervisedLabelArtifact",
