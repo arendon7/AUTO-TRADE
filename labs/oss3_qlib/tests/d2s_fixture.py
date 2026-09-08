@@ -19,6 +19,10 @@ from labs.oss3_qlib.raw_development_provenance import (
     SQLiteOSS3RawDevelopmentPreregistrationRegistry,
     derive_raw_development_features,
 )
+from labs.oss3_qlib.raw_training_bundle_provenance import (
+    RawTrainingMarketSource,
+    derive_raw_training_bundle,
+)
 from labs.oss3_qlib.tests.d2r_fixture import (
     CAMPAIGN_ID,
     SPLIT_HASH,
@@ -29,14 +33,26 @@ from labs.oss3_qlib.tests.d2r_fixture import (
 
 UTC = timezone.utc
 DEVELOPMENT_BARS = 9
+STRONG_TRAIN_BARS = 48
 D2S_PREREG_ID = "oss3d2s-raw-development-prereg-001"
 D2S_TOURNAMENT_CAMPAIGN = "oss3d2s-development-tournament-campaign-001"
 D2S_TOURNAMENT_ID = "oss3d2s-development-tournament-001"
 
 
 @dataclass(frozen=True, slots=True)
+class D2STrainSource:
+    warmup_universe: AlignedMarketUniverse
+    training_universe: AlignedMarketUniverse
+    raw_source: RawTrainingMarketSource
+    train_features: object
+    train_labels: object
+    training_bundle: object
+    provenance_receipt: object
+
+
+@dataclass(frozen=True, slots=True)
 class D2SSource:
-    train_source: object
+    train_source: D2STrainSource
     warmup_universe: AlignedMarketUniverse
     development_universe: AlignedMarketUniverse
     raw_source: RawDevelopmentMarketSource
@@ -46,7 +62,7 @@ class D2SSource:
 
 
 def build_d2s_source() -> D2SSource:
-    train = build_d2r_source()
+    train = _strong_raw_derived_training_source()
     warmup = _development_warmup(train)
     development = _development_universe(train)
     raw = RawDevelopmentMarketSource.build(
@@ -121,7 +137,85 @@ def build_registries(root: Path):
     )
 
 
-def _development_warmup(train) -> AlignedMarketUniverse:
+def _strong_raw_derived_training_source() -> D2STrainSource:
+    """Build a D2R-valid raw TRAIN set with enough signal for Lasso alpha=0.01.
+
+    D2R's own certified fixture intentionally uses very small benign returns.
+    That is sufficient to prove raw-bundle plumbing, but the strongest frozen
+    Lasso candidate can legitimately collapse to an intercept-only model on
+    those magnitudes.  D2S needs all six real candidates to reach D2D so its
+    end-to-end sequencing can be tested.  We therefore construct a separate
+    raw OHLCV fixture with the *same D2R formulas and governance*, but stronger
+    deterministic cross-sectional momentum/forward-return signal.  No model,
+    evaluator, alpha or formula is changed.
+    """
+    base = build_d2r_source()
+    warmup = base.warmup_universe
+    step = timedelta(seconds=TIMEFRAME_SECONDS)
+    start = warmup.datasets[0].bars[-1].ended_at
+    datasets = []
+    # Persistent but non-identical trends produce large enough covariance for
+    # both Lasso penalties while small deterministic waves avoid perfect
+    # collinearity and constant target series.
+    trend_by_symbol = (
+        Decimal("0.045"),
+        Decimal("0.012"),
+        Decimal("-0.022"),
+    )
+    for symbol_index, warmup_dataset in enumerate(warmup.datasets):
+        symbol = warmup_dataset.instrument.symbol
+        previous = warmup_dataset.bars[-1].close
+        bars = []
+        for index in range(STRONG_TRAIN_BARS):
+            wave = Decimal(((index + symbol_index) % 7) - 3) * Decimal("0.0025")
+            interaction = Decimal((index % 5) * (symbol_index + 1)) * Decimal("0.00045")
+            one_bar_return = trend_by_symbol[symbol_index] + wave + interaction
+            close = previous * (Decimal("1") + one_bar_return)
+            bars.append(
+                Bar(
+                    symbol=symbol,
+                    started_at=start + step * index,
+                    timeframe_seconds=TIMEFRAME_SECONDS,
+                    open=previous,
+                    high=max(previous, close) * Decimal("1.003"),
+                    low=min(previous, close) * Decimal("0.997"),
+                    close=close,
+                    volume=Decimal("1500000") + Decimal(index * 2500 + symbol_index * 500),
+                )
+            )
+            previous = close
+        datasets.append(
+            MarketDataset(
+                instrument=warmup_dataset.instrument,
+                bars=tuple(bars),
+                source="oss3d2s-strong-train-v1",
+            )
+        )
+    training = AlignedMarketUniverse.from_datasets(
+        datasets=tuple(datasets),
+        universe_name="oss3d2s-training-universe#strong-train",
+    )
+    raw = RawTrainingMarketSource.build(
+        warmup_universe=warmup,
+        training_universe=training,
+    )
+    features, labels, bundle, receipt = derive_raw_training_bundle(
+        raw_source=raw,
+        campaign_id=CAMPAIGN_ID,
+        research_split_hash=SPLIT_HASH,
+    )
+    return D2STrainSource(
+        warmup_universe=warmup,
+        training_universe=training,
+        raw_source=raw,
+        train_features=features,
+        train_labels=labels,
+        training_bundle=bundle,
+        provenance_receipt=receipt,
+    )
+
+
+def _development_warmup(train: D2STrainSource) -> AlignedMarketUniverse:
     datasets = []
     for dataset in train.training_universe.datasets:
         datasets.append(
@@ -137,31 +231,36 @@ def _development_warmup(train) -> AlignedMarketUniverse:
     )
 
 
-def _development_universe(train) -> AlignedMarketUniverse:
+def _development_universe(train: D2STrainSource) -> AlignedMarketUniverse:
     step = timedelta(seconds=TIMEFRAME_SECONDS)
     start = train.training_universe.datasets[0].bars[-1].ended_at
     datasets = []
+    trend_by_symbol = (
+        Decimal("0.038"),
+        Decimal("0.010"),
+        Decimal("-0.018"),
+    )
     for symbol_index, train_dataset in enumerate(train.training_universe.datasets):
         symbol = train_dataset.instrument.symbol
         previous = train_dataset.bars[-1].close
         bars = []
         for index in range(DEVELOPMENT_BARS):
-            # Deterministic but non-collinear cross-sectional dynamics.  The
-            # terminal bar is a target endpoint only, mirroring D2R semantics.
-            base = Decimal("0.0007") + Decimal(symbol_index + 1) * Decimal("0.00065")
-            wave = Decimal(((index + 2 * symbol_index) % 5) - 2) * Decimal("0.00055")
-            interaction = Decimal(index * (symbol_index + 1)) * Decimal("0.000025")
-            close = previous * (Decimal("1") + base + wave + interaction)
+            # Preserve the same broad predictive relation as TRAIN while
+            # varying ordering over time enough to exercise rank-IC metrics.
+            wave = Decimal(((index + 2 * symbol_index) % 5) - 2) * Decimal("0.004")
+            interaction = Decimal(index * (symbol_index + 1)) * Decimal("0.00035")
+            one_bar_return = trend_by_symbol[symbol_index] + wave + interaction
+            close = previous * (Decimal("1") + one_bar_return)
             bars.append(
                 Bar(
                     symbol=symbol,
                     started_at=start + step * index,
                     timeframe_seconds=TIMEFRAME_SECONDS,
                     open=previous,
-                    high=max(previous, close) * Decimal("1.002"),
-                    low=min(previous, close) * Decimal("0.998"),
+                    high=max(previous, close) * Decimal("1.003"),
+                    low=min(previous, close) * Decimal("0.997"),
                     close=close,
-                    volume=Decimal("1200000") + Decimal(index * 1700 + symbol_index * 300),
+                    volume=Decimal("1700000") + Decimal(index * 3100 + symbol_index * 700),
                 )
             )
             previous = close
@@ -169,7 +268,7 @@ def _development_universe(train) -> AlignedMarketUniverse:
             MarketDataset(
                 instrument=train_dataset.instrument,
                 bars=tuple(bars),
-                source="oss3d2s-development-v1",
+                source="oss3d2s-development-v2-strong-signal",
             )
         )
     return AlignedMarketUniverse.from_datasets(
