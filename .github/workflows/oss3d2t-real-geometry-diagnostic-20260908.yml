@@ -1,0 +1,101 @@
+name: OSS-3D2T Real Geometry Diagnostic 2026-09-08
+
+on:
+  push:
+    branches:
+      - research/oss3d2t-real-geometry-diagnostic-20260908
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose-real-kline-geometry:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout exact certified D2T code
+        uses: actions/checkout@v5
+        with:
+          ref: ddf85fb73ff4bfa09204da59219c0d7656f40ee3
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Inspect BTCUSDT 1h 2023-01 provider geometry
+        run: |
+          python - <<'PY'
+          from hashlib import sha256
+          from io import BytesIO, StringIO
+          import csv
+          import urllib.request
+          import zipfile
+
+          symbol = 'BTCUSDT'
+          interval = '1h'
+          period = '2023-01'
+          base = f'https://data.binance.vision/data/spot/monthly/klines/{symbol}/{interval}'
+          filename = f'{symbol}-{interval}-{period}.zip'
+          archive_url = f'{base}/{filename}'
+          checksum_url = archive_url + '.CHECKSUM'
+
+          with urllib.request.urlopen(checksum_url, timeout=30) as response:
+              checksum_raw = response.read()
+          with urllib.request.urlopen(archive_url, timeout=30) as response:
+              archive_raw = response.read()
+
+          checksum_text = checksum_raw.decode('utf-8').strip()
+          expected_sha = checksum_text.split()[0].lower()
+          actual_sha = sha256(archive_raw).hexdigest()
+          assert actual_sha == expected_sha, (actual_sha, expected_sha)
+
+          with zipfile.ZipFile(BytesIO(archive_raw), 'r') as archive:
+              names = [info.filename for info in archive.infolist() if not info.is_dir()]
+              assert names == [f'{symbol}-{interval}-{period}.csv'], names
+              csv_raw = archive.read(names[0])
+
+          rows = list(csv.reader(StringIO(csv_raw.decode('utf-8'))))
+          interval_ms = 3_600_000
+          anomalies = []
+          for index, row in enumerate(rows):
+              open_time = int(row[0])
+              close_time = int(row[6])
+              expected_close = open_time + interval_ms - 1
+              if close_time != expected_close:
+                  anomalies.append({
+                      'index': index,
+                      'open_time': open_time,
+                      'close_time': close_time,
+                      'expected_close': expected_close,
+                      'delta_ms': close_time - expected_close,
+                      'next_open_time': int(rows[index + 1][0]) if index + 1 < len(rows) else None,
+                  })
+
+          print(f'archive_url={archive_url}')
+          print(f'archive_sha256={actual_sha}')
+          print(f'rows={len(rows)}')
+          print(f'close_time_anomalies={len(anomalies)}')
+          for item in anomalies[:50]:
+              print('ANOMALY', item)
+
+          for index in range(561, 568):
+              row = rows[index]
+              open_time = int(row[0])
+              close_time = int(row[6])
+              print('ROW', {
+                  'index': index,
+                  'open_time': open_time,
+                  'close_time': close_time,
+                  'expected_close': open_time + interval_ms - 1,
+                  'duration_plus_one_ms': close_time - open_time + 1,
+                  'next_open_time': int(rows[index + 1][0]) if index + 1 < len(rows) else None,
+                  'open': row[1],
+                  'high': row[2],
+                  'low': row[3],
+                  'close': row[4],
+                  'volume': row[5],
+              })
+
+          assert len(rows) == 31 * 24
+          PY
