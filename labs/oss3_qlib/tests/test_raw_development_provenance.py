@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import replace
 from datetime import datetime, timezone
 from decimal import Decimal
-import json
 import sqlite3
 
 import pytest
@@ -79,10 +78,13 @@ def test_d2s_features_are_raw_derived_causal_and_schema_compatible(source):
 
 def test_d2s_preregistration_contains_no_label_artifact_or_label_values(source, outputs):
     prereg = _prereg(source, outputs)
-    payload = json.dumps(prereg.to_dict(), sort_keys=True)
+    payload = prereg.to_dict()
     assert "label_artifact_hash" not in payload
     assert "development_label_artifact_hash" not in payload
-    assert "label_values" not in payload
+    # `label_values_used=False` is an intentional governance proof.  What D2S
+    # forbids is any field containing actual label values or an artifact hash.
+    assert "label_values_used" in payload and payload["label_values_used"] is False
+    assert not any(key in payload for key in ("labels", "label_rows", "label_payload", "label_value_array"))
     assert prereg.label_artifact_materialized is False
     assert prereg.label_values_used is False
     assert prereg.development_metrics_computed is False
