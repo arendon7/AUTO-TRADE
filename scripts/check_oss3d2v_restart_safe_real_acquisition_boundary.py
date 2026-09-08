@@ -120,7 +120,7 @@ def main() -> int:
     loop_index = run_phase.index("for descriptor in plan.descriptors")
     existing_seal_index = run_phase.index("if existing_seal is not None")
     local_final_index = run_phase.index("if final_directory.exists()")
-    no_network_index = run_phase.index("if not allow_network")
+    no_network_index = run_phase.index("if not allow_network:", local_final_index)
     acquire_index = run_phase.index("acquire_preregistered_archive(")
     persist_index = run_phase.index("persist_material_with_atomic_directory_commit(")
     seal_index = run_phase.index("ledger.put_descriptor_seal(seal)", persist_index)
@@ -147,7 +147,7 @@ def main() -> int:
     raw_load_phase = function_source(runner, "_load_material_from_directory", "_read_receipt")
     for marker in (
         "HistoricalMarketSnapshotArtifact.read",
-        "ArchiveAcquisitionReceipt",
+        "_read_receipt(",
         "AcquiredArchiveMaterial(",
         "actual_names != expected_names",
     ):
