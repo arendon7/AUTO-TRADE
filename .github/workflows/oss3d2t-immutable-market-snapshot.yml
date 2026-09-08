@@ -1,0 +1,95 @@
+name: OSS-3D2T Immutable Market Snapshot
+
+on:
+  pull_request:
+    branches:
+      - research/oss3d2s-raw-development-provenance
+    paths:
+      - 'src/autotrade/research/oss3_market_snapshot.py'
+      - 'tests/test_research_oss3_market_snapshot.py'
+      - 'tests/test_research_oss3_market_snapshot_monthly.py'
+      - 'scripts/check_oss3d2t_immutable_market_snapshot_boundary.py'
+      - 'knowledge/20_RESEARCH/OSS3D2T_IMMUTABLE_MARKET_SNAPSHOT.md'
+      - '.github/workflows/oss3d2t-immutable-market-snapshot.yml'
+      - 'src/autotrade/research/external_data.py'
+      - 'src/autotrade/research/market.py'
+      - 'src/autotrade/research/universe.py'
+      - 'labs/oss3_qlib/raw_training_bundle_provenance.py'
+      - 'labs/oss3_qlib/raw_development_provenance.py'
+      - 'labs/oss3_qlib/economic_raw_market_feature_provenance.py'
+
+permissions:
+  contents: read
+
+jobs:
+  oss3d2t:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    env:
+      PYTHONPATH: ${{ github.workspace }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Install AUTO-TRADE core only
+        run: python -m pip install -e '.[dev]'
+
+      - name: Prove Qlib is absent from D2T runtime
+        run: |
+          python - <<'PY'
+          import importlib.util
+          assert importlib.util.find_spec('qlib') is None, 'D2T workflow must remain Qlib-free'
+          print('qlib runtime: ABSENT')
+          PY
+
+      - name: Compile D2T sources
+        run: |
+          python -m py_compile \
+            src/autotrade/research/oss3_market_snapshot.py \
+            tests/test_research_oss3_market_snapshot.py \
+            tests/test_research_oss3_market_snapshot_monthly.py \
+            scripts/check_oss3d2t_immutable_market_snapshot_boundary.py
+
+      - name: D2T offline immutable snapshot boundary
+        run: python scripts/check_oss3d2t_immutable_market_snapshot_boundary.py
+
+      - name: D2T daily and aligned-set adversarial suite
+        run: python -m pytest -q tests/test_research_oss3_market_snapshot.py
+
+      - name: D2T monthly calendar and timestamp suite
+        run: python -m pytest -q tests/test_research_oss3_market_snapshot_monthly.py
+
+      - name: Re-prove R3 public-data intake contracts
+        run: |
+          python -m pytest -q \
+            tests/test_r3_external_data.py \
+            tests/test_r3_external_data_hardening.py
+
+      - name: Re-prove canonical market and universe identities
+        run: |
+          python -m pytest -q tests/test_research_market.py
+          if test -f tests/test_research_universe.py; then
+            python -m pytest -q tests/test_research_universe.py
+          fi
+
+      - name: Re-prove raw provenance boundaries consuming MarketDataset
+        run: |
+          python scripts/check_oss3d2q_raw_market_feature_provenance_boundary.py
+          python scripts/check_oss3d2r_raw_training_bundle_provenance_boundary.py
+          python scripts/check_oss3d2s_raw_development_provenance_boundary.py
+
+      - name: Research authority boundary
+        run: python scripts/check_research_authority.py
+
+      - name: Re-prove Qlib was never installed
+        run: |
+          python - <<'PY'
+          import importlib.util
+          assert importlib.util.find_spec('qlib') is None, 'D2T unexpectedly gained Qlib runtime authority'
+          print('qlib runtime after D2T certification: ABSENT')
+          PY
