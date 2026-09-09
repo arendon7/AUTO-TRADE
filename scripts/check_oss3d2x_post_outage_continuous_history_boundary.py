@@ -14,7 +14,7 @@ from autotrade.research.oss3_market_collection import (  # noqa: E402
     CANONICAL_FIRST_MONTH,
     CANONICAL_INTERVAL,
     CANONICAL_LAST_MONTH,
-    SYMBOLS,
+    CANONICAL_SYMBOLS,
     canonical_oss3d2u_collection_plan,
 )
 
@@ -62,7 +62,7 @@ def main() -> int:
     require(CANONICAL_FIRST_MONTH == "2023-04", "D2X first canonical month must remain 2023-04")
     require(CANONICAL_LAST_MONTH == "2025-12", "D2X last canonical month must remain 2025-12")
     require(CANONICAL_INTERVAL == "1h", "D2X interval must remain 1h")
-    require(tuple(SYMBOLS) == ("BTCUSDT", "ETHUSDT", "SOLUSDT"), "D2X symbol universe drifted")
+    require(tuple(CANONICAL_SYMBOLS) == ("BTCUSDT", "ETHUSDT", "SOLUSDT"), "D2X symbol universe drifted")
 
     require(len(plan.periods) == EXPECTED_PERIOD_COUNT, "D2X must contain exactly 33 monthly periods")
     require(len(plan.descriptors) == EXPECTED_DESCRIPTOR_COUNT, "D2X must contain exactly 99 descriptors")
@@ -70,7 +70,7 @@ def main() -> int:
     require(EXCLUDED_OUTAGE_MONTH not in plan.periods, "March 2023 outage month must remain excluded")
     require(all(descriptor.period != EXCLUDED_OUTAGE_MONTH for descriptor in plan.descriptors), "outage descriptor re-entered canonical family")
 
-    expected_pairs = {(period, symbol) for period in plan.periods for symbol in SYMBOLS}
+    expected_pairs = {(period, symbol) for period in plan.periods for symbol in CANONICAL_SYMBOLS}
     actual_pairs = {(descriptor.period, descriptor.instrument.symbol) for descriptor in plan.descriptors}
     require(actual_pairs == expected_pairs, "D2X must contain exactly one descriptor for every canonical month/symbol pair")
 
