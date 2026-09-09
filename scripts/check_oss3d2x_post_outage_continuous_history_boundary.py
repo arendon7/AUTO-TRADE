@@ -83,8 +83,6 @@ def main() -> int:
         "final_holdout_descriptors_included",
         "label_values_included",
         "prediction_values_included",
-        "final_holdout_values_loaded",
-        "network_used_by_assembly",
         "execution_authorized",
         "paper_execution_authorized",
     ):
