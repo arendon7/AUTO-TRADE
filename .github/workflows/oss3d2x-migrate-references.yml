@@ -18,7 +18,7 @@ jobs:
           ref: research/oss3d2x-post-outage-continuous-history
           fetch-depth: 0
 
-      - name: Apply exact executable migrations
+      - name: Apply exact non-workflow migrations
         run: |
           python - <<'PY'
           from pathlib import Path
@@ -42,29 +42,18 @@ jobs:
               ('OSS3D2U_HISTORICAL_COLLECTION_PLAN_V1', 'OSS3D2U_HISTORICAL_COLLECTION_PLAN_V2'),
               ('CANONICAL_FIRST_MONTH = "2023-01"', 'CANONICAL_FIRST_MONTH = "2023-04"'),
           ])
-          exact('.github/workflows/oss3d2v-restart-safe-real-acquisition.yml', [
-              ("assert payload['descriptor_count'] == 108", "assert payload['descriptor_count'] == 99"),
-              ("assert payload['missing_without_network_authority'] == 108", "assert payload['missing_without_network_authority'] == 99"),
-          ])
           exact('scripts/run_oss3d2v_real_acquisition.py', [
               ('2023-01..2025-12 public archive campaign', '2023-04..2025-12 post-outage public archive campaign'),
           ])
-
           exact('knowledge/20_RESEARCH/OSS3D2U_HISTORICAL_COLLECTION_ACQUISITION.md', [
-              ('2023-01', '2023-04'),
-              ('2023-2025-v1', '2023apr-2025-v2'),
-              ('108', '99'),
-              ('2023-04-01T20:00:00Z', '2023-04-01T20:00:00Z'),
+              ('2023-01', '2023-04'), ('2023-2025-v1', '2023apr-2025-v2'), ('108', '99'),
           ])
           exact('knowledge/20_RESEARCH/OSS3D2V_RESTART_SAFE_REAL_ACQUISITION.md', [
-              ('2023-01', '2023-04'),
-              ('36 × 3 = 108', '33 × 3 = 99'),
-              ('324 planned HTTP calls', '297 planned HTTP calls'),
-              ('108', '99'),
+              ('2023-01', '2023-04'), ('36 × 3 = 108', '33 × 3 = 99'),
+              ('324 planned HTTP calls', '297 planned HTTP calls'), ('108', '99'),
           ])
           exact('knowledge/20_RESEARCH/OSS3D2W_SEALED_RAW_SPLIT_HANDOFF.md', [
-              ('2023-01', '2023-04'),
-              ('108', '99'),
+              ('2023-01', '2023-04'), ('108', '99'),
           ])
           PY
 
@@ -73,7 +62,6 @@ jobs:
           ! git grep -n -E '\b108\b|2023-01|HISTORICAL_COLLECTION_PLAN_V1' -- \
             tests/test_research_oss3_market_collection.py \
             scripts/check_oss3d2u_historical_collection_acquisition_boundary.py \
-            .github/workflows/oss3d2v-restart-safe-real-acquisition.yml \
             scripts/run_oss3d2v_real_acquisition.py
 
       - name: Commit migration
@@ -82,7 +70,6 @@ jobs:
           git config user.email '102555888+arendon7@users.noreply.github.com'
           git add tests/test_research_oss3_market_collection.py \
             scripts/check_oss3d2u_historical_collection_acquisition_boundary.py \
-            .github/workflows/oss3d2v-restart-safe-real-acquisition.yml \
             scripts/run_oss3d2v_real_acquisition.py \
             knowledge/20_RESEARCH/OSS3D2U_HISTORICAL_COLLECTION_ACQUISITION.md \
             knowledge/20_RESEARCH/OSS3D2V_RESTART_SAFE_REAL_ACQUISITION.md \
