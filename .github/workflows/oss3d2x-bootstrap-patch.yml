@@ -1,0 +1,83 @@
+name: OSS-3D2X Bootstrap Exact Patch
+
+on:
+  push:
+    branches:
+      - research/oss3d2x-post-outage-continuous-history
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: ${{ !contains(github.event.head_commit.message, '[d2x-patched]') }}
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: research/oss3d2x-post-outage-continuous-history
+          fetch-depth: 0
+
+      - name: Apply exact D2U V2 post-outage replacements
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('src/autotrade/research/oss3_market_collection.py')
+          text = path.read_text()
+          replacements = {
+              'OSS3D2U_PLAN_VERSION = "OSS3D2U_HISTORICAL_COLLECTION_PLAN_V1"':
+                  'OSS3D2U_PLAN_VERSION = "OSS3D2U_HISTORICAL_COLLECTION_PLAN_V2"',
+              'OSS3D2U_BINDING_VERSION = "OSS3D2U_ACQUIRED_SNAPSHOT_BINDING_V1"':
+                  'OSS3D2U_BINDING_VERSION = "OSS3D2U_ACQUIRED_SNAPSHOT_BINDING_V2"',
+              'OSS3D2U_EVIDENCE_VERSION = "OSS3D2U_HISTORICAL_COLLECTION_ASSEMBLY_EVIDENCE_V1"':
+                  'OSS3D2U_EVIDENCE_VERSION = "OSS3D2U_HISTORICAL_COLLECTION_ASSEMBLY_EVIDENCE_V2"',
+              'OSS3D2U_MATERIAL_VERSION = "OSS3D2U_HISTORICAL_RESEARCH_PARTITION_MATERIAL_V1"':
+                  'OSS3D2U_MATERIAL_VERSION = "OSS3D2U_HISTORICAL_RESEARCH_PARTITION_MATERIAL_V2"',
+              'PLAN_POLICY = "FINITE_MONTHLY_ARCHIVE_FAMILY_PREREGISTERED_BEFORE_NETWORK_V1"':
+                  'PLAN_POLICY = "FINITE_MONTHLY_ARCHIVE_FAMILY_POST_20230324_OUTAGE_PREREGISTERED_BEFORE_NETWORK_V2"',
+              'STITCH_POLICY = "EXACT_MONTH_TO_MONTH_NO_GAP_NO_OVERLAP_NO_FILL_V1"':
+                  'STITCH_POLICY = "EXACT_MONTH_TO_MONTH_NO_GAP_NO_OVERLAP_NO_FILL_V2"',
+              'PARTITION_POLICY = "WARMUP20_THEN_TRAIN_THEN_DEVELOPMENT_NO_HOLDOUT_VALUES_V1"':
+                  'PARTITION_POLICY = "POST_OUTAGE_WARMUP20_THEN_TRAIN_THEN_DEVELOPMENT_NO_HOLDOUT_VALUES_V2"',
+              'ACQUISITION_BINDING_POLICY = "EXACT_D2T_ARTIFACT_AND_D2U_RECEIPT_PER_DESCRIPTOR_V1"':
+                  'ACQUISITION_BINDING_POLICY = "EXACT_D2T_ARTIFACT_AND_D2U_RECEIPT_PER_DESCRIPTOR_V2"',
+              'CANONICAL_COLLECTION_ID = "oss3d2u-binance-spot-btc-eth-sol-1h-2023-2025-v1"':
+                  'CANONICAL_COLLECTION_ID = "oss3d2u-binance-spot-btc-eth-sol-1h-2023apr-2025-v2"',
+              'CANONICAL_FIRST_MONTH = "2023-01"':
+                  'CANONICAL_FIRST_MONTH = "2023-04"',
+              'CANONICAL_TRAIN_START = datetime(2023, 1, 1, 20, 0, tzinfo=timezone.utc)':
+                  'CANONICAL_TRAIN_START = datetime(2023, 4, 1, 20, 0, tzinfo=timezone.utc)',
+              'collection_start="2023-01-01T00:00:00+00:00"':
+                  'collection_start="2023-04-01T00:00:00+00:00"',
+          }
+          for old, new in replacements.items():
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'expected exactly one occurrence, got {count}: {old}')
+              text = text.replace(old, new)
+          path.write_text(text)
+          PY
+
+      - name: Prove exact post-outage family
+        run: |
+          PYTHONPATH=src python - <<'PY'
+          from autotrade.research.oss3_market_collection import canonical_oss3d2u_collection_plan
+          plan = canonical_oss3d2u_collection_plan()
+          assert len(plan.descriptors) == 99
+          assert plan.collection_start == '2023-04-01T00:00:00+00:00'
+          assert plan.train_start == '2023-04-01T20:00:00+00:00'
+          assert plan.development_start == '2025-01-01T00:00:00+00:00'
+          assert plan.development_end == '2026-01-01T00:00:00+00:00'
+          assert all(d.period >= '2023-04' for d in plan.descriptors)
+          assert all(d.period != '2023-03' for d in plan.descriptors)
+          print(plan.collection_id, len(plan.descriptors), plan.fingerprint)
+          PY
+
+      - name: Commit exact patch
+        run: |
+          git config user.name 'AUTO-TRADE Research Bot'
+          git config user.email '102555888+arendon7@users.noreply.github.com'
+          git add src/autotrade/research/oss3_market_collection.py
+          git commit -m 'research: D2X re-preregister post-outage continuous history [d2x-patched]'
+          git push origin HEAD:research/oss3d2x-post-outage-continuous-history
