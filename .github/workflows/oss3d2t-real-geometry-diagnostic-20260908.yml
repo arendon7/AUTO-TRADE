@@ -11,7 +11,7 @@ permissions:
 jobs:
   diagnose-real-kline-geometry:
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - name: Checkout exact certified D2T code
         uses: actions/checkout@v5
@@ -23,7 +23,7 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Inspect BTCUSDT 1h 2023-01 provider geometry
+      - name: Scan provider timestamp geometry around 2025 transition
         run: |
           python - <<'PY'
           from hashlib import sha256
@@ -32,70 +32,82 @@ jobs:
           import urllib.request
           import zipfile
 
-          symbol = 'BTCUSDT'
+          symbols = ('BTCUSDT', 'ETHUSDT', 'SOLUSDT')
+          periods = ('2024-12', '2025-01', '2025-02')
           interval = '1h'
-          period = '2023-01'
-          base = f'https://data.binance.vision/data/spot/monthly/klines/{symbol}/{interval}'
-          filename = f'{symbol}-{interval}-{period}.zip'
-          archive_url = f'{base}/{filename}'
-          checksum_url = archive_url + '.CHECKSUM'
-
-          with urllib.request.urlopen(checksum_url, timeout=30) as response:
-              checksum_raw = response.read()
-          with urllib.request.urlopen(archive_url, timeout=30) as response:
-              archive_raw = response.read()
-
-          checksum_text = checksum_raw.decode('utf-8').strip()
-          expected_sha = checksum_text.split()[0].lower()
-          actual_sha = sha256(archive_raw).hexdigest()
-          assert actual_sha == expected_sha, (actual_sha, expected_sha)
-
-          with zipfile.ZipFile(BytesIO(archive_raw), 'r') as archive:
-              names = [info.filename for info in archive.infolist() if not info.is_dir()]
-              assert names == [f'{symbol}-{interval}-{period}.csv'], names
-              csv_raw = archive.read(names[0])
-
-          rows = list(csv.reader(StringIO(csv_raw.decode('utf-8'))))
           interval_ms = 3_600_000
-          anomalies = []
-          for index, row in enumerate(rows):
-              open_time = int(row[0])
-              close_time = int(row[6])
-              expected_close = open_time + interval_ms - 1
-              if close_time != expected_close:
-                  anomalies.append({
-                      'index': index,
-                      'open_time': open_time,
-                      'close_time': close_time,
-                      'expected_close': expected_close,
-                      'delta_ms': close_time - expected_close,
-                      'next_open_time': int(rows[index + 1][0]) if index + 1 < len(rows) else None,
-                  })
 
-          print(f'archive_url={archive_url}')
-          print(f'archive_sha256={actual_sha}')
-          print(f'rows={len(rows)}')
-          print(f'close_time_anomalies={len(anomalies)}')
-          for item in anomalies[:50]:
-              print('ANOMALY', item)
+          all_results = []
+          for period in periods:
+              for symbol in symbols:
+                  base = f'https://data.binance.vision/data/spot/monthly/klines/{symbol}/{interval}'
+                  filename = f'{symbol}-{interval}-{period}.zip'
+                  archive_url = f'{base}/{filename}'
+                  checksum_url = archive_url + '.CHECKSUM'
+                  with urllib.request.urlopen(checksum_url, timeout=30) as response:
+                      checksum_raw = response.read()
+                  with urllib.request.urlopen(archive_url, timeout=30) as response:
+                      archive_raw = response.read()
+                  expected_sha = checksum_raw.decode('utf-8').strip().split()[0].lower()
+                  actual_sha = sha256(archive_raw).hexdigest()
+                  assert actual_sha == expected_sha, (symbol, period, actual_sha, expected_sha)
+                  with zipfile.ZipFile(BytesIO(archive_raw), 'r') as archive:
+                      csv_name = f'{symbol}-{interval}-{period}.csv'
+                      csv_raw = archive.read(csv_name)
+                  rows = list(csv.reader(StringIO(csv_raw.decode('utf-8'))))
 
-          for index in range(561, 568):
-              row = rows[index]
-              open_time = int(row[0])
-              close_time = int(row[6])
-              print('ROW', {
-                  'index': index,
-                  'open_time': open_time,
-                  'close_time': close_time,
-                  'expected_close': open_time + interval_ms - 1,
-                  'duration_plus_one_ms': close_time - open_time + 1,
-                  'next_open_time': int(rows[index + 1][0]) if index + 1 < len(rows) else None,
-                  'open': row[1],
-                  'high': row[2],
-                  'low': row[3],
-                  'close': row[4],
-                  'volume': row[5],
-              })
+                  unit = 'us' if len(rows[0][0]) >= 16 else 'ms'
+                  multiplier = 1000 if unit == 'us' else 1
+                  interval_units = interval_ms * multiplier
+                  anomalies = []
+                  gap_to_next_hist = {}
+                  for index, row in enumerate(rows):
+                      open_time = int(row[0])
+                      close_time = int(row[6])
+                      expected_open = int(rows[0][0]) + index * interval_units
+                      expected_close = expected_open + interval_units - 1
+                      next_open = int(rows[index + 1][0]) if index + 1 < len(rows) else None
+                      gap_to_next = None if next_open is None else next_open - close_time
+                      gap_to_next_hist[gap_to_next] = gap_to_next_hist.get(gap_to_next, 0) + 1
+                      if open_time != expected_open or close_time != expected_close:
+                          anomalies.append({
+                              'index': index,
+                              'open_time': open_time,
+                              'close_time': close_time,
+                              'expected_open': expected_open,
+                              'expected_close': expected_close,
+                              'open_delta': open_time - expected_open,
+                              'close_delta': close_time - expected_close,
+                              'next_open_time': next_open,
+                              'next_open_minus_close': gap_to_next,
+                              'open_digits': len(row[0]),
+                              'close_digits': len(row[6]),
+                          })
 
-          assert len(rows) == 31 * 24
+                  result = {
+                      'symbol': symbol,
+                      'period': period,
+                      'archive_sha256': actual_sha,
+                      'rows': len(rows),
+                      'inferred_unit': unit,
+                      'first_open_time': int(rows[0][0]),
+                      'first_close_time': int(rows[0][6]),
+                      'last_open_time': int(rows[-1][0]),
+                      'last_close_time': int(rows[-1][6]),
+                      'first_open_digits': len(rows[0][0]),
+                      'first_close_digits': len(rows[0][6]),
+                      'gap_to_next_histogram': gap_to_next_hist,
+                      'anomaly_count': len(anomalies),
+                      'first_anomaly': anomalies[0] if anomalies else None,
+                  }
+                  all_results.append(result)
+                  print('SUMMARY', result)
+                  for anomaly in anomalies[:5]:
+                      print('ANOMALY', symbol, period, anomaly)
+
+          failing = [item for item in all_results if item['anomaly_count']]
+          print('FILES_SCANNED', len(all_results))
+          print('FILES_WITH_GEOMETRY_ANOMALIES', len(failing))
+          for item in failing:
+              print('FAILING_FILE', item['symbol'], item['period'], item['first_anomaly'])
           PY
