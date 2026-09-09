@@ -17,10 +17,11 @@ jobs:
         with:
           ref: research/oss3d2x-post-outage-continuous-history
           fetch-depth: 0
-      - name: Patch exact D2U V2 policy markers
+      - name: Patch exact D2U V2 policy markers and month count
         run: |
           python - <<'PY'
           from pathlib import Path
+
           p = Path('scripts/check_oss3d2u_historical_collection_acquisition_boundary.py')
           text = p.read_text()
           pairs = [
@@ -34,8 +35,16 @@ jobs:
                   raise SystemExit(f'expected one occurrence: {old}')
               text = text.replace(old, new)
           p.write_text(text)
+
+          t = Path('tests/test_research_oss3_market_collection.py')
+          test_text = t.read_text()
+          old = 'assert len(plan.periods) == 36'
+          new = 'assert len(plan.periods) == 33'
+          if test_text.count(old) != 1:
+              raise SystemExit(f'expected one occurrence: {old}')
+          t.write_text(test_text.replace(old, new))
           PY
-      - name: Validate updated boundary
+      - name: Validate updated boundary and D2U suite
         run: |
           python -m pip install -e '.[dev]'
           python scripts/check_oss3d2u_historical_collection_acquisition_boundary.py
@@ -44,6 +53,6 @@ jobs:
         run: |
           git config user.name 'AUTO-TRADE Research Bot'
           git config user.email '102555888+arendon7@users.noreply.github.com'
-          git add scripts/check_oss3d2u_historical_collection_acquisition_boundary.py
-          git commit -m 'research: bind D2U boundary to post-outage V2 policies [d2x-boundary-markers]'
+          git add scripts/check_oss3d2u_historical_collection_acquisition_boundary.py tests/test_research_oss3_market_collection.py
+          git commit -m 'research: bind D2U boundary and month count to post-outage V2 [d2x-boundary-markers]'
           git push origin HEAD:research/oss3d2x-post-outage-continuous-history
