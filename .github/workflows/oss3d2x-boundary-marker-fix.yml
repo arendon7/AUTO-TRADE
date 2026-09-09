@@ -1,0 +1,49 @@
+name: OSS-3D2X Boundary Marker Fix
+
+on:
+  push:
+    branches:
+      - research/oss3d2x-post-outage-continuous-history
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: ${{ !contains(github.event.head_commit.message, '[d2x-boundary-markers]') }}
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: research/oss3d2x-post-outage-continuous-history
+          fetch-depth: 0
+      - name: Patch exact D2U V2 policy markers
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('scripts/check_oss3d2u_historical_collection_acquisition_boundary.py')
+          text = p.read_text()
+          pairs = [
+              ('FINITE_MONTHLY_ARCHIVE_FAMILY_PREREGISTERED_BEFORE_NETWORK_V1', 'FINITE_MONTHLY_ARCHIVE_FAMILY_POST_20230324_OUTAGE_PREREGISTERED_BEFORE_NETWORK_V2'),
+              ('EXACT_MONTH_TO_MONTH_NO_GAP_NO_OVERLAP_NO_FILL_V1', 'EXACT_MONTH_TO_MONTH_NO_GAP_NO_OVERLAP_NO_FILL_V2'),
+              ('WARMUP20_THEN_TRAIN_THEN_DEVELOPMENT_NO_HOLDOUT_VALUES_V1', 'POST_OUTAGE_WARMUP20_THEN_TRAIN_THEN_DEVELOPMENT_NO_HOLDOUT_VALUES_V2'),
+              ('D2U v1 must freeze monthly granularity', 'D2U v2 must freeze monthly granularity'),
+          ]
+          for old, new in pairs:
+              if text.count(old) != 1:
+                  raise SystemExit(f'expected one occurrence: {old}')
+              text = text.replace(old, new)
+          p.write_text(text)
+          PY
+      - name: Validate updated boundary
+        run: |
+          python -m pip install -e '.[dev]'
+          python scripts/check_oss3d2u_historical_collection_acquisition_boundary.py
+          python -m pytest -q tests/test_research_oss3_market_collection.py
+      - name: Commit exact boundary migration
+        run: |
+          git config user.name 'AUTO-TRADE Research Bot'
+          git config user.email '102555888+arendon7@users.noreply.github.com'
+          git add scripts/check_oss3d2u_historical_collection_acquisition_boundary.py
+          git commit -m 'research: bind D2U boundary to post-outage V2 policies [d2x-boundary-markers]'
+          git push origin HEAD:research/oss3d2x-post-outage-continuous-history
