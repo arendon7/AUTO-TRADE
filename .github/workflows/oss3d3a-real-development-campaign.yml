@@ -15,6 +15,21 @@ on:
       - '.github/workflows/oss3d3a-real-development-campaign.yml'
       - 'src/autotrade/research/oss3_real_descriptor_identity.py'
       - 'src/autotrade/research/oss3_real_campaign_evidence.py'
+  push:
+    branches:
+      - research/oss3d3a-real-development-campaign
+    paths:
+      - 'labs/oss3_market_data/real_campaign_rehydration.py'
+      - 'labs/oss3_qlib/real_development_campaign.py'
+      - 'labs/oss3_qlib/tests/test_real_development_campaign.py'
+      - 'scripts/run_oss3d3a_rehydration.py'
+      - 'scripts/run_oss3d3a_real_development_campaign.py'
+      - 'scripts/check_oss3d3a_real_development_campaign_boundary.py'
+      - 'knowledge/20_RESEARCH/OSS3D3A_REAL_DEVELOPMENT_CAMPAIGN.md'
+      - '.github/workflows/oss3d3a-real-development-campaign.yml'
+      - 'src/autotrade/research/oss3_real_descriptor_identity.py'
+      - 'src/autotrade/research/oss3_real_campaign_evidence.py'
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -26,6 +41,7 @@ jobs:
     timeout-minutes: 60
     env:
       PYTHONPATH: ${{ github.workspace }}
+      D3A_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
       D3A_ARTIFACT_DIR: ${{ runner.temp }}/oss3d3a-source-artifact
       D3A_REHYDRATE_PARENT: ${{ runner.temp }}/oss3d3a-rehydrate-parent
       D3A_EVIDENCE_ROOT: ${{ runner.temp }}/oss3d3a-rehydrate-parent/oss3d3a-certified-d2y-evidence
@@ -33,10 +49,17 @@ jobs:
       D3A_WORK_ROOT: ${{ runner.temp }}/oss3d3a-model-work
       D3A_RESULT_JSON: ${{ runner.temp }}/oss3d3a-real-development-result.json
     steps:
-      - name: Checkout
+      - name: Checkout exact D3A source SHA
         uses: actions/checkout@v5
         with:
+          ref: ${{ env.D3A_SOURCE_SHA }}
           fetch-depth: 0
+
+      - name: Prove exact D3A source SHA
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$D3A_SOURCE_SHA"
+          echo "D3A source SHA: $D3A_SOURCE_SHA"
 
       - name: Set up Python
         uses: actions/setup-python@v6
@@ -222,7 +245,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: oss3d3a-real-development-evidence-${{ github.event.pull_request.head.sha }}
+          name: oss3d3a-real-development-evidence-${{ env.D3A_SOURCE_SHA }}
           retention-days: 30
           if-no-files-found: error
           path: |
