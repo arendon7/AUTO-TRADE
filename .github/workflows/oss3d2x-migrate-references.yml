@@ -1,0 +1,91 @@
+name: OSS-3D2X Migrate Dependent References
+
+on:
+  push:
+    branches:
+      - research/oss3d2x-post-outage-continuous-history
+
+permissions:
+  contents: write
+
+jobs:
+  migrate:
+    if: ${{ !contains(github.event.head_commit.message, '[d2x-refs]') }}
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: research/oss3d2x-post-outage-continuous-history
+          fetch-depth: 0
+
+      - name: Apply exact executable migrations
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          def exact(path: str, pairs: list[tuple[str, str]]) -> None:
+              p = Path(path)
+              text = p.read_text()
+              for old, new in pairs:
+                  count = text.count(old)
+                  if count < 1:
+                      raise SystemExit(f'{path}: missing expected text: {old}')
+                  text = text.replace(old, new)
+              p.write_text(text)
+
+          exact('tests/test_research_oss3_market_collection.py', [
+              ('assert plan.periods[0] == "2023-01"', 'assert plan.periods[0] == "2023-04"'),
+              ('assert len(plan.descriptors) == 108', 'assert len(plan.descriptors) == 99'),
+              ('assert plan.train_start == "2023-01-01T20:00:00+00:00"', 'assert plan.train_start == "2023-04-01T20:00:00+00:00"'),
+          ])
+          exact('scripts/check_oss3d2u_historical_collection_acquisition_boundary.py', [
+              ('OSS3D2U_HISTORICAL_COLLECTION_PLAN_V1', 'OSS3D2U_HISTORICAL_COLLECTION_PLAN_V2'),
+              ('CANONICAL_FIRST_MONTH = "2023-01"', 'CANONICAL_FIRST_MONTH = "2023-04"'),
+          ])
+          exact('.github/workflows/oss3d2v-restart-safe-real-acquisition.yml', [
+              ("assert payload['descriptor_count'] == 108", "assert payload['descriptor_count'] == 99"),
+              ("assert payload['missing_without_network_authority'] == 108", "assert payload['missing_without_network_authority'] == 99"),
+          ])
+          exact('scripts/run_oss3d2v_real_acquisition.py', [
+              ('2023-01..2025-12 public archive campaign', '2023-04..2025-12 post-outage public archive campaign'),
+          ])
+
+          exact('knowledge/20_RESEARCH/OSS3D2U_HISTORICAL_COLLECTION_ACQUISITION.md', [
+              ('2023-01', '2023-04'),
+              ('2023-2025-v1', '2023apr-2025-v2'),
+              ('108', '99'),
+              ('2023-04-01T20:00:00Z', '2023-04-01T20:00:00Z'),
+          ])
+          exact('knowledge/20_RESEARCH/OSS3D2V_RESTART_SAFE_REAL_ACQUISITION.md', [
+              ('2023-01', '2023-04'),
+              ('36 × 3 = 108', '33 × 3 = 99'),
+              ('324 planned HTTP calls', '297 planned HTTP calls'),
+              ('108', '99'),
+          ])
+          exact('knowledge/20_RESEARCH/OSS3D2W_SEALED_RAW_SPLIT_HANDOFF.md', [
+              ('2023-01', '2023-04'),
+              ('108', '99'),
+          ])
+          PY
+
+      - name: Prove no stale executable assumptions remain
+        run: |
+          ! git grep -n -E '\b108\b|2023-01|HISTORICAL_COLLECTION_PLAN_V1' -- \
+            tests/test_research_oss3_market_collection.py \
+            scripts/check_oss3d2u_historical_collection_acquisition_boundary.py \
+            .github/workflows/oss3d2v-restart-safe-real-acquisition.yml \
+            scripts/run_oss3d2v_real_acquisition.py
+
+      - name: Commit migration
+        run: |
+          git config user.name 'AUTO-TRADE Research Bot'
+          git config user.email '102555888+arendon7@users.noreply.github.com'
+          git add tests/test_research_oss3_market_collection.py \
+            scripts/check_oss3d2u_historical_collection_acquisition_boundary.py \
+            .github/workflows/oss3d2v-restart-safe-real-acquisition.yml \
+            scripts/run_oss3d2v_real_acquisition.py \
+            knowledge/20_RESEARCH/OSS3D2U_HISTORICAL_COLLECTION_ACQUISITION.md \
+            knowledge/20_RESEARCH/OSS3D2V_RESTART_SAFE_REAL_ACQUISITION.md \
+            knowledge/20_RESEARCH/OSS3D2W_SEALED_RAW_SPLIT_HANDOFF.md
+          git commit -m 'research: migrate D2U D2V D2W references to post-outage V2 [d2x-refs]'
+          git push origin HEAD:research/oss3d2x-post-outage-continuous-history
