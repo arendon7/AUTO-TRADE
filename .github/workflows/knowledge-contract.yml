@@ -28,6 +28,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     env:
+      PYTHONPATH: ${{ github.workspace }}
       D3A_SOURCE_SHA: 2cb202f4aa821af97d36a041c7034194c3594e64
       D3A_ARTIFACT_DIR: /tmp/oss3d3a-source-artifact
       D3A_REHYDRATE_PARENT: /tmp/oss3d3a-rehydrate-parent
