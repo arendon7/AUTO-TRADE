@@ -222,3 +222,18 @@ def test_d3a_evidence_rejects_authority_retuning_and_postlabel_state_on_blocked_
     ):
         with pytest.raises(RealDevelopmentCampaignGovernanceError):
             replace(evidence, **updates)
+
+
+
+def test_d2e_exact_sign_test_supports_full_hourly_development_without_float_overflow():
+    from autotrade.research.oss3_development_model_tournament import _one_sided_exact_sign_test
+
+    # 8,760 non-zero cross-sectional signs approximate a full hourly year and
+    # reproduces the magnitude that overflowed the legacy float(2**n) path.
+    values = (1.0,) * 4380 + (-1.0,) * 4380
+    p_value = _one_sided_exact_sign_test(values)
+    assert 0.0 <= p_value <= 1.0
+    assert p_value > 0.5
+
+    # Small-n semantics remain the exact same one-sided binomial tail.
+    assert _one_sided_exact_sign_test((1.0, 1.0, -1.0)) == 0.5

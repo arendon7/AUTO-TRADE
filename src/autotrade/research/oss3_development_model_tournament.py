@@ -19,6 +19,7 @@ Scientific/governance boundary:
 from __future__ import annotations
 
 from dataclasses import dataclass
+from fractions import Fraction
 from datetime import datetime, timezone
 from decimal import Decimal
 from hashlib import sha256
@@ -789,7 +790,7 @@ def _one_sided_exact_sign_test(values: tuple[float, ...]) -> float:
     n = positives + negatives
     if n == 0:
         return 1.0
-    return sum(comb(n, k) for k in range(positives, n + 1)) / float(2**n)
+    return float(Fraction(sum(comb(n, k) for k in range(positives, n + 1)), 1 << n))
 
 
 def _cross_section_key_hash(evaluation: DevelopmentEvaluationArtifact) -> str:
