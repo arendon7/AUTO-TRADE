@@ -1,0 +1,40 @@
+name: OSS-3D2X Migration Inventory
+
+on:
+  push:
+    branches:
+      - research/oss3d2x-post-outage-continuous-history
+
+permissions:
+  contents: read
+
+jobs:
+  inventory:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - name: List D2U D2V D2W related files
+        run: |
+          git ls-files | grep -E '(oss3d2u|oss3d2v|oss3d2w|market_collection|real_acquisition|sealed_raw_split)' | sort || true
+      - name: Find inherited V1 and old-window assumptions
+        run: |
+          echo '=== 108 ==='
+          git grep -n -E '\b108\b' -- ':!knowledge/archive/**' || true
+          echo '=== 2023-01 / 2023-2025 / V1 collection id ==='
+          git grep -n -E '2023-01|2023-2025-v1|HISTORICAL_COLLECTION_PLAN_V1|HISTORICAL_COLLECTION_ASSEMBLY_EVIDENCE_V1|HISTORICAL_RESEARCH_PARTITION_MATERIAL_V1|ACQUIRED_SNAPSHOT_BINDING_V1' -- ':!knowledge/archive/**' || true
+      - name: Prove current canonical V2 plan
+        run: |
+          PYTHONPATH=src python - <<'PY'
+          from autotrade.research.oss3_market_collection import *
+          plan = canonical_oss3d2u_collection_plan()
+          print('collection_id=', plan.collection_id)
+          print('plan_version=', plan.plan_version)
+          print('descriptor_count=', len(plan.descriptors))
+          print('first=', plan.descriptors[0].instrument.symbol, plan.descriptors[0].period)
+          print('last=', plan.descriptors[-1].instrument.symbol, plan.descriptors[-1].period)
+          print('train_start=', plan.train_start)
+          print('development_start=', plan.development_start)
+          print('development_end=', plan.development_end)
+          print('fingerprint=', plan.fingerprint)
+          assert len(plan.descriptors) == 99
+          PY
