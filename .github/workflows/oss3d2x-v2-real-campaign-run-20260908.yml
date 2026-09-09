@@ -1,0 +1,195 @@
+name: OSS-3D2X V2 Real Canonical Campaign 2026-09-08
+
+on:
+  push:
+    branches:
+      - research/oss3d2x-v2-real-campaign-run-20260908
+
+permissions:
+  contents: read
+
+jobs:
+  real-canonical-campaign:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      PYTHONPATH: ${{ github.workspace }}
+      D2X_CERTIFIED_COMMIT: a2abb8fa73ef3b40c4d8523fc326df1e71a06355
+      D2X_PLAN_FINGERPRINT: f43abdcd532f07d37b54f93abafbd3b29a3c3ee07afeedbae95b7aa15153c59d
+      D2X_COLLECTION_ID: oss3d2u-binance-spot-btc-eth-sol-1h-2023apr-2025-v2
+    steps:
+      - name: Checkout exact certified D2X code
+        uses: actions/checkout@v5
+        with:
+          ref: a2abb8fa73ef3b40c4d8523fc326df1e71a06355
+          fetch-depth: 1
+
+      - name: Prove exact certified code checkout
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$D2X_CERTIFIED_COMMIT"
+          echo "certified D2X code: $D2X_CERTIFIED_COMMIT"
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Install AUTO-TRADE core only
+        run: python -m pip install -e '.[dev]'
+
+      - name: Prove Qlib absent
+        run: |
+          python - <<'PY'
+          import importlib.util
+          assert importlib.util.find_spec('qlib') is None
+          print('qlib runtime: ABSENT')
+          PY
+
+      - name: Re-prove certified D2X boundary before provider GET
+        run: python scripts/check_oss3d2x_post_outage_continuous_history_boundary.py
+
+      - name: Execute exact 99-descriptor public GET campaign
+        run: |
+          set -euo pipefail
+          EVIDENCE_ROOT="${RUNNER_TEMP}/oss3d2x-v2-evidence"
+          mkdir -p "$EVIDENCE_ROOT"
+          python scripts/run_oss3d2v_real_acquisition.py \
+            --evidence-root "$EVIDENCE_ROOT" \
+            --execute-public-get \
+            | tee "${RUNNER_TEMP}/d2x-v2-real-result.json"
+
+      - name: Validate complete real V2 campaign result
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import string
+          from pathlib import Path
+
+          result = json.loads((Path(os.environ['RUNNER_TEMP']) / 'd2x-v2-real-result.json').read_text())
+          assert result['collection_id'] == os.environ['D2X_COLLECTION_ID']
+          assert result['plan_fingerprint'] == os.environ['D2X_PLAN_FINGERPRINT']
+          assert result['descriptor_count'] == 99
+          assert result['acquired_from_network'] == 99
+          assert result['reused_after_seal_reverification'] == 0
+          assert result['reconciled_unsealed_final_material'] == 0
+          assert result['missing_without_network_authority'] == 0
+          assert result['complete'] is True
+          assert result['network_enabled'] is True
+          for key in (
+              'campaign_seal_fingerprint',
+              'd2u_partition_material_fingerprint',
+              'training_universe_hash',
+              'development_universe_hash',
+          ):
+              value = result[key]
+              assert len(value) == 64 and all(ch in string.hexdigits for ch in value), key
+          assert result['final_holdout_values_loaded'] is False
+          assert result['capital_authority'] == 'NONE'
+          assert result['live_trading'] == 'BLOCKED'
+          print('real V2 campaign first pass: COMPLETE — 99/99 acquired')
+          PY
+
+      - name: Re-run entire V2 campaign offline with zero GET authority
+        run: |
+          set -euo pipefail
+          EVIDENCE_ROOT="${RUNNER_TEMP}/oss3d2x-v2-evidence"
+          python scripts/run_oss3d2v_real_acquisition.py \
+            --evidence-root "$EVIDENCE_ROOT" \
+            | tee "${RUNNER_TEMP}/d2x-v2-offline-reverify-result.json"
+
+      - name: Validate offline full reverification and identical campaign seal
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          root = Path(os.environ['RUNNER_TEMP'])
+          first = json.loads((root / 'd2x-v2-real-result.json').read_text())
+          second = json.loads((root / 'd2x-v2-offline-reverify-result.json').read_text())
+          assert second['collection_id'] == os.environ['D2X_COLLECTION_ID']
+          assert second['plan_fingerprint'] == os.environ['D2X_PLAN_FINGERPRINT']
+          assert second['descriptor_count'] == 99
+          assert second['acquired_from_network'] == 0
+          assert second['reused_after_seal_reverification'] == 99
+          assert second['reconciled_unsealed_final_material'] == 0
+          assert second['missing_without_network_authority'] == 0
+          assert second['complete'] is True
+          assert second['network_enabled'] is False
+          assert second['campaign_seal_fingerprint'] == first['campaign_seal_fingerprint']
+          assert second['d2u_partition_material_fingerprint'] == first['d2u_partition_material_fingerprint']
+          assert second['training_universe_hash'] == first['training_universe_hash']
+          assert second['development_universe_hash'] == first['development_universe_hash']
+          assert second['final_holdout_values_loaded'] is False
+          assert second['capital_authority'] == 'NONE'
+          assert second['live_trading'] == 'BLOCKED'
+          print('offline V2 reverification: PASS — 0 GET / 99 reused / identical seal')
+          PY
+
+      - name: Build cryptographic evidence inventory
+        run: |
+          python - <<'PY'
+          from hashlib import sha256
+          import json
+          import os
+          from pathlib import Path
+
+          runner_temp = Path(os.environ['RUNNER_TEMP'])
+          root = runner_temp / 'oss3d2x-v2-evidence'
+          entries = []
+          for path in sorted(p for p in root.rglob('*') if p.is_file()):
+              raw = path.read_bytes()
+              entries.append({
+                  'path': path.relative_to(root).as_posix(),
+                  'bytes': len(raw),
+                  'sha256': sha256(raw).hexdigest(),
+              })
+          payload = {
+              'inventory_version': 'OSS3D2X_V2_REAL_CAMPAIGN_EVIDENCE_INVENTORY_V1',
+              'certified_code_commit': os.environ['D2X_CERTIFIED_COMMIT'],
+              'collection_id': os.environ['D2X_COLLECTION_ID'],
+              'plan_fingerprint': os.environ['D2X_PLAN_FINGERPRINT'],
+              'descriptor_count': 99,
+              'file_count': len(entries),
+              'files': entries,
+          }
+          inventory = runner_temp / 'd2x-v2-evidence-inventory.json'
+          inventory.write_text(json.dumps(payload, sort_keys=True, separators=(',', ':')) + '\n')
+          print(f"evidence files: {len(entries)}")
+          PY
+
+      - name: Archive exact local evidence
+        run: |
+          set -euo pipefail
+          EVIDENCE_ROOT="${RUNNER_TEMP}/oss3d2x-v2-evidence"
+          tar -C "$(dirname "$EVIDENCE_ROOT")" \
+            -czf "${RUNNER_TEMP}/oss3d2x-v2-real-evidence-20260908.tar.gz" \
+            "$(basename "$EVIDENCE_ROOT")"
+          sha256sum "${RUNNER_TEMP}/oss3d2x-v2-real-evidence-20260908.tar.gz" \
+            | tee "${RUNNER_TEMP}/oss3d2x-v2-real-evidence-20260908.tar.gz.sha256"
+
+      - name: Upload real D2X V2 campaign evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: oss3d2x-v2-real-campaign-20260908
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0
+          path: |
+            ${{ runner.temp }}/d2x-v2-real-result.json
+            ${{ runner.temp }}/d2x-v2-offline-reverify-result.json
+            ${{ runner.temp }}/d2x-v2-evidence-inventory.json
+            ${{ runner.temp }}/oss3d2x-v2-real-evidence-20260908.tar.gz
+            ${{ runner.temp }}/oss3d2x-v2-real-evidence-20260908.tar.gz.sha256
+
+      - name: Final authority proof
+        run: |
+          python - <<'PY'
+          import importlib.util
+          assert importlib.util.find_spec('qlib') is None
+          print('D2X V2 campaign authority: PUBLIC HISTORICAL GET ONLY')
+          print('FINAL_HOLDOUT: NOT LOADED')
+          print('PAPER/CAPITAL/LIVE: NOT AUTHORIZED')
+          PY
