@@ -182,12 +182,15 @@ def main() -> int:
         EXPECTED_SEAL_FINGERPRINT,
         "99/99",
         "0 GET",
-        "artifact expiry does not invalidate",
         "FINAL_HOLDOUT",
         "NONE",
         "BLOCKED",
     ):
         require(marker in doc, f"missing D2Y knowledge marker: {marker}")
+    require(
+        "artifact expiry does not invalidate" in doc.lower(),
+        "D2Y knowledge contract must state that artifact expiry does not invalidate the scientific seal",
+    )
 
     print(
         "AUTO-TRADE OSS-3D2Y DURABLE REAL CAMPAIGN EVIDENCE BOUNDARY: PASS — "
