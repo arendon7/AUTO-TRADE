@@ -43,7 +43,7 @@ def main() -> int:
     acquisition_tree = ast.parse(acquisition, filename=str(ACQUISITION))
 
     for marker in (
-        "OSS3D2U_HISTORICAL_COLLECTION_PLAN_V1",
+        "OSS3D2U_HISTORICAL_COLLECTION_PLAN_V2",
         "FINITE_MONTHLY_ARCHIVE_FAMILY_PREREGISTERED_BEFORE_NETWORK_V1",
         "EXACT_MONTH_TO_MONTH_NO_GAP_NO_OVERLAP_NO_FILL_V1",
         "WARMUP20_THEN_TRAIN_THEN_DEVELOPMENT_NO_HOLDOUT_VALUES_V1",
@@ -53,7 +53,7 @@ def main() -> int:
         "ETHUSDT",
         "SOLUSDT",
         'CANONICAL_INTERVAL = "1h"',
-        'CANONICAL_FIRST_MONTH = "2023-01"',
+        'CANONICAL_FIRST_MONTH = "2023-04"',
         'CANONICAL_LAST_MONTH = "2025-12"',
         "CANONICAL_WARMUP_BARS = 20",
         "final_holdout_descriptors_included=False",

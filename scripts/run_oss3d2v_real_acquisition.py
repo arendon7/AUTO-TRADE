@@ -16,7 +16,7 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
             "Verify or execute the frozen D2U BTCUSDT/ETHUSDT/SOLUSDT 1h "
-            "2023-01..2025-12 public archive campaign. Default mode is offline status/verification."
+            "2023-04..2025-12 post-outage public archive campaign. Default mode is offline status/verification."
         )
     )
     parser.add_argument(

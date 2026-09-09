@@ -14,11 +14,11 @@ The current D2U v1 family is:
 - symbols: `BTCUSDT`, `ETHUSDT`, `SOLUSDT`;
 - interval: `1h`;
 - archive granularity: monthly;
-- first month: `2023-01`;
+- first month: `2023-04`;
 - last month: `2025-12`;
-- descriptors: `36 × 3 = 108`;
+- descriptors: `33 × 3 = 99`;
 - WARMUP: first 20 hourly bars;
-- TRAIN: `2023-01-01T20:00:00Z` through `2025-01-01T00:00:00Z`;
+- TRAIN: `2023-04-01T20:00:00Z` through `2025-01-01T00:00:00Z`;
 - DEVELOPMENT: calendar year 2025;
 - FINAL_HOLDOUT descriptors: absent.
 
@@ -142,7 +142,7 @@ Without that flag:
 - missing descriptors are counted and reported;
 - no campaign seal is produced until the family is complete.
 
-For the canonical family, a clean first execution requires at most 324 planned HTTP calls: three GETs per 108 descriptors. There is no hidden retry loop.
+For the canonical family, a clean first execution requires at most 297 planned HTTP calls: three GETs per 99 descriptors. There is no hidden retry loop.
 
 ## 8. Atomic persistence
 
@@ -221,9 +221,9 @@ Authority fields are fixed:
 
 D2V cannot create `OSS3D2V_COMPLETE_COLLECTION_SEAL_V1` from descriptor counts alone.
 
-After all 108 descriptors have reverified, D2V calls the certified D2U assembler with:
+After all 99 descriptors have reverified, D2V calls the certified D2U assembler with:
 
-- all 108 D2T snapshots in exact plan order;
+- all 99 D2T snapshots in exact plan order;
 - one D2U acquisition receipt fingerprint per descriptor.
 
 Only successful assembly permits the final seal.
@@ -240,14 +240,14 @@ The complete seal binds:
 - DEVELOPMENT universe hash;
 - campaign/restart/storage policies.
 
-Therefore a collection with 108 individually valid files but a cross-file gap, cross-asset support mismatch, wrong partition geometry or other D2U assembly failure cannot be called complete.
+Therefore a collection with 99 individually valid files but a cross-file gap, cross-asset support mismatch, wrong partition geometry or other D2U assembly failure cannot be called complete.
 
 ## 12. Rerun behavior
 
 A complete healthy rerun in default offline mode should report:
 
 - network acquisitions: 0;
-- sealed descriptors reverified/reused: 108;
+- sealed descriptors reverified/reused: 99;
 - unsealed finals reconciled: 0;
 - missing: 0;
 - complete: true;
@@ -282,7 +282,7 @@ The CLI prints machine-readable JSON with descriptor counts, acquisition/reuse/r
 
 ## 15. CI policy
 
-Ordinary PR CI does not download the real 108-file campaign.
+Ordinary PR CI does not download the real 99-file campaign.
 
 It uses deterministic local ZIP/CHECKSUM fixtures and an injected read-only transport to prove:
 

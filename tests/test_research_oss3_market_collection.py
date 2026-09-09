@@ -150,13 +150,13 @@ def test_canonical_plan_is_finite_real_family_and_excludes_2026_archives():
     plan = canonical_oss3d2u_collection_plan()
     assert plan.symbols == SYMBOLS
     assert plan.interval == "1h"
-    assert plan.periods[0] == "2023-01"
+    assert plan.periods[0] == "2023-04"
     assert plan.periods[-1] == "2025-12"
     assert len(plan.periods) == 36
-    assert len(plan.descriptors) == 108
+    assert len(plan.descriptors) == 99
     assert all(descriptor.granularity == "monthly" for descriptor in plan.descriptors)
     assert all(not descriptor.period.startswith("2026-") for descriptor in plan.descriptors)
-    assert plan.train_start == "2023-01-01T20:00:00+00:00"
+    assert plan.train_start == "2023-04-01T20:00:00+00:00"
     assert plan.development_start == "2025-01-01T00:00:00+00:00"
     assert plan.development_end == "2026-01-01T00:00:00+00:00"
     assert plan.final_holdout_descriptors_included is False

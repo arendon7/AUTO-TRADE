@@ -16,10 +16,10 @@ The canonical upstream plan remains:
 - `BTCUSDT`, `ETHUSDT`, `SOLUSDT`;
 - `1h`;
 - monthly archives;
-- `2023-01` through `2025-12`;
-- 108 exact descriptors;
+- `2023-04` through `2025-12`;
+- 99 exact descriptors;
 - first 20 bars = WARMUP;
-- TRAIN begins `2023-01-01T20:00:00+00:00`;
+- TRAIN begins `2023-04-01T20:00:00+00:00`;
 - DEVELOPMENT begins `2025-01-01T00:00:00+00:00`;
 - DEVELOPMENT ends `2026-01-01T00:00:00+00:00`;
 - no FINAL_HOLDOUT descriptors.
