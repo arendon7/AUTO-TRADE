@@ -29,12 +29,12 @@ jobs:
     timeout-minutes: 60
     env:
       D3A_SOURCE_SHA: 2cb202f4aa821af97d36a041c7034194c3594e64
-      D3A_ARTIFACT_DIR: ${{ runner.temp }}/oss3d3a-source-artifact
-      D3A_REHYDRATE_PARENT: ${{ runner.temp }}/oss3d3a-rehydrate-parent
-      D3A_EVIDENCE_ROOT: ${{ runner.temp }}/oss3d3a-rehydrate-parent/oss3d3a-certified-d2y-evidence
-      D3A_REHYDRATION_JSON: ${{ runner.temp }}/oss3d3a-rehydration.json
-      D3A_WORK_ROOT: ${{ runner.temp }}/oss3d3a-model-work
-      D3A_RESULT_JSON: ${{ runner.temp }}/oss3d3a-real-development-result.json
+      D3A_ARTIFACT_DIR: /tmp/oss3d3a-source-artifact
+      D3A_REHYDRATE_PARENT: /tmp/oss3d3a-rehydrate-parent
+      D3A_EVIDENCE_ROOT: /tmp/oss3d3a-rehydrate-parent/oss3d3a-certified-d2y-evidence
+      D3A_REHYDRATION_JSON: /tmp/oss3d3a-rehydration.json
+      D3A_WORK_ROOT: /tmp/oss3d3a-model-work
+      D3A_RESULT_JSON: /tmp/oss3d3a-real-development-result.json
     steps:
       - name: Checkout exact D3A scientific source
         uses: actions/checkout@v5
