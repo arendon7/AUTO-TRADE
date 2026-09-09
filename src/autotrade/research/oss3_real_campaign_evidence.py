@@ -47,6 +47,10 @@ def _is_sha256(value: str) -> bool:
     return len(value) == 64 and all(character in string.hexdigits for character in value)
 
 
+def _is_git_commit(value: str) -> bool:
+    return len(value) == 40 and all(character in string.hexdigits for character in value)
+
+
 @dataclass(frozen=True, slots=True)
 class DurableRealCampaignEvidenceSeal:
     contract_version: str
@@ -99,6 +103,10 @@ class DurableRealCampaignEvidenceSeal:
     def __post_init__(self) -> None:
         if self.contract_version != OSS3D2Y_CONTRACT_VERSION:
             raise RealCampaignEvidenceSealError("D2Y contract version mismatch")
+        if not _is_git_commit(self.d2x_certified_commit):
+            raise RealCampaignEvidenceSealError("D2Y certified D2X commit must be a 40-hex Git commit id")
+        if not _is_git_commit(self.operational_wrapper_commit):
+            raise RealCampaignEvidenceSealError("D2Y operational wrapper commit must be a 40-hex Git commit id")
         if self.descriptor_count != DESCRIPTOR_COUNT:
             raise RealCampaignEvidenceSealError("D2Y descriptor count must remain 99")
         if self.source_file_count != SOURCE_FILE_COUNT:
@@ -119,8 +127,6 @@ class DurableRealCampaignEvidenceSeal:
 
     def _sha256_fields(self) -> dict[str, str]:
         return {
-            "d2x_certified_commit": self.d2x_certified_commit,
-            "operational_wrapper_commit": self.operational_wrapper_commit,
             "artifact_zip_sha256": self.artifact_zip_sha256,
             "plan_fingerprint": self.plan_fingerprint,
             "campaign_seal_fingerprint": self.campaign_seal_fingerprint,
