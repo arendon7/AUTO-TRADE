@@ -13,6 +13,8 @@ permissions:
 jobs:
   patch:
     runs-on: ubuntu-24.04
+    env:
+      PYTHONPATH: src:.
     steps:
       - name: Checkout D3A branch
         uses: actions/checkout@v5
