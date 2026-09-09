@@ -68,11 +68,24 @@ def main() -> int:
         IDENTITY_POLICY,
         MATERIAL_MANIFEST_FILE_SHA256,
         STABLE_MATERIAL_ROOT,
-        D2Y_SEAL_FINGERPRINT,
+        "canonical_oss3d2y_real_campaign_evidence_seal",
+        "verify_oss3d2y_real_campaign_evidence_seal",
+        "manifest.d2y_seal_fingerprint != D2Y_SEAL_FINGERPRINT",
+        "manifest.d2y_seal_fingerprint != d2y.fingerprint",
         "verify_rehydrated_descriptor_material",
         "stable_identity_vector",
     ):
         require(marker in source, f"missing D2Z source marker: {marker}")
+
+    # D2Y's exact fingerprint is imported from its certified contract instead of
+    # being duplicated as a second literal in D2Z. The runtime verification above
+    # and source markers below prove the canonical D2Y verifier is executed and
+    # the manifest fingerprint is compared both to the imported certified value
+    # and to the freshly reconstructed canonical D2Y seal fingerprint.
+    require(
+        "EXPECTED_SEAL_FINGERPRINT as D2Y_SEAL_FINGERPRINT" in source,
+        "D2Z must import the exact D2Y certified fingerprint rather than duplicate it",
+    )
 
     forbidden_import_fragments = (
         "qlib",
@@ -156,7 +169,8 @@ def main() -> int:
     print(
         "AUTO-TRADE OSS-3D2Z DURABLE DESCRIPTOR MATERIAL MANIFEST BOUNDARY: PASS — "
         "99 canonical D2U descriptors are durably committed to exact provider archive/CHECKSUM and D2T output identities; "
-        "receipt/acquisition timestamps are excluded from stable identity; no network/Qlib/FINAL_HOLDOUT/PAPER/capital/LIVE authority"
+        "receipt/acquisition timestamps are excluded from stable identity; D2Y is rebound through its canonical verifier; "
+        "no network/Qlib/FINAL_HOLDOUT/PAPER/capital/LIVE authority"
     )
     return 0
 
