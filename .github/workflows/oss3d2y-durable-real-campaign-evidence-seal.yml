@@ -1,0 +1,86 @@
+name: OSS-3D2Y Durable Real Campaign Evidence Seal
+
+on:
+  pull_request:
+    branches:
+      - research/oss3d2x-post-outage-continuous-history
+    paths:
+      - 'src/autotrade/research/oss3_real_campaign_evidence.py'
+      - 'tests/test_research_oss3_real_campaign_evidence.py'
+      - 'scripts/check_oss3d2y_durable_real_campaign_evidence_boundary.py'
+      - 'knowledge/20_RESEARCH/OSS3D2Y_DURABLE_REAL_CAMPAIGN_EVIDENCE_SEAL.md'
+      - '.github/workflows/oss3d2y-durable-real-campaign-evidence-seal.yml'
+      - 'src/autotrade/research/oss3_market_collection.py'
+      - 'scripts/check_oss3d2x_post_outage_continuous_history_boundary.py'
+      - 'knowledge/20_RESEARCH/OSS3D2X_POST_OUTAGE_CONTINUOUS_HISTORY.md'
+
+permissions:
+  contents: read
+
+jobs:
+  oss3d2y:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      PYTHONPATH: ${{ github.workspace }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Install AUTO-TRADE core only
+        run: python -m pip install -e '.[dev]'
+
+      - name: Prove Qlib absent from D2Y runtime
+        run: |
+          python - <<'PY'
+          import importlib.util
+          assert importlib.util.find_spec('qlib') is None, 'D2Y workflow must remain Qlib-free'
+          print('qlib runtime: ABSENT')
+          PY
+
+      - name: Compile D2Y sources
+        run: |
+          python -m py_compile \
+            src/autotrade/research/oss3_real_campaign_evidence.py \
+            tests/test_research_oss3_real_campaign_evidence.py \
+            scripts/check_oss3d2y_durable_real_campaign_evidence_boundary.py
+
+      - name: D2Y durable real campaign evidence boundary
+        run: python scripts/check_oss3d2y_durable_real_campaign_evidence_boundary.py
+
+      - name: D2Y deterministic and adversarial seal suite
+        run: python -m pytest -q tests/test_research_oss3_real_campaign_evidence.py
+
+      - name: Re-prove certified D2X post-outage root
+        run: python scripts/check_oss3d2x_post_outage_continuous_history_boundary.py
+
+      - name: Re-prove D2U V2 plan identity
+        run: python -m pytest -q tests/test_research_oss3_market_collection.py
+
+      - name: Research authority boundary
+        run: python scripts/check_research_authority.py
+
+      - name: Prove evidence module has no network runtime
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          source = Path('src/autotrade/research/oss3_real_campaign_evidence.py').read_text().lower()
+          for marker in ('urlopen(', 'requests.', 'httpx.', 'socket.socket(', 'subprocess.'):
+              assert marker not in source, marker
+          print('D2Y evidence runtime network surface: ABSENT')
+          PY
+
+      - name: Re-prove Qlib was never installed
+        run: |
+          python - <<'PY'
+          import importlib.util
+          assert importlib.util.find_spec('qlib') is None, 'D2Y unexpectedly gained Qlib runtime authority'
+          print('qlib runtime after D2Y certification: ABSENT')
+          PY
