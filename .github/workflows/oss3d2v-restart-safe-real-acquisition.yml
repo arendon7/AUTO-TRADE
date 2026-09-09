@@ -70,9 +70,9 @@ jobs:
           payload = json.loads(sys.argv[1])
           assert payload['network_enabled'] is False
           assert payload['acquired_from_network'] == 0
-          assert payload['descriptor_count'] == 108
+          assert payload['descriptor_count'] == 99
           assert payload['complete'] is False
-          assert payload['missing_without_network_authority'] == 108
+          assert payload['missing_without_network_authority'] == 99
           assert payload['final_holdout_values_loaded'] is False
           assert payload['capital_authority'] == 'NONE'
           assert payload['live_trading'] == 'BLOCKED'

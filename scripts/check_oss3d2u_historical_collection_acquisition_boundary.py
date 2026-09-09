@@ -43,17 +43,17 @@ def main() -> int:
     acquisition_tree = ast.parse(acquisition, filename=str(ACQUISITION))
 
     for marker in (
-        "OSS3D2U_HISTORICAL_COLLECTION_PLAN_V1",
-        "FINITE_MONTHLY_ARCHIVE_FAMILY_PREREGISTERED_BEFORE_NETWORK_V1",
-        "EXACT_MONTH_TO_MONTH_NO_GAP_NO_OVERLAP_NO_FILL_V1",
-        "WARMUP20_THEN_TRAIN_THEN_DEVELOPMENT_NO_HOLDOUT_VALUES_V1",
+        "OSS3D2U_HISTORICAL_COLLECTION_PLAN_V2",
+        "FINITE_MONTHLY_ARCHIVE_FAMILY_POST_20230324_OUTAGE_PREREGISTERED_BEFORE_NETWORK_V2",
+        "EXACT_MONTH_TO_MONTH_NO_GAP_NO_OVERLAP_NO_FILL_V2",
+        "POST_OUTAGE_WARMUP20_THEN_TRAIN_THEN_DEVELOPMENT_NO_HOLDOUT_VALUES_V2",
         "oss3d2u_historical_collection_plans",
         "OSS3D2U_APPEND_ONLY",
         "BTCUSDT",
         "ETHUSDT",
         "SOLUSDT",
         'CANONICAL_INTERVAL = "1h"',
-        'CANONICAL_FIRST_MONTH = "2023-01"',
+        'CANONICAL_FIRST_MONTH = "2023-04"',
         'CANONICAL_LAST_MONTH = "2025-12"',
         "CANONICAL_WARMUP_BARS = 20",
         "final_holdout_descriptors_included=False",
@@ -113,7 +113,7 @@ def main() -> int:
         require(marker not in core, f"forbidden D2U core capability/state: {marker}")
 
     plan_phase = core[core.index("class HistoricalCollectionPlan"):core.index("class SQLiteHistoricalCollectionPlanRegistry")]
-    require('self.granularity != "monthly"' in plan_phase, "D2U v1 must freeze monthly granularity")
+    require('self.granularity != "monthly"' in plan_phase, "D2U v2 must freeze monthly granularity")
     require("_months_are_contiguous" in plan_phase, "D2U must validate contiguous months")
     require("one exact descriptor per symbol and month" in plan_phase, "D2U must require full symbol-month grid")
     require("development_end != last_period_end" in plan_phase, "D2U must end collection exactly at DEVELOPMENT end")

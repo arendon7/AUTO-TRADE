@@ -38,17 +38,17 @@ provider   = Binance Spot public archive
 symbols    = BTCUSDT, ETHUSDT, SOLUSDT
 interval   = 1h
 granularity= monthly
-first month= 2023-01
+first month= 2023-04
 last month = 2025-12
 months     = 36
 symbols    = 3
-files      = 108
+files      = 99
 ```
 
 The canonical collection id is:
 
 ```text
-oss3d2u-binance-spot-btc-eth-sol-1h-2023-2025-v1
+oss3d2u-binance-spot-btc-eth-sol-1h-2023apr-2025-v2
 ```
 
 This family is a **protocol choice**, not a result-selected family.  D2U does not claim that BTC/ETH/SOL is profitable, optimal or sufficient for production.  Changing the symbol set, interval, month range or partition dates after observing DEVELOPMENT results requires a new protocol/version rather than mutating this collection.
@@ -60,7 +60,7 @@ No 2026 archive descriptor is part of D2U v1.
 The material period is:
 
 ```text
-collection_start  = 2023-01-01T00:00:00Z
+collection_start  = 2023-04-01T00:00:00Z
 development_end   = 2026-01-01T00:00:00Z
 ```
 
@@ -68,15 +68,15 @@ At 1h resolution the first twenty bars are a dedicated causal warmup:
 
 ```text
 WARMUP
-2023-01-01 00:00 UTC
+2023-04-01 00:00 UTC
 through
-2023-01-01 19:00 UTC
+2023-04-01 19:00 UTC
 ```
 
 TRAIN begins immediately after that warmup:
 
 ```text
-TRAIN start = 2023-01-01T20:00:00Z
+TRAIN start = 2023-04-01T20:00:00Z
 TRAIN end   = 2025-01-01T00:00:00Z  (exclusive)
 ```
 
@@ -439,7 +439,7 @@ The acquisition suite uses a scripted fake transport to prove network call order
 
 D2U tests/boundary must prove at least:
 
-1. canonical v1 plan contains exactly 108 descriptors;
+1. canonical v1 plan contains exactly 99 descriptors;
 2. canonical v1 contains no 2026 archive descriptor;
 3. symbol-month grid must be complete;
 4. months must be contiguous;
@@ -513,7 +513,7 @@ LIVE trading
 
 ## Next step after D2U certification
 
-After the D2U code/contract is certified, the next operation should be a controlled **real acquisition campaign** for the frozen 108-descriptor family.
+After the D2U code/contract is certified, the next operation should be a controlled **real acquisition campaign** for the frozen 99-descriptor family.
 
 That campaign should:
 
