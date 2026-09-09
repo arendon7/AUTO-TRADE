@@ -328,7 +328,7 @@ def _parse_inventory(raw: bytes) -> dict[str, tuple[int, str]]:
         if not isinstance(item, Mapping):
             raise RealCampaignRehydrationIntegrityError("D3A inventory file entry is invalid")
         rel = item.get("path")
-        size = item.get("size")
+        size = item.get("bytes")
         digest = item.get("sha256")
         if not isinstance(rel, str) or not _safe_relative(rel):
             raise RealCampaignRehydrationIntegrityError("D3A inventory path is unsafe")
