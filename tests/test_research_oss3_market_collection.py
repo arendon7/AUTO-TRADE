@@ -152,7 +152,7 @@ def test_canonical_plan_is_finite_real_family_and_excludes_2026_archives():
     assert plan.interval == "1h"
     assert plan.periods[0] == "2023-04"
     assert plan.periods[-1] == "2025-12"
-    assert len(plan.periods) == 36
+    assert len(plan.periods) == 33
     assert len(plan.descriptors) == 99
     assert all(descriptor.granularity == "monthly" for descriptor in plan.descriptors)
     assert all(not descriptor.period.startswith("2026-") for descriptor in plan.descriptors)
