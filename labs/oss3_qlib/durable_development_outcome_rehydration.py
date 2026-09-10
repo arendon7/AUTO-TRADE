@@ -2,9 +2,10 @@
 
 This module does not rerun Qlib, materialize DEVELOPMENT labels, or recompute
 D2D metrics.  It reads the exact candidate artifacts, D2S preregistration and
-D2E terminal ledger produced by D3A, rebuilds the deterministic D2H identity,
-re-verifies the D2E tournament from persisted terminal records, reproduces the
-D2I winner seal and finally emits the D3C portable outcome bundle.
+D2E terminal ledger produced by one D3A replay, verifies that replay has the
+same stable scientific outcome as the previously certified D3A baseline,
+rebuilds the exact current D2H/D2I provenance lineage, and emits one portable
+D3C bundle.
 """
 
 from __future__ import annotations
@@ -33,9 +34,12 @@ from autotrade.research.oss3_training_bundle import TrainingBundleArtifact
 from autotrade.research.trials import SQLiteTrialLedger, TrialStatus
 from labs.oss3_qlib.development_winner_seal import seal_development_winner
 from labs.oss3_qlib.durable_development_outcome import (
+    SOURCE_D3A_COMPLETED_STATUS,
+    SOURCE_D3A_EVIDENCE_VERSION,
     DurableDevelopmentOutcomeBundle,
     DurableDevelopmentOutcomeIntegrityError,
     build_durable_development_outcome,
+    d3a_scientific_outcome_fingerprint,
     write_durable_development_outcome,
 )
 from labs.oss3_qlib.family_environment_attestation import CandidateEnvironmentAttestation
@@ -48,12 +52,6 @@ from labs.oss3_qlib.family_evaluation_batch import (
     FamilyEvaluationPreregistration,
     FrozenCandidateOutput,
     FrozenCandidateOutputBinding,
-)
-from labs.oss3_qlib.real_development_campaign import (
-    D2S_PREREGISTRATION_ID,
-    OSS3D3A_CAMPAIGN_EVIDENCE_VERSION,
-    STATUS_COMPLETED,
-    STRUCTURAL_FAILURE_CODE,
 )
 
 
@@ -108,26 +106,33 @@ class _SerializedRunEvidence:
 
 def reconstruct_and_write_durable_development_outcome(
     *,
+    certified_d3a_baseline_path: str | Path,
     d3a_result_path: str | Path,
     work_root: str | Path,
     output_path: str | Path,
 ) -> DurableDevelopmentOutcomeBundle:
-    """Rebuild the completed D2H/D2I lineage from D3A durable outputs only."""
+    """Rebuild current D2H/D2I provenance only after stable D3A science equality."""
     root = Path(work_root).expanduser().resolve()
-    if not root.is_dir():
+    if not root.is_dir() or root.is_symlink():
         raise DurableDevelopmentOutcomeRehydrationIntegrityError(
-            "D3C work_root does not exist"
+            "D3C work_root does not exist or is unsafe"
         )
+
+    baseline_payload, baseline_fingerprint = _read_d3a_result(
+        certified_d3a_baseline_path
+    )
     d3a_payload, d3a_fingerprint = _read_d3a_result(d3a_result_path)
-    if d3a_payload.get("status") != STATUS_COMPLETED:
-        raise DurableDevelopmentOutcomeRehydrationGovernanceError(
-            "D3C requires a completed D3A campaign"
+    baseline_science = d3a_scientific_outcome_fingerprint(baseline_payload)
+    replay_science = d3a_scientific_outcome_fingerprint(d3a_payload)
+    if baseline_science != replay_science:
+        raise DurableDevelopmentOutcomeRehydrationIntegrityError(
+            "D3C replay differs scientifically from certified D3A baseline"
         )
 
     d2s = _read_d2s_preregistration(root / D2S_LEDGER_NAME)
     if _hash_payload(d2s) != d3a_payload.get("d2s_preregistration_fingerprint"):
         raise DurableDevelopmentOutcomeRehydrationIntegrityError(
-            "D3C durable D2S preregistration differs from D3A result"
+            "D3C durable D2S preregistration differs from D3A replay"
         )
 
     outputs = _load_candidate_outputs(root / CANDIDATE_ROOT_NAME, d3a_payload)
@@ -136,9 +141,11 @@ def reconstruct_and_write_durable_development_outcome(
         d3a=d3a_payload,
         outputs=outputs,
     )
-    if preregistration.fingerprint != d3a_payload.get("d2h_preregistration_fingerprint"):
+    if preregistration.fingerprint != d3a_payload.get(
+        "d2h_preregistration_fingerprint"
+    ):
         raise DurableDevelopmentOutcomeRehydrationIntegrityError(
-            "D3C reconstructed D2H preregistration differs from D3A"
+            "D3C reconstructed D2H preregistration differs from D3A replay"
         )
 
     tournament, evaluation_bindings = _reconstruct_terminal_batch_material(
@@ -147,9 +154,11 @@ def reconstruct_and_write_durable_development_outcome(
         outputs=outputs,
         d3a=d3a_payload,
     )
-    if tournament.fingerprint != d3a_payload.get("d2e_tournament_evidence_fingerprint"):
+    if tournament.fingerprint != d3a_payload.get(
+        "d2e_tournament_evidence_fingerprint"
+    ):
         raise DurableDevelopmentOutcomeRehydrationIntegrityError(
-            "D3C reconstructed D2E tournament differs from D3A"
+            "D3C reconstructed D2E tournament differs from D3A replay"
         )
 
     batch = FamilyEvaluationBatchEvidence(
@@ -165,7 +174,7 @@ def reconstruct_and_write_durable_development_outcome(
     )
     if batch.fingerprint != d3a_payload.get("d2h_batch_evidence_fingerprint"):
         raise DurableDevelopmentOutcomeRehydrationIntegrityError(
-            "D3C reconstructed D2H batch differs from D3A"
+            "D3C reconstructed D2H batch differs from D3A replay"
         )
 
     winner = seal_development_winner(
@@ -174,16 +183,21 @@ def reconstruct_and_write_durable_development_outcome(
     )
     if winner.fingerprint != d3a_payload.get("d2i_winner_seal_fingerprint"):
         raise DurableDevelopmentOutcomeRehydrationIntegrityError(
-            "D3C reconstructed D2I winner differs from D3A"
+            "D3C reconstructed D2I winner differs from D3A replay"
         )
 
-    adapter = _D3AEvidenceAdapter(
+    baseline_adapter = _D3AEvidenceAdapter(
+        payload_json=_canonical_json(baseline_payload),
+        fingerprint=baseline_fingerprint,
+    )
+    replay_adapter = _D3AEvidenceAdapter(
         payload_json=_canonical_json(d3a_payload),
         fingerprint=d3a_fingerprint,
     )
     try:
         bundle = build_durable_development_outcome(
-            source_d3a_evidence=adapter,
+            certified_d3a_baseline=baseline_adapter,
+            source_d3a_evidence=replay_adapter,
             preregistration=preregistration,
             batch_evidence=batch,
             winner=winner,
@@ -200,9 +214,13 @@ def _read_d3a_result(path: str | Path) -> tuple[dict[str, object], str]:
     document = _read_canonical_json_file(path, "D3A result")
     fingerprint = document.pop("fingerprint", None)
     _require_hash(fingerprint, "D3A result fingerprint")
-    if document.get("evidence_version") != OSS3D3A_CAMPAIGN_EVIDENCE_VERSION:
+    if document.get("evidence_version") != SOURCE_D3A_EVIDENCE_VERSION:
         raise DurableDevelopmentOutcomeRehydrationIntegrityError(
             "D3C source is not canonical D3A evidence"
+        )
+    if document.get("status") != SOURCE_D3A_COMPLETED_STATUS:
+        raise DurableDevelopmentOutcomeRehydrationGovernanceError(
+            "D3C requires completed D3A evidence"
         )
     if _hash_payload(document) != fingerprint:
         raise DurableDevelopmentOutcomeRehydrationIntegrityError(
@@ -213,8 +231,7 @@ def _read_d3a_result(path: str | Path) -> tuple[dict[str, object], str]:
 
 def _read_d2s_preregistration(path: Path) -> dict[str, object]:
     _require_regular_file(path, "D2S preregistration ledger")
-    uri = f"file:{path}?mode=ro"
-    conn = sqlite3.connect(uri, uri=True)
+    conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
     conn.row_factory = sqlite3.Row
     try:
         conn.execute("PRAGMA query_only = ON")
@@ -224,12 +241,17 @@ def _read_d2s_preregistration(path: Path) -> dict[str, object]:
         ).fetchall()
     finally:
         conn.close()
-    if len(rows) != 1 or rows[0]["preregistration_id"] != D2S_PREREGISTRATION_ID:
+    if len(rows) != 1:
         raise DurableDevelopmentOutcomeRehydrationIntegrityError(
-            "D3C requires exactly the canonical D3A D2S preregistration"
+            "D3C requires exactly one durable D2S preregistration"
         )
     try:
-        payload = json.loads(str(rows[0]["plan_json"]))
+        payload = json.loads(
+            str(rows[0]["plan_json"]),
+            object_pairs_hook=_reject_duplicate_pairs,
+        )
+    except DurableDevelopmentOutcomeRehydrationError:
+        raise
     except json.JSONDecodeError as exc:
         raise DurableDevelopmentOutcomeRehydrationIntegrityError(
             "D2S durable preregistration JSON is invalid"
@@ -261,9 +283,12 @@ def _load_candidate_outputs(
         )
     expected_ids = tuple(candidate.candidate_id for candidate in CANONICAL_CANDIDATES)
     expected_output_pairs = d3a.get("candidate_output_hashes")
-    if not isinstance(expected_output_pairs, list) or len(expected_output_pairs) != len(expected_ids):
+    if (
+        not isinstance(expected_output_pairs, list)
+        or len(expected_output_pairs) != len(expected_ids)
+    ):
         raise DurableDevelopmentOutcomeRehydrationIntegrityError(
-            "D3A result lacks exact six candidate output hashes"
+            "D3A replay lacks exact six candidate output hashes"
         )
     expected_hashes: dict[str, str] = {}
     for pair in expected_output_pairs:
@@ -277,6 +302,10 @@ def _load_candidate_outputs(
                 "D3A candidate output id is invalid"
             )
         _require_hash(digest, "D3A candidate output hash")
+        if candidate_id in expected_hashes:
+            raise DurableDevelopmentOutcomeRehydrationIntegrityError(
+                "D3A candidate output id is duplicated"
+            )
         expected_hashes[candidate_id] = digest
     if tuple(expected_hashes) != expected_ids:
         raise DurableDevelopmentOutcomeRehydrationIntegrityError(
@@ -294,7 +323,9 @@ def _load_candidate_outputs(
             )
         request = DevelopmentInferenceRequest.read(root / "request.json")
         bundle = TrainingBundleArtifact.read(root / "training-bundle.json")
-        development_features = FactorMatrixArtifact.read(root / "development-features.json")
+        development_features = FactorMatrixArtifact.read(
+            root / "development-features.json"
+        )
         prediction = QlibPredictionArtifact.read(root / "prediction.json")
         attestation = CandidateEnvironmentAttestation.read(root / "attestation.json")
         receipt = request.bind_prediction(
@@ -313,7 +344,7 @@ def _load_candidate_outputs(
         )
         if output.fingerprint != expected_hashes[candidate_id]:
             raise DurableDevelopmentOutcomeRehydrationIntegrityError(
-                f"D3C candidate output differs from D3A: {candidate_id}"
+                f"D3C candidate output differs from D3A replay: {candidate_id}"
             )
         if common_bundle_hash is None:
             common_bundle_hash = bundle.artifact_hash
@@ -329,11 +360,13 @@ def _load_candidate_outputs(
 
     if common_bundle_hash != d3a.get("training_bundle_hash"):
         raise DurableDevelopmentOutcomeRehydrationIntegrityError(
-            "D3C TRAIN bundle differs from D3A"
+            "D3C TRAIN bundle differs from D3A replay"
         )
-    if common_development_feature_hash != d3a.get("development_feature_artifact_hash"):
+    if common_development_feature_hash != d3a.get(
+        "development_feature_artifact_hash"
+    ):
         raise DurableDevelopmentOutcomeRehydrationIntegrityError(
-            "D3C DEVELOPMENT feature artifact differs from D3A"
+            "D3C DEVELOPMENT feature artifact differs from D3A replay"
         )
     return tuple(outputs)
 
@@ -400,7 +433,9 @@ def _reconstruct_d2h_preregistration(
         evaluation_end=d2s["evaluation_end"],
     )
     runtime = outputs[0].runtime_environment
-    if {output.runtime_environment.fingerprint for output in outputs} != {runtime.fingerprint}:
+    if {output.runtime_environment.fingerprint for output in outputs} != {
+        runtime.fingerprint
+    }:
         raise DurableDevelopmentOutcomeRehydrationIntegrityError(
             "D3C candidate runtime identities differ"
         )
@@ -450,8 +485,12 @@ def _reconstruct_terminal_batch_material(
         copy = Path(temporary) / "d2e-verification.sqlite3"
         shutil.copyfile(source_ledger, copy)
         ledger = SQLiteTrialLedger(copy)
-        records = tuple(ledger.list_trials(preregistration.d2e_plan.campaign.campaign_id))
-        expected_ids = tuple(candidate.candidate_id for candidate in CANONICAL_CANDIDATES)
+        records = tuple(
+            ledger.list_trials(preregistration.d2e_plan.campaign.campaign_id)
+        )
+        expected_ids = tuple(
+            candidate.candidate_id for candidate in CANONICAL_CANDIDATES
+        )
         if tuple(record.spec.trial_id for record in records) != expected_ids:
             raise DurableDevelopmentOutcomeRehydrationIntegrityError(
                 "D3C D2E ledger family differs from exact six"
@@ -468,16 +507,29 @@ def _reconstruct_terminal_batch_material(
             )
 
         result_items = d3a.get("candidate_results")
-        if not isinstance(result_items, list) or len(result_items) != len(expected_ids):
+        structural_items = d3a.get("structural_profiles")
+        if (
+            not isinstance(result_items, list)
+            or len(result_items) != len(expected_ids)
+            or not isinstance(structural_items, list)
+            or len(structural_items) != len(expected_ids)
+        ):
             raise DurableDevelopmentOutcomeRehydrationIntegrityError(
-                "D3A candidate result accounting is incomplete"
+                "D3A candidate/structural accounting is incomplete"
             )
         result_by_id = {
             item.get("candidate_id"): item
             for item in result_items
-            if isinstance(item, dict) and isinstance(item.get("candidate_id"), str)
+            if isinstance(item, dict)
+            and isinstance(item.get("candidate_id"), str)
         }
-        if tuple(result_by_id) != expected_ids:
+        structural_by_id = {
+            item.get("candidate_id"): item
+            for item in structural_items
+            if isinstance(item, dict)
+            and isinstance(item.get("candidate_id"), str)
+        }
+        if tuple(result_by_id) != expected_ids or tuple(structural_by_id) != expected_ids:
             raise DurableDevelopmentOutcomeRehydrationIntegrityError(
                 "D3A candidate result family differs from exact six"
             )
@@ -487,9 +539,12 @@ def _reconstruct_terminal_batch_material(
         for record in records:
             candidate_id = record.spec.trial_id
             source_result = result_by_id[candidate_id]
+            structural = structural_by_id[candidate_id]
             output = output_by_id[candidate_id]
             if record.status is TrialStatus.COMPLETED:
-                if source_result.get("status") != "COMPLETED":
+                if source_result.get("status") != "COMPLETED" or structural.get(
+                    "evaluable"
+                ) is not True:
                     raise DurableDevelopmentOutcomeRehydrationIntegrityError(
                         f"D3C terminal status mismatch: {candidate_id}"
                     )
@@ -499,7 +554,9 @@ def _reconstruct_terminal_batch_material(
                     raise DurableDevelopmentOutcomeRehydrationIntegrityError(
                         f"D3C D2D artifact mismatch: {candidate_id}"
                     )
-                if float(record.metrics[PRIMARY_METRIC]) != source_result.get("primary_metric"):
+                if float(record.metrics[PRIMARY_METRIC]) != source_result.get(
+                    "primary_metric"
+                ):
                     raise DurableDevelopmentOutcomeRehydrationIntegrityError(
                         f"D3C primary metric mismatch: {candidate_id}"
                     )
@@ -521,27 +578,39 @@ def _reconstruct_terminal_batch_material(
                     )
                 )
             else:
-                if source_result.get("status") != "FAILED":
+                expected_failure = structural.get("failure_code")
+                if (
+                    source_result.get("status") != "FAILED"
+                    or structural.get("evaluable") is not False
+                    or not isinstance(expected_failure, str)
+                    or record.failure_code != expected_failure
+                ):
                     raise DurableDevelopmentOutcomeRehydrationIntegrityError(
-                        f"D3C failed-candidate status mismatch: {candidate_id}"
-                    )
-                if record.failure_code != STRUCTURAL_FAILURE_CODE:
-                    raise DurableDevelopmentOutcomeRehydrationIntegrityError(
-                        f"D3C unexpected D2E failure code: {candidate_id}"
+                        f"D3C failed-candidate accounting mismatch: {candidate_id}"
                     )
                 if any(
                     source_result.get(name) is not None
-                    for name in ("evaluation_artifact_hash", "primary_metric", "raw_p_value")
+                    for name in (
+                        "evaluation_artifact_hash",
+                        "primary_metric",
+                        "raw_p_value",
+                    )
                 ):
                     raise DurableDevelopmentOutcomeRehydrationIntegrityError(
                         f"D3C failed candidate exposes evaluation values: {candidate_id}"
                     )
 
-        tournament = evaluate_oss3d2e_tournament(ledger, preregistration.d2e_plan)
+        tournament = evaluate_oss3d2e_tournament(
+            ledger,
+            preregistration.d2e_plan,
+        )
         return tournament, tuple(bindings)
 
 
-def _read_canonical_json_file(path: str | Path, name: str) -> dict[str, object]:
+def _read_canonical_json_file(
+    path: str | Path,
+    name: str,
+) -> dict[str, object]:
     target = Path(path).expanduser().resolve()
     _require_regular_file(target, name)
     try:
