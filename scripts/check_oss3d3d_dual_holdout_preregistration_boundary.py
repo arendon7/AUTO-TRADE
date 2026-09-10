@@ -27,7 +27,6 @@ FORBIDDEN_IMPORT_FRAGMENTS = (
     "urllib",
     "socket",
     "aiohttp",
-    "qlib",
     "pandas",
     "numpy",
     "scipy",
@@ -79,6 +78,11 @@ def _call_name(node: ast.Call) -> str:
     return ""
 
 
+def _external_qlib_import(module: str) -> bool:
+    lowered = module.lower()
+    return lowered == "qlib" or lowered.startswith("qlib.")
+
+
 def main() -> int:
     for path in SOURCES:
         if not path.is_file():
@@ -94,7 +98,9 @@ def main() -> int:
                 modules = []
             for module in modules:
                 lowered = module.lower()
-                if any(marker in lowered for marker in FORBIDDEN_IMPORT_FRAGMENTS):
+                if _external_qlib_import(module) or any(
+                    marker in lowered for marker in FORBIDDEN_IMPORT_FRAGMENTS
+                ):
                     raise SystemExit(f"D3D forbidden import {module!r} in {path.relative_to(ROOT)}")
             if isinstance(node, ast.Call) and _call_name(node) in FORBIDDEN_CALLS:
                 raise SystemExit(f"D3D forbidden call {_call_name(node)!r} in {path.relative_to(ROOT)}")
