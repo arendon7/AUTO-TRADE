@@ -10,10 +10,11 @@ from autotrade.research.oss3_concrete_model_family import CANONICAL_CANDIDATES
 from labs.oss3_qlib.development_winner_seal import seal_development_winner
 from labs.oss3_qlib.durable_development_outcome import (
     OSS3D3C_CONTRACT_VERSION,
-    DurableDevelopmentOutcomeBundle,
+    SCIENTIFIC_IDENTITY_POLICY,
     DurableDevelopmentOutcomeGovernanceError,
     DurableDevelopmentOutcomeIntegrityError,
     build_durable_development_outcome,
+    d3a_scientific_outcome_fingerprint,
     read_durable_development_outcome,
     write_durable_development_outcome,
 )
@@ -29,13 +30,55 @@ class _SyntheticD3AEvidence:
         return _hash(self.payload)
 
     def to_dict(self) -> dict[str, object]:
-        return dict(self.payload)
+        return json.loads(_canonical_json(self.payload))
 
 
 def _completed_source(preregistration, batch, winner) -> _SyntheticD3AEvidence:
     expected_ids = tuple(candidate.candidate_id for candidate in CANONICAL_CANDIDATES)
-    frozen_hashes = {item.candidate_id: item.frozen_output_hash for item in batch.evaluations}
+    frozen_hashes = {
+        item.candidate_id: item.frozen_output_hash for item in batch.evaluations
+    }
+    prediction_hashes = {
+        item.candidate_id: item.prediction_artifact_hash for item in batch.evaluations
+    }
+    evaluation_hashes = {
+        item.candidate_id: item.d2d_evaluation_artifact_hash
+        for item in batch.evaluations
+    }
     assert tuple(frozen_hashes) == expected_ids
+
+    structural_profiles: list[dict[str, object]] = []
+    candidate_results: list[dict[str, object]] = []
+    for index, candidate_id in enumerate(expected_ids):
+        profile = {
+            "candidate_id": candidate_id,
+            "prediction_artifact_hash": prediction_hashes[candidate_id],
+            "observation_count": 90,
+            "cross_section_count": 30,
+            "nonconstant_cross_section_count": 30,
+            "global_nonconstant": True,
+            "full_cross_section_support": True,
+            "evaluable": True,
+            "failure_code": None,
+        }
+        structural_profiles.append(profile)
+        is_winner = candidate_id == winner.selected_trial_id
+        candidate_results.append(
+            {
+                "candidate_id": candidate_id,
+                "status": "COMPLETED",
+                "structural_profile_hash": _hash(profile),
+                "prediction_artifact_hash": prediction_hashes[candidate_id],
+                "evaluation_artifact_hash": evaluation_hashes[candidate_id],
+                "primary_metric": (
+                    winner.winner_primary_metric if is_winner else float(index) / 1000.0
+                ),
+                "raw_p_value": (
+                    winner.winner_raw_p_value if is_winner else 0.5 + float(index) / 100.0
+                ),
+            }
+        )
+
     return _SyntheticD3AEvidence(
         {
             "evidence_version": "OSS3D3A_REAL_DEVELOPMENT_CAMPAIGN_EVIDENCE_V1",
@@ -55,7 +98,7 @@ def _completed_source(preregistration, batch, winner) -> _SyntheticD3AEvidence:
                 [candidate_id, frozen_hashes[candidate_id]] for candidate_id in expected_ids
             ],
             "structural_policy": "PRELABEL_REQUIRE_GLOBAL_AND_EVERY_CROSS_SECTION_SCORE_VARIATION_V1",
-            "structural_profiles": [],
+            "structural_profiles": structural_profiles,
             "evaluable_candidate_ids": list(expected_ids),
             "d2s_preregistration_fingerprint": "9" * 64,
             "development_label_artifact_hash": preregistration.development_label_artifact_hash,
@@ -63,7 +106,7 @@ def _completed_source(preregistration, batch, winner) -> _SyntheticD3AEvidence:
             "d2h_batch_evidence_fingerprint": batch.fingerprint,
             "d2s_completed_evidence_fingerprint": "a" * 64,
             "d2e_tournament_evidence_fingerprint": batch.tournament_evidence.fingerprint,
-            "candidate_results": [],
+            "candidate_results": candidate_results,
             "d2i_winner_seal_fingerprint": winner.fingerprint,
             "selected_trial_id": winner.selected_trial_id,
             "winner_primary_metric": winner.winner_primary_metric,
@@ -97,6 +140,7 @@ def _bundle(tmp_path):
     )
     source = _completed_source(preregistration, batch, winner)
     bundle = build_durable_development_outcome(
+        certified_d3a_baseline=source,
         source_d3a_evidence=source,
         preregistration=preregistration,
         batch_evidence=batch,
@@ -113,7 +157,12 @@ def test_d3c_roundtrip_is_canonical_and_hash_stable(tmp_path):
 
     assert restored == bundle
     assert restored.fingerprint == bundle.fingerprint
+    assert restored.certified_d3a_baseline_fingerprint == source.fingerprint
     assert restored.source_d3a_evidence_fingerprint == source.fingerprint
+    assert restored.scientific_outcome_fingerprint == d3a_scientific_outcome_fingerprint(
+        source.to_dict()
+    )
+    assert restored.scientific_identity_policy == SCIENTIFIC_IDENTITY_POLICY
     assert restored.d2i_winner_seal_fingerprint == winner.fingerprint
     assert restored.selected_trial_id == winner.selected_trial_id
     assert restored.contract_version == OSS3D3C_CONTRACT_VERSION
@@ -133,7 +182,59 @@ def test_d3c_roundtrip_is_canonical_and_hash_stable(tmp_path):
     assert document["artifact_hash"] == bundle.fingerprint
 
 
-def test_d3c_rejects_cross_wired_source_winner(tmp_path):
+def test_d3c_accepts_provenance_container_drift_when_science_is_exact(tmp_path):
+    preregistration, batch, winner, source, _ = _bundle(tmp_path)
+    baseline_payload = source.to_dict()
+    baseline_payload["candidate_output_hashes"] = [
+        [candidate_id, f"{index + 1:064x}"]
+        for index, candidate_id in enumerate(
+            candidate.candidate_id for candidate in CANONICAL_CANDIDATES
+        )
+    ]
+    baseline_payload["d2s_preregistration_fingerprint"] = "b" * 64
+    baseline_payload["d2h_preregistration_fingerprint"] = "c" * 64
+    baseline_payload["d2h_batch_evidence_fingerprint"] = "d" * 64
+    baseline_payload["d2s_completed_evidence_fingerprint"] = "e" * 64
+    baseline_payload["d2e_tournament_evidence_fingerprint"] = "f" * 64
+    baseline_payload["d2i_winner_seal_fingerprint"] = "0" * 64
+    for index, item in enumerate(baseline_payload["candidate_results"]):
+        item["evaluation_artifact_hash"] = f"{index + 10:064x}"
+    baseline = _SyntheticD3AEvidence(baseline_payload)
+
+    assert baseline.fingerprint != source.fingerprint
+    assert d3a_scientific_outcome_fingerprint(
+        baseline.to_dict()
+    ) == d3a_scientific_outcome_fingerprint(source.to_dict())
+
+    bundle = build_durable_development_outcome(
+        certified_d3a_baseline=baseline,
+        source_d3a_evidence=source,
+        preregistration=preregistration,
+        batch_evidence=batch,
+        winner=winner,
+    )
+    assert bundle.certified_d3a_baseline_fingerprint == baseline.fingerprint
+    assert bundle.source_d3a_evidence_fingerprint == source.fingerprint
+    assert bundle.certified_d3a_baseline_fingerprint != bundle.source_d3a_evidence_fingerprint
+
+
+def test_d3c_rejects_true_prediction_drift_even_when_provenance_is_valid(tmp_path):
+    preregistration, batch, winner, source, _ = _bundle(tmp_path)
+    baseline_payload = source.to_dict()
+    baseline_payload["candidate_results"][0]["prediction_artifact_hash"] = "f" * 64
+    baseline = _SyntheticD3AEvidence(baseline_payload)
+
+    with pytest.raises(DurableDevelopmentOutcomeIntegrityError):
+        build_durable_development_outcome(
+            certified_d3a_baseline=baseline,
+            source_d3a_evidence=source,
+            preregistration=preregistration,
+            batch_evidence=batch,
+            winner=winner,
+        )
+
+
+def test_d3c_rejects_cross_wired_current_winner(tmp_path):
     preregistration, batch, winner, source, _ = _bundle(tmp_path)
     payload = source.to_dict()
     other_id = next(
@@ -146,6 +247,7 @@ def test_d3c_rejects_cross_wired_source_winner(tmp_path):
 
     with pytest.raises(DurableDevelopmentOutcomeIntegrityError):
         build_durable_development_outcome(
+            certified_d3a_baseline=source,
             source_d3a_evidence=cross_wired,
             preregistration=preregistration,
             batch_evidence=batch,
@@ -161,6 +263,7 @@ def test_d3c_rejects_source_metric_drift(tmp_path):
 
     with pytest.raises(DurableDevelopmentOutcomeIntegrityError):
         build_durable_development_outcome(
+            certified_d3a_baseline=source,
             source_d3a_evidence=drifted,
             preregistration=preregistration,
             batch_evidence=batch,
@@ -168,7 +271,7 @@ def test_d3c_rejects_source_metric_drift(tmp_path):
         )
 
 
-def test_d3c_rejects_authority_escalation_inside_source(tmp_path):
+def test_d3c_rejects_authority_escalation_inside_current_replay(tmp_path):
     preregistration, batch, winner, source, _ = _bundle(tmp_path)
     payload = source.to_dict()
     payload["final_holdout_authorized"] = True
@@ -176,6 +279,7 @@ def test_d3c_rejects_authority_escalation_inside_source(tmp_path):
 
     with pytest.raises(DurableDevelopmentOutcomeGovernanceError):
         build_durable_development_outcome(
+            certified_d3a_baseline=source,
             source_d3a_evidence=escalated,
             preregistration=preregistration,
             batch_evidence=batch,
@@ -217,7 +321,10 @@ def test_d3c_read_rejects_payload_tampering_even_with_valid_json(tmp_path):
 
 def test_d3c_read_rejects_duplicate_json_keys(tmp_path):
     path = tmp_path / "bad.json"
-    path.write_text('{"contract_version":"x","contract_version":"y"}\n', encoding="utf-8")
+    path.write_text(
+        '{"contract_version":"x","contract_version":"y"}\n',
+        encoding="utf-8",
+    )
     with pytest.raises(DurableDevelopmentOutcomeIntegrityError):
         read_durable_development_outcome(path)
 
