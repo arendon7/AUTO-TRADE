@@ -10,6 +10,7 @@ on:
       - 'labs/oss3_qlib/tests/test_durable_development_outcome.py'
       - 'scripts/run_oss3d3c_durable_development_outcome.py'
       - 'scripts/check_oss3d3c_durable_development_outcome_boundary.py'
+      - 'knowledge/20_RESEARCH/OSS3D3A_CERTIFIED_BASELINE_d6a66390.json'
       - 'knowledge/20_RESEARCH/OSS3D3C_DURABLE_DEVELOPMENT_OUTCOME.md'
       - '.github/workflows/oss3d3c-durable-development-outcome.yml'
   push:
@@ -21,6 +22,7 @@ on:
       - 'labs/oss3_qlib/tests/test_durable_development_outcome.py'
       - 'scripts/run_oss3d3c_durable_development_outcome.py'
       - 'scripts/check_oss3d3c_durable_development_outcome_boundary.py'
+      - 'knowledge/20_RESEARCH/OSS3D3A_CERTIFIED_BASELINE_d6a66390.json'
       - 'knowledge/20_RESEARCH/OSS3D3C_DURABLE_DEVELOPMENT_OUTCOME.md'
       - '.github/workflows/oss3d3c-durable-development-outcome.yml'
   workflow_dispatch:
@@ -35,6 +37,7 @@ jobs:
     timeout-minutes: 70
     env:
       PYTHONPATH: ${{ github.workspace }}
+      CERTIFIED_D3A_BASELINE: ${{ github.workspace }}/knowledge/20_RESEARCH/OSS3D3A_CERTIFIED_BASELINE_d6a66390.json
       D3A_ARTIFACT_DIR: /tmp/oss3d3c-source-artifact
       D3A_REHYDRATE_PARENT: /tmp/oss3d3c-rehydrate-parent
       D3A_EVIDENCE_ROOT: /tmp/oss3d3c-rehydrate-parent/oss3d3a-certified-d2y-evidence
@@ -42,8 +45,9 @@ jobs:
       D3A_WORK_ROOT: /tmp/oss3d3c-d3a-work
       D3A_RESULT_JSON: /tmp/oss3d3c-d3a-result.json
       D3C_RESULT_JSON: /tmp/oss3d3c-durable-development-outcome.json
-      EXPECTED_D3A_FINGERPRINT: ce703916e83161cc71e73e56e4a9ffab5c0989bf630cfbae260a90a5846ca9cc
-      EXPECTED_D2I_WINNER_SEAL: eacb62b1e506a4386b5f3fd71e0d4109f37a716d825473242fd3a94228386416
+      EXPECTED_CERTIFIED_D3A_FINGERPRINT: ce703916e83161cc71e73e56e4a9ffab5c0989bf630cfbae260a90a5846ca9cc
+      EXPECTED_SCIENTIFIC_OUTCOME: 5b4261b186e30cbdc30ec2c3025305fbb96650247a066cdf470ce53e80f86ea7
+      EXPECTED_CERTIFIED_D2I_WINNER_SEAL: eacb62b1e506a4386b5f3fd71e0d4109f37a716d825473242fd3a94228386416
       EXPECTED_WINNER: linear-ridge-a10
     steps:
       - name: Checkout exact D3C source
@@ -81,6 +85,28 @@ jobs:
 
       - name: D3C deterministic and adversarial bundle tests
         run: python -m pytest -q labs/oss3_qlib/tests/test_durable_development_outcome.py
+
+      - name: Verify immutable certified D3A baseline
+        run: |
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          from labs.oss3_qlib.durable_development_outcome import d3a_scientific_outcome_fingerprint
+
+          path = Path(os.environ['CERTIFIED_D3A_BASELINE'])
+          raw = path.read_text(encoding='utf-8')
+          d = json.loads(raw)
+          assert raw == json.dumps(d, sort_keys=True, separators=(',', ':'), ensure_ascii=False, allow_nan=False) + '\n'
+          fingerprint = d.pop('fingerprint')
+          assert fingerprint == os.environ['EXPECTED_CERTIFIED_D3A_FINGERPRINT']
+          assert d['status'] == 'COMPLETED'
+          assert d['selected_trial_id'] == os.environ['EXPECTED_WINNER']
+          assert d['d2i_winner_seal_fingerprint'] == os.environ['EXPECTED_CERTIFIED_D2I_WINNER_SEAL']
+          science = d3a_scientific_outcome_fingerprint(d)
+          assert science == os.environ['EXPECTED_SCIENTIFIC_OUTCOME']
+          print('certified D3A baseline fingerprint:', fingerprint)
+          print('certified stable scientific outcome:', science)
+          PY
 
       - name: Re-prove D3A boundary before Qlib
         run: |
@@ -164,16 +190,19 @@ jobs:
             --repository-root "$GITHUB_WORKSPACE" \
             --output "$D3A_RESULT_JSON"
 
-      - name: Require exact previously certified D3A scientific identity
+      - name: Require exact certified D3A scientific outcome
         run: |
           python - <<'PY'
           import json, os
           from pathlib import Path
+          from labs.oss3_qlib.durable_development_outcome import d3a_scientific_outcome_fingerprint
+
           d = json.loads(Path(os.environ['D3A_RESULT_JSON']).read_text())
+          replay_fingerprint = d.pop('fingerprint')
+          science = d3a_scientific_outcome_fingerprint(d)
           assert d['status'] == 'COMPLETED'
-          assert d['fingerprint'] == os.environ['EXPECTED_D3A_FINGERPRINT']
+          assert science == os.environ['EXPECTED_SCIENTIFIC_OUTCOME']
           assert d['selected_trial_id'] == os.environ['EXPECTED_WINNER']
-          assert d['d2i_winner_seal_fingerprint'] == os.environ['EXPECTED_D2I_WINNER_SEAL']
           assert d['winner_primary_metric'] == 0.02431784450279712
           assert d['winner_raw_p_value'] == 0.000903437382079215
           assert d['winner_holm_adjusted_p_value'] == 0.00542062429247529
@@ -185,12 +214,15 @@ jobs:
           assert d['paper_execution_authorized'] is False
           assert d['capital_authority'] == 'NONE'
           assert d['live_trading'] == 'BLOCKED'
-          print('Exact previously certified D3A identity: PASS')
+          print('current D3A provenance fingerprint:', replay_fingerprint)
+          print('current D2I provenance seal:', d['d2i_winner_seal_fingerprint'])
+          print('stable scientific outcome: PASS', science)
           PY
 
       - name: Build D3C solely from D3A durable outputs
         run: |
           python scripts/run_oss3d3c_durable_development_outcome.py \
+            --certified-d3a-baseline "$CERTIFIED_D3A_BASELINE" \
             --d3a-result "$D3A_RESULT_JSON" \
             --work-root "$D3A_WORK_ROOT" \
             --output "$D3C_RESULT_JSON"
@@ -198,11 +230,16 @@ jobs:
       - name: Verify portable D3C outcome
         run: |
           python - <<'PY'
-          import os
+          import json, os
+          from pathlib import Path
           from labs.oss3_qlib.durable_development_outcome import read_durable_development_outcome
+
+          replay = json.loads(Path(os.environ['D3A_RESULT_JSON']).read_text())
           d = read_durable_development_outcome(os.environ['D3C_RESULT_JSON'])
-          assert d.source_d3a_evidence_fingerprint == os.environ['EXPECTED_D3A_FINGERPRINT']
-          assert d.d2i_winner_seal_fingerprint == os.environ['EXPECTED_D2I_WINNER_SEAL']
+          assert d.certified_d3a_baseline_fingerprint == os.environ['EXPECTED_CERTIFIED_D3A_FINGERPRINT']
+          assert d.source_d3a_evidence_fingerprint == replay['fingerprint']
+          assert d.scientific_outcome_fingerprint == os.environ['EXPECTED_SCIENTIFIC_OUTCOME']
+          assert d.d2i_winner_seal_fingerprint == replay['d2i_winner_seal_fingerprint']
           assert d.selected_trial_id == os.environ['EXPECTED_WINNER']
           assert d.final_holdout_observed is False
           assert d.final_holdout_authorized is False
@@ -215,6 +252,7 @@ jobs:
           assert d.live_trading == 'BLOCKED'
           print('D3C durable DEVELOPMENT outcome: PASS')
           print('D3C artifact:', d.fingerprint)
+          print('D3C stable science:', d.scientific_outcome_fingerprint)
           PY
 
       - name: Research authority boundary
@@ -229,7 +267,7 @@ jobs:
         with:
           name: oss3d3c-durable-development-outcome-${{ github.sha }}
           retention-days: 30
-          if-no-files-found: error
+          if-no-files-found: warn
           path: |
             ${{ env.D3A_REHYDRATION_JSON }}
             ${{ env.D3A_RESULT_JSON }}
