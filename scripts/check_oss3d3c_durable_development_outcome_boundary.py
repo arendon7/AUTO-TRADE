@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+from hashlib import sha256
 import json
 from pathlib import Path
 
@@ -83,6 +84,16 @@ def _call_name(node: ast.Call) -> str:
     return ""
 
 
+def _canonical_json(value: object) -> str:
+    return json.dumps(
+        value,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+        allow_nan=False,
+    )
+
+
 def _load_baseline() -> dict[str, object]:
     if not BASELINE.is_file() or BASELINE.is_symlink():
         raise SystemExit("OSS-3D3C certified D3A baseline evidence is missing or unsafe")
@@ -93,19 +104,18 @@ def _load_baseline() -> dict[str, object]:
         raise SystemExit("OSS-3D3C certified D3A baseline is invalid JSON") from exc
     if not isinstance(document, dict):
         raise SystemExit("OSS-3D3C certified D3A baseline must be an object")
-    canonical = json.dumps(
-        document,
-        sort_keys=True,
-        separators=(",", ":"),
-        ensure_ascii=False,
-        allow_nan=False,
-    ) + "\n"
-    if raw != canonical:
+    if raw != _canonical_json(document) + "\n":
         raise SystemExit("OSS-3D3C certified D3A baseline is not canonical JSON")
-    if document.get("fingerprint") != EXPECTED_BASELINE_FINGERPRINT:
+
+    stored_fingerprint = document.get("fingerprint")
+    if stored_fingerprint != EXPECTED_BASELINE_FINGERPRINT:
         raise SystemExit("OSS-3D3C certified D3A baseline fingerprint drifted")
     payload = dict(document)
     payload.pop("fingerprint")
+    recomputed = sha256(_canonical_json(payload).encode("utf-8")).hexdigest()
+    if recomputed != stored_fingerprint:
+        raise SystemExit("OSS-3D3C certified D3A baseline payload hash mismatch")
+
     science = d3a_scientific_outcome_fingerprint(payload)
     if science != EXPECTED_SCIENTIFIC_OUTCOME:
         raise SystemExit("OSS-3D3C certified D3A scientific identity drifted")
@@ -189,9 +199,6 @@ def main() -> int:
     ):
         raise SystemExit("OSS-3D3C imported scientific identity policy drifted")
 
-    # D3C may verify the persisted D2E tournament on a temporary ledger copy,
-    # but it must never reproduce candidate fitting, label materialization, D2D
-    # evaluation, holdout checkout or any execution path.
     print(
         "OSS-3D3C DURABLE DEVELOPMENT OUTCOME BOUNDARY PASS — "
         "certified baseline + stable scientific identity + current provenance; "
