@@ -1,0 +1,225 @@
+name: OSS-3D3E Dual Holdout Raw Acquisition
+
+on:
+  pull_request:
+    branches:
+      - research/oss3d3d-dual-holdout-acquisition-prereg
+    paths:
+      - 'labs/oss3_market_data/dual_holdout_acquisition.py'
+      - 'labs/oss3_market_data/tests/test_dual_holdout_acquisition.py'
+      - 'scripts/run_oss3d3e_dual_holdout_acquisition.py'
+      - 'scripts/check_oss3d3e_dual_holdout_acquisition_boundary.py'
+      - 'knowledge/20_RESEARCH/OSS3D3E_DUAL_HOLDOUT_ACQUISITION.md'
+      - '.github/workflows/oss3d3e-dual-holdout-acquisition.yml'
+  push:
+    branches:
+      - research/oss3d3e-dual-holdout-acquisition
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  oss3d3e:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      PYTHONPATH: ${{ github.workspace }}
+      D3D_SOURCE_DIR: /tmp/oss3d3e-source-d3d
+      D3E_EVIDENCE_ROOT: /tmp/oss3d3e-evidence
+      EXPECTED_D3D_HEAD: 7911c962733811bb7a6713c8e06587c09df1bcdb
+      EXPECTED_D3D_PLAN: d6dc987cc2053a6617796fdb89df9467c0895a090c5745c91b157edc5d7a4af2
+    steps:
+      - name: Checkout exact D3E source
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Install AUTO-TRADE core only
+        run: python -m pip install -e '.[dev]'
+
+      - name: Prove Qlib absent before holdout acquisition
+        run: |
+          python - <<'PY'
+          import importlib.util
+          assert importlib.util.find_spec('qlib') is None
+          print('qlib runtime: ABSENT')
+          PY
+
+      - name: Compile D3E sources
+        run: |
+          python -m py_compile \
+            labs/oss3_market_data/dual_holdout_acquisition.py \
+            labs/oss3_market_data/tests/test_dual_holdout_acquisition.py \
+            scripts/run_oss3d3e_dual_holdout_acquisition.py \
+            scripts/check_oss3d3e_dual_holdout_acquisition_boundary.py
+
+      - name: D3E raw-acquisition authority boundary
+        run: python scripts/check_oss3d3e_dual_holdout_acquisition_boundary.py
+
+      - name: D3E deterministic and adversarial suite
+        run: python -m pytest -q labs/oss3_market_data/tests/test_dual_holdout_acquisition.py
+
+      - name: Re-prove D2T immutable snapshot and R3 GET-only transport
+        run: |
+          python scripts/check_oss3d2t_immutable_market_snapshot_boundary.py
+          python -m pytest -q \
+            tests/test_research_oss3_market_snapshot.py \
+            tests/test_research_oss3_market_snapshot_monthly.py \
+            tests/test_r3_external_data.py \
+            tests/test_r3_external_data_hardening.py
+
+      - name: Download exact certified D3D preregistration artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: oss3d3d-dual-holdout-prereg-d2ea5a46fe5f8b1132570d9aef9779638a349872
+          path: ${{ env.D3D_SOURCE_DIR }}
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: 34620023956
+
+      - name: Verify exact D3D admission evidence read-only
+        id: d3d
+        run: |
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          from labs.oss3_market_data.dual_holdout_acquisition import require_exact_d3d_registry_read_only
+
+          root = Path(os.environ['D3D_SOURCE_DIR'])
+          registries = list(root.rglob('dual-holdout-prereg.sqlite3'))
+          plans = list(root.rglob('dual-holdout-plan.json'))
+          assert len(registries) == 1, registries
+          assert len(plans) == 1, plans
+          plan = require_exact_d3d_registry_read_only(registries[0])
+          document = json.loads(plans[0].read_text())
+          assert plan.fingerprint == os.environ['EXPECTED_D3D_PLAN']
+          assert document['fingerprint'] == plan.fingerprint
+          assert document['predictive']['partition_start'] == '2026-01-01T00:00:00+00:00'
+          assert document['predictive']['partition_end'] == '2026-04-01T00:00:00+00:00'
+          assert document['economic']['partition_start'] == '2026-04-01T00:00:00+00:00'
+          assert document['economic']['partition_end'] == '2026-07-01T00:00:00+00:00'
+          assert len(document['predictive']['descriptors']) == 9
+          assert len(document['economic']['descriptors']) == 9
+          assert document['network_acquisition_performed'] is False
+          assert document['final_holdout_observed'] is False
+          assert document['economic_holdout_observed'] is False
+          assert document['holdout_permit_issued'] is False
+          assert document['holdout_permit_consumed'] is False
+          assert document['capital_authority'] == 'NONE'
+          assert document['live_trading'] == 'BLOCKED'
+          print('certified D3D admission evidence: PASS', plan.fingerprint)
+          with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as handle:
+              handle.write(f"registry={registries[0]}\n")
+          PY
+
+      - name: Prove D3E defaults to zero network authority
+        run: |
+          rm -rf "$D3E_EVIDENCE_ROOT"
+          OUTPUT="$(python scripts/run_oss3d3e_dual_holdout_acquisition.py \
+            --d3d-registry '${{ steps.d3d.outputs.registry }}' \
+            --evidence-root "$D3E_EVIDENCE_ROOT")"
+          python - "$OUTPUT" <<'PY'
+          import json, sys
+          payload = json.loads(sys.argv[1])
+          assert payload['network_enabled'] is False
+          assert payload['descriptor_count'] == 18
+          assert payload['sealed_descriptor_count'] == 0
+          assert payload['acquired_from_network'] == 0
+          assert payload['missing_without_network_authority'] == 18
+          assert payload['complete'] is False
+          assert payload['expected_get_count_if_fresh'] == 54
+          assert payload['scientific_holdout_evaluation_observed'] is False
+          assert payload['feature_values_materialized'] is False
+          assert payload['label_values_materialized'] is False
+          assert payload['prediction_values_materialized'] is False
+          assert payload['metrics_computed'] is False
+          assert payload['holdout_permit_issued'] is False
+          assert payload['capital_authority'] == 'NONE'
+          assert payload['live_trading'] == 'BLOCKED'
+          print('D3E default network authority: ABSENT')
+          PY
+
+      - name: Acquire exact preregistered Q1 + Q2 raw archives
+        run: |
+          OUTPUT="$(python scripts/run_oss3d3e_dual_holdout_acquisition.py \
+            --d3d-registry '${{ steps.d3d.outputs.registry }}' \
+            --evidence-root "$D3E_EVIDENCE_ROOT" \
+            --execute-public-get)"
+          echo "$OUTPUT"
+          python - "$OUTPUT" <<'PY'
+          import json, sys
+          payload = json.loads(sys.argv[1])
+          assert payload['d3d_plan_fingerprint'] == 'd6dc987cc2053a6617796fdb89df9467c0895a090c5745c91b157edc5d7a4af2'
+          assert payload['descriptor_count'] == 18
+          assert payload['sealed_descriptor_count'] == 18
+          assert payload['predictive_sealed_count'] == 9
+          assert payload['economic_sealed_count'] == 9
+          assert payload['acquired_from_network'] == 18
+          assert payload['reused_after_full_reverification'] == 0
+          assert payload['reconciled_unsealed_final_material'] == 0
+          assert payload['missing_without_network_authority'] == 0
+          assert payload['complete'] is True
+          assert payload['campaign_seal_fingerprint']
+          assert payload['network_enabled'] is True
+          assert payload['expected_get_count_if_fresh'] == 54
+          assert payload['scientific_holdout_evaluation_observed'] is False
+          assert payload['feature_values_materialized'] is False
+          assert payload['label_values_materialized'] is False
+          assert payload['prediction_values_materialized'] is False
+          assert payload['metrics_computed'] is False
+          assert payload['d2j_or_d2m_commitment_created'] is False
+          assert payload['holdout_permit_issued'] is False
+          assert payload['holdout_permit_consumed'] is False
+          assert payload['capital_authority'] == 'NONE'
+          assert payload['live_trading'] == 'BLOCKED'
+          print('real D3E raw acquisition: PASS', payload['campaign_seal_fingerprint'])
+          PY
+
+      - name: Restart offline and fully reverify all 18 sealed descriptors
+        run: |
+          OUTPUT="$(python scripts/run_oss3d3e_dual_holdout_acquisition.py \
+            --d3d-registry '${{ steps.d3d.outputs.registry }}' \
+            --evidence-root "$D3E_EVIDENCE_ROOT")"
+          echo "$OUTPUT"
+          python - "$OUTPUT" <<'PY'
+          import json, sys
+          payload = json.loads(sys.argv[1])
+          assert payload['network_enabled'] is False
+          assert payload['complete'] is True
+          assert payload['sealed_descriptor_count'] == 18
+          assert payload['predictive_sealed_count'] == 9
+          assert payload['economic_sealed_count'] == 9
+          assert payload['acquired_from_network'] == 0
+          assert payload['reused_after_full_reverification'] == 18
+          assert payload['missing_without_network_authority'] == 0
+          assert payload['scientific_holdout_evaluation_observed'] is False
+          assert payload['capital_authority'] == 'NONE'
+          assert payload['live_trading'] == 'BLOCKED'
+          print('D3E restart-safe full raw reverification: PASS')
+          PY
+
+      - name: Re-prove upstream D3D and research authority boundaries
+        run: |
+          python scripts/check_oss3d3d_dual_holdout_preregistration_boundary.py
+          python scripts/check_research_authority.py
+          python - <<'PY'
+          import importlib.util
+          assert importlib.util.find_spec('qlib') is None
+          print('qlib runtime after D3E: ABSENT')
+          PY
+
+      - name: Upload durable D3E raw evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: oss3d3e-dual-holdout-raw-evidence-${{ github.sha }}
+          retention-days: 90
+          if-no-files-found: error
+          include-hidden-files: true
+          path: ${{ env.D3E_EVIDENCE_ROOT }}
