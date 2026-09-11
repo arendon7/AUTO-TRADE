@@ -10,6 +10,7 @@ from pathlib import Path
 import sys
 
 from labs.oss3_market_data.dual_holdout_acquisition import (
+    LEDGER_FILENAME,
     SQLiteD3EAcquisitionLedger,
     require_exact_d3d_registry_read_only,
     run_dual_holdout_acquisition,
@@ -36,13 +37,27 @@ def _parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     require_exact_d3d_registry_read_only(args.d3d_registry)
+    evidence_root = Path(args.evidence_root)
+
+    # Campaign seals are immutable.  On a restart after a completed campaign,
+    # replay the original seal timestamp so the canonical candidate remains
+    # byte-for-byte identical rather than manufacturing a second campaign
+    # identity merely because verification happened later.
+    now = datetime.now(timezone.utc)
+    ledger_path = evidence_root / LEDGER_FILENAME
+    if ledger_path.is_file():
+        ledger_before = SQLiteD3EAcquisitionLedger(ledger_path)
+        existing_campaign = ledger_before.get_campaign()
+        if existing_campaign is not None:
+            now = datetime.fromisoformat(existing_campaign.sealed_at)
+
     result = run_dual_holdout_acquisition(
         d3d_registry_path=args.d3d_registry,
-        evidence_root=Path(args.evidence_root),
-        now=datetime.now(timezone.utc),
+        evidence_root=evidence_root,
+        now=now,
         allow_network=bool(args.execute_public_get),
     )
-    ledger = SQLiteD3EAcquisitionLedger(Path(args.evidence_root) / "oss3d3e-dual-holdout-acquisition.sqlite3")
+    ledger = SQLiteD3EAcquisitionLedger(ledger_path)
     seals = ledger.descriptor_seals()
     payload = {
         "result_version": result.result_version,
