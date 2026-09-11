@@ -77,7 +77,7 @@ jobs:
       - name: Download exact certified D3C artifact
         uses: actions/download-artifact@v4
         with:
-          name: oss3d3c-durable-development-outcome-2f168513482e188ed381550ba4ab3780011e600d
+          name: oss3d3c-durable-development-outcome-85ef211cf6486cf8bc77527e295d5842c0dc5933
           path: ${{ env.D3C_SOURCE_DIR }}
           github-token: ${{ github.token }}
           repository: ${{ github.repository }}
