@@ -1,4 +1,4 @@
-name: OSS-3D3H Historical Single-Package Hash Search
+name: OSS-3D3H Historical D3A Runtime Reconstruction
 
 on:
   push:
@@ -8,9 +8,10 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
-  single-package-hash-search:
+  historical-runtime-reconstruction:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     env:
@@ -18,6 +19,10 @@ jobs:
       EXPECTED_MODEL_CONFIG: c2181bb4be73d8a0e8067d8640d9c9bd39c85297f6a6ab3e0d190cda039c21eb
       EXPECTED_DISTRIBUTION_SET: 0e4e828d8fe8cc6421773297892bcdb71ec67495d1cf1681fc07991ee4e3d47f
       RUNTIME_CONSTRAINTS: labs/oss3_qlib/runtime_locks/oss3d3a_d2g_runtime_constraints.txt
+      D3A_JOB_ID: '102647050817'
+      D3A_LOG: /tmp/oss3d3a-certified-job.log
+      BASE_JSON: /tmp/oss3d3h-base-distributions.json
+      HISTORICAL_JSON: /tmp/oss3d3a-historical-distributions.json
 
     steps:
       - name: Checkout exact diagnostic SHA
@@ -26,85 +31,191 @@ jobs:
           ref: ${{ github.sha }}
           fetch-depth: 0
 
-      - name: Set up Python
+      - name: Set up exact Python
         uses: actions/setup-python@v6
         with:
           python-version: '3.12'
 
-      - name: Reconstruct constrained D3A candidate environment
+      - name: Capture pristine setup-python distribution base
+        run: |
+          python - <<'PY'
+          import json
+          from importlib import metadata
+          from pathlib import Path
+          from packaging.utils import canonicalize_name
+          import os
+
+          rows = []
+          for d in metadata.distributions():
+              raw = d.metadata.get('Name')
+              if raw:
+                  rows.append({'name': canonicalize_name(raw), 'version': d.version})
+          rows.sort(key=lambda x: (x['name'], x['version']))
+          Path(os.environ['BASE_JSON']).write_text(
+              json.dumps(rows, sort_keys=True, separators=(',', ':')) + '\n',
+              encoding='utf-8',
+          )
+          print('pristine distribution count:', len(rows))
+          for row in rows:
+              print('BASE', row['name'], row['version'])
+          PY
+
+      - name: Download exact successful D3A job log
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh api "/repos/${GITHUB_REPOSITORY}/actions/jobs/${D3A_JOB_ID}/logs" > "$D3A_LOG"
+          test -s "$D3A_LOG"
+          grep -F "Successfully installed" "$D3A_LOG"
+
+      - name: Install current constrained comparison environment
         run: |
           python -m pip install -c "$RUNTIME_CONSTRAINTS" -e '.[dev]'
           python -m pip install -c "$RUNTIME_CONSTRAINTS" 'pyqlib==0.9.7'
 
-      - name: Search every public one-package historical substitution
+      - name: Reconstruct historical D3A distribution set from certified log
         run: |
           python - <<'PY'
-          from concurrent.futures import ThreadPoolExecutor, as_completed
           import json
           import os
-          import urllib.error
-          import urllib.parse
+          import re
           import urllib.request
+          from importlib import metadata
+          from pathlib import Path
+
+          from packaging.utils import canonicalize_name
+          from packaging.version import InvalidVersion, Version
 
           from labs.oss3_qlib.environment_attestation import InstalledDistribution
-          from labs.oss3_qlib.family_environment_attestation import (
-              _distribution_set_hash,
-              collect_candidate_environment_attestation,
-          )
+          from labs.oss3_qlib.family_environment_attestation import _distribution_set_hash
 
-          att = collect_candidate_environment_attestation(
-              model_config_hash=os.environ['EXPECTED_MODEL_CONFIG']
-          )
-          current = tuple(att.distributions)
-          assert len(current) == 198
-          target = os.environ['EXPECTED_DISTRIBUTION_SET']
-          print('current_distribution_set_hash:', _distribution_set_hash(current))
-          print('target_distribution_set_hash:', target)
+          text = Path(os.environ['D3A_LOG']).read_text(encoding='utf-8', errors='replace')
+          base_rows = json.loads(Path(os.environ['BASE_JSON']).read_text(encoding='utf-8'))
 
-          def fetch_versions(item):
-              url = 'https://pypi.org/pypi/' + urllib.parse.quote(item.name, safe='') + '/json'
-              try:
-                  with urllib.request.urlopen(url, timeout=20) as r:
-                      payload = json.load(r)
-                  return item, tuple(payload.get('releases', {}).keys()), None
-              except Exception as exc:
-                  return item, (), f'{type(exc).__name__}: {exc}'
+          current_names = {}
+          for d in metadata.distributions():
+              raw = d.metadata.get('Name')
+              if raw:
+                  current_names[canonicalize_name(raw)] = raw
 
-          catalogs = {}
-          errors = {}
-          with ThreadPoolExecutor(max_workers=24) as pool:
-              futures = [pool.submit(fetch_versions, item) for item in current]
-              for fut in as_completed(futures):
-                  item, versions, error = fut.result()
-                  if error:
-                      errors[item.name] = error
-                  else:
-                      catalogs[item.name] = versions
+          success_payloads = []
+          for line in text.splitlines():
+              marker = 'Successfully installed '
+              if marker in line:
+                  success_payloads.append(line.split(marker, 1)[1].strip())
+          print('successful-install payload count:', len(success_payloads))
+          if len(success_payloads) != 2:
+              raise SystemExit(f'expected exactly two D3A pip success payloads; found {len(success_payloads)}')
 
-          print('PyPI catalogs fetched:', len(catalogs))
-          print('PyPI catalog misses:', sorted(errors))
-
-          matches = []
-          tested = 0
-          for index, item in enumerate(current):
-              prefix = current[:index]
-              suffix = current[index + 1:]
-              for version in catalogs.get(item.name, ()):
-                  if version == item.version:
+          def parse_token(token: str):
+              candidates = []
+              for idx, ch in enumerate(token):
+                  if ch != '-':
                       continue
+                  name_raw = token[:idx]
+                  version_raw = token[idx + 1:]
                   try:
-                      replacement = InstalledDistribution(name=item.name, version=version)
-                  except Exception:
+                      Version(version_raw)
+                  except InvalidVersion:
                       continue
-                  candidate = tuple(sorted(prefix + (replacement,) + suffix))
-                  tested += 1
-                  if _distribution_set_hash(candidate) == target:
-                      matches.append((item.name, item.version, version))
+                  canonical = canonicalize_name(name_raw)
+                  if canonical in current_names or canonical == 'auto-trade-core':
+                      candidates.append((len(name_raw), canonical, version_raw))
+              if not candidates:
+                  raise SystemExit(f'cannot parse pip success token: {token!r}')
+              _, name, version = max(candidates)
+              return name, version
 
-          print('single-package historical substitutions tested:', tested)
-          print('matching substitutions:', matches)
-          if len(matches) != 1:
-              raise SystemExit(f'expected exactly one one-package match; found {matches!r}')
-          name, current_version, historical_version = matches[0]
-          print(f'HISTORICAL_DRIFT={name}:{current_version}->{historical_version}')
+          installed = {}
+          for payload in success_payloads:
+              for token in payload.split():
+                  name, version = parse_token(token)
+                  existing = installed.get(name)
+                  if existing is not None and existing != version:
+                      raise SystemExit(f'conflicting historical versions for {name}: {existing} vs {version}')
+                  installed[name] = version
+
+          print('historical packages parsed from successful installs:', len(installed))
+          for name in sorted(installed):
+              print('HIST_INSTALL', name, installed[name])
+
+          base = {row['name']: row['version'] for row in base_rows}
+          historical = dict(base)
+          historical.update(installed)
+          historical_items = tuple(
+              sorted(InstalledDistribution(name=name, version=version) for name, version in historical.items())
+          )
+          reconstructed_hash = _distribution_set_hash(historical_items)
+          target = os.environ['EXPECTED_DISTRIBUTION_SET']
+          print('historical base count:', len(base))
+          print('reconstructed final count:', len(historical_items))
+          print('reconstructed hash:', reconstructed_hash)
+          print('target hash:', target)
+
+          current = {}
+          for d in metadata.distributions():
+              raw = d.metadata.get('Name')
+              if raw:
+                  current[canonicalize_name(raw)] = d.version
+          diff = []
+          for name in sorted(set(historical) | set(current)):
+              if historical.get(name) != current.get(name):
+                  diff.append((name, historical.get(name), current.get(name)))
+          print('historical-vs-current diff count:', len(diff))
+          for row in diff:
+              print('DIFF', *row)
+
+          if reconstructed_hash != target:
+              # The D3A final attestation had 198 distributions. If the two pip
+              # success payloads provide 197 of them, solve the remaining base
+              # distribution cryptographically rather than guessing its version.
+              installed_items = tuple(
+                  sorted(InstalledDistribution(name=name, version=version) for name, version in installed.items())
+              )
+              print('installed-only count:', len(installed_items))
+              if len(installed_items) == 197:
+                  with urllib.request.urlopen('https://pypi.org/pypi/pip/json', timeout=30) as r:
+                      pip_payload = json.load(r)
+                  matches = []
+                  for version in pip_payload.get('releases', {}):
+                      candidate = tuple(sorted(installed_items + (InstalledDistribution(name='pip', version=version),)))
+                      if _distribution_set_hash(candidate) == target:
+                          matches.append(version)
+                  print('pip versions matching exact historical logged set:', matches)
+                  if len(matches) == 1:
+                      historical = dict(installed)
+                      historical['pip'] = matches[0]
+                      historical_items = tuple(
+                          sorted(InstalledDistribution(name=name, version=version) for name, version in historical.items())
+                      )
+                      reconstructed_hash = _distribution_set_hash(historical_items)
+                      print('SOLVED_HISTORICAL_PIP_VERSION=' + matches[0])
+
+          if reconstructed_hash != target:
+              raise SystemExit('certified D3A distribution set still not reconstructed exactly')
+          if len(historical_items) != 198:
+              raise SystemExit(f'historical D3A count mismatch: {len(historical_items)}')
+
+          output = {
+              'distribution_count': len(historical_items),
+              'distribution_set_hash': reconstructed_hash,
+              'distributions': [item.to_dict() for item in historical_items],
+          }
+          Path(os.environ['HISTORICAL_JSON']).write_text(
+              json.dumps(output, sort_keys=True, separators=(',', ':')) + '\n',
+              encoding='utf-8',
+          )
+          print('OSS-3D3H exact historical D3A distribution reconstruction: PASS')
           PY
+
+      - name: Upload reconstructed historical runtime
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: oss3d3h-historical-runtime-${{ github.sha }}
+          path: |
+            ${{ env.BASE_JSON }}
+            ${{ env.HISTORICAL_JSON }}
+          retention-days: 30
+          if-no-files-found: warn
