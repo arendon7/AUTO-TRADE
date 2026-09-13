@@ -1,0 +1,75 @@
+name: OSS-3D3H Historical pip Hash Search
+
+on:
+  push:
+    branches:
+      - diagnostic/oss3d3h-pip-version-hash
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  pip-hash-search:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      PYTHONPATH: ${{ github.workspace }}
+      EXPECTED_MODEL_CONFIG: c2181bb4be73d8a0e8067d8640d9c9bd39c85297f6a6ab3e0d190cda039c21eb
+      EXPECTED_DISTRIBUTION_SET: 0e4e828d8fe8cc6421773297892bcdb71ec67495d1cf1681fc07991ee4e3d47f
+      RUNTIME_CONSTRAINTS: labs/oss3_qlib/runtime_locks/oss3d3a_d2g_runtime_constraints.txt
+
+    steps:
+      - name: Checkout exact diagnostic SHA
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Reconstruct known 197-package D3A environment
+        run: |
+          python -m pip install -c "$RUNTIME_CONSTRAINTS" -e '.[dev]'
+          python -m pip install -c "$RUNTIME_CONSTRAINTS" 'pyqlib==0.9.7'
+
+      - name: Enumerate every public pip release against frozen D2G hash
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import urllib.request
+
+          from labs.oss3_qlib.environment_attestation import InstalledDistribution
+          from labs.oss3_qlib.family_environment_attestation import (
+              _distribution_set_hash,
+              collect_candidate_environment_attestation,
+          )
+
+          att = collect_candidate_environment_attestation(
+              model_config_hash=os.environ['EXPECTED_MODEL_CONFIG']
+          )
+          without_pip = tuple(item for item in att.distributions if item.name != 'pip')
+          assert len(att.distributions) == 198
+          assert len(without_pip) == 197
+
+          with urllib.request.urlopen('https://pypi.org/pypi/pip/json', timeout=30) as r:
+              payload = json.load(r)
+          versions = sorted(payload['releases'])
+          print('public pip releases tested:', len(versions))
+
+          target = os.environ['EXPECTED_DISTRIBUTION_SET']
+          matches = []
+          for version in versions:
+              candidate = tuple(sorted(without_pip + (InstalledDistribution(name='pip', version=version),)))
+              if _distribution_set_hash(candidate) == target:
+                  matches.append(version)
+
+          print('matching pip versions:', matches)
+          if len(matches) != 1:
+              raise SystemExit(f'expected exactly one public pip version match; found {matches!r}')
+          print('HISTORICAL_PIP_VERSION=' + matches[0])
+          PY
