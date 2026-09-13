@@ -1,0 +1,298 @@
+name: OSS-3D3F Protected Holdout Materialization
+
+on:
+  pull_request:
+    branches:
+      - research/oss3d3e-dual-holdout-acquisition
+    paths:
+      - 'labs/oss3_qlib/protected_holdout_materialization.py'
+      - 'labs/oss3_qlib/tests/test_protected_holdout_materialization.py'
+      - 'scripts/run_oss3d3f_protected_holdout_materialization.py'
+      - 'scripts/check_oss3d3f_protected_holdout_materialization_boundary.py'
+      - 'knowledge/20_RESEARCH/OSS3D3E_CERTIFIED_BASELINE_129e546c.json'
+      - 'knowledge/20_RESEARCH/OSS3D3F_FROZEN_IDENTITIES.json'
+      - 'knowledge/20_RESEARCH/OSS3D3F_PROTECTED_HOLDOUT_MATERIALIZATION.md'
+      - '.github/workflows/oss3d3f-protected-holdout-materialization.yml'
+  push:
+    branches:
+      - research/oss3d3f-protected-holdout-materialization
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  oss3d3f:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    env:
+      PYTHONPATH: ${{ github.workspace }}
+      D3D_SOURCE_DIR: /tmp/oss3d3f-source-d3d
+      D3E_EVIDENCE_ROOT: /tmp/oss3d3f-source-d3e
+      D2Y_ARTIFACT_DIR: /tmp/oss3d3f-source-d2y-artifact
+      D2Y_REHYDRATE_PARENT: /tmp/oss3d3f-d2y-parent
+      D2Y_EVIDENCE_ROOT: /tmp/oss3d3f-d2y-parent/oss3d3a-certified-d2y-evidence
+      D2Y_REHYDRATION_JSON: /tmp/oss3d3f-d2y-rehydration.json
+      D3F_RESULT_JSON: /tmp/oss3d3f-protected-holdout-public-evidence.json
+      D3E_BASELINE: ${{ github.workspace }}/knowledge/20_RESEARCH/OSS3D3E_CERTIFIED_BASELINE_129e546c.json
+      D3F_FROZEN_IDENTITIES: ${{ github.workspace }}/knowledge/20_RESEARCH/OSS3D3F_FROZEN_IDENTITIES.json
+      EXPECTED_D3D_PLAN: d6dc987cc2053a6617796fdb89df9467c0895a090c5745c91b157edc5d7a4af2
+      EXPECTED_D3E_HEAD: 129e546cc09257b11dfe6e96915d370b91126a3f
+      EXPECTED_D3E_CAMPAIGN_SEAL: 8ce57f1e6a6ce6999d8599af7df38b5b06662834739aa175cadd672c21eed105
+      EXPECTED_D3E_ARTIFACT_NAME: oss3d3e-dual-holdout-raw-evidence-cd02125b1455fac49ef1d241d9f8a8746220f6a8
+      EXPECTED_D3E_ARTIFACT_ZIP_SHA256: e0b0a8d31384d5d296564bfb8e04e8d2ffa256086f43623bac41891d5a3e92cf
+      EXPECTED_D3F_EVIDENCE: a9681ff31f4d74176d072c2076d129516d8db19cfb8aea093432ec6f7ac9d5b6
+      EXPECTED_Q1_COMMITMENT: a6fef49419ef22b75be45385a805f8f3242653a3fcb74cb708be6548ac865bde
+      EXPECTED_Q2_COMMITMENT: 349e277981ff08a4918eea68dd8fd86c745c2669f188b55727ac1b0ebfd70369
+
+    steps:
+      - name: Checkout exact D3F source
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Install AUTO-TRADE core only
+        run: python -m pip install -e '.[dev]'
+
+      - name: Prove Qlib absent before protected materialization
+        run: |
+          python - <<'PY'
+          import importlib.util
+          assert importlib.util.find_spec('qlib') is None
+          print('qlib runtime before D3F: ABSENT')
+          PY
+
+      - name: Compile D3F sources
+        run: |
+          python -m py_compile \
+            labs/oss3_qlib/protected_holdout_materialization.py \
+            labs/oss3_qlib/tests/test_protected_holdout_materialization.py \
+            scripts/run_oss3d3f_protected_holdout_materialization.py \
+            scripts/check_oss3d3f_protected_holdout_materialization_boundary.py
+
+      - name: D3F protected-material authority boundary
+        run: python scripts/check_oss3d3f_protected_holdout_materialization_boundary.py
+
+      - name: D3F deterministic and adversarial tests
+        run: python -m pytest -q labs/oss3_qlib/tests/test_protected_holdout_materialization.py
+
+      - name: Re-prove D2J D2M and research authority boundaries
+        run: |
+          python scripts/check_oss3d2j_final_holdout_protocol_boundary.py
+          python scripts/check_oss3d2m_predictive_economic_protocol_boundary.py
+          python scripts/check_research_authority.py
+
+      - name: Verify immutable certified D3E baseline
+        run: |
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          path = Path(os.environ['D3E_BASELINE'])
+          raw = path.read_text(encoding='utf-8')
+          document = json.loads(raw)
+          assert raw == json.dumps(document, sort_keys=True, separators=(',', ':'), ensure_ascii=False) + '\n'
+          assert document['certified_branch_head'] == os.environ['EXPECTED_D3E_HEAD']
+          assert document['d3d_plan_fingerprint'] == os.environ['EXPECTED_D3D_PLAN']
+          assert document['campaign_seal_fingerprint'] == os.environ['EXPECTED_D3E_CAMPAIGN_SEAL']
+          assert document['artifact_name'] == os.environ['EXPECTED_D3E_ARTIFACT_NAME']
+          assert document['artifact_zip_sha256'] == os.environ['EXPECTED_D3E_ARTIFACT_ZIP_SHA256']
+          assert document['descriptor_count'] == 18
+          assert document['predictive_descriptor_count'] == 9
+          assert document['economic_descriptor_count'] == 9
+          assert document['fresh_get_count'] == 54
+          assert document['scientific_holdout_evaluation_observed'] is False
+          assert document['feature_values_materialized'] is False
+          assert document['label_values_materialized'] is False
+          assert document['prediction_values_materialized'] is False
+          assert document['metrics_computed'] is False
+          assert document['holdout_permit_issued'] is False
+          assert document['holdout_permit_consumed'] is False
+          assert document['capital_authority'] == 'NONE'
+          assert document['live_trading'] == 'BLOCKED'
+          print('certified D3E baseline: PASS', document['campaign_seal_fingerprint'])
+          PY
+
+      - name: Verify frozen D3F real identities baseline
+        run: |
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          path = Path(os.environ['D3F_FROZEN_IDENTITIES'])
+          raw = path.read_text(encoding='utf-8')
+          document = json.loads(raw)
+          assert raw == json.dumps(document, sort_keys=True, separators=(',', ':'), ensure_ascii=False) + '\n'
+          assert document['schema_version'] == 'OSS3D3F_FROZEN_REAL_IDENTITIES_V1'
+          assert document['source_d3d_plan_fingerprint'] == os.environ['EXPECTED_D3D_PLAN']
+          assert document['source_d3e_campaign_seal_fingerprint'] == os.environ['EXPECTED_D3E_CAMPAIGN_SEAL']
+          assert document['evidence_fingerprint'] == os.environ['EXPECTED_D3F_EVIDENCE']
+          assert document['predictive_commitment_fingerprint'] == os.environ['EXPECTED_Q1_COMMITMENT']
+          assert document['economic_commitment_fingerprint'] == os.environ['EXPECTED_Q2_COMMITMENT']
+          print('frozen D3F real identities: PASS')
+          PY
+
+      - name: Download exact certified D3D preregistration artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: oss3d3d-dual-holdout-prereg-d2ea5a46fe5f8b1132570d9aef9779638a349872
+          path: ${{ env.D3D_SOURCE_DIR }}
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: 34620023956
+
+      - name: Download exact certified D3E raw evidence artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: oss3d3e-dual-holdout-raw-evidence-cd02125b1455fac49ef1d241d9f8a8746220f6a8
+          path: ${{ env.D3E_EVIDENCE_ROOT }}
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: 34621244867
+
+      - name: Download exact certified D2Y historical evidence artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: oss3d2x-v2-real-campaign-20260908
+          path: ${{ env.D2Y_ARTIFACT_DIR }}
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: 34309982898
+
+      - name: Rehydrate exact certified D2Y history with Qlib absent
+        run: |
+          rm -rf "$D2Y_REHYDRATE_PARENT"
+          python scripts/run_oss3d3a_rehydration.py \
+            --artifact-dir "$D2Y_ARTIFACT_DIR" \
+            --extraction-parent "$D2Y_REHYDRATE_PARENT" \
+            --repository-root "$GITHUB_WORKSPACE" \
+            --output "$D2Y_REHYDRATION_JSON"
+
+      - name: Resolve and verify exact D3D registry
+        id: d3d
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          from labs.oss3_market_data.dual_holdout_acquisition import require_exact_d3d_registry_read_only
+          root = Path(os.environ['D3D_SOURCE_DIR'])
+          registries = list(root.rglob('dual-holdout-prereg.sqlite3'))
+          assert len(registries) == 1, registries
+          plan = require_exact_d3d_registry_read_only(registries[0])
+          assert plan.fingerprint == os.environ['EXPECTED_D3D_PLAN']
+          with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as handle:
+              handle.write(f"registry={registries[0]}\n")
+          print('D3D exact durable registry: PASS', plan.fingerprint)
+          PY
+
+      - name: Reverify certified D3E raw family completely offline
+        env:
+          D3D_REGISTRY: ${{ steps.d3d.outputs.registry }}
+        run: |
+          OUTPUT="$(python scripts/run_oss3d3e_dual_holdout_acquisition.py \
+            --d3d-registry "$D3D_REGISTRY" \
+            --evidence-root "$D3E_EVIDENCE_ROOT")"
+          echo "$OUTPUT"
+          python - "$OUTPUT" <<'PY'
+          import json, os, sys
+          result = json.loads(sys.argv[1])
+          assert result['complete'] is True
+          assert result['acquired_from_network'] == 0
+          assert result['reused_after_full_reverification'] == 18
+          assert result['missing_without_network_authority'] == 0
+          assert result['campaign_seal_fingerprint'] == os.environ['EXPECTED_D3E_CAMPAIGN_SEAL']
+          assert result['scientific_holdout_evaluation_observed'] is False
+          assert result['feature_values_materialized'] is False
+          assert result['label_values_materialized'] is False
+          assert result['prediction_values_materialized'] is False
+          assert result['metrics_computed'] is False
+          assert result['holdout_permit_issued'] is False
+          assert result['holdout_permit_consumed'] is False
+          assert result['capital_authority'] == 'NONE'
+          assert result['live_trading'] == 'BLOCKED'
+          print('D3E 18/18 full offline reverification: PASS', result['campaign_seal_fingerprint'])
+          PY
+
+      - name: Materialize protected Q1/Q2 commitments without evaluation
+        env:
+          D3D_REGISTRY: ${{ steps.d3d.outputs.registry }}
+        run: |
+          python scripts/run_oss3d3f_protected_holdout_materialization.py \
+            --d3d-registry "$D3D_REGISTRY" \
+            --d3e-evidence-root "$D3E_EVIDENCE_ROOT" \
+            --d2y-evidence-root "$D2Y_EVIDENCE_ROOT" \
+            --repository-root "$GITHUB_WORKSPACE" \
+            --output "$D3F_RESULT_JSON"
+
+      - name: Verify D3F public evidence is exact value opaque and frozen
+        run: |
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          path = Path(os.environ['D3F_RESULT_JSON'])
+          raw = path.read_text(encoding='utf-8')
+          document = json.loads(raw)
+          assert raw == json.dumps(document, sort_keys=True, separators=(',', ':'), ensure_ascii=False, allow_nan=False) + '\n'
+          assert document['fingerprint'] == os.environ['EXPECTED_D3F_EVIDENCE']
+          assert document['predictive_commitment_fingerprint'] == os.environ['EXPECTED_Q1_COMMITMENT']
+          assert document['economic_commitment_fingerprint'] == os.environ['EXPECTED_Q2_COMMITMENT']
+          assert document['d3d_plan_fingerprint'] == os.environ['EXPECTED_D3D_PLAN']
+          assert document['d3e_certified_head'] == os.environ['EXPECTED_D3E_HEAD']
+          assert document['d3e_campaign_seal_fingerprint'] == os.environ['EXPECTED_D3E_CAMPAIGN_SEAL']
+          assert document['predictive_partition_start'] == '2026-01-01T00:00:00+00:00'
+          assert document['predictive_partition_end'] == '2026-04-01T00:00:00+00:00'
+          assert document['predictive_cross_section_count'] == 2159
+          assert document['predictive_row_count'] == 6477
+          assert document['predictive_minimum_cross_section_observation_count'] == 3
+          assert document['economic_partition_start'] == '2026-04-01T00:00:00+00:00'
+          assert document['economic_partition_end'] == '2026-07-01T00:00:00+00:00'
+          assert document['economic_bar_count'] == 2184
+          assert document['economic_symbol_count'] == 3
+          assert document['d3e_full_offline_reverification_complete'] is True
+          assert document['d2y_full_offline_reverification_complete'] is True
+          assert document['predictive_protected_feature_values_materialized'] is True
+          assert document['predictive_protected_label_values_materialized'] is True
+          assert document['label_values_exposed'] is False
+          assert document['prediction_values_materialized'] is False
+          assert document['predictive_metrics_computed'] is False
+          assert document['economic_outcomes_observed'] is False
+          assert document['final_holdout_observed'] is False
+          assert document['economic_holdout_observed'] is False
+          assert document['d2j_protocol_registered'] is False
+          assert document['d2m_protocol_registered'] is False
+          assert document['holdout_permit_issued'] is False
+          assert document['holdout_permit_consumed'] is False
+          assert document['profitability_claim_authorized'] is False
+          assert document['promotion_authorized'] is False
+          assert document['execution_authorized'] is False
+          assert document['paper_execution_authorized'] is False
+          assert document['capital_authority'] == 'NONE'
+          assert document['live_trading'] == 'BLOCKED'
+          for forbidden in ('"feature_rows"', '"label_rows"', '"prediction_rows"', '"open"', '"high"', '"low"', '"close"', '"volume"'):
+              assert forbidden not in raw, forbidden
+          print('D3F frozen public value-opaque evidence: PASS')
+          print('D3F evidence:', document['fingerprint'])
+          print('Q1 commitment:', document['predictive_commitment_fingerprint'])
+          print('Q2 commitment:', document['economic_commitment_fingerprint'])
+          PY
+
+      - name: Prove Qlib and execution authority remain absent after D3F
+        run: |
+          python - <<'PY'
+          import importlib.util
+          assert importlib.util.find_spec('qlib') is None
+          print('qlib runtime after D3F: ABSENT')
+          PY
+          python scripts/check_research_authority.py
+
+      - name: Upload public value-opaque D3F evidence only
+        uses: actions/upload-artifact@v4
+        with:
+          name: oss3d3f-protected-holdout-public-evidence-${{ github.sha }}
+          retention-days: 90
+          if-no-files-found: error
+          path: ${{ env.D3F_RESULT_JSON }}
