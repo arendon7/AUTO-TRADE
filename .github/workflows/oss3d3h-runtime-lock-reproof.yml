@@ -43,8 +43,8 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Install AUTO-TRADE core only
-        run: python -m pip install -e '.[dev]'
+      - name: Install AUTO-TRADE core under frozen D3A runtime constraints
+        run: python -m pip install -c "$RUNTIME_CONSTRAINTS" -e '.[dev]'
 
       - name: Prove Qlib absent before runtime reconstruction
         run: |
