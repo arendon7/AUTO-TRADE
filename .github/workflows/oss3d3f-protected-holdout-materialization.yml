@@ -10,6 +10,7 @@ on:
       - 'scripts/run_oss3d3f_protected_holdout_materialization.py'
       - 'scripts/check_oss3d3f_protected_holdout_materialization_boundary.py'
       - 'knowledge/20_RESEARCH/OSS3D3E_CERTIFIED_BASELINE_129e546c.json'
+      - 'knowledge/20_RESEARCH/OSS3D3F_FROZEN_IDENTITIES.json'
       - 'knowledge/20_RESEARCH/OSS3D3F_PROTECTED_HOLDOUT_MATERIALIZATION.md'
       - '.github/workflows/oss3d3f-protected-holdout-materialization.yml'
   push:
@@ -35,11 +36,15 @@ jobs:
       D2Y_REHYDRATION_JSON: /tmp/oss3d3f-d2y-rehydration.json
       D3F_RESULT_JSON: /tmp/oss3d3f-protected-holdout-public-evidence.json
       D3E_BASELINE: ${{ github.workspace }}/knowledge/20_RESEARCH/OSS3D3E_CERTIFIED_BASELINE_129e546c.json
+      D3F_FROZEN_IDENTITIES: ${{ github.workspace }}/knowledge/20_RESEARCH/OSS3D3F_FROZEN_IDENTITIES.json
       EXPECTED_D3D_PLAN: d6dc987cc2053a6617796fdb89df9467c0895a090c5745c91b157edc5d7a4af2
       EXPECTED_D3E_HEAD: 129e546cc09257b11dfe6e96915d370b91126a3f
       EXPECTED_D3E_CAMPAIGN_SEAL: 8ce57f1e6a6ce6999d8599af7df38b5b06662834739aa175cadd672c21eed105
       EXPECTED_D3E_ARTIFACT_NAME: oss3d3e-dual-holdout-raw-evidence-cd02125b1455fac49ef1d241d9f8a8746220f6a8
       EXPECTED_D3E_ARTIFACT_ZIP_SHA256: e0b0a8d31384d5d296564bfb8e04e8d2ffa256086f43623bac41891d5a3e92cf
+      EXPECTED_D3F_EVIDENCE: a9681ff31f4d74176d072c2076d129516d8db19cfb8aea093432ec6f7ac9d5b6
+      EXPECTED_Q1_COMMITMENT: a6fef49419ef22b75be45385a805f8f3242653a3fcb74cb708be6548ac865bde
+      EXPECTED_Q2_COMMITMENT: 349e277981ff08a4918eea68dd8fd86c745c2669f188b55727ac1b0ebfd70369
 
     steps:
       - name: Checkout exact D3F source
@@ -111,6 +116,24 @@ jobs:
           assert document['capital_authority'] == 'NONE'
           assert document['live_trading'] == 'BLOCKED'
           print('certified D3E baseline: PASS', document['campaign_seal_fingerprint'])
+          PY
+
+      - name: Verify frozen D3F real identities baseline
+        run: |
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          path = Path(os.environ['D3F_FROZEN_IDENTITIES'])
+          raw = path.read_text(encoding='utf-8')
+          document = json.loads(raw)
+          assert raw == json.dumps(document, sort_keys=True, separators=(',', ':'), ensure_ascii=False) + '\n'
+          assert document['schema_version'] == 'OSS3D3F_FROZEN_REAL_IDENTITIES_V1'
+          assert document['source_d3d_plan_fingerprint'] == os.environ['EXPECTED_D3D_PLAN']
+          assert document['source_d3e_campaign_seal_fingerprint'] == os.environ['EXPECTED_D3E_CAMPAIGN_SEAL']
+          assert document['evidence_fingerprint'] == os.environ['EXPECTED_D3F_EVIDENCE']
+          assert document['predictive_commitment_fingerprint'] == os.environ['EXPECTED_Q1_COMMITMENT']
+          assert document['economic_commitment_fingerprint'] == os.environ['EXPECTED_Q2_COMMITMENT']
+          print('frozen D3F real identities: PASS')
           PY
 
       - name: Download exact certified D3D preregistration artifact
@@ -205,7 +228,7 @@ jobs:
             --repository-root "$GITHUB_WORKSPACE" \
             --output "$D3F_RESULT_JSON"
 
-      - name: Verify D3F public evidence is exact and value opaque
+      - name: Verify D3F public evidence is exact value opaque and frozen
         run: |
           python - <<'PY'
           import json, os
@@ -214,6 +237,9 @@ jobs:
           raw = path.read_text(encoding='utf-8')
           document = json.loads(raw)
           assert raw == json.dumps(document, sort_keys=True, separators=(',', ':'), ensure_ascii=False, allow_nan=False) + '\n'
+          assert document['fingerprint'] == os.environ['EXPECTED_D3F_EVIDENCE']
+          assert document['predictive_commitment_fingerprint'] == os.environ['EXPECTED_Q1_COMMITMENT']
+          assert document['economic_commitment_fingerprint'] == os.environ['EXPECTED_Q2_COMMITMENT']
           assert document['d3d_plan_fingerprint'] == os.environ['EXPECTED_D3D_PLAN']
           assert document['d3e_certified_head'] == os.environ['EXPECTED_D3E_HEAD']
           assert document['d3e_campaign_seal_fingerprint'] == os.environ['EXPECTED_D3E_CAMPAIGN_SEAL']
@@ -248,7 +274,7 @@ jobs:
           assert document['live_trading'] == 'BLOCKED'
           for forbidden in ('"feature_rows"', '"label_rows"', '"prediction_rows"', '"open"', '"high"', '"low"', '"close"', '"volume"'):
               assert forbidden not in raw, forbidden
-          print('D3F public value-opaque evidence: PASS')
+          print('D3F frozen public value-opaque evidence: PASS')
           print('D3F evidence:', document['fingerprint'])
           print('Q1 commitment:', document['predictive_commitment_fingerprint'])
           print('Q2 commitment:', document['economic_commitment_fingerprint'])
