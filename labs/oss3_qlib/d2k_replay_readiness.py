@@ -32,13 +32,13 @@ from labs.oss3_qlib.family_model_contract import QLIB_VERSION, family_runner_cod
 from labs.oss3_qlib.final_holdout_protocol import read_oss3d2j_protocol_read_only
 from labs.oss3_qlib.raw_development_provenance import derive_raw_development_features
 from labs.oss3_qlib.raw_training_bundle_provenance import derive_raw_training_bundle
-from labs.oss3_qlib.real_development_campaign import REAL_CAMPAIGN_ID
 from labs.oss3_qlib.sealed_raw_split_handoff import build_canonical_sealed_raw_split_handoff
 
 
 OSS3D3H_PREPARATION_VERSION = "OSS3D3H_D2K_REPLAY_PREPARATION_V1"
 OSS3D3H_SEAL_VERSION = "OSS3D3H_D2K_REPLAY_READINESS_SEAL_V1"
 REVIEW_FRONTIER = "SEPARATE_EXPLICIT_D2K_ONE_SHOT_AUTHORIZATION_REVIEW_ONLY"
+REAL_CAMPAIGN_ID = "oss3d3a-real-development-campaign-v1"
 MAX_EVIDENCE_BYTES = 256_000
 _HASH_RE = re.compile(r"^[0-9a-f]{64}$")
 _ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,127}$")
