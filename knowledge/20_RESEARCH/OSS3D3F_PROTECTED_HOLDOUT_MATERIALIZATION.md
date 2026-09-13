@@ -12,6 +12,16 @@ D3F is anchored to D3E branch head `129e546cc09257b11dfe6e96915d370b91126a3f`, c
 
 The machine-readable source facts live in `OSS3D3E_CERTIFIED_BASELINE_129e546c.json`.
 
+## Frozen real identities
+
+A complete real-data discovery replay on head `56ca1f9450e2a5f005d9c8fd49e4f8d49d5f13c1` produced the following deterministic roots. They are now frozen in `OSS3D3F_FROZEN_IDENTITIES.json` and every certification replay must reproduce them exactly:
+
+- D3F public evidence: `a9681ff31f4d74176d072c2076d129516d8db19cfb8aea093432ec6f7ac9d5b6`;
+- Q1 predictive D2J commitment: `a6fef49419ef22b75be45385a805f8f3242653a3fcb74cb708be6548ac865bde`;
+- Q2 economic D2M commitment: `349e277981ff08a4918eea68dd8fd86c745c2669f188b55727ac1b0ebfd70369`.
+
+These hashes bind the protected values without disclosing them. Freezing a commitment is not observing a holdout and does not issue or consume any holdout permit.
+
 ## Predictive Q1 material
 
 Q1 is the D2J/D2K predictive `FINAL_HOLDOUT`:
