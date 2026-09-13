@@ -14,7 +14,7 @@ profitability or authorize promotion, PAPER, LIVE or capital.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from hashlib import sha256
 import json
 from math import isfinite
@@ -54,6 +54,7 @@ MIN_HOLDOUT_TOTAL_OBSERVATIONS = 90
 MIN_CROSS_SECTION_OBSERVATIONS = 3
 MIN_NONZERO_RANK_IC_CROSS_SECTIONS = 20
 MAX_EVALUATIONS = 1
+DEVELOPMENT_EXCLUSIVE_END_SENTINEL = timedelta(microseconds=1)
 
 _HASH_RE = re.compile(r"^[0-9a-f]{64}$")
 _ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,127}$")
@@ -887,9 +888,14 @@ def _verify_holdout_compatibility(
         "holdout partition_start",
     )
     if holdout_start < development_end:
-        raise OSS3FinalHoldoutProtocolIntegrityError(
-            "D2J holdout chronological boundary overlaps DEVELOPMENT"
-        )
+        # D2R encodes a half-open supervised partition end as the final
+        # label availability plus exactly one microsecond.  A holdout that
+        # starts at that final availability is therefore adjacent, not
+        # overlapping.  Any larger backward gap remains a hard failure.
+        if development_end - holdout_start != DEVELOPMENT_EXCLUSIVE_END_SENTINEL:
+            raise OSS3FinalHoldoutProtocolIntegrityError(
+                "D2J holdout chronological boundary overlaps DEVELOPMENT"
+            )
     if holdout_commitment.label_artifact_hash == dataset.development_label_artifact_hash:
         raise OSS3FinalHoldoutProtocolIntegrityError(
             "D2J holdout label artifact cannot reuse DEVELOPMENT labels"
