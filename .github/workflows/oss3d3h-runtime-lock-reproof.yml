@@ -1,0 +1,103 @@
+name: OSS-3D3H Frozen Runtime Lock Reproof
+
+on:
+  push:
+    branches:
+      - research/oss3d3h-d2k-replay-readiness-seal
+    paths:
+      - 'labs/oss3_qlib/runtime_locks/oss3d3a_d2g_runtime_constraints.txt'
+      - '.github/workflows/oss3d3h-runtime-lock-reproof.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  runtime-reproof:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      PYTHONPATH: ${{ github.workspace }}
+      EXPECTED_MODEL_CONFIG: c2181bb4be73d8a0e8067d8640d9c9bd39c85297f6a6ab3e0d190cda039c21eb
+      EXPECTED_RUNNER: 7b3d94631c0d735a8391f62adf90a4afdf12aacd681c03731eed3881c0398f4c
+      EXPECTED_ATTESTATION: 89f742401e18b77825adf0368840244fc73e160b72e925ad13c57c38754fed2d
+      EXPECTED_RUNTIME: fe13d28ad077ff6b0cd4d5ad0f95f252fe106bb548fd90d5cc87e2e12c5a970c
+      EXPECTED_DISTRIBUTION_COUNT: '198'
+      EXPECTED_DISTRIBUTION_SET: 0e4e828d8fe8cc6421773297892bcdb71ec67495d1cf1681fc07991ee4e3d47f
+      RUNTIME_CONSTRAINTS: labs/oss3_qlib/runtime_locks/oss3d3a_d2g_runtime_constraints.txt
+
+    steps:
+      - name: Checkout exact diagnostic source SHA
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
+      - name: Prove exact diagnostic checkout
+        run: |
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          echo "exact source: $GITHUB_SHA"
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Install AUTO-TRADE core only
+        run: python -m pip install -e '.[dev]'
+
+      - name: Prove Qlib absent before runtime reconstruction
+        run: |
+          python - <<'PY'
+          import importlib.util
+          assert importlib.util.find_spec('qlib') is None
+          print('qlib before runtime reconstruction: ABSENT')
+          PY
+
+      - name: Install frozen D3A Qlib runtime under drift constraints
+        run: |
+          python -m pip install -c "$RUNTIME_CONSTRAINTS" 'pyqlib==0.9.7'
+
+      - name: Prove exact pyqlib version
+        run: |
+          python - <<'PY'
+          from importlib.metadata import version
+          assert version('pyqlib') == '0.9.7'
+          print('pyqlib:', version('pyqlib'))
+          PY
+
+      - name: Reprove exact frozen D2G runtime identity
+        run: |
+          python - <<'PY'
+          import os
+          from labs.oss3_qlib.family_environment_attestation import collect_candidate_environment_attestation
+          from labs.oss3_qlib.family_model_contract import family_runner_code_hash
+
+          attestation = collect_candidate_environment_attestation(
+              model_config_hash=os.environ['EXPECTED_MODEL_CONFIG']
+          )
+          runtime = attestation.runtime_environment
+
+          print('runner_code_hash:', family_runner_code_hash())
+          print('attestation_hash:', attestation.artifact_hash)
+          print('runtime_fingerprint:', runtime.fingerprint)
+          print('distribution_count:', runtime.distribution_count)
+          print('distribution_set_hash:', runtime.distribution_set_hash)
+
+          if (
+              family_runner_code_hash() != os.environ['EXPECTED_RUNNER']
+              or attestation.artifact_hash != os.environ['EXPECTED_ATTESTATION']
+              or runtime.fingerprint != os.environ['EXPECTED_RUNTIME']
+              or runtime.distribution_count != int(os.environ['EXPECTED_DISTRIBUTION_COUNT'])
+              or runtime.distribution_set_hash != os.environ['EXPECTED_DISTRIBUTION_SET']
+          ):
+              print('--- canonical installed distribution set ---')
+              for item in attestation.distributions:
+                  print(f'{item.name}=={item.version}')
+              raise SystemExit('frozen D2G runtime identity mismatch')
+
+          print('OSS-3D3H frozen D2G runtime reproof: PASS')
+          PY
+
+      - name: Reprove research-only authority boundary
+        run: python scripts/check_research_authority.py
