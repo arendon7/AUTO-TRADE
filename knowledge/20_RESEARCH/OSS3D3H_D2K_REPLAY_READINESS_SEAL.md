@@ -30,6 +30,8 @@ Before Qlib exists in the environment, D3H deterministically reconstructs:
 
 Every identity must equal the corresponding D3C root. The request, bundle and concrete artifacts are serialized with their existing canonical `write/read` contracts and immediately round-trip verified.
 
+The source campaign identity is frozen locally as `oss3d3a-real-development-campaign-v1`. D3H deliberately does not import the executable D3A campaign module during preparation, because that module transitively loads the Qlib/pandas runner surface. This keeps the preparation import graph core-only while preserving the exact already-certified campaign identity.
+
 ## Runtime-only seal
 
 Only after replay preparation is complete does CI install exact `pyqlib==0.9.7`. D3H then collects the model-neutral/candidate environment attestation and requires exact equality with the D2I winner's frozen D2G environment and runtime fingerprints. It also freezes `evaluator_semantic_hash()` for the current D2K implementation.
