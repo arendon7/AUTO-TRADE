@@ -8,7 +8,7 @@ on:
       - 'labs/oss3_qlib/final_holdout_protocol.py'
       - 'labs/oss3_qlib/d2j_predictive_final_holdout_preregistration.py'
       - 'labs/oss3_qlib/tests/test_final_holdout_protocol.py'
-      - 'labs/oss3_qlib/tests/test_final_holdout_protocol_exclusive_end.py'
+      - 'labs/oss3_qlib/tests/test_final_holdout_protocol_exclusive_end_sentinel.py'
       - 'labs/oss3_qlib/tests/test_d2j_predictive_final_holdout_preregistration.py'
       - 'scripts/run_oss3d3g_d2j_predictive_final_holdout_preregistration.py'
       - 'scripts/check_oss3d3g_d2j_predictive_final_holdout_preregistration_boundary.py'
@@ -21,7 +21,7 @@ on:
       - 'labs/oss3_qlib/final_holdout_protocol.py'
       - 'labs/oss3_qlib/d2j_predictive_final_holdout_preregistration.py'
       - 'labs/oss3_qlib/tests/test_final_holdout_protocol.py'
-      - 'labs/oss3_qlib/tests/test_final_holdout_protocol_exclusive_end.py'
+      - 'labs/oss3_qlib/tests/test_final_holdout_protocol_exclusive_end_sentinel.py'
       - 'labs/oss3_qlib/tests/test_d2j_predictive_final_holdout_preregistration.py'
       - 'scripts/run_oss3d3g_d2j_predictive_final_holdout_preregistration.py'
       - 'scripts/check_oss3d3g_d2j_predictive_final_holdout_preregistration_boundary.py'
@@ -93,7 +93,7 @@ jobs:
           python -m py_compile \
             labs/oss3_qlib/final_holdout_protocol.py \
             labs/oss3_qlib/d2j_predictive_final_holdout_preregistration.py \
-            labs/oss3_qlib/tests/test_final_holdout_protocol_exclusive_end.py \
+            labs/oss3_qlib/tests/test_final_holdout_protocol_exclusive_end_sentinel.py \
             labs/oss3_qlib/tests/test_d2j_predictive_final_holdout_preregistration.py \
             scripts/run_oss3d3g_d2j_predictive_final_holdout_preregistration.py \
             scripts/check_oss3d3g_d2j_predictive_final_holdout_preregistration_boundary.py
@@ -110,7 +110,7 @@ jobs:
         run: |
           python -m pytest -q \
             labs/oss3_qlib/tests/test_final_holdout_protocol.py \
-            labs/oss3_qlib/tests/test_final_holdout_protocol_exclusive_end.py \
+            labs/oss3_qlib/tests/test_final_holdout_protocol_exclusive_end_sentinel.py \
             labs/oss3_qlib/tests/test_d2j_predictive_final_holdout_preregistration.py
 
       - name: Download and verify exact certified D3C ZIP
