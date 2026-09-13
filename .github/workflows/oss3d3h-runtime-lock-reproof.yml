@@ -25,6 +25,7 @@ jobs:
       EXPECTED_DISTRIBUTION_COUNT: '198'
       EXPECTED_DISTRIBUTION_SET: 0e4e828d8fe8cc6421773297892bcdb71ec67495d1cf1681fc07991ee4e3d47f
       RUNTIME_CONSTRAINTS: labs/oss3_qlib/runtime_locks/oss3d3a_d2g_runtime_constraints.txt
+      RUNTIME_DIAGNOSTIC: /tmp/oss3d3h-current-runtime.json
 
     steps:
       - name: Checkout exact diagnostic source SHA
@@ -66,10 +67,11 @@ jobs:
           print('pyqlib:', version('pyqlib'))
           PY
 
-      - name: Reprove exact frozen D2G runtime identity
+      - name: Capture and reprove exact frozen D2G runtime identity
         run: |
           python - <<'PY'
-          import os
+          import json, os
+          from pathlib import Path
           from labs.oss3_qlib.family_environment_attestation import collect_candidate_environment_attestation
           from labs.oss3_qlib.family_model_contract import family_runner_code_hash
 
@@ -77,12 +79,22 @@ jobs:
               model_config_hash=os.environ['EXPECTED_MODEL_CONFIG']
           )
           runtime = attestation.runtime_environment
+          diagnostic = {
+              'runner_code_hash': family_runner_code_hash(),
+              'attestation_hash': attestation.artifact_hash,
+              'runtime': runtime.to_dict(),
+              'runtime_fingerprint': runtime.fingerprint,
+              'distributions': [item.to_dict() for item in attestation.distributions],
+          }
+          Path(os.environ['RUNTIME_DIAGNOSTIC']).write_text(
+              json.dumps(diagnostic, sort_keys=True, separators=(',', ':')) + '\n',
+              encoding='utf-8',
+          )
 
-          print('runner_code_hash:', family_runner_code_hash())
-          print('attestation_hash:', attestation.artifact_hash)
-          print('runtime_fingerprint:', runtime.fingerprint)
-          print('distribution_count:', runtime.distribution_count)
-          print('distribution_set_hash:', runtime.distribution_set_hash)
+          print('runner_code_hash:', diagnostic['runner_code_hash'])
+          print('attestation_hash:', diagnostic['attestation_hash'])
+          print('runtime:', diagnostic['runtime'])
+          print('runtime_fingerprint:', diagnostic['runtime_fingerprint'])
 
           if (
               family_runner_code_hash() != os.environ['EXPECTED_RUNNER']
@@ -91,13 +103,20 @@ jobs:
               or runtime.distribution_count != int(os.environ['EXPECTED_DISTRIBUTION_COUNT'])
               or runtime.distribution_set_hash != os.environ['EXPECTED_DISTRIBUTION_SET']
           ):
-              print('--- canonical installed distribution set ---')
-              for item in attestation.distributions:
-                  print(f'{item.name}=={item.version}')
               raise SystemExit('frozen D2G runtime identity mismatch')
 
           print('OSS-3D3H frozen D2G runtime reproof: PASS')
           PY
 
+      - name: Upload canonical runtime diagnostic
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: oss3d3h-runtime-diagnostic-${{ github.sha }}
+          path: ${{ env.RUNTIME_DIAGNOSTIC }}
+          retention-days: 30
+          if-no-files-found: error
+
       - name: Reprove research-only authority boundary
+        if: success()
         run: python scripts/check_research_authority.py
