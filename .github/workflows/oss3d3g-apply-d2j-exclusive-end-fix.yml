@@ -1,0 +1,79 @@
+name: OSS-3D3G Apply D2J Exclusive-End Sentinel Fix
+
+on:
+  push:
+    branches:
+      - research/oss3d3g-d2j-predictive-final-holdout-preregistration
+    paths:
+      - '.github/workflows/oss3d3g-apply-d2j-exclusive-end-fix.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact branch head
+        uses: actions/checkout@v5
+        with:
+          ref: research/oss3d3g-d2j-predictive-final-holdout-preregistration
+          fetch-depth: 0
+
+      - name: Apply exact bounded D2J sentinel correction
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('labs/oss3_qlib/final_holdout_protocol.py')
+          text = path.read_text(encoding='utf-8')
+          replacements = (
+              (
+                  'from datetime import datetime, timezone\n',
+                  'from datetime import datetime, timedelta, timezone\n',
+              ),
+              (
+                  'MAX_EVALUATIONS = 1\n',
+                  'MAX_EVALUATIONS = 1\nDEVELOPMENT_EXCLUSIVE_END_SENTINEL = timedelta(microseconds=1)\n',
+              ),
+              (
+                  '    if holdout_start < development_end:\n'
+                  '        raise OSS3FinalHoldoutProtocolIntegrityError(\n'
+                  '            "D2J holdout chronological boundary overlaps DEVELOPMENT"\n'
+                  '        )\n',
+                  '    if holdout_start < development_end:\n'
+                  '        # D2R encodes a half-open supervised partition end as the final\n'
+                  '        # label availability plus exactly one microsecond.  A holdout that\n'
+                  '        # starts at that final availability is therefore adjacent, not\n'
+                  '        # overlapping.  Any larger backward gap remains a hard failure.\n'
+                  '        if development_end - holdout_start != DEVELOPMENT_EXCLUSIVE_END_SENTINEL:\n'
+                  '            raise OSS3FinalHoldoutProtocolIntegrityError(\n'
+                  '                "D2J holdout chronological boundary overlaps DEVELOPMENT"\n'
+                  '            )\n',
+              ),
+          )
+          for old, new in replacements:
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'exact replacement count drifted: {count} for {old!r}')
+              text = text.replace(old, new, 1)
+          path.write_text(text, encoding='utf-8')
+          PY
+
+      - name: Validate corrected D2J contract
+        run: |
+          python -m py_compile labs/oss3_qlib/final_holdout_protocol.py
+          python -m pip install -e '.[dev]'
+          python -m pytest -q labs/oss3_qlib/tests/test_final_holdout_protocol.py
+          python scripts/check_oss3d2j_final_holdout_protocol_boundary.py
+          git diff --check
+
+      - name: Commit exact correction
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add labs/oss3_qlib/final_holdout_protocol.py
+          git diff --cached --quiet && exit 0
+          git commit -m 'fix(oss3d2j): honor D2R exclusive-end sentinel'
+          git push origin HEAD:research/oss3d3g-d2j-predictive-final-holdout-preregistration
