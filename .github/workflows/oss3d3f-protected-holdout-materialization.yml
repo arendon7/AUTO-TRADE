@@ -170,25 +170,28 @@ jobs:
         env:
           D3D_REGISTRY: ${{ steps.d3d.outputs.registry }}
         run: |
-          python - <<'PY'
-          import os
-          from datetime import datetime, timezone
-          from labs.oss3_market_data.dual_holdout_acquisition import run_dual_holdout_acquisition
-          result = run_dual_holdout_acquisition(
-              d3d_registry_path=os.environ['D3D_REGISTRY'],
-              evidence_root=os.environ['D3E_EVIDENCE_ROOT'],
-              now=datetime.now(timezone.utc),
-              allow_network=False,
-          )
-          assert result.complete is True
-          assert result.acquired_from_network == 0
-          assert result.reused_after_full_reverification == 18
-          assert result.missing_without_network_authority == 0
-          assert result.campaign_seal_fingerprint == os.environ['EXPECTED_D3E_CAMPAIGN_SEAL']
-          assert result.scientific_holdout_evaluation_observed is False
-          assert result.capital_authority == 'NONE'
-          assert result.live_trading == 'BLOCKED'
-          print('D3E 18/18 full offline reverification: PASS', result.campaign_seal_fingerprint)
+          OUTPUT="$(python scripts/run_oss3d3e_dual_holdout_acquisition.py \
+            --d3d-registry "$D3D_REGISTRY" \
+            --evidence-root "$D3E_EVIDENCE_ROOT")"
+          echo "$OUTPUT"
+          python - "$OUTPUT" <<'PY'
+          import json, os, sys
+          result = json.loads(sys.argv[1])
+          assert result['complete'] is True
+          assert result['acquired_from_network'] == 0
+          assert result['reused_after_full_reverification'] == 18
+          assert result['missing_without_network_authority'] == 0
+          assert result['campaign_seal_fingerprint'] == os.environ['EXPECTED_D3E_CAMPAIGN_SEAL']
+          assert result['scientific_holdout_evaluation_observed'] is False
+          assert result['feature_values_materialized'] is False
+          assert result['label_values_materialized'] is False
+          assert result['prediction_values_materialized'] is False
+          assert result['metrics_computed'] is False
+          assert result['holdout_permit_issued'] is False
+          assert result['holdout_permit_consumed'] is False
+          assert result['capital_authority'] == 'NONE'
+          assert result['live_trading'] == 'BLOCKED'
+          print('D3E 18/18 full offline reverification: PASS', result['campaign_seal_fingerprint'])
           PY
 
       - name: Materialize protected Q1/Q2 commitments without evaluation
