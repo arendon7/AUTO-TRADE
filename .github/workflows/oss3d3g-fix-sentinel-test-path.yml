@@ -1,0 +1,43 @@
+name: OSS-3D3G Fix Sentinel Test Path
+
+on:
+  push:
+    branches:
+      - research/oss3d3g-d2j-predictive-final-holdout-preregistration
+    paths:
+      - '.github/workflows/oss3d3g-fix-sentinel-test-path.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: research/oss3d3g-d2j-predictive-final-holdout-preregistration
+          fetch-depth: 0
+      - name: Correct exact test filename references
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('.github/workflows/oss3d3g-d2j-predictive-final-holdout-preregistration.yml')
+          text = path.read_text(encoding='utf-8')
+          old = 'test_final_holdout_protocol_exclusive_end.py'
+          new = 'test_final_holdout_protocol_exclusive_end_sentinel.py'
+          if text.count(old) != 4:
+              raise SystemExit(f'unexpected old-path count: {text.count(old)}')
+          text = text.replace(old, new)
+          if text.count(new) != 4 or old in text:
+              raise SystemExit('sentinel test path replacement failed')
+          path.write_text(text, encoding='utf-8')
+          PY
+          git diff --check
+      - name: Commit correction
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add .github/workflows/oss3d3g-d2j-predictive-final-holdout-preregistration.yml
+          git commit -m 'fix(oss3d3g): use canonical sentinel test path'
+          git push origin HEAD:research/oss3d3g-d2j-predictive-final-holdout-preregistration
