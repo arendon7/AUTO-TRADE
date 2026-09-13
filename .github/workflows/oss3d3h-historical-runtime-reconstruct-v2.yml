@@ -58,7 +58,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh api "/repos/${GITHUB_REPOSITORY}/actions/jobs/${D3A_JOB_ID}/logs" > "$D3A_LOG"
+          gh api --allow-escape-sequences "/repos/${GITHUB_REPOSITORY}/actions/jobs/${D3A_JOB_ID}/logs" > "$D3A_LOG"
           test -s "$D3A_LOG"
           grep -F "Successfully installed" "$D3A_LOG"
 
