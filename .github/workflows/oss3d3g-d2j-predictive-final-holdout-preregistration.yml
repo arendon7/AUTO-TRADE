@@ -13,6 +13,7 @@ on:
       - 'scripts/run_oss3d3g_d2j_predictive_final_holdout_preregistration.py'
       - 'scripts/check_oss3d3g_d2j_predictive_final_holdout_preregistration_boundary.py'
       - 'knowledge/20_RESEARCH/OSS3D3G_D2J_PREDICTIVE_FINAL_HOLDOUT_PREREGISTRATION.md'
+      - 'knowledge/20_RESEARCH/OSS3D3G_FROZEN_IDENTITIES.json'
       - '.github/workflows/oss3d3g-d2j-predictive-final-holdout-preregistration.yml'
   push:
     branches:
@@ -26,6 +27,7 @@ on:
       - 'scripts/run_oss3d3g_d2j_predictive_final_holdout_preregistration.py'
       - 'scripts/check_oss3d3g_d2j_predictive_final_holdout_preregistration_boundary.py'
       - 'knowledge/20_RESEARCH/OSS3D3G_D2J_PREDICTIVE_FINAL_HOLDOUT_PREREGISTRATION.md'
+      - 'knowledge/20_RESEARCH/OSS3D3G_FROZEN_IDENTITIES.json'
       - '.github/workflows/oss3d3g-d2j-predictive-final-holdout-preregistration.yml'
   workflow_dispatch:
 
@@ -50,12 +52,17 @@ jobs:
       D3G_REGISTRY: /tmp/oss3d3g-d2j.sqlite3
       D3G_RESULT_1: /tmp/oss3d3g-result-1.json
       D3G_RESULT_2: /tmp/oss3d3g-result-2.json
+      FROZEN_IDENTITIES: ${{ github.workspace }}/knowledge/20_RESEARCH/OSS3D3G_FROZEN_IDENTITIES.json
       EXPECTED_D3C_BUNDLE: 1d271c31f506be21d2a99c857a1007cc5676cfcb5ab83fb6a524171a38dbaf43
       EXPECTED_D3C_SCIENCE: 5b4261b186e30cbdc30ec2c3025305fbb96650247a066cdf470ce53e80f86ea7
       EXPECTED_D3C_D2I: 65537f610766852c834893604192e1fe5562d0385fa2b00f4c692b6b074d7cb1
       EXPECTED_D3F_EVIDENCE: a9681ff31f4d74176d072c2076d129516d8db19cfb8aea093432ec6f7ac9d5b6
       EXPECTED_Q1_COMMITMENT: a6fef49419ef22b75be45385a805f8f3242653a3fcb74cb708be6548ac865bde
       EXPECTED_WINNER: linear-ridge-a10
+      EXPECTED_D3G_EVIDENCE: 95881a179f4ebe84cbd7a2b29300212ad9c4e0902dad3acc8da16e87ee7315f1
+      EXPECTED_D2J_RECEIPT: a54fa9e736ca1baa83ae06887954bad39d254e39b6019a852e13859ef25b882d
+      EXPECTED_D2J_POLICY: 7983cfd3666fc2fcf9744f2b35744bc8a37cb6ee442dca615bb042e9e74417a5
+      EXPECTED_AUTHORIZATION_ID: oss3d2j:2455ca9d6ec35cd923a9bac039bb58eef4a44c0a5994611c
 
     steps:
       - name: Checkout exact D3G source SHA
@@ -79,6 +86,40 @@ jobs:
 
       - name: Install AUTO-TRADE core only
         run: python -m pip install -e '.[dev]'
+
+      - name: Verify immutable frozen D3G identities
+        run: |
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          path = Path(os.environ['FROZEN_IDENTITIES'])
+          raw = path.read_text(encoding='utf-8')
+          d = json.loads(raw)
+          assert raw == json.dumps(d, sort_keys=True, separators=(',', ':'), ensure_ascii=False, allow_nan=False) + '\n'
+          assert d['schema_version'] == 'OSS3D3G_FROZEN_REAL_IDENTITIES_V1'
+          assert d['d3g_evidence_fingerprint'] == os.environ['EXPECTED_D3G_EVIDENCE']
+          assert d['d2j_receipt_hash'] == os.environ['EXPECTED_D2J_RECEIPT']
+          assert d['d2j_policy_fingerprint'] == os.environ['EXPECTED_D2J_POLICY']
+          assert d['expected_holdout_authorization_id'] == os.environ['EXPECTED_AUTHORIZATION_ID']
+          assert d['source_d3c_bundle_fingerprint'] == os.environ['EXPECTED_D3C_BUNDLE']
+          assert d['source_d2i_seal_fingerprint'] == os.environ['EXPECTED_D3C_D2I']
+          assert d['source_d3f_evidence_fingerprint'] == os.environ['EXPECTED_D3F_EVIDENCE']
+          assert d['holdout_commitment_fingerprint'] == os.environ['EXPECTED_Q1_COMMITMENT']
+          assert d['selected_trial_id'] == os.environ['EXPECTED_WINNER']
+          assert d['final_holdout_evaluations_performed'] == 0
+          assert d['final_holdout_observed'] is False
+          assert d['holdout_permit_issued'] is False
+          assert d['holdout_permit_consumed'] is False
+          assert d['final_holdout_checkout_authorized'] is False
+          assert d['predictive_validation_passed'] is False
+          assert d['profitability_claim_authorized'] is False
+          assert d['promotion_authorized'] is False
+          assert d['execution_authorized'] is False
+          assert d['paper_execution_authorized'] is False
+          assert d['capital_authority'] == 'NONE'
+          assert d['live_trading'] == 'BLOCKED'
+          print('frozen D3G real identities: PASS')
+          PY
 
       - name: Prove Qlib absent before D3G
         run: |
@@ -205,6 +246,10 @@ jobs:
           raw = Path(os.environ['D3G_RESULT_1']).read_text(encoding='utf-8')
           d = json.loads(raw)
           assert raw == json.dumps(d, sort_keys=True, separators=(',', ':'), ensure_ascii=False, allow_nan=False) + '\n'
+          assert d['fingerprint'] == os.environ['EXPECTED_D3G_EVIDENCE']
+          assert d['d2j_receipt_hash'] == os.environ['EXPECTED_D2J_RECEIPT']
+          assert d['d2j_policy_fingerprint'] == os.environ['EXPECTED_D2J_POLICY']
+          assert d['expected_holdout_authorization_id'] == os.environ['EXPECTED_AUTHORIZATION_ID']
           assert d['source_d3c_bundle_fingerprint'] == os.environ['EXPECTED_D3C_BUNDLE']
           assert d['source_scientific_outcome_fingerprint'] == os.environ['EXPECTED_D3C_SCIENCE']
           assert d['source_d2i_seal_fingerprint'] == os.environ['EXPECTED_D3C_D2I']
