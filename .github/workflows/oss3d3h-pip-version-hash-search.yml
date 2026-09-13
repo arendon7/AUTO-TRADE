@@ -1,4 +1,4 @@
-name: OSS-3D3H Historical pip Hash Search
+name: OSS-3D3H Historical Single-Package Hash Search
 
 on:
   push:
@@ -10,7 +10,7 @@ permissions:
   contents: read
 
 jobs:
-  pip-hash-search:
+  single-package-hash-search:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     env:
@@ -31,16 +31,19 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Reconstruct known 197-package D3A environment
+      - name: Reconstruct constrained D3A candidate environment
         run: |
           python -m pip install -c "$RUNTIME_CONSTRAINTS" -e '.[dev]'
           python -m pip install -c "$RUNTIME_CONSTRAINTS" 'pyqlib==0.9.7'
 
-      - name: Enumerate every public pip release against frozen D2G hash
+      - name: Search every public one-package historical substitution
         run: |
           python - <<'PY'
+          from concurrent.futures import ThreadPoolExecutor, as_completed
           import json
           import os
+          import urllib.error
+          import urllib.parse
           import urllib.request
 
           from labs.oss3_qlib.environment_attestation import InstalledDistribution
@@ -52,24 +55,56 @@ jobs:
           att = collect_candidate_environment_attestation(
               model_config_hash=os.environ['EXPECTED_MODEL_CONFIG']
           )
-          without_pip = tuple(item for item in att.distributions if item.name != 'pip')
-          assert len(att.distributions) == 198
-          assert len(without_pip) == 197
-
-          with urllib.request.urlopen('https://pypi.org/pypi/pip/json', timeout=30) as r:
-              payload = json.load(r)
-          versions = sorted(payload['releases'])
-          print('public pip releases tested:', len(versions))
-
+          current = tuple(att.distributions)
+          assert len(current) == 198
           target = os.environ['EXPECTED_DISTRIBUTION_SET']
-          matches = []
-          for version in versions:
-              candidate = tuple(sorted(without_pip + (InstalledDistribution(name='pip', version=version),)))
-              if _distribution_set_hash(candidate) == target:
-                  matches.append(version)
+          print('current_distribution_set_hash:', _distribution_set_hash(current))
+          print('target_distribution_set_hash:', target)
 
-          print('matching pip versions:', matches)
+          def fetch_versions(item):
+              url = 'https://pypi.org/pypi/' + urllib.parse.quote(item.name, safe='') + '/json'
+              try:
+                  with urllib.request.urlopen(url, timeout=20) as r:
+                      payload = json.load(r)
+                  return item, tuple(payload.get('releases', {}).keys()), None
+              except Exception as exc:
+                  return item, (), f'{type(exc).__name__}: {exc}'
+
+          catalogs = {}
+          errors = {}
+          with ThreadPoolExecutor(max_workers=24) as pool:
+              futures = [pool.submit(fetch_versions, item) for item in current]
+              for fut in as_completed(futures):
+                  item, versions, error = fut.result()
+                  if error:
+                      errors[item.name] = error
+                  else:
+                      catalogs[item.name] = versions
+
+          print('PyPI catalogs fetched:', len(catalogs))
+          print('PyPI catalog misses:', sorted(errors))
+
+          matches = []
+          tested = 0
+          for index, item in enumerate(current):
+              prefix = current[:index]
+              suffix = current[index + 1:]
+              for version in catalogs.get(item.name, ()):
+                  if version == item.version:
+                      continue
+                  try:
+                      replacement = InstalledDistribution(name=item.name, version=version)
+                  except Exception:
+                      continue
+                  candidate = tuple(sorted(prefix + (replacement,) + suffix))
+                  tested += 1
+                  if _distribution_set_hash(candidate) == target:
+                      matches.append((item.name, item.version, version))
+
+          print('single-package historical substitutions tested:', tested)
+          print('matching substitutions:', matches)
           if len(matches) != 1:
-              raise SystemExit(f'expected exactly one public pip version match; found {matches!r}')
-          print('HISTORICAL_PIP_VERSION=' + matches[0])
+              raise SystemExit(f'expected exactly one one-package match; found {matches!r}')
+          name, current_version, historical_version = matches[0]
+          print(f'HISTORICAL_DRIFT={name}:{current_version}->{historical_version}')
           PY
