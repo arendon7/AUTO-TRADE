@@ -8,6 +8,7 @@
 # these constraints do not redefine or relax that frozen identity.
 alembic==1.19.2
 contourpy==1.3.3
+coverage==7.16.0
 databricks-sdk==0.137.0
 fonttools==4.64.0
 matplotlib==3.11.1
