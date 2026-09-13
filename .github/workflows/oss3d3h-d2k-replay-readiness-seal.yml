@@ -1,0 +1,293 @@
+name: OSS-3D3H D2K Replay Readiness Seal
+
+on:
+  pull_request:
+    branches:
+      - research/oss3d3g-d2j-predictive-final-holdout-preregistration
+    paths:
+      - 'labs/oss3_qlib/d2k_replay_readiness.py'
+      - 'labs/oss3_qlib/tests/test_d2k_replay_readiness.py'
+      - 'scripts/run_oss3d3h_d2k_replay_readiness.py'
+      - 'scripts/check_oss3d3h_d2k_replay_readiness_boundary.py'
+      - 'knowledge/20_RESEARCH/OSS3D3H_D2K_REPLAY_READINESS_SEAL.md'
+      - '.github/workflows/oss3d3h-d2k-replay-readiness-seal.yml'
+  push:
+    branches:
+      - research/oss3d3h-d2k-replay-readiness-seal
+    paths:
+      - 'labs/oss3_qlib/d2k_replay_readiness.py'
+      - 'labs/oss3_qlib/tests/test_d2k_replay_readiness.py'
+      - 'scripts/run_oss3d3h_d2k_replay_readiness.py'
+      - 'scripts/check_oss3d3h_d2k_replay_readiness_boundary.py'
+      - 'knowledge/20_RESEARCH/OSS3D3H_D2K_REPLAY_READINESS_SEAL.md'
+      - '.github/workflows/oss3d3h-d2k-replay-readiness-seal.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  oss3d3h:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    env:
+      PYTHONPATH: ${{ github.workspace }}
+      D2X_ARTIFACT_ID: '10088057589'
+      D2X_ARTIFACT_ZIP_SHA256: 23598e3bd2f42b645095291115451d115dae60455b813c5653f28ebd5a6b7dc7
+      D2X_DIR: /tmp/oss3d3h-d2x
+      D2X_ZIP: /tmp/oss3d3h-d2x.zip
+      D3C_ARTIFACT_ID: '10172032908'
+      D3C_ARTIFACT_ZIP_SHA256: f7e6d4dc62138b52954c4c4f50f3598dd88271bcb9a413883280d8dc2cb5e585
+      D3C_DIR: /tmp/oss3d3h-d3c
+      D3C_ZIP: /tmp/oss3d3h-d3c.zip
+      D3G_ARTIFACT_ID: '10322540788'
+      D3G_ARTIFACT_ZIP_SHA256: 7c5a9ac6ce7804707ca9ad165482aeb6d35fdcb1881565df2d451bdd2a83f95a
+      D3G_DIR: /tmp/oss3d3h-d3g
+      D3G_ZIP: /tmp/oss3d3h-d3g.zip
+      REHYDRATE_PARENT: /tmp/oss3d3h-rehydrate-parent
+      EVIDENCE_ROOT: /tmp/oss3d3h-rehydrate-parent/oss3d3a-certified-d2y-evidence
+      REHYDRATION_JSON: /tmp/oss3d3h-rehydration.json
+      PACKAGE_ROOT: /tmp/oss3d3h-replay-package
+      EXPECTED_D3C_BUNDLE: 1d271c31f506be21d2a99c857a1007cc5676cfcb5ab83fb6a524171a38dbaf43
+      EXPECTED_D3C_SCIENCE: 5b4261b186e30cbdc30ec2c3025305fbb96650247a066cdf470ce53e80f86ea7
+      EXPECTED_D2I: 65537f610766852c834893604192e1fe5562d0385fa2b00f4c692b6b074d7cb1
+      EXPECTED_D3G: 95881a179f4ebe84cbd7a2b29300212ad9c4e0902dad3acc8da16e87ee7315f1
+      EXPECTED_D2J_RECEIPT: a54fa9e736ca1baa83ae06887954bad39d254e39b6019a852e13859ef25b882d
+      EXPECTED_D2J_POLICY: 7983cfd3666fc2fcf9744f2b35744bc8a37cb6ee442dca615bb042e9e74417a5
+      EXPECTED_Q1_COMMITMENT: a6fef49419ef22b75be45385a805f8f3242653a3fcb74cb708be6548ac865bde
+      EXPECTED_AUTHORIZATION_ID: oss3d2j:2455ca9d6ec35cd923a9bac039bb58eef4a44c0a5994611c
+      EXPECTED_WINNER: linear-ridge-a10
+      EXPECTED_WINNER_REQUEST: f3c461cc815f97313f9706c05801adf8dc3b1461cf6d78f915c488dd207625a3
+      EXPECTED_MODEL_CONFIG: c2181bb4be73d8a0e8067d8640d9c9bd39c85297f6a6ab3e0d190cda039c21eb
+      EXPECTED_RUNNER: 7b3d94631c0d735a8391f62adf90a4afdf12aacd681c03731eed3881c0398f4c
+      EXPECTED_SOURCE_ATTESTATION: 89f742401e18b77825adf0368840244fc73e160b72e925ad13c57c38754fed2d
+      EXPECTED_SOURCE_RUNTIME: fe13d28ad077ff6b0cd4d5ad0f95f252fe106bb548fd90d5cc87e2e12c5a970c
+      EXPECTED_D2W: ab132ff67e52cda64eb638982fc2ef14f38a2983a0b4852ae5bd55c025d8d3ff
+      EXPECTED_SPLIT: e514bbfe03649a4545b0ece709142baf389c1640b311e2988685bd4cf7f4706c
+      EXPECTED_RAW_TRAIN: 7767789802e57f501da18c678932b051df2ec7347eec698f6a7ecd0a85ddb6de
+      EXPECTED_RAW_DEV: 6568671fe8e9f3f95101813ff52ca99387a93d3f0871c7de5874cdba643c7b8b
+      EXPECTED_D2R: cf7ba28bcb1b9781595cb4ea11d934eb3ede2005cf5542ab043f5206fe7b765d
+      EXPECTED_TRAIN_BUNDLE: 1dbadb75b0c62bdd9dfcdb0280608a6e598bc0cf73cea5238357bd12ff894eac
+      EXPECTED_TRAIN_FEATURES: 1782d9f3d486387b0b937f3e59fd69a11090979e597ea8e5887e0903cfc62a3a
+      EXPECTED_TRAIN_LABELS: 7213c30f34415a7028241468b09d629d8e4f5455b71a9c7301966c368b55b778
+      EXPECTED_DEV_FEATURES: cc9feebf1a7cbdcd10f48940c254df017d742d34d48aab50243f91a56c080eef
+      EXPECTED_D2F_PLAN: 871683bfd2a2189924486c0250b49a7ae322290d0729ecdbad0f0966f72251c6
+      EXPECTED_D2F_REQUEST_SET: 22953ea1bb48b53f30b27f6cf17440c94c8da9c868a20e8a404b7c228b474bf6
+
+    steps:
+      - name: Checkout exact D3H source SHA
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+      - name: Prove exact D3H source checkout
+        env:
+          EXPECTED_SOURCE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SOURCE_SHA"
+          echo "exact D3H source: $EXPECTED_SOURCE_SHA"
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Install AUTO-TRADE core only
+        run: python -m pip install -e '.[dev]'
+      - name: Prove Qlib absent before D3H preparation
+        run: |
+          python - <<'PY'
+          import importlib.util
+          assert importlib.util.find_spec('qlib') is None
+          print('qlib before D3H preparation: ABSENT')
+          PY
+      - name: Compile D3H sources
+        run: |
+          python -m py_compile \
+            labs/oss3_qlib/d2k_replay_readiness.py \
+            labs/oss3_qlib/tests/test_d2k_replay_readiness.py \
+            scripts/run_oss3d3h_d2k_replay_readiness.py \
+            scripts/check_oss3d3h_d2k_replay_readiness_boundary.py
+      - name: D3H no-holdout authority boundary
+        run: |
+          python scripts/check_oss3d3h_d2k_replay_readiness_boundary.py
+          python scripts/check_oss3d2k_final_holdout_evaluator_boundary.py
+          python scripts/check_oss3d3g_d2j_predictive_final_holdout_preregistration_boundary.py
+          python scripts/check_research_authority.py
+      - name: D3H deterministic and adversarial unit tests
+        run: python -m pytest -q labs/oss3_qlib/tests/test_d2k_replay_readiness.py
+      - name: Download exact certified upstream ZIPs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          rm -rf "$D2X_DIR" "$D3C_DIR" "$D3G_DIR" "$D2X_ZIP" "$D3C_ZIP" "$D3G_ZIP"
+          mkdir -p "$D2X_DIR" "$D3C_DIR" "$D3G_DIR"
+          for spec in \
+            "$D2X_ARTIFACT_ID|$D2X_ARTIFACT_ZIP_SHA256|$D2X_ZIP|$D2X_DIR" \
+            "$D3C_ARTIFACT_ID|$D3C_ARTIFACT_ZIP_SHA256|$D3C_ZIP|$D3C_DIR" \
+            "$D3G_ARTIFACT_ID|$D3G_ARTIFACT_ZIP_SHA256|$D3G_ZIP|$D3G_DIR"
+          do
+            IFS='|' read -r artifact_id expected zip_path dest <<< "$spec"
+            curl --fail-with-body -L -H "Authorization: Bearer $GH_TOKEN" \
+              -H 'Accept: application/vnd.github+json' \
+              "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/${artifact_id}/zip" \
+              -o "$zip_path"
+            echo "${expected}  ${zip_path}" | sha256sum -c -
+            unzip -q "$zip_path" -d "$dest"
+          done
+      - name: Rehydrate exact certified real history with Qlib absent
+        run: |
+          rm -rf "$REHYDRATE_PARENT" "$REHYDRATION_JSON"
+          python scripts/run_oss3d3a_rehydration.py \
+            --artifact-dir "$D2X_DIR" \
+            --extraction-parent "$REHYDRATE_PARENT" \
+            --repository-root "$GITHUB_WORKSPACE" \
+            --output "$REHYDRATION_JSON"
+      - name: Verify no-holdout rehydration roots
+        run: |
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          d = json.loads(Path(os.environ['REHYDRATION_JSON']).read_text())
+          assert d['d2w_evidence_fingerprint'] == os.environ['EXPECTED_D2W']
+          assert d['network_used_during_rehydration'] is False
+          assert d['qlib_runtime_used'] is False
+          assert d['development_labels_materialized'] is False
+          assert d['development_metrics_computed'] is False
+          assert d['final_holdout_observed'] is False
+          assert d['capital_authority'] == 'NONE'
+          assert d['live_trading'] == 'BLOCKED'
+          print('D3H certified history rehydration: PASS')
+          PY
+      - name: Resolve certified D3C and D3G public handoffs
+        id: sources
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          d3c = list(Path(os.environ['D3C_DIR']).rglob('oss3d3c-durable-development-outcome.json'))
+          d3g_result = list(Path(os.environ['D3G_DIR']).rglob('oss3d3g-result-1.json'))
+          d3g_registry = list(Path(os.environ['D3G_DIR']).rglob('oss3d3g-d2j.sqlite3'))
+          assert len(d3c) == len(d3g_result) == len(d3g_registry) == 1
+          with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as h:
+              h.write(f"d3c={d3c[0]}\n")
+              h.write(f"d3g_result={d3g_result[0]}\n")
+              h.write(f"d3g_registry={d3g_registry[0]}\n")
+          PY
+      - name: Reconstruct exact D2K replay package without Qlib or Q1
+        run: |
+          rm -rf "$PACKAGE_ROOT"
+          python scripts/run_oss3d3h_d2k_replay_readiness.py prepare \
+            --evidence-root "$EVIDENCE_ROOT" \
+            --d3c-bundle "${{ steps.sources.outputs.d3c }}" \
+            --d3g-result "${{ steps.sources.outputs.d3g_result }}" \
+            --d3g-registry "${{ steps.sources.outputs.d3g_registry }}" \
+            --output-root "$PACKAGE_ROOT" \
+            --repository-root "$GITHUB_WORKSPACE"
+      - name: Inspect exact replay preparation roots
+        run: |
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          d = json.loads((Path(os.environ['PACKAGE_ROOT'])/'d3h-replay-preparation.json').read_text())
+          expected = {
+            'source_d3c_bundle_fingerprint':'EXPECTED_D3C_BUNDLE','source_scientific_outcome_fingerprint':'EXPECTED_D3C_SCIENCE',
+            'source_d2i_seal_fingerprint':'EXPECTED_D2I','source_d3g_evidence_fingerprint':'EXPECTED_D3G',
+            'd2j_receipt_hash':'EXPECTED_D2J_RECEIPT','d2j_policy_fingerprint':'EXPECTED_D2J_POLICY',
+            'holdout_commitment_fingerprint':'EXPECTED_Q1_COMMITMENT','expected_holdout_authorization_id':'EXPECTED_AUTHORIZATION_ID',
+            'selected_trial_id':'EXPECTED_WINNER','model_config_hash':'EXPECTED_MODEL_CONFIG','winner_request_hash':'EXPECTED_WINNER_REQUEST',
+            'expected_runner_code_hash':'EXPECTED_RUNNER','d2w_evidence_fingerprint':'EXPECTED_D2W','research_split_hash':'EXPECTED_SPLIT',
+            'raw_training_source_hash':'EXPECTED_RAW_TRAIN','raw_development_source_hash':'EXPECTED_RAW_DEV','d2r_receipt_hash':'EXPECTED_D2R',
+            'training_bundle_hash':'EXPECTED_TRAIN_BUNDLE','training_feature_artifact_hash':'EXPECTED_TRAIN_FEATURES',
+            'training_label_artifact_hash':'EXPECTED_TRAIN_LABELS','development_feature_artifact_hash':'EXPECTED_DEV_FEATURES',
+            'd2f_plan_fingerprint':'EXPECTED_D2F_PLAN','d2f_request_set_fingerprint':'EXPECTED_D2F_REQUEST_SET'}
+          for field, env in expected.items(): assert d[field] == os.environ[env], field
+          for field in ('qlib_runtime_used','development_labels_materialized','development_predictions_materialized',
+            'development_metrics_computed','final_holdout_private_material_loaded','protected_holdout_constructed',
+            'd2k_evaluator_invoked','holdout_permit_issued','holdout_permit_consumed','final_holdout_checkout_authorized',
+            'predictive_validation_passed','profitability_claim_authorized','promotion_authorized','execution_authorized','paper_execution_authorized'):
+              assert d[field] is False, field
+          assert d['capital_authority'] == 'NONE' and d['live_trading'] == 'BLOCKED'
+          print('D3H replay preparation:', d['fingerprint'])
+          PY
+      - name: Prove Qlib remained absent through replay reconstruction
+        run: |
+          python - <<'PY'
+          import importlib.util
+          assert importlib.util.find_spec('qlib') is None
+          print('qlib after D3H preparation: ABSENT')
+          PY
+      - name: Install exact frozen Qlib runtime for metadata-only attestation
+        run: python -m pip install 'pyqlib==0.9.7'
+      - name: Prove exact Qlib distribution
+        run: |
+          python - <<'PY'
+          from importlib.metadata import version
+          assert version('pyqlib') == '0.9.7'
+          print('pyqlib:', version('pyqlib'))
+          PY
+      - name: Seal exact D2K replay/runtime readiness without model execution
+        run: |
+          python scripts/run_oss3d3h_d2k_replay_readiness.py seal \
+            --package-root "$PACKAGE_ROOT" \
+            --d3c-bundle "${{ steps.sources.outputs.d3c }}" \
+            --d3g-result "${{ steps.sources.outputs.d3g_result }}" \
+            --d3g-registry "${{ steps.sources.outputs.d3g_registry }}"
+      - name: Inspect D3H readiness seal
+        run: |
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          d = json.loads((Path(os.environ['PACKAGE_ROOT'])/'d3h-replay-readiness-seal.json').read_text())
+          expected = {'source_d3c_bundle_fingerprint':'EXPECTED_D3C_BUNDLE','source_d2i_seal_fingerprint':'EXPECTED_D2I',
+            'source_d3g_evidence_fingerprint':'EXPECTED_D3G','d2j_receipt_hash':'EXPECTED_D2J_RECEIPT',
+            'd2j_policy_fingerprint':'EXPECTED_D2J_POLICY','holdout_commitment_fingerprint':'EXPECTED_Q1_COMMITMENT',
+            'expected_holdout_authorization_id':'EXPECTED_AUTHORIZATION_ID','selected_trial_id':'EXPECTED_WINNER',
+            'model_config_hash':'EXPECTED_MODEL_CONFIG','winner_request_hash':'EXPECTED_WINNER_REQUEST','training_bundle_hash':'EXPECTED_TRAIN_BUNDLE',
+            'training_feature_artifact_hash':'EXPECTED_TRAIN_FEATURES','training_label_artifact_hash':'EXPECTED_TRAIN_LABELS',
+            'source_environment_attestation_hash':'EXPECTED_SOURCE_ATTESTATION','current_environment_attestation_hash':'EXPECTED_SOURCE_ATTESTATION',
+            'source_runtime_environment_hash':'EXPECTED_SOURCE_RUNTIME','current_runtime_environment_hash':'EXPECTED_SOURCE_RUNTIME',
+            'current_runner_code_hash':'EXPECTED_RUNNER'}
+          for field, env in expected.items(): assert d[field] == os.environ[env], field
+          assert d['qlib_version'] == '0.9.7'
+          assert d['environment_reproduced_exactly'] is True and d['replay_inputs_reproduced_exactly'] is True
+          for field in ('qlib_model_fit_performed','qlib_prediction_performed','development_labels_materialized',
+            'final_holdout_private_material_loaded','protected_holdout_constructed','d2k_evaluator_invoked',
+            'holdout_permit_issued','holdout_permit_consumed','final_holdout_checkout_authorized','predictive_validation_passed',
+            'profitability_claim_authorized','promotion_authorized','execution_authorized','paper_execution_authorized'):
+              assert d[field] is False, field
+          assert d['capital_authority'] == 'NONE' and d['live_trading'] == 'BLOCKED'
+          print('D3H READINESS SEAL:', d['fingerprint'])
+          print('D2K SEMANTIC HASH:', d['evaluator_semantic_hash'])
+          PY
+      - name: Strict reload of durable D3H package
+        run: python scripts/run_oss3d3h_d2k_replay_readiness.py verify --package-root "$PACKAGE_ROOT"
+      - name: Re-prove no-holdout boundary and research authority
+        run: |
+          python scripts/check_oss3d3h_d2k_replay_readiness_boundary.py
+          python scripts/check_oss3d2k_final_holdout_evaluator_boundary.py
+          python scripts/check_research_authority.py
+      - name: Prove package has no Q1/private-holdout serialization surface
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          root = Path(os.environ['PACKAGE_ROOT'])
+          names = {p.name for p in root.iterdir() if p.is_file()}
+          expected = {'winner-request.json','training-bundle.json','train-features.json','train-labels.json',
+            'development-features.json','d3h-replay-preparation.json','winner-environment-attestation.json','d3h-replay-readiness-seal.json'}
+          assert names == expected, (names, expected)
+          for name in ('d3h-replay-preparation.json','d3h-replay-readiness-seal.json'):
+              text = (root/name).read_text(encoding='utf-8')
+              for forbidden in ('"feature_rows"','"label_rows"','"prediction_rows"','"label_values"','"outcomes"'):
+                  assert forbidden not in text, (name, forbidden)
+          print('D3H Q1/private holdout serialization surface: ABSENT')
+          PY
+      - name: Upload D3H replay-readiness evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: oss3d3h-d2k-replay-readiness-${{ github.sha }}
+          retention-days: 30
+          if-no-files-found: error
+          path: ${{ env.PACKAGE_ROOT }}
